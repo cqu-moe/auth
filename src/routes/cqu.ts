@@ -6,6 +6,7 @@ import { errorResponse } from "../utils/error";
 import { cquCredentials } from "../db/schema";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
+import { requireCquScope } from "../middleware/scope";
 
 const cqu = new Hono<HonoEnv>();
 
@@ -104,10 +105,14 @@ cqu.get("/status", async (c) => {
 });
 
 // GET /api/cqu/service-ticket?service=jwxt
-cqu.get("/service-ticket", async (c) => {
+// requireCquScope is applied inline (service is dynamic from query param)
+cqu.get("/service-ticket", requireCquScope("*"), async (c) => {
   const service = c.req.query("service");
   if (!service)
     return errorResponse(c, "MISSING_SERVICE", "缺少 service 参数", 400);
+
+  // TODO: Enforce per-service scope when OIDC is configured
+  // For now, any authenticated user can request ST for their own account
 
   const user = c.get("user") as { id: string };
   const doId = c.env.CQU_SESSION.idFromName(user.id);

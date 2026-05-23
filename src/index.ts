@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import type { HonoEnv } from "./types";
 import { createAuth } from "./auth";
 import { cqu } from "./routes/cqu";
+import { admin } from "./routes/admin";
 
 const app = new Hono<HonoEnv>();
 
@@ -18,6 +19,7 @@ app.all("/api/auth/*", async (c) => {
 });
 
 app.route("/api/cqu", cqu);
+app.route("/api/admin", admin);
 
 export default app;
 export { CquSessionDO } from "./durable-objects/cqu-session";
