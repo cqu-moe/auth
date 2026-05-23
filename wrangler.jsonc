@@ -17,13 +17,13 @@
   "d1_databases": [{
     "binding": "DATABASE",
     "database_name": "auth-cqu-moe-db",
-    "database_id": "PLACEHOLDER",
+    "database_id": "135e9272-b7f6-4672-925a-f813dba5ad40",
     "migrations_dir": "drizzle/migrations"
   }],
 
   "kv_namespaces": [{
     "binding": "KV",
-    "id": "PLACEHOLDER"
+    "id": "6b00aa8948df452d956bd948b4c0b603"
   }],
 
   "send_email": [{ "name": "EMAIL" }],
