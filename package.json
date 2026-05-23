@@ -1,0 +1,44 @@
+{
+  "name": "auth",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "npm run build:frontend && wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply auth-cqu-moe-db --local",
+    "build:frontend": "cd frontend && npm install && npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cqu-moe/auth.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/cqu-moe/auth/issues"
+  },
+  "homepage": "https://github.com/cqu-moe/auth#readme",
+  "dependencies": {
+    "better-auth": "^1.6.11",
+    "better-auth-cloudflare": "^0.3.0",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.12.22"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.16.9",
+    "@cloudflare/workers-types": "^4.20260523.1",
+    "@types/node": "^25.9.1",
+    "drizzle-kit": "^0.31.10",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.7",
+    "wrangler": "^4.94.0"
+  }
+}

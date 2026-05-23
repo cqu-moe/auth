@@ -1,0 +1,7 @@
+node_modules/
+.wrangler/
+.dev.vars
+frontend/dist/
+frontend/node_modules/
+*.tsbuildinfo
+.playwright-mcp/

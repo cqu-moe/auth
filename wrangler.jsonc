@@ -1,0 +1,42 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "auth-cqu-moe",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "placement": { "hostname": "sso.cqu.edu.cn" },
+
+  "assets": {
+    "directory": "./frontend/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+
+  "d1_databases": [{
+    "binding": "DATABASE",
+    "database_name": "auth-cqu-moe-db",
+    "database_id": "PLACEHOLDER",
+    "migrations_dir": "drizzle/migrations"
+  }],
+
+  "kv_namespaces": [{
+    "binding": "KV",
+    "id": "PLACEHOLDER"
+  }],
+
+  "send_email": [{ "name": "EMAIL" }],
+
+  "durable_objects": {
+    "bindings": [{
+      "name": "CQU_SESSION",
+      "class_name": "CquSessionDO"
+    }]
+  },
+
+  "migrations": [{
+    "tag": "v1",
+    "new_classes": ["CquSessionDO"]
+  }]
+}
