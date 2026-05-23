@@ -333,6 +333,10 @@ export default function Settings() {
           <div className="bg-white rounded-2xl border border-gray-200 p-6">
             <h3 className="text-base font-semibold text-gray-900 mb-4">个人信息</h3>
             <div className="space-y-3">
+              <div className="flex items-center justify-between py-2 border-b border-gray-100">
+                <span className="text-sm text-gray-500">用户名</span>
+                <span className="text-sm font-medium text-gray-900">{user?.name ?? "—"}</span>
+              </div>
               <div className="flex items-center justify-between py-2">
                 <span className="text-sm text-gray-500">邮箱</span>
                 <span className="text-sm font-medium text-gray-900">{user?.email ?? "—"}</span>

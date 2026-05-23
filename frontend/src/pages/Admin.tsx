@@ -122,7 +122,8 @@ function UsersSection() {
             {users.map((user) => (
               <tr key={user.id} className="hover:bg-gray-50 transition-colors">
                 <td className="py-3 px-4">
-                  <div className="font-medium text-gray-900">{user.email}</div>
+                  <div className="font-medium text-gray-900">{user.name}</div>
+                  <div className="text-xs text-gray-400">{user.email}</div>
                 </td>
                 <td className="py-3 px-4">
                   <select
@@ -130,7 +131,7 @@ function UsersSection() {
                     onChange={(e) => updateUser(user.id, { role: e.target.value })}
                     disabled={actionLoading === user.id}
                     className="text-xs border border-gray-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
-                    aria-label={`${user.email} 的角色`}
+                    aria-label={`${user.name} 的角色`}
                   >
                     {ROLE_OPTIONS.map((opt) => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
