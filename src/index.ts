@@ -21,5 +21,9 @@ app.all("/api/auth/*", async (c) => {
 app.route("/api/cqu", cqu);
 app.route("/api/admin", admin);
 
+app.all("*", async (c) => {
+  return c.env.ASSETS.fetch(c.req.raw);
+});
+
 export default app;
 export { CquSessionDO } from "./durable-objects/cqu-session";

@@ -3,6 +3,7 @@ export interface Env {
   KV: KVNamespace;
   EMAIL: SendEmail;
   CQU_SESSION: DurableObjectNamespace;
+  ASSETS: Fetcher;
   ENCRYPTION_KEY: string;
   BETTER_AUTH_URL: string;
   BETTER_AUTH_SECRET: string;
