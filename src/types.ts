@@ -10,4 +10,7 @@ export interface Env {
 
 export interface HonoEnv {
   Bindings: Env;
+  Variables: {
+    user: { id: string; [key: string]: unknown };
+  };
 }
