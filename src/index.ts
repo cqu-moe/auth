@@ -10,7 +10,7 @@ const app = new Hono<HonoEnv>();
 app.use("/*", cors());
 
 app.get("/api/health", (c) =>
-  c.json({ status: "ok", timestamp: new Date().toISOString() })
+  c.json({ status: "ok", version: "d1native-fix", timestamp: new Date().toISOString() })
 );
 
 app.all("/api/auth/*", async (c) => {
