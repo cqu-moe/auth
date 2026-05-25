@@ -2,9 +2,7 @@ import { betterAuth } from "better-auth";
 import { withCloudflare, type CloudflareGeolocation } from "better-auth-cloudflare";
 import { admin } from "better-auth/plugins/admin";
 import { createAccessControl } from "better-auth/plugins/access";
-import { drizzle } from "drizzle-orm/d1";
 import type { Env } from "./types";
-import * as schema from "./db/schema";
 
 export const statement = {
   user: ["read", "ban", "unban", "delete"],
@@ -33,14 +31,12 @@ export const roles = {
 };
 
 export function createAuth(env: Env, request: Request) {
-  const db = drizzle(env.DATABASE, { schema });
-
   return betterAuth({
     baseURL: env.BETTER_AUTH_URL,
     secret: env.BETTER_AUTH_SECRET,
     ...withCloudflare(
       {
-        d1: { db, options: { usePlural: false } },
+        d1Native: env.DATABASE,
         kv: env.KV,
         cf: (request.cf ?? {}) as CloudflareGeolocation,
         autoDetectIpAddress: true,
