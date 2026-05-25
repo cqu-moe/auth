@@ -26,8 +26,6 @@
     "id": "6b00aa8948df452d956bd948b4c0b603"
   }],
 
-  "send_email": [{ "name": "EMAIL" }],
-
   "durable_objects": {
     "bindings": [{
       "name": "CQU_SESSION",

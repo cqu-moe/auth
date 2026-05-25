@@ -2,6 +2,7 @@ import { betterAuth } from "better-auth";
 import { withCloudflare, type CloudflareGeolocation } from "better-auth-cloudflare";
 import { admin } from "better-auth/plugins/admin";
 import { createAccessControl } from "better-auth/plugins/access";
+import { Resend } from "resend";
 import type { Env } from "./types";
 
 export const statement = {
@@ -31,6 +32,8 @@ export const roles = {
 };
 
 export function createAuth(env: Env, request: Request) {
+  const resend = new Resend(env.RESEND_API_KEY);
+
   return betterAuth({
     baseURL: env.BETTER_AUTH_URL,
     secret: env.BETTER_AUTH_SECRET,
@@ -45,8 +48,8 @@ export function createAuth(env: Env, request: Request) {
         emailAndPassword: {
           enabled: true,
           sendResetPassword: async ({ user, url }) => {
-            await env.EMAIL.send({
-              from: "noreply@cqu.moe",
+            void resend.emails.send({
+              from: "auth.cqu.moe <noreply@cqu.moe>",
               to: user.email,
               subject: "重置密码 - auth.cqu.moe",
               html: `<p>点击链接重置密码：<a href="${url}">${url}</a></p>`,
@@ -55,8 +58,8 @@ export function createAuth(env: Env, request: Request) {
         },
         emailVerification: {
           sendVerificationEmail: async ({ user, url }) => {
-            await env.EMAIL.send({
-              from: "noreply@cqu.moe",
+            void resend.emails.send({
+              from: "auth.cqu.moe <noreply@cqu.moe>",
               to: user.email,
               subject: "验证你的邮箱 - auth.cqu.moe",
               html: `<p>点击链接验证邮箱：<a href="${url}">${url}</a></p>`,

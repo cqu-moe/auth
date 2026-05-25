@@ -1,7 +1,7 @@
 export interface Env {
   DATABASE: D1Database;
   KV: KVNamespace;
-  EMAIL: SendEmail;
+  RESEND_API_KEY: string;
   CQU_SESSION: DurableObjectNamespace;
   ASSETS: Fetcher;
   ENCRYPTION_KEY: string;
