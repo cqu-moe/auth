@@ -1,7 +1,9 @@
 import { betterAuth } from "better-auth";
 import { withCloudflare, type CloudflareGeolocation } from "better-auth-cloudflare";
 import { admin } from "better-auth/plugins/admin";
+import { jwt } from "better-auth/plugins/jwt";
 import { createAccessControl } from "better-auth/plugins/access";
+import { oauthProvider } from "@better-auth/oauth-provider";
 import { Resend } from "resend";
 import type { Env } from "./types";
 
@@ -32,7 +34,7 @@ export const roles = {
 };
 
 export function createAuth(env: Env, request: Request) {
-  const resend = new Resend(env.RESEND_API_KEY);
+  const getResend = () => new Resend(env.RESEND_API_KEY);
 
   return betterAuth({
     baseURL: env.BETTER_AUTH_URL,
@@ -48,7 +50,7 @@ export function createAuth(env: Env, request: Request) {
         emailAndPassword: {
           enabled: true,
           sendResetPassword: async ({ user, url }) => {
-            void resend.emails.send({
+            void getResend().emails.send({
               from: "auth.cqu.moe <noreply@cqu.moe>",
               to: user.email,
               subject: "重置密码 - auth.cqu.moe",
@@ -58,7 +60,7 @@ export function createAuth(env: Env, request: Request) {
         },
         emailVerification: {
           sendVerificationEmail: async ({ user, url }) => {
-            void resend.emails.send({
+            void getResend().emails.send({
               from: "auth.cqu.moe <noreply@cqu.moe>",
               to: user.email,
               subject: "验证你的邮箱 - auth.cqu.moe",
@@ -66,11 +68,31 @@ export function createAuth(env: Env, request: Request) {
             });
           },
         },
+        disabledPaths: ["/token"],
         plugins: [
           admin({
             ac,
             roles,
             defaultRole: "user",
+          }),
+          jwt(),
+          oauthProvider({
+            loginPage: "/login",
+            consentPage: "/oauth/authorize",
+            scopes: [
+              "openid",
+              "profile",
+              "email",
+              "offline_access",
+              "cqu:ticket:jwxt",
+              "cqu:ticket:jxpj",
+              "cqu:ticket:library",
+              "cqu:ticket:card",
+            ],
+            silenceWarnings: {
+              oauthAuthServerConfig: true,
+              openidConfig: true,
+            },
           }),
         ],
         rateLimit: {

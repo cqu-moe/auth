@@ -7,11 +7,30 @@ import { cquCredentials } from "../db/schema";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { requireCquScope } from "../middleware/scope";
+import { verifyAccessToken } from "better-auth/oauth2";
 
 const cqu = new Hono<HonoEnv>();
 
-// Middleware: require authenticated user
 cqu.use("/*", async (c, next) => {
+  const authHeader = c.req.header("Authorization");
+
+  if (authHeader?.startsWith("Bearer ")) {
+    const token = authHeader.substring(7);
+    try {
+      const payload = await verifyAccessToken(token, {
+        verifyOptions: {
+          issuer: c.env.BETTER_AUTH_URL,
+          audience: c.env.BETTER_AUTH_URL,
+        },
+        jwksUrl: `${c.env.BETTER_AUTH_URL}/api/auth/jwks`,
+      });
+      c.set("user", { id: payload.sub as string });
+      return next();
+    } catch {
+      return errorResponse(c, "UNAUTHORIZED", "无效的访问令牌", 401);
+    }
+  }
+
   const auth = createAuth(c.env, c.req.raw);
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!session?.user) return errorResponse(c, "UNAUTHORIZED", "未登录", 401);
@@ -104,16 +123,13 @@ cqu.get("/status", async (c) => {
   return c.json(await resp.json());
 });
 
-// GET /api/cqu/service-ticket?service=jwxt
-// requireCquScope is applied inline (service is dynamic from query param)
-cqu.get("/service-ticket", requireCquScope("*"), async (c) => {
+cqu.get("/service-ticket", async (c, next) => {
   const service = c.req.query("service");
   if (!service)
     return errorResponse(c, "MISSING_SERVICE", "缺少 service 参数", 400);
-
-  // TODO: Enforce per-service scope when OIDC is configured
-  // For now, any authenticated user can request ST for their own account
-
+  return requireCquScope(service)(c, next);
+}, async (c) => {
+  const service = c.req.query("service")!;
   const user = c.get("user") as { id: string };
   const doId = c.env.CQU_SESSION.idFromName(user.id);
   const stub = c.env.CQU_SESSION.get(doId);
