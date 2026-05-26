@@ -35,9 +35,9 @@ export default function OAuthAuthorize() {
 
   useEffect(() => {
     if (!clientId) return;
-    authClient.oauth2.getPublicClient({ query: { clientId } }).then((res) => {
+    authClient.oauth2.publicClient({ query: { client_id: clientId } }).then((res) => {
       if (res.data) {
-        setClientInfo({ name: res.data.name ?? clientId, icon: res.data.icon });
+        setClientInfo({ name: (res.data.name as string) ?? clientId, icon: res.data.icon as string | null });
       }
     }).catch(() => {
       setClientInfo({ name: clientId });
@@ -53,8 +53,8 @@ export default function OAuthAuthorize() {
         accept,
         scope: accept ? scopeParam : undefined,
       });
-      if (res.data?.redirectURI) {
-        window.location.href = res.data.redirectURI;
+      if (res.data?.redirect && res.data?.url) {
+        window.location.href = res.data.url;
         return;
       }
     } catch {
