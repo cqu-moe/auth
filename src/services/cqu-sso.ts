@@ -2,7 +2,7 @@ import { encryptAesEcb } from "./crypto";
 
 const SSO_BASE = "https://sso.cqu.edu.cn";
 const BROWSER_UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
 
 export class CquSsoError extends Error {
   constructor(
@@ -37,7 +37,13 @@ export function parseLoginPage(html: string): LoginPageParams {
   const captchaId = extractText(html, "captchaId");
 
   if (!execution || !croypto) {
-    throw new CquSsoError("PARSE_ERROR", "Failed to parse SSO login page");
+    const isServiceError = html.includes("noDocking") || html.includes("canot-access-code");
+    throw new CquSsoError(
+      "PARSE_ERROR",
+      isServiceError
+        ? "SSO service URL not registered (服务未对接)"
+        : "Failed to parse SSO login page"
+    );
   }
   return { execution, croypto, captchaId };
 }
@@ -62,7 +68,7 @@ export class CquSsoClient {
   async login(
     username: string,
     password: string,
-    serviceUrl: string = "https://sso.cqu.edu.cn/onlineCheck"
+    serviceUrl: string = "https://my.cqu.edu.cn/authserver/authentication/cas"
   ): Promise<LoginResult> {
     // Step 1: Get login page
     const pageResp = await fetch(

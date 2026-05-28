@@ -4,7 +4,7 @@ import { decrypt } from "../services/crypto";
 import type { Env } from "../types";
 
 const KEEPALIVE_INTERVAL_MS = 15 * 60 * 1000;
-const DUMMY_SERVICE = "https://sso.cqu.edu.cn/onlineCheck";
+const DUMMY_SERVICE = "https://my.cqu.edu.cn/authserver/authentication/cas";
 
 export const SERVICE_URLS: Record<string, string> = {
   jwxt: "https://my.cqu.edu.cn/authserver/authentication/cas",
