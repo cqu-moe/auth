@@ -101,6 +101,84 @@ cqu.post("/bind", async (c) => {
   return c.json({ success: true, studentId });
 });
 
+// PUT /api/cqu/bind — atomic rebind
+cqu.put("/bind", async (c) => {
+  const user = c.get("user") as { id: string };
+  const { studentId, password } = await c.req.json<{
+    studentId: string;
+    password: string;
+  }>();
+
+  if (!studentId || !password) {
+    return errorResponse(c, "MISSING_FIELDS", "缺少学号或密码", 400);
+  }
+
+  const db = drizzle(c.env.DATABASE);
+  const existing = await db
+    .select()
+    .from(cquCredentials)
+    .where(eq(cquCredentials.userId, user.id))
+    .get();
+  if (!existing) {
+    return errorResponse(c, "NOT_BOUND", "尚未绑定 CQU 账号", 400);
+  }
+
+  const { ciphertext, iv } = await encrypt(password, c.env.ENCRYPTION_KEY);
+
+  const doId = c.env.CQU_SESSION.idFromName(user.id);
+  const stub = c.env.CQU_SESSION.get(doId);
+
+  // Destroy old session first
+  await stub.fetch(new Request("https://do/destroy", { method: "POST" }));
+
+  // Try to initialize new session — validate credentials before committing
+  const result = await stub.fetch(
+    new Request("https://do/init", {
+      method: "POST",
+      body: JSON.stringify({
+        userId: user.id,
+        studentId,
+        encryptedPassword: ciphertext,
+        iv,
+      }),
+    })
+  );
+  const initResult = await result.json<{ success: boolean; error?: string }>();
+
+  if (!initResult.success) {
+    // Re-init old session so user doesn't lose existing binding
+    await stub.fetch(
+      new Request("https://do/init", {
+        method: "POST",
+        body: JSON.stringify({
+          userId: user.id,
+          studentId: existing.studentId,
+          encryptedPassword: existing.encryptedPassword,
+          iv: existing.iv,
+        }),
+      })
+    );
+    return errorResponse(
+      c,
+      "CQU_LOGIN_FAILED",
+      initResult.error ?? "新账号登录失败，已保留原绑定",
+      400
+    );
+  }
+
+  // Credentials validated — update database
+  await db
+    .update(cquCredentials)
+    .set({
+      studentId,
+      encryptedPassword: ciphertext,
+      iv,
+    })
+    .where(eq(cquCredentials.userId, user.id));
+
+  return c.json({ success: true, studentId });
+});
+
 // DELETE /api/cqu/bind
 cqu.delete("/bind", async (c) => {
   const user = c.get("user") as { id: string };
