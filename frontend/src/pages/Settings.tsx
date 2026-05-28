@@ -3,9 +3,10 @@ import { authClient } from "../lib/auth-client";
 import Layout from "../components/Layout";
 
 interface CquStatus {
-  bound: boolean;
+  status: string;
   studentId?: string;
-  sessionStatus?: string;
+  lastKeepAlive?: number;
+  lastRequestedAt?: number;
 }
 
 function ChangePasswordSection() {
@@ -236,7 +237,7 @@ function CquBindingSection() {
     setSuccess("");
     setBindLoading(true);
 
-    const isRebind = status?.bound;
+    const isRebind = status && status.status !== "unbound";
     try {
       const res = await fetch("/api/cqu/bind", {
         method: isRebind ? "PUT" : "POST",
@@ -309,7 +310,7 @@ function CquBindingSection() {
         </div>
       )}
 
-      {status?.bound ? (
+      {status && status.status !== "unbound" ? (
         <div className="space-y-4">
           <div className="flex flex-col gap-3 p-4 bg-gray-50 rounded-xl">
             <div className="flex items-center justify-between">
@@ -319,14 +320,14 @@ function CquBindingSection() {
             <div className="flex items-center justify-between">
               <span className="text-sm text-gray-500">会话状态</span>
               <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ${
-                status.sessionStatus === "active"
+                status.status === "active"
                   ? "bg-green-100 text-green-700"
                   : "bg-yellow-100 text-yellow-700"
               }`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${
-                  status.sessionStatus === "active" ? "bg-green-500" : "bg-yellow-500"
+                  status.status === "active" ? "bg-green-500" : "bg-yellow-500"
                 }`} />
-                {status.sessionStatus === "active" ? "正常" : "需要重新登录"}
+                {status.status === "active" ? "正常" : "需要重新登录"}
               </span>
             </div>
           </div>
