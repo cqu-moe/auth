@@ -60,7 +60,31 @@ function oauthClientUpdateToSchema(update: Record<string, unknown>): Record<stri
   if (typeof update.scope === "string") {
     out.scopes = update.scope.split(" ").filter(Boolean);
   }
+  // Keep the public flag in sync with the auth method: the plugin derives
+  // isPublic = (token_endpoint_auth_method === "none") on create, and token
+  // validation reads client.public — so an auth-method edit must update it too,
+  // or a client switched to/from "none" gets stuck with the wrong credential mode.
+  if (typeof update.token_endpoint_auth_method === "string") {
+    out.public = update.token_endpoint_auth_method === "none";
+  }
   return out;
+}
+
+// Gate OAuth-client write endpoints by the oauthClient ACL. The admin middleware
+// only checks the admin/superAdmin role string; per the roles config a plain
+// admin has oauthClient:["read"] while superAdmin has create/update/delete. The
+// write routes mutate the adapter directly (bypassing the plugin's own checks),
+// so enforce the permission here or a read-only admin could write.
+async function hasOAuthClientPermission(
+  c: Context<HonoEnv>,
+  auth: ReturnType<typeof createAuth>,
+  action: "create" | "update" | "delete"
+): Promise<boolean> {
+  const res = await auth.api.userHasPermission({
+    headers: c.req.raw.headers,
+    body: { permissions: { oauthClient: [action] } },
+  });
+  return res.success === true;
 }
 
 // Middleware: require admin or superAdmin role
@@ -309,6 +333,9 @@ admin.get("/oauth-clients/:id/scopes", async (c) => {
 // exactly once here and never again — the frontend must surface it immediately.
 admin.post("/oauth-clients", async (c) => {
   const auth = createAuth(c.env, c.req.raw);
+  if (!(await hasOAuthClientPermission(c, auth, "create"))) {
+    return errorResponse(c, "FORBIDDEN", "需要 OAuth 客户端写权限", 403);
+  }
   const body = await c.req.json();
   try {
     const result = await auth.api.adminCreateOAuthClient({
@@ -326,6 +353,9 @@ admin.post("/oauth-clients", async (c) => {
 // so map snake_case -> DB model and write via the adapter (same as rotate/delete).
 admin.patch("/oauth-clients/:id", async (c) => {
   const auth = createAuth(c.env, c.req.raw);
+  if (!(await hasOAuthClientPermission(c, auth, "update"))) {
+    return errorResponse(c, "FORBIDDEN", "需要 OAuth 客户端写权限", 403);
+  }
   const clientId = c.req.param("id");
   const update = await c.req.json<Record<string, unknown>>();
   const dbUpdate = oauthClientUpdateToSchema(update);
@@ -349,6 +379,9 @@ admin.patch("/oauth-clients/:id", async (c) => {
 // rejects it; the plaintext is returned once.
 admin.post("/oauth-clients/:id/rotate-secret", async (c) => {
   const auth = createAuth(c.env, c.req.raw);
+  if (!(await hasOAuthClientPermission(c, auth, "update"))) {
+    return errorResponse(c, "FORBIDDEN", "需要 OAuth 客户端写权限", 403);
+  }
   const clientId = c.req.param("id");
   const ctx = await auth.$context;
   const secret = generateOAuthClientSecret();
@@ -368,6 +401,9 @@ admin.post("/oauth-clients/:id/rotate-secret", async (c) => {
 // since there's no DB-level foreign key.
 admin.delete("/oauth-clients/:id", async (c) => {
   const auth = createAuth(c.env, c.req.raw);
+  if (!(await hasOAuthClientPermission(c, auth, "delete"))) {
+    return errorResponse(c, "FORBIDDEN", "需要 OAuth 客户端写权限", 403);
+  }
   const clientId = c.req.param("id");
   const ctx = await auth.$context;
   await ctx.adapter.delete({
