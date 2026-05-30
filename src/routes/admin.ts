@@ -504,6 +504,22 @@ admin.post("/oauth-clients/:id/rotate-secret", async (c) => {
   }
   const clientId = c.req.param("id");
   const ctx = await auth.$context;
+  const existing = await ctx.adapter.findOne<OAuthClientRow>({
+    model: "oauthClient",
+    where: [{ field: "clientId", value: clientId }],
+  });
+  if (!existing) return errorResponse(c, "NOT_FOUND", "客户端不存在", 404);
+  // Public clients have no secret (mirrors the plugin's rotate, which rejects
+  // them): writing one would be misleading since the token endpoint still
+  // accepts requests without it. Make it confidential first.
+  if (existing.tokenEndpointAuthMethod === "none" || !existing.clientSecret) {
+    return errorResponse(
+      c,
+      "PUBLIC_CLIENT_NO_SECRET",
+      "公开客户端没有可轮换的密钥，请先将其改为机密客户端",
+      400
+    );
+  }
   const secret = generateOAuthClientSecret();
   const hashed = await hashOAuthClientSecret(secret);
   const updated = await ctx.adapter.update({

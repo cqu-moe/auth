@@ -1093,7 +1093,7 @@ function OAuthClientEditor({
             </div>
 
             {/* --- Secret (edit mode only) --- */}
-            {isEdit && (
+            {isEdit && state.token_endpoint_auth_method !== "none" && (
               <div className="border-t border-gray-100 pt-4">
                 <p className="text-xs font-medium text-gray-700 mb-2">客户端密钥</p>
                 <p className="text-xs text-gray-400 mb-3">出于安全考虑，现有密钥不会显示。重新生成后旧密钥立即失效。</p>
