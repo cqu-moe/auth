@@ -800,15 +800,18 @@ function OAuthClientEditor({
           return;
         }
         const data = (await res.json()) as {
-          data: { client_id: string; client_secret: string };
+          data: { client_id: string; client_secret?: string };
         };
         const newClientId = data.data.client_id;
         // Best-effort: persist CQU scopes for the freshly created client.
         if (state.cqu_scopes.length > 0 && newClientId) {
           await saveCquScopes(newClientId);
         }
-        // Hand the one-time secret up to the parent to display, then refresh+close.
-        onCreated({ clientId: newClientId, clientSecret: data.data.client_secret });
+        // Public clients (token_endpoint_auth_method: "none") have no secret, so
+        // only surface the one-time credential modal when a secret was issued.
+        if (data.data.client_secret) {
+          onCreated({ clientId: newClientId, clientSecret: data.data.client_secret });
+        }
         onSaved();
       }
     } catch {

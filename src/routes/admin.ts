@@ -262,12 +262,9 @@ admin.get("/oauth-clients", async (c) => {
       grant_types: asArray(client.grantTypes),
       response_types: asArray(client.responseTypes),
       // DB stores scopes as string[]; the API contract uses a space-delimited
-      // string.
-      scope: Array.isArray(client.scopes)
-        ? client.scopes.join(" ")
-        : typeof client.scopes === "string"
-          ? client.scopes
-          : "",
+      // string. Use asArray so a raw JSON-string value (sqlite serialization)
+      // is parsed too, not joined as the literal "[\"openid\",...]" token.
+      scope: asArray(client.scopes).join(" "),
       type: client.type ?? null,
       require_pkce: client.requirePKCE ?? false,
       skip_consent: client.skipConsent ?? false,
