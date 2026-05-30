@@ -1,12 +1,43 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { APIError } from "better-auth/api";
 import type { HonoEnv } from "../types";
 import { createAuth } from "../auth";
 import { errorResponse } from "../utils/error";
 import { oauthClientCquScopes } from "../db/schema";
+import {
+  hashOAuthClientSecret,
+  generateOAuthClientSecret,
+} from "../utils/oauth-secret";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 
 const admin = new Hono<HonoEnv>();
+
+// Plugin endpoints (adminCreateOAuthClient/adminUpdateOAuthClient) throw
+// APIError on validation/authorization failures. Called via auth.api.* without
+// a catch, those bubble up as opaque 500s — translate them into the project's
+// structured errorResponse shape, preserving the OAuth error_description.
+function oauthClientError(c: Context<HonoEnv>, e: unknown) {
+  if (e instanceof APIError) {
+    const body = e.body as
+      | { error_description?: string; message?: string }
+      | undefined;
+    const msg =
+      body?.error_description ?? body?.message ?? "OAuth 客户端操作失败";
+    // APIError.status can be a string name ("BAD_REQUEST") or a number; the
+    // companion statusCode is always numeric, so prefer it for the HTTP status.
+    const status = typeof e.statusCode === "number" ? e.statusCode : 400;
+    return errorResponse(
+      c,
+      "OAUTH_CLIENT_ERROR",
+      msg,
+      status as ContentfulStatusCode
+    );
+  }
+  return errorResponse(c, "INTERNAL_ERROR", "服务器内部错误", 500);
+}
 
 // Middleware: require admin or superAdmin role
 admin.use("/*", async (c, next) => {
@@ -161,6 +192,81 @@ admin.get("/oauth-clients/:id/scopes", async (c) => {
     .all();
 
   return c.json({ clientId, scopes: rows.map((r) => r.scope) });
+});
+
+// POST /api/admin/oauth-clients - Register a new OAuth client.
+// adminCreateOAuthClient is a SERVER_ONLY plugin endpoint; body is snake_case
+// (redirect_uris, client_name, ...). The plaintext client_secret is returned
+// exactly once here and never again — the frontend must surface it immediately.
+admin.post("/oauth-clients", async (c) => {
+  const auth = createAuth(c.env, c.req.raw);
+  const body = await c.req.json();
+  try {
+    const result = await auth.api.adminCreateOAuthClient({
+      headers: c.req.raw.headers,
+      body,
+    });
+    return c.json({ data: result });
+  } catch (e) {
+    return oauthClientError(c, e);
+  }
+});
+
+// PATCH /api/admin/oauth-clients/:id - Edit an existing OAuth client.
+// adminUpdateOAuthClient expects { client_id, update } where update holds the
+// snake_case fields to change. :id is the public client_id.
+admin.patch("/oauth-clients/:id", async (c) => {
+  const auth = createAuth(c.env, c.req.raw);
+  const clientId = c.req.param("id");
+  const update = await c.req.json();
+  try {
+    const result = await auth.api.adminUpdateOAuthClient({
+      headers: c.req.raw.headers,
+      body: { client_id: clientId, update },
+    });
+    return c.json({ data: result });
+  } catch (e) {
+    return oauthClientError(c, e);
+  }
+});
+
+// POST /api/admin/oauth-clients/:id/rotate-secret - Issue a fresh client secret.
+// The plugin's own rotate endpoint enforces an owner check that admins can't
+// satisfy, so we write directly via the adapter. The stored value must match
+// the plugin's "hashed" mode (SHA-256/base64url) or validateClientCredentials
+// rejects it; the plaintext is returned once.
+admin.post("/oauth-clients/:id/rotate-secret", async (c) => {
+  const auth = createAuth(c.env, c.req.raw);
+  const clientId = c.req.param("id");
+  const ctx = await auth.$context;
+  const secret = generateOAuthClientSecret();
+  const hashed = await hashOAuthClientSecret(secret);
+  const updated = await ctx.adapter.update({
+    model: "oauthClient",
+    where: [{ field: "clientId", value: clientId }],
+    update: { clientSecret: hashed },
+  });
+  if (!updated) return errorResponse(c, "NOT_FOUND", "客户端不存在", 404);
+  return c.json({ data: { client_id: clientId, client_secret: secret } });
+});
+
+// DELETE /api/admin/oauth-clients/:id - Remove a client and its CQU scopes.
+// The plugin delete endpoint also enforces an owner check, so we delete via the
+// adapter and cascade-clean oauth_client_cqu_scopes (keyed by public client_id)
+// since there's no DB-level foreign key.
+admin.delete("/oauth-clients/:id", async (c) => {
+  const auth = createAuth(c.env, c.req.raw);
+  const clientId = c.req.param("id");
+  const ctx = await auth.$context;
+  await ctx.adapter.delete({
+    model: "oauthClient",
+    where: [{ field: "clientId", value: clientId }],
+  });
+  const db = drizzle(c.env.DATABASE);
+  await db
+    .delete(oauthClientCquScopes)
+    .where(eq(oauthClientCquScopes.clientId, clientId));
+  return c.json({ success: true });
 });
 
 export { admin };
