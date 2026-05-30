@@ -406,6 +406,20 @@ admin.delete("/oauth-clients/:id", async (c) => {
   }
   const clientId = c.req.param("id");
   const ctx = await auth.$context;
+  // Provider tables (oauthAccessToken/oauthRefreshToken/oauthConsent) reference
+  // oauthClient(clientId) without ON DELETE CASCADE, so remove dependent rows
+  // first or deleting a used client FK-errors (→500) / orphans rows. Access
+  // tokens reference refresh tokens, so they must go before refresh tokens.
+  for (const model of [
+    "oauthAccessToken",
+    "oauthRefreshToken",
+    "oauthConsent",
+  ]) {
+    await ctx.adapter.deleteMany({
+      model,
+      where: [{ field: "clientId", value: clientId }],
+    });
+  }
   await ctx.adapter.delete({
     model: "oauthClient",
     where: [{ field: "clientId", value: clientId }],

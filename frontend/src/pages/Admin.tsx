@@ -101,11 +101,14 @@ const ROLE_OPTIONS = [
   { value: "admin", label: "管理员" },
 ];
 
-// Read { error: { message } } from a non-2xx response, with a fallback.
+// Read the message from a non-2xx response. The backend's errorResponse shape is
+// { detail: { error: { code, message } } }, so read that path (not body.error).
 async function readErrorMessage(res: Response, fallback: string): Promise<string> {
   try {
-    const body = (await res.json()) as { error?: { message?: string } };
-    return body?.error?.message ?? fallback;
+    const body = (await res.json()) as {
+      detail?: { error?: { message?: string } };
+    };
+    return body?.detail?.error?.message ?? fallback;
   } catch {
     return fallback;
   }
