@@ -635,6 +635,9 @@ function OAuthClientEditor({
   const [error, setError] = useState("");
   const [rotating, setRotating] = useState(false);
   const [rotatedSecret, setRotatedSecret] = useState<string | null>(null);
+  // Set once a create succeeds: the editor then targets that client (PATCH), so
+  // retrying after a failed CQU-scope save updates it instead of re-creating.
+  const [createdId, setCreatedId] = useState<string | null>(null);
 
   // In edit mode, hydrate form (and fetch CQU scopes) once.
   useEffect(() => {
@@ -776,8 +779,11 @@ function OAuthClientEditor({
 
     setLoading(true);
     try {
-      if (isEdit && client) {
-        const res = await fetch(`/api/admin/oauth-clients/${client.id}`, {
+      // Target an existing client, or one we already created in this session
+      // (after a create that failed only at the CQU-scope step).
+      const targetId = client?.id ?? createdId;
+      if (targetId) {
+        const res = await fetch(`/api/admin/oauth-clients/${targetId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
@@ -786,7 +792,7 @@ function OAuthClientEditor({
           setError(await readErrorMessage(res, "保存失败，请稍后重试"));
           return;
         }
-        const ok = await saveCquScopes(client.id);
+        const ok = await saveCquScopes(targetId);
         if (!ok) return;
         onSaved();
       } else {
@@ -803,15 +809,22 @@ function OAuthClientEditor({
           data: { client_id: string; client_secret?: string };
         };
         const newClientId = data.data.client_id;
-        // Best-effort: persist CQU scopes for the freshly created client.
-        if (state.cqu_scopes.length > 0 && newClientId) {
-          await saveCquScopes(newClientId);
-        }
+        // The client now exists; bind the editor to it so a retry PATCHes
+        // instead of creating a duplicate.
+        setCreatedId(newClientId);
         // Public clients (token_endpoint_auth_method: "none") have no secret, so
         // only surface the one-time credential modal when a secret was issued.
         if (data.data.client_secret) {
           onCreated({ clientId: newClientId, clientSecret: data.data.client_secret });
         }
+        // Persist CQU scopes. If this fails the client exists but is missing
+        // scopes, so keep the editor open with the error (saveCquScopes set it)
+        // rather than silently closing as success — the admin can retry.
+        const scopesOk =
+          state.cqu_scopes.length === 0
+            ? true
+            : await saveCquScopes(newClientId);
+        if (!scopesOk) return;
         onSaved();
       }
     } catch {
