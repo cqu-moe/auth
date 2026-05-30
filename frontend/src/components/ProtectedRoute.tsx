@@ -24,7 +24,7 @@ export default function ProtectedRoute({ children, requireAdmin = false }: Prote
 
   if (requireAdmin) {
     const user = session.user as { role?: string };
-    if (user.role !== "admin") {
+    if (user.role !== "admin" && user.role !== "superAdmin") {
       return <Navigate to="/settings" replace />;
     }
   }
