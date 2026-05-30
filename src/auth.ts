@@ -1,14 +1,20 @@
 import { betterAuth } from "better-auth";
 import { withCloudflare, type CloudflareGeolocation } from "better-auth-cloudflare";
 import { admin } from "better-auth/plugins/admin";
+import { defaultStatements, adminAc } from "better-auth/plugins/admin/access";
 import { jwt } from "better-auth/plugins/jwt";
 import { createAccessControl } from "better-auth/plugins/access";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { Resend } from "resend";
 import type { Env } from "./types";
 
+// Must spread the admin plugin's defaultStatements: its built-in endpoints
+// (listUsers/setRole/banUser/...) authorize against actions like
+// user:["list","set-role","ban","delete","get"]. Defining a custom `user`
+// statement without them strips those actions, so every admin API throws
+// FORBIDDEN — which, called via auth.api.* without a catch, surfaces as a 500.
 export const statement = {
-  user: ["read", "ban", "unban", "delete"],
+  ...defaultStatements,
   oauthClient: ["create", "read", "update", "delete"],
   cquScope: ["assign", "revoke"],
   auditLog: ["read"],
@@ -20,12 +26,12 @@ export const ac = createAccessControl(statement);
 export const roles = {
   user: ac.newRole({}),
   admin: ac.newRole({
-    user: ["read", "ban", "unban"],
+    user: ["list", "get", "ban"],
     oauthClient: ["read"],
     auditLog: ["read"],
   }),
   superAdmin: ac.newRole({
-    user: ["read", "ban", "unban", "delete"],
+    ...adminAc.statements,
     oauthClient: ["create", "read", "update", "delete"],
     cquScope: ["assign", "revoke"],
     auditLog: ["read"],
@@ -74,6 +80,7 @@ export function createAuth(env: Env, request: Request) {
             ac,
             roles,
             defaultRole: "user",
+            adminRoles: ["admin", "superAdmin"],
           }),
           jwt(),
           oauthProvider({

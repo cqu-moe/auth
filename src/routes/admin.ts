@@ -37,7 +37,12 @@ admin.get("/users", async (c) => {
 
   return c.json({
     data: result.users,
-    pagination: { page, limit, total: result.total },
+    pagination: {
+      page,
+      limit,
+      total: result.total,
+      totalPages: Math.max(1, Math.ceil(result.total / limit)),
+    },
   });
 });
 
@@ -89,6 +94,27 @@ admin.patch("/users/:id", async (c) => {
   }
 
   return errorResponse(c, "INVALID_ACTION", "需要 action 或 role 参数", 400);
+});
+
+// GET /api/admin/oauth-clients - List all registered OAuth clients
+admin.get("/oauth-clients", async (c) => {
+  const auth = createAuth(c.env, c.req.raw);
+  const ctx = await auth.$context;
+  const clients = await ctx.adapter.findMany<{
+    clientId: string;
+    name?: string | null;
+  }>({ model: "oauthClient" });
+
+  // Key by the public client_id: scope storage + the scope middleware both
+  // match on it (payload.azp ?? payload.client_id), so the frontend's
+  // client.id must be that same value for the scope round-trip to line up.
+  return c.json({
+    data: clients.map((client) => ({
+      id: client.clientId,
+      clientId: client.clientId,
+      name: client.name ?? client.clientId,
+    })),
+  });
 });
 
 // PUT /api/admin/oauth-clients/:id/scopes - Configure CQU scopes for an OAuth client
