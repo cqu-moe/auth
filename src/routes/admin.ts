@@ -70,6 +70,58 @@ function oauthClientUpdateToSchema(update: Record<string, unknown>): Record<stri
   return out;
 }
 
+// Mirror the structural checks from the provider's checkOAuthClient against the
+// merged (existing + update) config. The create path runs that validation but the
+// adapter-direct PATCH bypasses it, so without this an edit could persist a config
+// the provider rejects (e.g. auth method "none" with a non-public type, or
+// authorization_code without redirect URIs), breaking later authorize/token flows.
+// Returns a human message when invalid, else null.
+function validateOAuthClientUpdate(
+  existing: OAuthClientRow,
+  update: Record<string, unknown>
+): string | null {
+  const authMethod =
+    (update.token_endpoint_auth_method as string | undefined) ??
+    existing.tokenEndpointAuthMethod ??
+    undefined;
+  const type = (update.type as string | undefined) ?? existing.type ?? undefined;
+  const isPublic = authMethod === "none";
+  if (type) {
+    if (isPublic && type !== "native" && type !== "user-agent-based") {
+      return "公开客户端 (token_endpoint_auth_method=none) 的类型必须是 native 或 user-agent-based";
+    }
+    if (!isPublic && type !== "web") {
+      return "机密客户端的类型必须是 web";
+    }
+  }
+  const grantTypes =
+    update.grant_types !== undefined
+      ? asArray(update.grant_types)
+      : asArray(existing.grantTypes);
+  const redirectUris =
+    update.redirect_uris !== undefined
+      ? asArray(update.redirect_uris)
+      : asArray(existing.redirectUris);
+  if (
+    (grantTypes.length === 0 || grantTypes.includes("authorization_code")) &&
+    redirectUris.length === 0
+  ) {
+    return "authorization_code 授权类型需要至少一个回调 URI";
+  }
+  const responseTypes =
+    update.response_types !== undefined
+      ? asArray(update.response_types)
+      : asArray(existing.responseTypes);
+  if (
+    grantTypes.includes("authorization_code") &&
+    responseTypes.length > 0 &&
+    !responseTypes.includes("code")
+  ) {
+    return "使用 authorization_code 时 response_types 必须包含 code";
+  }
+  return null;
+}
+
 // Gate OAuth-client write endpoints by the oauthClient ACL. The admin middleware
 // only checks the admin/superAdmin role string; per the roles config a plain
 // admin has oauthClient:["read"] while superAdmin has create/update/delete. The
@@ -360,6 +412,15 @@ admin.patch("/oauth-clients/:id", async (c) => {
     return errorResponse(c, "NO_UPDATE", "没有可更新的字段", 400);
   }
   const ctx = await auth.$context;
+  // Validate the merged config (existing + this update) the way the provider's
+  // create path does, since the adapter-direct write skips checkOAuthClient.
+  const existing = await ctx.adapter.findOne<OAuthClientRow>({
+    model: "oauthClient",
+    where: [{ field: "clientId", value: clientId }],
+  });
+  if (!existing) return errorResponse(c, "NOT_FOUND", "客户端不存在", 404);
+  const invalid = validateOAuthClientUpdate(existing, update);
+  if (invalid) return errorResponse(c, "INVALID_CLIENT_METADATA", invalid, 400);
   const updated = await ctx.adapter.update({
     model: "oauthClient",
     where: [{ field: "clientId", value: clientId }],
