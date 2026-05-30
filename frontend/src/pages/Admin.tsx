@@ -77,6 +77,7 @@ const ALL_CQU_SCOPES = [
   { key: "cqu:ticket:library", label: "图书馆 (library)" },
   { key: "cqu:ticket:card", label: "校园卡 (card)" },
 ];
+const CQU_SCOPE_KEYS = new Set(ALL_CQU_SCOPES.map((s) => s.key));
 
 const GRANT_TYPE_OPTIONS = [
   { value: "authorization_code", label: "授权码 (authorization_code)" },
@@ -585,7 +586,12 @@ function stateFromClient(client: ClientConfig, cquScopes: string[]): EditorState
   return {
     client_name: client.client_name ?? "",
     redirect_uris: client.redirect_uris.length ? client.redirect_uris : [""],
-    scope: client.scope ?? "",
+    // CQU scopes live in their own checkbox section; keep them out of the text
+    // field so the two don't duplicate (buildPayload re-merges them on save).
+    scope: (client.scope ?? "")
+      .split(" ")
+      .filter((s) => s && !CQU_SCOPE_KEYS.has(s))
+      .join(" "),
     grant_types: client.grant_types.length ? client.grant_types : ["authorization_code"],
     type: client.type ?? "web",
     skip_consent: client.skip_consent,
@@ -726,7 +732,15 @@ function OAuthClientEditor({
     // Optional strings: include only when non-empty after trimming.
     const clientName = state.client_name.trim();
     if (clientName) payload.client_name = clientName;
-    const scope = state.scope.trim();
+    // The client's OAuth scopes must include the selected CQU scopes, or the
+    // provider rejects cqu:ticket:* with invalid_scope before the ticket
+    // middleware ever consults oauth_client_cqu_scopes. Merge them (deduped).
+    const scope = [
+      ...new Set([
+        ...state.scope.split(" ").filter(Boolean),
+        ...state.cqu_scopes,
+      ]),
+    ].join(" ");
     if (scope) payload.scope = scope;
     const clientUri = state.client_uri.trim();
     if (clientUri) payload.client_uri = clientUri;
