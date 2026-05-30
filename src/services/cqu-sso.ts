@@ -3,6 +3,28 @@ import { encryptAesEcb } from "./crypto";
 const SSO_BASE = "https://sso.cqu.edu.cn";
 const BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
+const FETCH_TIMEOUT_MS = 10_000;
+
+/**
+ * fetch wrapper with a hard timeout. A hung connection to CQU (common when
+ * Cloudflare's edge can't reach the campus network) would otherwise stall the
+ * caller until the platform's ~180s wall-clock limit. Any network-level
+ * failure is normalized to CquSsoError("NETWORK_ERROR") so callers can tell a
+ * transient outage apart from a genuine auth rejection.
+ */
+async function ssoFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+  } catch (e) {
+    throw new CquSsoError(
+      "NETWORK_ERROR",
+      `CQU SSO unreachable: ${e instanceof Error ? e.message : String(e)}`
+    );
+  }
+}
 
 export class CquSsoError extends Error {
   constructor(
@@ -71,7 +93,7 @@ export class CquSsoClient {
     serviceUrl: string = "https://my.cqu.edu.cn/authserver/authentication/cas"
   ): Promise<LoginResult> {
     // Step 1: Get login page
-    const pageResp = await fetch(
+    const pageResp = await ssoFetch(
       `${SSO_BASE}/login?service=${encodeURIComponent(serviceUrl)}`,
       {
         headers: { "User-Agent": BROWSER_UA },
@@ -98,7 +120,7 @@ export class CquSsoClient {
       geolocation: "",
     });
 
-    const loginResp = await fetch(
+    const loginResp = await ssoFetch(
       `${SSO_BASE}/login?service=${encodeURIComponent(serviceUrl)}`,
       {
         method: "POST",
@@ -144,7 +166,7 @@ export class CquSsoClient {
     cookies: CasCookies,
     serviceUrl: string
   ): Promise<string> {
-    const resp = await fetch(
+    const resp = await ssoFetch(
       `${SSO_BASE}/login?service=${encodeURIComponent(serviceUrl)}`,
       {
         headers: {
@@ -171,7 +193,7 @@ export class CquSsoClient {
   }
 
   async checkOnline(cookies: CasCookies): Promise<boolean> {
-    const resp = await fetch(`${SSO_BASE}/onlineCheck`, {
+    const resp = await ssoFetch(`${SSO_BASE}/onlineCheck`, {
       headers: {
         "User-Agent": BROWSER_UA,
         Cookie: formatCasCookies(cookies),

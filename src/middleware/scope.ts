@@ -1,5 +1,5 @@
 import type { Context, Next } from "hono";
-import type { Env } from "../types";
+import type { HonoEnv } from "../types";
 import { verifyAccessToken } from "better-auth/oauth2";
 import { oauthClientCquScopes } from "../db/schema";
 import { drizzle } from "drizzle-orm/d1";
@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { errorResponse } from "../utils/error";
 
 export function requireCquScope(service: string) {
-  return async (c: Context<{ Bindings: Env }>, next: Next) => {
+  return async (c: Context<HonoEnv>, next: Next) => {
     const authHeader = c.req.header("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
       return next();
