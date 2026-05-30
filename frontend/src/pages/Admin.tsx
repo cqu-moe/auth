@@ -48,23 +48,26 @@ interface ClientConfig {
 }
 
 // Body sent to POST/PATCH /api/admin/oauth-clients (snake_case, flat).
+// Optional fields are omitted entirely when empty rather than sent as null/[]:
+// the create endpoint's zod schema rejects null on optional strings/enums and
+// rejects [] on .min(1) arrays, so empty values must not appear in the payload.
 interface ClientPayload {
-  client_name?: string | null;
-  client_uri?: string | null;
-  logo_uri?: string | null;
-  tos_uri?: string | null;
-  policy_uri?: string | null;
+  client_name?: string;
+  client_uri?: string;
+  logo_uri?: string;
+  tos_uri?: string;
+  policy_uri?: string;
   contacts?: string[];
-  redirect_uris?: string[];
+  redirect_uris: string[];
   post_logout_redirect_uris?: string[];
-  token_endpoint_auth_method?: string | null;
-  grant_types?: string[];
-  response_types?: string[];
+  token_endpoint_auth_method?: string;
+  grant_types: string[];
+  response_types: string[];
   scope?: string;
-  type?: string | null;
-  require_pkce?: boolean;
-  skip_consent?: boolean;
-  enable_end_session?: boolean;
+  type?: string;
+  require_pkce: boolean;
+  skip_consent: boolean;
+  enable_end_session: boolean;
   metadata?: unknown;
 }
 
@@ -679,6 +682,10 @@ function OAuthClientEditor({
   };
 
   // Build the snake_case payload; returns null + sets error on validation failure.
+  // Empty optional fields are omitted (never sent as null/empty-string/[]): the
+  // create endpoint's zod schema rejects those. On edit (adapter direct write),
+  // an omitted field simply means "leave unchanged" — v1 has no way to clear a
+  // field back to empty, which is an accepted limitation.
   const buildPayload = (): ClientPayload | null => {
     const redirectUris = cleanList(state.redirect_uris);
     if (redirectUris.length === 0) {
@@ -700,24 +707,42 @@ function OAuthClientEditor({
       }
     }
 
+    // Always-valid required/boolean fields.
     const payload: ClientPayload = {
-      client_name: state.client_name.trim() || null,
       redirect_uris: redirectUris,
-      scope: state.scope.trim(),
       grant_types: state.grant_types,
-      type: state.type || null,
-      skip_consent: state.skip_consent,
-      client_uri: state.client_uri.trim() || null,
-      logo_uri: state.logo_uri.trim() || null,
-      tos_uri: state.tos_uri.trim() || null,
-      policy_uri: state.policy_uri.trim() || null,
-      contacts: cleanList(state.contacts),
-      post_logout_redirect_uris: cleanList(state.post_logout_redirect_uris),
-      require_pkce: state.require_pkce,
-      token_endpoint_auth_method: state.token_endpoint_auth_method || null,
       response_types: state.response_types.length ? state.response_types : ["code"],
+      skip_consent: state.skip_consent,
+      require_pkce: state.require_pkce,
       enable_end_session: state.enable_end_session,
     };
+
+    // Optional strings: include only when non-empty after trimming.
+    const clientName = state.client_name.trim();
+    if (clientName) payload.client_name = clientName;
+    const scope = state.scope.trim();
+    if (scope) payload.scope = scope;
+    const clientUri = state.client_uri.trim();
+    if (clientUri) payload.client_uri = clientUri;
+    const logoUri = state.logo_uri.trim();
+    if (logoUri) payload.logo_uri = logoUri;
+    const tosUri = state.tos_uri.trim();
+    if (tosUri) payload.tos_uri = tosUri;
+    const policyUri = state.policy_uri.trim();
+    if (policyUri) payload.policy_uri = policyUri;
+
+    // Optional enums: include only when truthy.
+    if (state.type) payload.type = state.type;
+    if (state.token_endpoint_auth_method) {
+      payload.token_endpoint_auth_method = state.token_endpoint_auth_method;
+    }
+
+    // Optional .min(1) arrays: include only when non-empty after cleaning.
+    const contacts = cleanList(state.contacts);
+    if (contacts.length) payload.contacts = contacts;
+    const postLogoutUris = cleanList(state.post_logout_redirect_uris);
+    if (postLogoutUris.length) payload.post_logout_redirect_uris = postLogoutUris;
+
     if (metadata !== undefined) payload.metadata = metadata;
     return payload;
   };
