@@ -39,6 +39,30 @@ function oauthClientError(c: Context<HonoEnv>, e: unknown) {
   return errorResponse(c, "INTERNAL_ERROR", "服务器内部错误", 500);
 }
 
+// Map OAuth snake_case update fields to the oauthClient DB model (camelCase),
+// mirroring the plugin's oauthToSchema. Needed because the plugin update endpoint
+// enforces a userId owner check admins can't satisfy, so we write via the adapter.
+function oauthClientUpdateToSchema(update: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const map: Record<string, string> = {
+    client_name: "name", client_uri: "uri", logo_uri: "icon", tos_uri: "tos",
+    policy_uri: "policy", token_endpoint_auth_method: "tokenEndpointAuthMethod",
+    type: "type", subject_type: "subjectType", contacts: "contacts",
+    redirect_uris: "redirectUris", post_logout_redirect_uris: "postLogoutRedirectUris",
+    grant_types: "grantTypes", response_types: "responseTypes",
+    skip_consent: "skipConsent", enable_end_session: "enableEndSession",
+    require_pkce: "requirePKCE", disabled: "disabled", metadata: "metadata",
+  };
+  for (const [snake, camel] of Object.entries(map)) {
+    if (update[snake] !== undefined) out[camel] = update[snake];
+  }
+  // scope is a space-delimited string in the OAuth API but stored as scopes[]
+  if (typeof update.scope === "string") {
+    out.scopes = update.scope.split(" ").filter(Boolean);
+  }
+  return out;
+}
+
 // Middleware: require admin or superAdmin role
 admin.use("/*", async (c, next) => {
   const auth = createAuth(c.env, c.req.raw);
@@ -297,22 +321,25 @@ admin.post("/oauth-clients", async (c) => {
   }
 });
 
-// PATCH /api/admin/oauth-clients/:id - Edit an existing OAuth client.
-// adminUpdateOAuthClient expects { client_id, update } where update holds the
-// snake_case fields to change. :id is the public client_id.
+// PATCH /api/admin/oauth-clients/:id - Edit a client. The plugin update endpoint
+// enforces a userId owner check admins can't satisfy for clients they don't own,
+// so map snake_case -> DB model and write via the adapter (same as rotate/delete).
 admin.patch("/oauth-clients/:id", async (c) => {
   const auth = createAuth(c.env, c.req.raw);
   const clientId = c.req.param("id");
-  const update = await c.req.json();
-  try {
-    const result = await auth.api.adminUpdateOAuthClient({
-      headers: c.req.raw.headers,
-      body: { client_id: clientId, update },
-    });
-    return c.json({ data: result });
-  } catch (e) {
-    return oauthClientError(c, e);
+  const update = await c.req.json<Record<string, unknown>>();
+  const dbUpdate = oauthClientUpdateToSchema(update);
+  if (Object.keys(dbUpdate).length === 0) {
+    return errorResponse(c, "NO_UPDATE", "没有可更新的字段", 400);
   }
+  const ctx = await auth.$context;
+  const updated = await ctx.adapter.update({
+    model: "oauthClient",
+    where: [{ field: "clientId", value: clientId }],
+    update: { ...dbUpdate, updatedAt: new Date() },
+  });
+  if (!updated) return errorResponse(c, "NOT_FOUND", "客户端不存在", 404);
+  return c.json({ success: true });
 });
 
 // POST /api/admin/oauth-clients/:id/rotate-secret - Issue a fresh client secret.
