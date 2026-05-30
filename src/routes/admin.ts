@@ -127,23 +127,108 @@ admin.patch("/users/:id", async (c) => {
   return errorResponse(c, "INVALID_ACTION", "需要 action 或 role 参数", 400);
 });
 
-// GET /api/admin/oauth-clients - List all registered OAuth clients
+// Shape of a row returned by adapter.findMany({ model: "oauthClient" }).
+// Fields are camelCase (the oauthClient DB model's field names). Array/json
+// fields are typed as `unknown` because the adapter's output transform may, in
+// degenerate cases, hand back a raw string instead of a parsed value — asArray
+// normalizes that. clientSecret is intentionally present here (the adapter
+// returns it) but never copied into the response.
+interface OAuthClientRow {
+  clientId: string;
+  name?: string | null;
+  uri?: string | null;
+  icon?: string | null;
+  tos?: string | null;
+  policy?: string | null;
+  contacts?: unknown;
+  redirectUris?: unknown;
+  postLogoutRedirectUris?: unknown;
+  tokenEndpointAuthMethod?: string | null;
+  grantTypes?: unknown;
+  responseTypes?: unknown;
+  scopes?: unknown;
+  type?: string | null;
+  requirePKCE?: boolean | null;
+  skipConsent?: boolean | null;
+  enableEndSession?: boolean | null;
+  subjectType?: string | null;
+  disabled?: boolean | null;
+  metadata?: unknown;
+  clientSecret?: string | null;
+}
+
+// Parse a value that should be a JSON array; returns [] on anything malformed.
+function safeJsonArray(v: string): string[] {
+  try {
+    const parsed = JSON.parse(v);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+// Defensive coercion to a string[]. The D1/sqlite adapter has
+// supportsArrays === false, so its output transform runs safeJSONParse on
+// string[] fields and normally yields a real array. We still guard against a
+// raw JSON string slipping through, so this endpoint is robust regardless of
+// the underlying adapter's serialization behavior.
+function asArray(v: unknown): string[] {
+  return Array.isArray(v)
+    ? (v as string[])
+    : typeof v === "string"
+      ? safeJsonArray(v)
+      : [];
+}
+
+// GET /api/admin/oauth-clients - List all registered OAuth clients with their
+// full configuration (snake_case, matching the create/update API contract so
+// the edit form reads and writes the same field names).
 admin.get("/oauth-clients", async (c) => {
   const auth = createAuth(c.env, c.req.raw);
   const ctx = await auth.$context;
-  const clients = await ctx.adapter.findMany<{
-    clientId: string;
-    name?: string | null;
-  }>({ model: "oauthClient" });
+  const clients = await ctx.adapter.findMany<OAuthClientRow>({
+    model: "oauthClient",
+  });
 
   // Key by the public client_id: scope storage + the scope middleware both
   // match on it (payload.azp ?? payload.client_id), so the frontend's
   // client.id must be that same value for the scope round-trip to line up.
   return c.json({
     data: clients.map((client) => ({
+      // Legacy fields kept for the already-deployed frontend, which reads
+      // id / clientId / name. Do not remove.
       id: client.clientId,
       clientId: client.clientId,
       name: client.name ?? client.clientId,
+      // Full config in snake_case for the edit form.
+      client_id: client.clientId,
+      client_name: client.name ?? null,
+      client_uri: client.uri ?? null,
+      logo_uri: client.icon ?? null,
+      tos_uri: client.tos ?? null,
+      policy_uri: client.policy ?? null,
+      contacts: asArray(client.contacts),
+      redirect_uris: asArray(client.redirectUris),
+      post_logout_redirect_uris: asArray(client.postLogoutRedirectUris),
+      token_endpoint_auth_method: client.tokenEndpointAuthMethod ?? null,
+      grant_types: asArray(client.grantTypes),
+      response_types: asArray(client.responseTypes),
+      // DB stores scopes as string[]; the API contract uses a space-delimited
+      // string.
+      scope: Array.isArray(client.scopes)
+        ? client.scopes.join(" ")
+        : typeof client.scopes === "string"
+          ? client.scopes
+          : "",
+      type: client.type ?? null,
+      require_pkce: client.requirePKCE ?? false,
+      skip_consent: client.skipConsent ?? false,
+      enable_end_session: client.enableEndSession ?? false,
+      subject_type: client.subjectType ?? null,
+      disabled: client.disabled ?? false,
+      metadata: client.metadata ?? null,
+      // client_secret is intentionally omitted: it is stored hashed and is
+      // sensitive — it must never be returned by a list endpoint.
     })),
   });
 });
