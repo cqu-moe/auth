@@ -3,7 +3,7 @@ import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { APIError } from "better-auth/api";
 import type { HonoEnv } from "../types";
-import { createAuth } from "../auth";
+import { createAuth, OAUTH_SCOPES } from "../auth";
 import { errorResponse } from "../utils/error";
 import { oauthClientCquScopes } from "../db/schema";
 import {
@@ -70,6 +70,32 @@ function oauthClientUpdateToSchema(update: Record<string, unknown>): Record<stri
   return out;
 }
 
+// Mirror the provider's SafeUrlSchema redirect-URI validation: parseable URL,
+// no javascript:/data:/vbscript: scheme, and HTTPS unless the host is loopback.
+// Without this a malformed URI saved on edit makes authorize's new URL(...) throw.
+const DANGEROUS_URI_SCHEMES = ["javascript:", "data:", "vbscript:"];
+function isLoopbackUriHost(host: string): boolean {
+  const h = host.replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+  return h === "localhost" || h === "127.0.0.1" || h === "::1";
+}
+function badRedirectUri(uris: string[]): string | null {
+  for (const uri of uris) {
+    let u: URL;
+    try {
+      u = new URL(uri);
+    } catch {
+      return `回调 URI 不是合法 URL：${uri}`;
+    }
+    if (DANGEROUS_URI_SCHEMES.includes(u.protocol)) {
+      return `回调 URI 不允许使用 ${u.protocol} 协议：${uri}`;
+    }
+    if (u.protocol === "http:" && !isLoopbackUriHost(u.host)) {
+      return `回调 URI 必须使用 HTTPS（仅 loopback 主机可用 HTTP）：${uri}`;
+    }
+  }
+  return null;
+}
+
 // Mirror the structural checks from the provider's checkOAuthClient against the
 // merged (existing + update) config. The create path runs that validation but the
 // adapter-direct PATCH bypasses it, so without this an edit could persist a config
@@ -118,6 +144,26 @@ function validateOAuthClientUpdate(
     !responseTypes.includes("code")
   ) {
     return "使用 authorization_code 时 response_types 必须包含 code";
+  }
+  // Validate redirect URI formats supplied by this update (existing values were
+  // already validated at create time).
+  if (update.redirect_uris !== undefined) {
+    const bad = badRedirectUri(asArray(update.redirect_uris));
+    if (bad) return bad;
+  }
+  if (update.post_logout_redirect_uris !== undefined) {
+    const bad = badRedirectUri(asArray(update.post_logout_redirect_uris));
+    if (bad) return bad;
+  }
+  // Scopes must stay within the provider's configured allowlist, else later
+  // flows treat the stored client.scopes as valid and can mint unsupported scopes.
+  if (typeof update.scope === "string") {
+    const allowed = new Set(OAUTH_SCOPES);
+    const bad = update.scope
+      .split(" ")
+      .filter(Boolean)
+      .find((s) => !allowed.has(s));
+    if (bad) return `不支持的 scope：${bad}`;
   }
   return null;
 }
