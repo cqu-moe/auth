@@ -792,8 +792,16 @@ function OAuthClientEditor({
           setError(await readErrorMessage(res, "保存失败，请稍后重试"));
           return;
         }
+        // Switching a public client to confidential mints a new secret, returned
+        // once — surface it like create/rotate.
+        const patchBody = (await res.json()) as {
+          data?: { client_secret?: string };
+        };
         const ok = await saveCquScopes(targetId);
         if (!ok) return;
+        if (patchBody.data?.client_secret) {
+          onCreated({ clientId: targetId, clientSecret: patchBody.data.client_secret });
+        }
         onSaved();
       } else {
         const res = await fetch(`/api/admin/oauth-clients`, {

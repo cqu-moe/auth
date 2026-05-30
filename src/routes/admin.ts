@@ -4,6 +4,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { APIError } from "better-auth/api";
 import type { HonoEnv } from "../types";
 import { createAuth, OAUTH_SCOPES } from "../auth";
+import { isLoopbackHost } from "@better-auth/core/utils/host";
 import { errorResponse } from "../utils/error";
 import { oauthClientCquScopes } from "../db/schema";
 import {
@@ -74,10 +75,6 @@ function oauthClientUpdateToSchema(update: Record<string, unknown>): Record<stri
 // no javascript:/data:/vbscript: scheme, and HTTPS unless the host is loopback.
 // Without this a malformed URI saved on edit makes authorize's new URL(...) throw.
 const DANGEROUS_URI_SCHEMES = ["javascript:", "data:", "vbscript:"];
-function isLoopbackUriHost(host: string): boolean {
-  const h = host.replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
-  return h === "localhost" || h === "127.0.0.1" || h === "::1";
-}
 function badRedirectUri(uris: string[]): string | null {
   for (const uri of uris) {
     let u: URL;
@@ -89,7 +86,9 @@ function badRedirectUri(uris: string[]): string | null {
     if (DANGEROUS_URI_SCHEMES.includes(u.protocol)) {
       return `回调 URI 不允许使用 ${u.protocol} 协议：${uri}`;
     }
-    if (u.protocol === "http:" && !isLoopbackUriHost(u.host)) {
+    // Use the provider's own loopback semantics (127.0.0.0/8, ::1, *.localhost)
+    // so we don't reject loopback redirect URIs the create path accepted.
+    if (u.protocol === "http:" && !isLoopbackHost(u.host)) {
       return `回调 URI 必须使用 HTTPS（仅 loopback 主机可用 HTTP）：${uri}`;
     }
   }
@@ -467,13 +466,30 @@ admin.patch("/oauth-clients/:id", async (c) => {
   if (!existing) return errorResponse(c, "NOT_FOUND", "客户端不存在", 404);
   const invalid = validateOAuthClientUpdate(existing, update);
   if (invalid) return errorResponse(c, "INVALID_CLIENT_METADATA", invalid, 400);
+  // Keep the secret consistent with the auth method (the create path does the
+  // same via isPublic). Public clients hold no secret; switching a public client
+  // to confidential must mint one — returned once — or the token endpoint can
+  // neither require nor validate a secret and the client breaks.
+  let revealedSecret: string | undefined;
+  if (typeof update.token_endpoint_auth_method === "string") {
+    if (update.token_endpoint_auth_method === "none") {
+      dbUpdate.clientSecret = null;
+    } else if (!existing.clientSecret) {
+      revealedSecret = generateOAuthClientSecret();
+      dbUpdate.clientSecret = await hashOAuthClientSecret(revealedSecret);
+    }
+  }
   const updated = await ctx.adapter.update({
     model: "oauthClient",
     where: [{ field: "clientId", value: clientId }],
     update: { ...dbUpdate, updatedAt: new Date() },
   });
   if (!updated) return errorResponse(c, "NOT_FOUND", "客户端不存在", 404);
-  return c.json({ success: true });
+  return c.json(
+    revealedSecret
+      ? { success: true, data: { client_id: clientId, client_secret: revealedSecret } }
+      : { success: true }
+  );
 });
 
 // POST /api/admin/oauth-clients/:id/rotate-secret - Issue a fresh client secret.
