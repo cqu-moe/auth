@@ -25,7 +25,7 @@ npm run db:generate                  # 从 schema.ts 生成 migration
 npm run db:migrate:local             # 本地 D1 执行 migration
 
 # 测试
-npm run test                         # vitest (Cloudflare Workers pool)
+npm run test                         # vitest run（Node 普通 pool，见 vitest.config.ts；当前测试是 runtime-agnostic crypto，不需要 Workers pool）
 
 # 部署 (GitHub 连接 Cloudflare，push 到 main 自动构建部署)
 npm run deploy                       # 手动部署: 构建前端 + wrangler deploy
