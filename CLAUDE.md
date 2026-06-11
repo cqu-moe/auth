@@ -85,7 +85,7 @@ Secrets (via `wrangler secret`): `ENCRYPTION_KEY`, `BETTER_AUTH_URL`, `BETTER_AU
 - Workers 中 AES-ECB 加密的 IV 必须传 `""` 而非 `null`
 - `frontend/dist/` 在 `.gitignore` 中，部署时由 CI 自动构建
 - `withCloudflare()` 源码是 `{ ...options, database, ... }` — `disabledPaths` 等 betterAuth 顶层选项放在第二参数中即可透传
-- `drizzle-orm/d1` 是 D1 专用适配器
+- `drizzle-orm/d1` 是 D1 专用适配器（仅用于 App 自有表 cquCredentials/oauthClientCquScopes）。**Better Auth 自有表（user/session/oauthClient 等）走的是内置 Kysely adapter**（`d1Native: env.DATABASE` → better-auth-cloudflare 直连 Kysely，**不经过 drizzleAdapter**）；操作 Better Auth 表用 `(await auth.$context).adapter.findMany/update/delete({ model: "oauthClient", ... })`。sqlite dialect `supportsJSON/Arrays=false`，数组/json 字段以 JSON 字符串存、读时 `safeJSONParse`
 - UI 文字全部使用简体中文
 - 更换域名后必须同步更新 `BETTER_AUTH_URL` secret: `echo "https://新域名" | npx wrangler secret put BETTER_AUTH_URL`
 - Git commit 使用 1Password SSH 签名，需要 1Password 解锁；报 `1Password: failed to fill whole buffer` 时让用户在终端手动 commit
@@ -95,3 +95,5 @@ Secrets (via `wrangler secret`): `ENCRYPTION_KEY`, `BETTER_AUTH_URL`, `BETTER_AU
 - `new Resend(apiKey)` 在构造时校验 key，必须延迟初始化（`getResend()`），否则缺 key 时所有路由 500
 - 本地开发需要 `.dev.vars` 文件配置 secrets（`BETTER_AUTH_URL=http://localhost:8787` 等），否则 auth 路由全部 500
 - `npm run deploy` 是手动部署的备用方式，常规部署通过 push 到 main 自动触发
+- **Better Auth admin 插件自定义 `ac` 时必须 spread `defaultStatements` + 角色 spread `adminAc.statements`**（`better-auth/plugins/admin/access`），否则内置端点（listUsers/setRole/banUser…）缺 `user:["list","set-role",...]` 动作，权限校验全失败抛 FORBIDDEN；而 `auth.api.*` 抛的 APIError 无 try/catch 会被 Hono 兜底成**通用 500**，伪装成"服务器崩溃"。前端路由守卫也要同时放行 `admin` 和 `superAdmin`
+- admin 层轮换/直写 OAuth client secret 必须复刻插件 `defaultHasher`（`base64Url.encode(SHA-256(secret), {padding:false})`，存储模式 `"hashed"`，见 `src/utils/oauth-secret.ts`）；插件的 rotate/delete 端点有 `userId===session.user.id` 的 owner 硬校验，admin 用不了，只能走 adapter 直操

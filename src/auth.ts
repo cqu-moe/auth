@@ -39,6 +39,19 @@ export const roles = {
   }),
 };
 
+// Scopes the OAuth provider accepts. Single source of truth: the oauthProvider
+// config below and the admin client-update validation both reference this.
+export const OAUTH_SCOPES = [
+  "openid",
+  "profile",
+  "email",
+  "offline_access",
+  "cqu:ticket:jwxt",
+  "cqu:ticket:jxpj",
+  "cqu:ticket:library",
+  "cqu:ticket:card",
+];
+
 export function createAuth(env: Env, request: Request) {
   const getResend = () => new Resend(env.RESEND_API_KEY);
 
@@ -86,16 +99,7 @@ export function createAuth(env: Env, request: Request) {
           oauthProvider({
             loginPage: "/login",
             consentPage: "/oauth/authorize",
-            scopes: [
-              "openid",
-              "profile",
-              "email",
-              "offline_access",
-              "cqu:ticket:jwxt",
-              "cqu:ticket:jxpj",
-              "cqu:ticket:library",
-              "cqu:ticket:card",
-            ],
+            scopes: OAUTH_SCOPES,
             silenceWarnings: {
               oauthAuthServerConfig: true,
               openidConfig: true,
