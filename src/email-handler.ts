@@ -4,25 +4,36 @@ import { eq } from "drizzle-orm";
 import { cquBindAddresses } from "./db/schema";
 import { localPart } from "./services/cqu-2fa/address";
 import { extractCode } from "./services/cqu-2fa/extract-code";
-import { parseInboundAuth, senderVerified, trustedCfArc } from "./services/cqu-2fa/sender-auth";
+import { envelopeSenderAllowed } from "./services/cqu-2fa/sender-auth";
 import type { Env } from "./types";
 
 const MAX_RAW_SIZE = 25 * 1024 * 1024; // 25 MiB 上限，超过即拒，避免 PostalMime 解析大邮件
 
-// Cloudflare 入站邮件管道：解析收件地址 → D1 查绑定 → 校验发件人 → 提码 → 投递到用户 DO。
+// Cloudflare 入站邮件管道：解析收件地址 → D1 查绑定 → 校验信封发件人 → 提码 → 投递到用户 DO。
 //
-// 安全顺序至关重要（先校验、后解析正文）：
+// 安全模型（三道独立防线）：
+//   (a) 不可枚举的随机收件地址：token → bind 查表是真正的「谁能投进来」门。攻击者不知道某用户的
+//       随机 token，根本投不到对的地址。
+//   (b) CF 平台层 SPF/DKIM 门（在 Worker 之前）：CF 在 MX/邮局阶段强制入站邮件「通过 SPF 或带
+//       正确 DKIM」，否则在进入本 Worker 之前就拒收。cqu.edu.cn 无 DKIM、SPF 只授权 CQU 发信 IP，
+//       故任何「到达本 Worker 且信封 MAIL FROM=sso@cqu.edu.cn」的邮件必然已过 SPF（来自 CQU IP）。
+//   (c) 信封发件人白名单：envelopeSenderAllowed(message.from, whitelist)。`message.from` 是
+//       *信封* MAIL FROM（CF 文档明确：用于安全判断的字段），非可伪造的邮件头 From。
+//
+// 安全顺序（先校验、后解析正文）：
 //   1. token → bind（D1），缺失/已 revoked 立即 setReject（pending 与 active 都收码）
-//   2. ARC-Authentication-Results 必须由 CF 盖章：trustedCfArc() 把信任锚定在 authserv-id
-//      （mx.cloudflare.net）上——只取 CF 自己那一条 ARC 实例，丢弃攻击者自带/追加的伪造段；
-//      不是 CF 盖的（或被伪造段顶到最前）即 setReject。
-//   3. parseInboundAuth(cfArc) + senderVerified（Phase 2 纯函数），不过即 setReject
-//   4. rawSize 上限校验
-//   5. 以上全过后，才 PostalMime.parse + extractCode
+//   2. rawSize 上限校验
+//   3. 解析 senderWhitelist + envelopeSenderAllowed(message.from)，不过即 setReject
+//   4. 以上全过后，才 PostalMime.parse + extractCode
 //
-// senderVerified 必须在 extractCode 之前运行：提码器信任正文来自 CQU，
-// 只有确认发件人是 CQU 官方（SPF=pass + envelope 白名单 + 源 IP∈202.202.0.0/24）后，
-// 才允许把正文里的 6 位数字当作可信验证码提取。
+// 信封发件人校验必须在 extractCode 之前运行：提码器信任正文来自 CQU，只有确认信封发件人在白名单内
+// （叠加上面 CF 平台 SPF 门：白名单内的 cqu.edu.cn 地址必来自 CQU 授权 IP）后，才允许把正文里的
+// 6 位数字当作可信验证码提取。
+//
+// ⚠️ 勿重新引入 ARC 头方案：旧实现读 `ARC-Authentication-Results` 并要求 CF 盖章
+// （trustedCfArc/parseInboundAuth/senderVerified）。但 `ARC-*` 是「转发链」认证头，只在 *转发*
+// 路径上添加，*不会* 出现在投递给 Worker email() handler 的入站邮件里——该头恒缺失，导致真实 CQU
+// 邮件被全部误拒。已改为「CF 平台 SPF 门 + 信封发件人白名单 + 不可枚举地址」模型。
 //
 // 可观测性约定：spoof/未知收件人/非验证码邮件的拒绝是「预期内」的，保持静默（不打 error log）。
 // 只有当一封*发件人已通过校验*的可信邮件因基础设施故障（D1 查询、解析、DO 投递抛错）丢失时，
@@ -81,17 +92,6 @@ export async function handleEmail(
     return message.setReject("inactive binding");
   }
 
-  // C1: 信任锚定在 authserv-id 上，只解析 CF 自己盖的那条 ARC 段。
-  const rawHeader = message.headers.get("arc-authentication-results") ?? "";
-  const cfArc = trustedCfArc(rawHeader);
-  if (!cfArc) {
-    console.warn("[email] reject: untrusted ARC (no CF-stamped auth header)", {
-      token,
-    });
-    return message.setReject("untrusted auth header");
-  }
-  const auth = parseInboundAuth(cfArc);
-
   if (message.rawSize > MAX_RAW_SIZE) {
     console.warn("[email] reject: oversized raw", {
       token,
@@ -114,18 +114,15 @@ export async function handleEmail(
     return message.setReject("invalid binding");
   }
 
-  if (!senderVerified(auth, { kind: bind.kind, senderWhitelist: whitelist })) {
-    // 预期内拒绝（spoof / 发件人未通过校验）。Phase 7 诊断: 打出 parseInboundAuth 解析到的
-    // spf/envelopeFrom/sourceIp + 绑定 kind, 以便和真实 CF ARC header 对照, 判断是误拒真信
-    // 还是正确挡了伪造。不含验证码值。
-    console.warn("[email] reject: sender not verified", {
+  // 信封发件人门：message.from 是信封 MAIL FROM（CF 平台 SPF 门已保证它来自被授权 IP）。
+  // 预期内拒绝（信封发件人不在白名单）。诊断打出 message.from 以便和真实邮件对照，判断是误拒
+  // 真信还是正确挡了非白名单发件人。不含验证码值。
+  if (!envelopeSenderAllowed(message.from, whitelist)) {
+    console.warn("[email] reject: envelope sender not allowed", {
       token,
-      kind: bind.kind,
-      spf: auth.spf,
-      envelopeFrom: auth.envelopeFrom,
-      sourceIp: auth.sourceIp,
+      from: message.from,
     });
-    return message.setReject("sender not verified");
+    return message.setReject("sender not allowed");
   }
 
   // —— 自此以下，发件人已确认为可信 CQU 来源 ——
