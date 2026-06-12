@@ -382,6 +382,7 @@ Email Worker 收码 ──┤   （hibernatable WS；2min TTL 下轮询来不及
 - [x] **CF Email Routing SPF 投递行为** — 已查证：CF 有 DMARC 闸 + 基线"SPF 或 DKIM"闸（2025-07-03），伪造 SPF-fail 大概率被拒在 Worker 前，**但 docs 歧义 → Worker 仍须自校验**；解析 **`ARC-Authentication-Results`**（authserv-id=mx.cloudflare.net），取 `smtp.mailfrom` 的 `spf=pass` + `smtp.remote-ip`，**不信** `Authentication-Results`/`Received-SPF`。见 §4.2。
 - [x] **`basic`（1 GiB）Chromium 不 OOM** — 已实测：peak 523 MiB、未 OOM、渲染成功 → **basic 设默认**（成本 ÷4）。
 - [ ] 专用收信 zone/域名选定（**勿在 cqu.moe 顶级开 catch-all**，会劫持现有 @cqu.moe 收信）。
+- [ ] **ARC 信任锚集成验证（安全，必做）**：`email-handler` 用 `trustedCfArc()` 取**首个** ARC 段并要求 `^i=N; mx.cloudflare.net` 锚定。残留风险：若攻击者伪造的 `ARC-Authentication-Results: i=1; mx.cloudflare.net; spf=pass…` 在 `Headers.get()` 拼接中**排在 CF 真头之前**，会被误信。须发一封带伪造 ARC 头的测试邮件过真实 Email Routing，确认 Worker 实际看到的头顺序 / CF 是否剥离入站 ARC-AR（RFC 8601 建议 MTA 删除自身 authserv-id 的入站 Authentication-Results）。当前被"地址不可枚举 + CF stage-2 SPF/DKIM 闸 + IP∈202.202.0.0/24"多重兜底。Phase 7 补 prepend-伪造单测。
 
 ---
 
