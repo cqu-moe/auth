@@ -73,13 +73,28 @@ cquBind.post("/address", async (c) => {
   }
 
   const token = genAddressToken();
-  await db.insert(cquBindAddresses).values({
-    token,
-    userId: user.id,
-    kind: "direct",
-    senderWhitelist: JSON.stringify(["sso@cqu.edu.cn"]),
-    status: "pending",
-  });
+  try {
+    await db.insert(cquBindAddresses).values({
+      token,
+      userId: user.id,
+      kind: "direct",
+      senderWhitelist: JSON.stringify(["sso@cqu.edu.cn"]),
+      status: "pending",
+    });
+  } catch (err) {
+    // #6: 并发同用户请求会撞 user_id UNIQUE 约束。优雅退化到「返回已存在行」，
+    // 而非裸 500。重查一次；查不到才说明是别的故障，照常抛出。
+    const raced = await db
+      .select()
+      .from(cquBindAddresses)
+      .where(eq(cquBindAddresses.userId, user.id))
+      .get();
+    if (!raced) throw err;
+    return c.json({
+      address: `${raced.token}@${c.env.BIND_EMAIL_DOMAIN}`,
+      status: raced.status,
+    });
+  }
 
   return c.json({
     address: `${token}@${c.env.BIND_EMAIL_DOMAIN}`,
@@ -116,11 +131,19 @@ cquBind.get("/status", async (c) => {
 
   const stub = c.env.CQU_SESSION.get(c.env.CQU_SESSION.idFromName(user.id));
   const resp = await stub.fetch(new Request("https://do/status"));
-  const sessionStatus = await resp.json();
+  // #1: DO 非 2xx（如 500 {error,code}）不能当成 status 载荷直接回传给客户端；
+  // 解析失败同样兜底为 sentinel，避免把 DO 故障伪装成会话状态。
+  let sessionStatus: unknown;
+  if (resp.ok) {
+    sessionStatus = await resp.json().catch(() => ({ error: true }));
+  } else {
+    sessionStatus = { error: true };
+  }
 
   return c.json({
+    // #7: bindStatus 始终返回，无绑定时为 "unbound"，让客户端能区分「无绑定」与「响应异常」。
     address: bind ? `${bind.token}@${c.env.BIND_EMAIL_DOMAIN}` : undefined,
-    bindStatus: bind?.status,
+    bindStatus: bind?.status ?? "unbound",
     sessionStatus,
   });
 });
@@ -128,13 +151,19 @@ cquBind.get("/status", async (c) => {
 // POST /api/cqu/bind/credentials
 // body { studentId, password }。要求已存在绑定地址行（否则 400 "先获取绑定地址"）。
 // 加密密码 → upsert cqu_credentials → 触发 DO /init 首登。
-// 成功 → cqu_bind_addresses.status = "active"；失败 → 返回错误，不标记 active。
+// 成功 → cqu_bind_addresses.status = "active"；首登失败 → 回滚本次新插入的凭证行
+// （对齐 cqu.ts），绑定地址保留 pending，不标记 active。
 cquBind.post("/credentials", async (c) => {
   const user = c.get("user") as { id: string };
-  const { studentId, password } = await c.req.json<{
-    studentId: string;
-    password: string;
-  }>();
+
+  // #5: 畸形 JSON body 不应裸 500，统一返回 400 INVALID_BODY。
+  let body: { studentId?: string; password?: string };
+  try {
+    body = await c.req.json<{ studentId?: string; password?: string }>();
+  } catch {
+    return errorResponse(c, "INVALID_BODY", "请求体不是合法 JSON", 400);
+  }
+  const { studentId, password } = body;
 
   if (!studentId || !password) {
     return errorResponse(c, "MISSING_FIELDS", "缺少学号或密码", 400);
@@ -154,24 +183,45 @@ cquBind.post("/credentials", async (c) => {
   const { ciphertext, iv } = await encrypt(password, c.env.ENCRYPTION_KEY);
 
   // upsert cqu_credentials（复刻 cqu.ts 的 insert/update 形状）。
+  // #3: 记录本次是「插入新行」还是「更新已有行」——首登失败需据此回滚：
+  //   插入的新行要删掉，否则残留行会把 cqu.ts 的 POST /bind 卡成 409 ALREADY_BOUND；
+  //   更新的旧行保留（对齐 PUT /bind 语义，不破坏既有绑定）。
   const existingCreds = await db
     .select()
     .from(cquCredentials)
     .where(eq(cquCredentials.userId, user.id))
     .get();
+  let insertedCredsId: string | null = null;
   if (existingCreds) {
     await db
       .update(cquCredentials)
       .set({ studentId, encryptedPassword: ciphertext, iv })
       .where(eq(cquCredentials.userId, user.id));
   } else {
-    await db.insert(cquCredentials).values({
-      id: crypto.randomUUID(),
-      userId: user.id,
-      studentId,
-      encryptedPassword: ciphertext,
-      iv,
-    });
+    const newId = crypto.randomUUID();
+    try {
+      await db.insert(cquCredentials).values({
+        id: newId,
+        userId: user.id,
+        studentId,
+        encryptedPassword: ciphertext,
+        iv,
+      });
+      insertedCredsId = newId;
+    } catch (err) {
+      // #6: 并发同用户请求会撞 user_id UNIQUE。退化为「更新已有行」（视作 existing，
+      // 不持有回滚权），而非裸 500。
+      const raced = await db
+        .select()
+        .from(cquCredentials)
+        .where(eq(cquCredentials.userId, user.id))
+        .get();
+      if (!raced) throw err;
+      await db
+        .update(cquCredentials)
+        .set({ studentId, encryptedPassword: ciphertext, iv })
+        .where(eq(cquCredentials.userId, user.id));
+    }
   }
 
   // 触发 DO 首登。userId 只来自 session（绝不取客户端入参）。
@@ -187,10 +237,23 @@ cquBind.post("/credentials", async (c) => {
       }),
     })
   );
-  const initResult = await result.json<{ success: boolean; error?: string }>();
+  // #1: DO /init 响应非 2xx 或非 JSON 不应抛未捕获异常。解析失败兜底为
+  // {success:false}，与「首登未成功」走同一回滚分支。
+  const initResult = result.ok
+    ? await result
+        .json<{ success: boolean; error?: string }>()
+        .catch(() => ({ success: false, error: undefined as string | undefined }))
+    : { success: false, error: undefined as string | undefined };
 
   if (!initResult.success) {
-    // 首登未成功：保留 pending，不标记 active。
+    // #3: 首登未成功。本次若 INSERT 了新凭证行，回滚删除（避免半绑定残留卡死
+    // cqu.ts 的 POST /bind）；若是更新已有行则保留（对齐 PUT /bind）。
+    // 绑定地址行无论如何留 pending（正确）。
+    if (insertedCredsId) {
+      await db
+        .delete(cquCredentials)
+        .where(eq(cquCredentials.id, insertedCredsId));
+    }
     return errorResponse(
       c,
       "CQU_LOGIN_FAILED",
@@ -199,10 +262,25 @@ cquBind.post("/credentials", async (c) => {
     );
   }
 
-  await db
-    .update(cquBindAddresses)
-    .set({ status: "active" })
-    .where(eq(cquBindAddresses.userId, user.id));
+  // #4: 首登已成功、DO 已初始化。若这步置 active 的 D1 写抛错，返回独立的
+  // 可重试错误而非裸 500——重试 /credentials 是安全的（重登 + 重置 active）。
+  try {
+    await db
+      .update(cquBindAddresses)
+      .set({ status: "active" })
+      .where(eq(cquBindAddresses.userId, user.id));
+  } catch (err) {
+    console.error("[cqu-bind] activate update failed after successful init", {
+      userId: user.id,
+      err,
+    });
+    return errorResponse(
+      c,
+      "BIND_ACTIVATE_FAILED",
+      "首登成功但激活状态写入失败，请重试",
+      503
+    );
+  }
 
   return c.json({ success: true, studentId });
 });

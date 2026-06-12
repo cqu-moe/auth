@@ -12,7 +12,7 @@ const MAX_RAW_SIZE = 25 * 1024 * 1024; // 25 MiB 上限，超过即拒，避免 
 // Cloudflare 入站邮件管道：解析收件地址 → D1 查绑定 → 校验发件人 → 提码 → 投递到用户 DO。
 //
 // 安全顺序至关重要（先校验、后解析正文）：
-//   1. token → bind（D1），缺失/非 active 立即 setReject（pending/revoked 都不收码）
+//   1. token → bind（D1），缺失/已 revoked 立即 setReject（pending 与 active 都收码）
 //   2. ARC-Authentication-Results 必须由 CF 盖章：trustedCfArc() 把信任锚定在 authserv-id
 //      （mx.cloudflare.net）上——只取 CF 自己那一条 ARC 实例，丢弃攻击者自带/追加的伪造段；
 //      不是 CF 盖的（或被伪造段顶到最前）即 setReject。
@@ -46,8 +46,19 @@ export async function handleEmail(
     console.error("[email] D1 lookup failed", { to: message.to, err });
     return message.setReject("temporary lookup failure");
   }
-  // C2: 仅 active 绑定收码。pending（未验证激活）/ revoked（已撤销）一律拒。
-  if (!bind || bind.status !== "active") {
+  // 生命周期门（非安全门）：pending 与 active 都收码，只拒 revoked（已撤销）与缺失。
+  //
+  // 为什么 pending 必须收码：onboarding 是先有蛋、后有鸡的时序——
+  //   POST /credentials 在绑定仍为 pending 时就触发 DO 首登；首登让 CQU 发出
+  //   login_2fa 邮件，bind_confirm 确认码同样在 pending 阶段到达。若此处只收 active，
+  //   首登 2FA 邮件会被丢弃 → 容器等码超时 → 首登永远不成功 → status 永远到不了 active，
+  //   形成死锁。故 pending 必须收码。
+  //
+  // 这推翻了 Phase 3 review 的 C2 结论（"pending 绑定不应收码"）：C2 的本意是别让
+  // 未验证的绑定收码，但它没考虑 onboarding 首登 2FA 的时序依赖——已被本次排序结论取代。
+  // 真正的安全门是「不可枚举的随机收件地址」+「SPF/ARC 发件人校验」（下方步骤 2/3），
+  // 绑定 status 只是生命周期开关（revoked = 关），不是安全门。请勿"修回"成 active-only。
+  if (!bind || bind.status === "revoked") {
     return message.setReject("inactive binding");
   }
 
