@@ -71,8 +71,10 @@ interface ContainerRunResult {
   error?: string;
 }
 
-// 暂存的绑定码 TTL: 2FA 邮件本身约 2min 有效, 暂存 5min 足够覆盖 WS 推送窗口。
-const PENDING_CODE_TTL_MS = 5 * 60 * 1000;
+// 暂存的绑定码 TTL: 绑定确认码实测后端有效期约 10min(邮件正文写的"2分钟"不准),
+// 暂存兜底必须比它活得更久, 否则迟到/重连的浏览器回放到的是已被后端作废的码;
+// 取 12min 留 ~2min 余量覆盖时钟漂移与 WS 重连窗口。
+const PENDING_CODE_TTL_MS = 12 * 60 * 1000;
 
 export class CquSessionDO extends DurableObject<Env> {
   private state: SessionState | null = null;
@@ -106,6 +108,28 @@ export class CquSessionDO extends DurableObject<Env> {
       const pair = new WebSocketPair();
       // pair[1] 是 server 端 — 交给 DO 托管(hibernatable); pair[0] 返回给客户端。
       this.ctx.acceptWebSocket(pair[1]);
+      // 回放兜底: 码可能在浏览器 WS 连上(或重连)之前就到了, depositCode 的实时 send
+      // 推给了零个 socket 而丢失。此处在 accept 后立刻读暂存的 pendingCode, 若仍有效
+      // (未过期且 kind=bind_confirm)就主动补推给这条新连接, 让迟到/重连的浏览器立即收到。
+      const pending =
+        await this.ctx.storage.get<PendingCode>("pendingCode");
+      if (
+        pending &&
+        pending.kind === "bind_confirm" &&
+        pending.expiresAt > Date.now()
+      ) {
+        try {
+          pair[1].send(
+            JSON.stringify({
+              type: "bind_code",
+              code: pending.code,
+              ts: Date.now(),
+            })
+          );
+        } catch {
+          // 回放补推失败(连接已断/正在关闭)忽略, 不影响 accept 与 101 返回。
+        }
+      }
       return new Response(null, { status: 101, webSocket: pair[0] });
     }
 

@@ -33,6 +33,14 @@ export async function handleEmail(
   message: ForwardableEmailMessage,
   env: Env
 ): Promise<void> {
+  // Phase 7 可观测性：入站即记录路由关键量（收件 token + 信封发件人），便于在 Worker 日志里
+  // 把「发件人校验是否放行了一封真实邮件」与真实 CF ARC header 对照排查。不记验证码值/原始邮件。
+  const token = localPart(message.to);
+  console.log("[email] inbound", {
+    token,
+    mailFrom: message.from,
+  });
+
   // 校验前的 D1 查询：基础设施故障不应静默吞掉（此时还无法判定发件人，但查询失败本身值得记录）。
   let bind: typeof cquBindAddresses.$inferSelect | undefined;
   try {
@@ -40,12 +48,18 @@ export async function handleEmail(
     bind = await db
       .select()
       .from(cquBindAddresses)
-      .where(eq(cquBindAddresses.token, localPart(message.to)))
+      .where(eq(cquBindAddresses.token, token))
       .get();
   } catch (err) {
     console.error("[email] D1 lookup failed", { to: message.to, err });
     return message.setReject("temporary lookup failure");
   }
+  // 记录绑定查询结果（是否命中 + status），让「未知收件人/已撤销」的拒绝路径在日志里可见。
+  console.log("[email] bind lookup", {
+    token,
+    found: !!bind,
+    status: bind?.status,
+  });
   // 生命周期门（非安全门）：pending 与 active 都收码，只拒 revoked（已撤销）与缺失。
   //
   // 为什么 pending 必须收码：onboarding 是先有蛋、后有鸡的时序——
@@ -59,16 +73,30 @@ export async function handleEmail(
   // 真正的安全门是「不可枚举的随机收件地址」+「SPF/ARC 发件人校验」（下方步骤 2/3），
   // 绑定 status 只是生命周期开关（revoked = 关），不是安全门。请勿"修回"成 active-only。
   if (!bind || bind.status === "revoked") {
+    console.warn("[email] reject: inactive binding", {
+      token,
+      found: !!bind,
+      status: bind?.status,
+    });
     return message.setReject("inactive binding");
   }
 
   // C1: 信任锚定在 authserv-id 上，只解析 CF 自己盖的那条 ARC 段。
   const rawHeader = message.headers.get("arc-authentication-results") ?? "";
   const cfArc = trustedCfArc(rawHeader);
-  if (!cfArc) return message.setReject("untrusted auth header");
+  if (!cfArc) {
+    console.warn("[email] reject: untrusted ARC (no CF-stamped auth header)", {
+      token,
+    });
+    return message.setReject("untrusted auth header");
+  }
   const auth = parseInboundAuth(cfArc);
 
   if (message.rawSize > MAX_RAW_SIZE) {
+    console.warn("[email] reject: oversized raw", {
+      token,
+      rawSize: message.rawSize,
+    });
     return message.setReject("too large");
   }
 
@@ -87,7 +115,16 @@ export async function handleEmail(
   }
 
   if (!senderVerified(auth, { kind: bind.kind, senderWhitelist: whitelist })) {
-    // 预期内拒绝（spoof / 发件人未通过校验）——保持静默。
+    // 预期内拒绝（spoof / 发件人未通过校验）。Phase 7 诊断: 打出 parseInboundAuth 解析到的
+    // spf/envelopeFrom/sourceIp + 绑定 kind, 以便和真实 CF ARC header 对照, 判断是误拒真信
+    // 还是正确挡了伪造。不含验证码值。
+    console.warn("[email] reject: sender not verified", {
+      token,
+      kind: bind.kind,
+      spf: auth.spf,
+      envelopeFrom: auth.envelopeFrom,
+      sourceIp: auth.sourceIp,
+    });
     return message.setReject("sender not verified");
   }
 
@@ -110,6 +147,13 @@ export async function handleEmail(
   const hit = extractCode(email.subject ?? "", email.text ?? email.html ?? "");
   if (!hit) return; // 非验证码邮件，静默 drop（不出站、不回弹）
 
+  // 发件人已校验通过 + 成功提码: 记录 kind（不记码值）, 标记进入 DO 投递。
+  console.log("[email] code extracted from verified sender", {
+    token,
+    userId: bind.userId,
+    kind: hit.kind,
+  });
+
   // 投递到用户的 Durable Object —— 复用 src/routes/cqu.ts 的寻址约定：
   // idFromName(userId) → get(id) → fetch(new Request(...))。
   // deposit-code action 由 Phase 5 实现，此处先接线（当前运行时可能 404）。
@@ -129,6 +173,12 @@ export async function handleEmail(
         token: bind.token,
         userId: bind.userId,
         status: res.status,
+      });
+    } else {
+      console.log("[email] deposited to DO", {
+        token,
+        userId: bind.userId,
+        kind: hit.kind,
       });
     }
   } catch (err) {
