@@ -45,8 +45,8 @@ app.all("*", async (c) => {
 // 入站邮件走 Cloudflare Email Routing 的 email() handler。
 export default {
   fetch: app.fetch,
-  async email(message, _env, _ctx) {
-    await handleEmail(message, _env);
+  async email(message, env, _ctx) {
+    await handleEmail(message, env);
   },
 } satisfies ExportedHandler<Env>;
 export { CquSessionDO } from "./durable-objects/cqu-session";
