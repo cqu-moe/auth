@@ -22,17 +22,20 @@
 阻塞性未知项；任一为否都要改设计。**不写代码，记录结论到设计文档 §12。**
 
 ### Task 0.1: 验证 CQU 密保邮箱接受外部域
+> ✅ **已确认（用户实测）**：CQU 密保邮箱接受外部域 → "直设专属地址"方案成立，无需降级转发。
 - 用真实账号登录 `self.cqu.edu.cn/cas-success/safe-center/bind-email-password/bind`，尝试把密保邮箱设为一个你控制的外部域地址（如 `probe@<你的测试域>`）。
 - **验证**：能否提交并收到"密保邮箱绑定验证码"邮件。✅ 已有真实样本（`密保邮箱绑定验证码.eml`，发件 `sso@cqu.edu.cn`，6 位码，TTL 2min）→ 基本确认可行，但需确认 `@bind.cqu.moe` 这类**你将用的真实域**不被拒。
 - **失败应对**：若限制域 → 改走 §转发模式（用户保留自己邮箱 + 转发规则）为主。
 
 ### Task 0.2: 验证 CF Email Routing 对 SPF-fail 邮件的投递行为
+> ✅ **已查证（CF 官方文档对抗验证）**：① CF 有 DMARC 闸 + 基线"SPF 或 DKIM"闸（2025-07-03），伪造 SPF-fail+无 DKIM 大概率被拒在 Worker 前，**但 changelog 把要求框在转发动作上、docs 有歧义 → Worker 仍须自校验**。② CF 盖的可信头是 **`ARC-Authentication-Results`**（authserv-id=`mx.cloudflare.net`），不是 `Authentication-Results`/`Received-SPF`；含两条 spf 子句（helo/mailfrom），源 IP 在 `smtp.remote-ip=`。Task 2.4 已据此重写。仍建议上线前用真实 CF 头回归一次。
 - 在一个测试 zone 上开 Email Routing catch-all → 一个最小 `email()` Worker（仅 `console.log(message.from, message.headers.get("authentication-results"))`）。
 - 从一个**伪造 From: sso@cqu.edu.cn 但非 CQU IP** 的来源发测试信。
 - **验证**：CF 是否仍把 SPF-fail 信投到 Worker（决定我们 `setReject` 把关位置），以及 `authentication-results` 头里 `spf=` 字段的确切格式。
 - **记录**：CF 注入的 `Authentication-Results` 头精确文本（Phase 2 解析正则要对齐）。
 
 ### Task 0.3: basic(1 GiB) Chromium OOM 实测
+> ✅ **已实测（linux/amd64 Docker `--memory=1g --memory-swap=1g`）**：patchright 铸 P + 渲染真实登录页（`#login-croypto` 出现）peak **523 MiB**、未 OOM、exit 0。→ **basic 设为默认**（带 `--disable-dev-shm-usage`），容器内存成本 ÷4。完整流程 2FA tab 渲染留 Phase 4 复测。顺带证实容器化 patchright 过瑞数。
 - 本地 Docker 跑 `linux/amd64` Debian + Chromium + patchright，限内存 1 GiB，跑一次 `cqu_login.py --stop-before-code`。
 - **验证**：是否 OOM。✅ → 用 basic（成本 ÷4）；❌ → 用 standard-1。
 - 记录到设计文档 §11.5 / §12。
@@ -223,38 +226,36 @@ export function extractCode(subject: string, text: string): CodeHit | null {
 
 **Step 5: Commit** — `git commit -m "feat(2fa): subject-routed verification code extractor"`
 
-### Task 2.4: `parseInboundAuth(headers)` — 解析 SPF/envelope/源 IP
+### Task 2.4: `parseInboundAuth(arc)` — 解析 CF `ARC-Authentication-Results`
+
+> Phase 0 Task 0.2 定论：CF 盖的可信头是 **`ARC-Authentication-Results`**（authserv-id=`mx.cloudflare.net`），含**两条** `spf=` 子句（helo / mailfrom），源 IP 在 `smtp.remote-ip=`。**只解析这个头、只取 mailfrom 子句**；不信 `Authentication-Results`/`Received-SPF`（攻击者可在正文自带）。
 
 **Files:** Create `src/services/cqu-2fa/sender-auth.ts` + `sender-auth.test.ts`
 
-> 头部精确格式以 Phase 0 Task 0.2 实测的 CF `Authentication-Results` 为准；下方按已抓样本（Fastmail 头）写，实施时按 CF 真头微调正则。
-
-**Step 1: 失败测试**
+**Step 1: 失败测试（CF 真实头格式，含两条 spf 子句）**
 ```ts
 import { describe, it, expect } from "vitest";
 import { parseInboundAuth, senderVerified } from "./sender-auth";
 
-const AUTH = "phl-mx-03; spf=pass smtp.mailfrom=sso@cqu.edu.cn smtp.helo=cqu.edu.cn; dkim=none; dmarc=none";
-const RECEIVED = "from cqu.edu.cn (smtp.cqu.edu.cn [202.202.0.26]) by phl-mx-03 ...";
+const ARC_OK = "i=1; mx.cloudflare.net; dkim=none; dmarc=none header.from=cqu.edu.cn; spf=none (mx.cloudflare.net: no SPF for postmaster@cqu.edu.cn) smtp.helo=cqu.edu.cn; spf=pass (mx.cloudflare.net: domain of sso@cqu.edu.cn designates 202.202.0.26 as permitted sender) smtp.mailfrom=sso@cqu.edu.cn; arc=none smtp.remote-ip=202.202.0.26";
+const ARC_SPOOF = "i=1; mx.cloudflare.net; dkim=none; dmarc=none; spf=fail (mx.cloudflare.net: 1.2.3.4 not permitted) smtp.mailfrom=sso@cqu.edu.cn; arc=none smtp.remote-ip=1.2.3.4";
 
 describe("parseInboundAuth", () => {
-  it("extracts spf result, envelope from, source ip", () => {
-    expect(parseInboundAuth(AUTH, RECEIVED)).toEqual({
-      spf: "pass", envelopeFrom: "sso@cqu.edu.cn", sourceIp: "202.202.0.26",
-    });
+  it("takes the mailfrom spf clause (skips the helo spf=none), envelope, remote-ip", () => {
+    expect(parseInboundAuth(ARC_OK)).toEqual({ spf: "pass", envelopeFrom: "sso@cqu.edu.cn", sourceIp: "202.202.0.26" });
+  });
+  it("reports spf=fail for spoof from non-CQU ip", () => {
+    expect(parseInboundAuth(ARC_SPOOF)).toEqual({ spf: "fail", envelopeFrom: "sso@cqu.edu.cn", sourceIp: "1.2.3.4" });
   });
 });
 
 describe("senderVerified", () => {
   const bind = { kind: "direct", senderWhitelist: ["sso@cqu.edu.cn"] };
-  it("accepts spf=pass + official envelope + CQU ip", () => {
-    expect(senderVerified({ spf: "pass", envelopeFrom: "sso@cqu.edu.cn", sourceIp: "202.202.0.26" }, bind)).toBe(true);
+  it("accepts spf=pass on envelope + CQU ip", () => {
+    expect(senderVerified(parseInboundAuth(ARC_OK), bind)).toBe(true);
   });
-  it("rejects spoofed From with spf=fail", () => {
-    expect(senderVerified({ spf: "fail", envelopeFrom: "sso@cqu.edu.cn", sourceIp: "1.2.3.4" }, bind)).toBe(false);
-  });
-  it("rejects non-CQU source ip even if spf=pass", () => {
-    expect(senderVerified({ spf: "pass", envelopeFrom: "sso@cqu.edu.cn", sourceIp: "8.8.8.8" }, bind)).toBe(false);
+  it("rejects spoof (spf=fail, non-CQU ip)", () => {
+    expect(senderVerified(parseInboundAuth(ARC_SPOOF), bind)).toBe(false);
   });
 });
 ```
@@ -265,10 +266,12 @@ describe("senderVerified", () => {
 ```ts
 const CQU_IP_PREFIX = "202.202.0.";  // 202.202.0.0/24（smtp/pop3.cqu.edu.cn）
 
-export function parseInboundAuth(authResults: string, received: string) {
-  const spf = authResults.match(/spf=(\w+)/)?.[1] ?? "none";
-  const envelopeFrom = authResults.match(/smtp\.mailfrom=([^\s;]+)/)?.[1] ?? "";
-  const sourceIp = received.match(/\[(\d{1,3}(?:\.\d{1,3}){3})\]/)?.[1] ?? "";
+// 只解析 CF 盖的 ARC-Authentication-Results（调用方须先确认 authserv-id=mx.cloudflare.net）
+export function parseInboundAuth(arc: string) {
+  // clause-bounded [^;]：锁定绑 smtp.mailfrom 的那条 spf（跳过 smtp.helo 的 spf=none），勿用 /s dot-all
+  const spf = arc.match(/spf=(\w+)\b[^;]*smtp\.mailfrom=/i)?.[1] ?? "none";
+  const envelopeFrom = arc.match(/smtp\.mailfrom=([^;\s]+)/i)?.[1] ?? "";
+  const sourceIp = arc.match(/smtp\.remote-ip=([^;\s]+)/i)?.[1] ?? "";
   return { spf, envelopeFrom, sourceIp };
 }
 
@@ -282,14 +285,14 @@ export function senderVerified(
     auth.sourceIp.startsWith(CQU_IP_PREFIX);
   if (officialOk) return true;
   // forward 模式：额外接受用户登记的转发地址（信任较弱）
-  if (bind.kind === "forward" && bind.senderWhitelist.includes(auth.envelopeFrom) && auth.spf === "pass") return true;
+  if (bind.kind === "forward" && auth.spf === "pass" && bind.senderWhitelist.includes(auth.envelopeFrom)) return true;
   return false;
 }
 ```
 
 **Step 4: 确认通过** — `npm run test -- sender-auth` → PASS。
 
-**Step 5: Commit** — `git commit -m "feat(2fa): SPF+envelope+IP sender verification (cqu.edu.cn has no DMARC)"`
+**Step 5: Commit** — `git commit -m "feat(2fa): parse CF ARC-Authentication-Results (mailfrom spf clause) for sender verification"`
 
 ### Task 2.5: `nextStatus(current, event)` — 6 态状态机
 
@@ -432,10 +435,10 @@ export async function handleEmail(message: ForwardableEmailMessage, env: Env): P
   const bind = await db.select().from(cquBindAddresses).where(eq(cquBindAddresses.token, token)).get();
   if (!bind || bind.status === "revoked") return message.setReject("unknown recipient");
 
-  const auth = parseInboundAuth(
-    message.headers.get("authentication-results") ?? "",
-    message.headers.get("received") ?? ""
-  );
+  const arc = message.headers.get("arc-authentication-results") ?? "";
+  if (!arc.includes("mx.cloudflare.net")) return message.setReject("missing CF auth header");
+  const auth = parseInboundAuth(arc);   // 只信 CF 盖的 ARC-Authentication-Results
+  if (message.rawSize > 25 * 1024 * 1024) return message.setReject("too large");
   const whitelist = JSON.parse(bind.senderWhitelist) as string[];
   if (!senderVerified(auth, { kind: bind.kind, senderWhitelist: whitelist })) {
     return message.setReject("sender not verified");

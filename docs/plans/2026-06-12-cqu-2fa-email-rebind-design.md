@@ -114,19 +114,25 @@
 - 正文：`尊敬的 〈姓名〉(〈学号〉)，您的验证码为：943754，有效期 2 分钟。`
 - **有效期 120s（2 分钟，更短）**，正文含 PII（姓名+学号）
 
-### 4.2 ⚠️ 发件人校验：靠 SPF，不靠 DMARC
+### 4.2 ⚠️ 发件人校验：解析 CF 的 `ARC-Authentication-Results`（不是 `Authentication-Results`）
 
-**实测样本认证头**：`dkim=none`、`dmarc=none (p=none,d=none)`、`spf=pass smtp.mailfrom=sso@cqu.edu.cn`（源 IP `202.202.0.26`/`.36`，即 `smtp/pop3.cqu.edu.cn`，均在 `202.202.0.0/24`）。
+> Phase 0 Task 0.2 经 CF 官方文档对抗验证（实测样本：cqu.edu.cn `dkim=none`、`dmarc=none p=none`、`spf=pass smtp.mailfrom=sso@cqu.edu.cn`，源 IP `202.202.0.26/.36` ∈ `202.202.0.0/24`）。
 
-→ **cqu.edu.cn 未部署 DMARC、不做 DKIM 签名**，DMARC 这道闸形同虚设，伪造 `From: sso@cqu.edu.cn` 不会被 DMARC 拒。**唯一有效信号是 SPF**（pass 前提是来自 CQU 机房 IP）。
+**两道闸，分层理解**：
+- **CF 平台闸（Worker 之前，stage 2）**：① DMARC 策略闸——cqu.edu.cn `p=none` **不拒**；② **基线闸（2025-07-03 起）：邮件必须"通过 SPF 或有正确 DKIM 签名"，两者都不过即拒**。伪造 `From: sso@cqu.edu.cn`（非 CQU IP、SPF=fail、无 DKIM）大概率被基线闸在进 Worker 前拒掉。**但 docs 有歧义**（2025-06-30 changelog 把该要求框在"转发"动作上，暗示未认证邮件可能仍到 Worker、只是 `forward()` 失败）→ **安全默认：假设伪造邮件可能到 Worker，Worker 必须自校验，不能只靠平台闸。**
+- **Worker 自校验（关键，纠正早先错误）**：CF 盖在邮件上的可信认证头是 **`ARC-Authentication-Results`**（authserv-id = `mx.cloudflare.net`, i=1），**不是 `Authentication-Results`、也不是 `Received-SPF`**。`ForwardableEmailMessage` 无 spf/dkim 属性，只能解析这个头。
+  - **只信 authserv-id = `mx.cloudflare.net` 的那条**（防止信任攻击者在邮件正文里自带的伪造 `Authentication-Results`）。
+  - 头里有**两条 `spf=` 子句**：一条绑 `smtp.helo=`、一条绑 `smtp.mailfrom=`（envelope）——**必须取 mailfrom 那条**。源 IP 在 **`smtp.remote-ip=`**。
+  - CF 真实头样本：`ARC-Authentication-Results: i=1; mx.cloudflare.net; dkim=...; dmarc=...; spf=none (...) smtp.helo=...; spf=pass (...) smtp.mailfrom=joe@example.com; arc=none smtp.remote-ip=2a00:...`
 
-**Worker 发件人校验规则**（多重）：
-1. 收件地址（RCPT 本地部分 token）能在 D1 查到 → userId；
-2. envelope-from（`message.from`）== `sso@cqu.edu.cn`；
-3. **SPF=pass**（读 CF 注入的 Authentication-Results）；
-4. 可选叠加：Received 源 IP ∈ `202.202.0.0/24`；
-5. 转发模式（kind=forward）额外接受用户登记的转发地址（信任较弱，优先直设）。
-> 专属地址 token 随机不可枚举，攻击者须同时**猜中地址** + **从 CQU 机房 IP 发信**才能注入假码——攻击面极小。
+**Worker 校验规则**：
+1. 收件地址 token 在 D1 查到 → userId；
+2. 取 `message.headers.get("arc-authentication-results")`，确认含 `mx.cloudflare.net` authserv-id，再解析：`/spf=pass\b[^;]*smtp\.mailfrom=([^;\s]+)/i`（**clause-bounded `[^;]`，不要 `/s` dot-all**，否则从 helo 的 `spf=none` 串到 mailfrom 子句）；
+3. envelope mailfrom == `sso@cqu.edu.cn`（`message.from` 也直接给 envelope MAIL FROM，但不带 verdict，不能只靠它）；
+4. 可选叠加源 IP `/smtp\.remote-ip=([^;\s]+)/i` ∈ `202.202.0.0/24`；
+5. 转发模式（kind=forward）额外接受用户登记的转发地址（信任较弱，优先直设）；
+6. `rawSize > 25 MiB` 直接 `setReject`。
+> 专属地址 token 随机不可枚举 + 攻击者须让 SPF 对 envelope `sso@cqu.edu.cn` 通过（=从 CQU 机房 IP 发信）才能过校验——攻击面极小。**不信任邮件正文自带的 `Authentication-Results`/`Received-SPF`。**
 
 ### 4.3 提码正则（按主题分流，避开 PII 数字）
 - 登录：主题含 `邮件验证码登录` → `(?<!\d)(\d{6})(?!\d)`（正文 "600" 是 3 位不误命中）
@@ -194,7 +200,7 @@ POST /code {code}                                    ← DO 在收到邮件码�
 ```jsonc
 {
   "containers": [{ "class_name": "CquLoginContainer", "image": "./container/Dockerfile",
-                   "max_instances": 5, "instance_type": "standard-1" }],
+                   "max_instances": 5, "instance_type": "basic" }],
   "durable_objects": { "bindings": [
     { "name": "CQU_SESSION", "class_name": "CquSessionDO" },
     { "name": "CQU_LOGIN",   "class_name": "CquLoginContainer" }
@@ -202,7 +208,7 @@ POST /code {code}                                    ← DO 在收到邮件码�
   "migrations": [{ "tag": "v2", "new_sqlite_classes": ["CquLoginContainer"] }]
 }
 ```
-Dockerfile：`linux/amd64` + Debian + Chromium + `pip install patchright` + `patchright install chromium` + 最小 aiohttp server 包住 `cqu_login.py` 的 `run()`。`instance_type` 先 `standard-1`（4 GiB）；`basic`（1 GiB）降本待实测（§9）。
+Dockerfile：`linux/amd64` + Debian + Chromium + `pip install patchright` + `patchright install chromium` + 最小 aiohttp server 包住 `cqu_login.py` 的 `run()`。`instance_type` 用 **`basic`（1 GiB）**（Phase 0 Task 0.3 实测 peak 523 MiB 可行，成本 ÷4，需带 `--disable-dev-shm-usage`）；standard-1 为保守回退。
 
 ---
 
@@ -335,7 +341,8 @@ Email Worker 收码 ──┤   （hibernatable WS；2min TTL 下轮询来不及
 | vCPU | $0.000020 / vCPU·秒（**按实际利用率**） | 375 vCPU·分（22,500 vCPU·秒） |
 | 磁盘 | $0.00000007 / GB·秒 | 200 GB·时（720,000 GB·秒） |
 
-实例：`standard-1` = 1/2 vCPU / 4 GiB / 8 GB（安全选）；`basic` = 1/4 vCPU / 1 GiB / 4 GB（激进下限）。
+实例：**`basic` = 1/4 vCPU / 1 GiB / 4 GB（Phase 0 实测 peak 523 MiB 可行，默认选它）**；`standard-1` = 1/2 vCPU / 4 GiB / 8 GB 为保守回退。
+> 下方 §11.3/§11.4 表为 standard-1（4 GiB）保守口径；用 basic 则内存项 ÷4（见 §11.5 旋钮 1），100 用户 ≈ $8.4/月。
 
 ### 11.2 用量假设
 - 重登频率：TGT ~8h 硬顶 → 每 ~7h 一次 ≈ **103 次/用户/月**（24/7 在线）。
@@ -357,7 +364,7 @@ Email Worker 收码 ──┤   （hibernatable WS；2min TTL 下轮询来不及
 **成本结构内存独大**（provisioned 4 GiB × 活跃秒数）；vCPU 按实际利用率（登录大半时间空转等邮件，CPU≈0，吃到红利）；磁盘可忽略。
 
 ### 11.5 三个降本旋钮
-1. **实例 4 GiB → 1 GiB（basic）**：内存成本 ÷4，100 用户 ≈ $7.6/月；免费额度从 ~3.6 涨到 ~14 个持续用户。**代价**：Chromium 单页在 1 GiB 偏紧，需实测不 OOM（`--single-process --disable-dev-shm-usage`）。第一期就验证。
+1. **实例 4 GiB → 1 GiB（basic）**：内存成本 ÷4，100 用户 ≈ $8.4/月；免费额度从 ~3.6 涨到 ~14 个持续用户。✅ **已实测**（Phase 0 Task 0.3，linux/amd64 `--memory=1g`，铸 P + 渲染登录页 peak 523 MiB、未 OOM、渲染成功）→ **basic 设为默认**（带 `--disable-dev-shm-usage`）。完整流程 2FA tab 渲染留 Phase 4 复测。
 2. **缩短等邮件空转**：50s→30s 近线性砍 ~40%（压邮件延迟 + 拿码即拆除）。
 3. **降频率**：不需 24/7 就别 24/7。清醒时段 ~16h 保活 → ~69 次/月；纯按需重登（查询发现会话死才点火）可砍 70%+。
 
@@ -371,9 +378,9 @@ Email Worker 收码 ──┤   （hibernatable WS；2min TTL 下轮询来不及
 - [x] 真实 2FA 邮件样本（发件人/主题/正文/TTL/认证头）— 已抓，见 §4.1。
 - [x] 绑定确认邮件样本 — 已抓，确证绑定发 6 位码、TTL 2min。
 - [x] cqu.edu.cn 无 DMARC/DKIM、SPF 有效 — 已确认，校验改用 SPF+IP。
-- [ ] **密保邮箱是否接受外部域** `@bind.cqu.moe`（有些系统限制域）— 实测。
-- [ ] **CF Email Routing 是否会把 SPF-fail 邮件投递到 Worker**（决定我们 setReject 的把关位置）— 实测。
-- [ ] **`basic`（1 GiB）Chromium 不 OOM** — 实测（成本 ÷4）。
+- [x] **密保邮箱接受外部域** — 已确认支持（用户实测）→ 直设方案成立。
+- [x] **CF Email Routing SPF 投递行为** — 已查证：CF 有 DMARC 闸 + 基线"SPF 或 DKIM"闸（2025-07-03），伪造 SPF-fail 大概率被拒在 Worker 前，**但 docs 歧义 → Worker 仍须自校验**；解析 **`ARC-Authentication-Results`**（authserv-id=mx.cloudflare.net），取 `smtp.mailfrom` 的 `spf=pass` + `smtp.remote-ip`，**不信** `Authentication-Results`/`Received-SPF`。见 §4.2。
+- [x] **`basic`（1 GiB）Chromium 不 OOM** — 已实测：peak 523 MiB、未 OOM、渲染成功 → **basic 设默认**（成本 ÷4）。
 - [ ] 专用收信 zone/域名选定（**勿在 cqu.moe 顶级开 catch-all**，会劫持现有 @cqu.moe 收信）。
 
 ---
