@@ -118,8 +118,12 @@ def aes_encrypt_password(croypto_b64, password):
     return b64encode(AES.new(key, AES.MODE_ECB).encrypt(pad(password.encode(), 16))).decode()
 
 
-async def do_first_factor(pg, url, username, password):
-    """加载 → 表单导航式提交密码。返回 'success'(直接ticket) / '2fa' / 'fail:...'。"""
+async def do_first_factor(pg, url, username, password, debug_screenshot=True):
+    """加载 → 表单导航式提交密码。返回 'success'(直接ticket) / '2fa' / 'fail:...'。
+
+    debug_screenshot=False 时跳过失败截图(及其文案后缀): 容器路径用之,
+    避免在登录页落下凭证相邻产物 + 并发覆盖同名文件; CLI 路径保留(默认 True)便于调试。
+    """
     croypto, flowkey = await load_login_page(pg, url)
     if not (croypto and flowkey):
         return "fail:登录页未渲染(疑似被瑞数挑战/限流)"
@@ -140,8 +144,10 @@ async def do_first_factor(pg, url, username, password):
         err = ""
     if not err and await pg.locator("#login-croypto").count():
         err = "回到登录页(密码错误/瑞数软重挑战)"
-    await pg.screenshot(path="firstfactor_fail.png", full_page=True)
-    return "fail:" + (err or f"未判定 url={pg.url[:70]}") + " (见 firstfactor_fail.png)"
+    if debug_screenshot:
+        await pg.screenshot(path="firstfactor_fail.png", full_page=True)
+        return "fail:" + (err or f"未判定 url={pg.url[:70]}") + " (见 firstfactor_fail.png)"
+    return "fail:" + (err or f"未判定 url={pg.url[:70]}")
 
 
 async def switch_2fa_tab(pg, method):
@@ -275,7 +281,8 @@ async def run_login(student_id, password, service, method="mail", code_provider=
         page.on("response", lambda r: sms_state.__setitem__("status", r.status)
                 if METHOD[method]["send_marker"] in r.url else None)
         try:
-            verdict = await do_first_factor(page, url, student_id, password)
+            # 容器路径不落盘失败截图(凭证相邻产物 + 并发覆盖同名文件的隐患)。
+            verdict = await do_first_factor(page, url, student_id, password, debug_screenshot=False)
             if verdict == "success":
                 # 该 service 未开二次验证, 第一因素直出 ticket。
                 tk = extract_ticket(tickets + [page.url])

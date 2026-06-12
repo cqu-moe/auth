@@ -17,6 +17,7 @@ CQU 浏览器登录器 —— aiohttp 服务(CF Containers, 端口 8080)。
 """
 import asyncio
 import logging
+import time
 
 from aiohttp import web
 
@@ -25,9 +26,23 @@ import cqu_login  # 改造后的登录器, 暴露 run_login(...)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("cqu-login-server")
 
-# session -> Event(被 /code set 唤醒) / session -> 验证码字符串。
+# 等 /code 推码的上限(秒): ~对齐 2FA 邮件 TTL / 重发窗口, 超时则中止登录(浏览器在 finally 关闭)。
+CODE_WAIT_TIMEOUT = 180
+# 单次 /run 的整体上限(秒): 含发码 + 等码 + 提交, 超时返回 504 而非永久挂住凭证路径。
+RUN_TOTAL_TIMEOUT = 300
+
+# session -> Event(被 /code set 唤醒)。
 CODE_EVENTS: dict[str, asyncio.Event] = {}
-CODE_VALUES: dict[str, str] = {}
+# session -> (验证码字符串, 存入时刻 time.time())。存入时刻用于清理过期(孤儿)码, 避免明文码长期驻留。
+CODE_VALUES: dict[str, tuple[str, float]] = {}
+
+
+def _sweep_stale_codes() -> None:
+    """删除早于 CODE_WAIT_TIMEOUT 的孤儿 /code 存码(及其 Event), 防止明文码无界堆积/长期驻留。"""
+    now = time.time()
+    for sess in [s for s, (_, ts) in CODE_VALUES.items() if now - ts > CODE_WAIT_TIMEOUT]:
+        CODE_VALUES.pop(sess, None)
+        CODE_EVENTS.pop(sess, None)
 
 
 async def run_handler(request: web.Request) -> web.Response:
@@ -50,23 +65,34 @@ async def run_handler(request: web.Request) -> web.Response:
 
     ev = asyncio.Event()
     CODE_EVENTS[session] = ev
+    # I1: /code 可能在本 Event 注册前略早到达; 若码已在, 立即唤醒, 避免错过唤醒永久阻塞。
+    if session in CODE_VALUES:
+        ev.set()
 
     async def code_waiter() -> str:
-        # run_login 在发码后 await 它: 阻塞到 /code 推入并 set Event。
-        await ev.wait()
-        return CODE_VALUES.pop(session, "")
+        # run_login 在发码后 await 它: 阻塞到 /code 推入并 set Event, 上限 CODE_WAIT_TIMEOUT。
+        # 超时抛 TimeoutError → run_login 中止 → 其 finally 关浏览器(凭证不再驻留)。
+        await asyncio.wait_for(ev.wait(), timeout=CODE_WAIT_TIMEOUT)
+        entry = CODE_VALUES.pop(session, None)
+        return entry[0] if entry else ""
 
     log.info("run start session=%s student=%s method=%s", session, student_id, method)
     try:
-        result = await cqu_login.run_login(
-            student_id=student_id,
-            password=password,
-            service=service,
-            method=method,
-            code_provider=code_waiter,
+        result = await asyncio.wait_for(
+            cqu_login.run_login(
+                student_id=student_id,
+                password=password,
+                service=service,
+                method=method,
+                code_provider=code_waiter,
+            ),
+            timeout=RUN_TOTAL_TIMEOUT,
         )
         log.info("run ok session=%s ticket=%s", session, result.get("ticket", "")[:24])
         return web.json_response({"ok": True, **result})
+    except asyncio.TimeoutError:
+        log.warning("run timeout session=%s (>%ds)", session, RUN_TOTAL_TIMEOUT)
+        return web.json_response({"ok": False, "error": "login timed out"}, status=504)
     except Exception as e:  # noqa: BLE001 - surface any login failure to the caller
         log.warning("run fail session=%s error=%s", session, e)
         return web.json_response({"ok": False, "error": str(e)}, status=500)
@@ -86,7 +112,9 @@ async def code_handler(request: web.Request) -> web.Response:
     if not code:
         return web.json_response({"ok": False, "error": "missing code"}, status=400)
 
-    CODE_VALUES[session] = str(code)
+    # I2: 顺手清掉过期孤儿码, 防止无人认领的明文码无界堆积/长期驻留。
+    _sweep_stale_codes()
+    CODE_VALUES[session] = (str(code), time.time())
     ev = CODE_EVENTS.get(session)
     if ev is not None:
         ev.set()
