@@ -109,6 +109,15 @@ cquBind.get("/ws", async (c) => {
   if (c.req.header("Upgrade") !== "websocket") {
     return errorResponse(c, "UPGRADE_REQUIRED", "需要 WebSocket 升级请求", 426);
   }
+  // CSWSH 防护：WS 握手不受 CORS 约束，但浏览器会在跨源握手时携带 session cookie。
+  // 恶意站点可借受害者 cookie 打开本端点并接收推送的 bind_code。session 级 DO 寻址
+  // 拦不住（同一用户被跨源劫持），必须在转发前校验 Origin 同源。浏览器握手必带 Origin，
+  // 缺失 Origin 视为可疑（非浏览器）一并拒绝。
+  const origin = c.req.header("Origin");
+  const allowedOrigin = new URL(c.env.BETTER_AUTH_URL).origin;
+  if (!origin || origin !== allowedOrigin) {
+    return errorResponse(c, "FORBIDDEN_ORIGIN", "WebSocket 来源不被允许", 403);
+  }
   const user = c.get("user") as { id: string };
   const stub = c.env.CQU_SESSION.get(c.env.CQU_SESSION.idFromName(user.id));
   // 原始请求不可改：DO 的 WS 升级分支依赖 Upgrade 头返回 101 + webSocket。
