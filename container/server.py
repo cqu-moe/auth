@@ -26,15 +26,28 @@ import cqu_login  # 改造后的登录器, 暴露 run_login(...)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("cqu-login-server")
 
-# 等 /code 推码的上限(秒): ~对齐 2FA 邮件 TTL / 重发窗口, 超时则中止登录(浏览器在 finally 关闭)。
-CODE_WAIT_TIMEOUT = 180
+# ── 超时链路标定(2026-06 真实集成测试: CQU 2FA 邮件实际到达约 180s) ──────────────
+# CQU 2FA 验证码自「点发码」起有效 600s。围绕这条硬上限标定两级超时:
+#   · CODE_WAIT_TIMEOUT(480s): 等 /code 推码的上限。必须 > 实测邮件到达(~180s)留足余量,
+#     又要 < 600s 有效期, 给提交验证码留 ~120s。180s 太紧(实测真实登录因此超时)。
+#   · RUN_TOTAL_TIMEOUT(540s): 单次 /run 整体上限, 含第一因素 + 发码开销 + CODE_WAIT + 提交。
+#     须 > CODE_WAIT(480s) + 第一因素/发码开销, 又 < 600s 有效期(过期再等码无意义)。
+# 改这两值须同步上调 src/services/cqu-2fa/single-flight.ts 的 LOGIN_LOCK_TTL_MS(须 > RUN_TOTAL_TIMEOUT)。
+CODE_WAIT_TIMEOUT = 480
 # 单次 /run 的整体上限(秒): 含发码 + 等码 + 提交, 超时返回 504 而非永久挂住凭证路径。
-RUN_TOTAL_TIMEOUT = 300
+RUN_TOTAL_TIMEOUT = 540
 
 # session -> Event(被 /code set 唤醒)。
 CODE_EVENTS: dict[str, asyncio.Event] = {}
 # session -> (验证码字符串, 存入时刻 time.time())。存入时刻用于清理过期(孤儿)码, 避免明文码长期驻留。
 CODE_VALUES: dict[str, tuple[str, float]] = {}
+
+
+class CodeWaitTimeout(Exception):
+    """内层「等 /code 推码」超时(验证码始终没到), 区别于外层 RUN_TOTAL_TIMEOUT。
+
+    单独成类是为了让日志/HTTP 消息能准确区分两种超时: 邮件一直没来 vs 整体跑太久。
+    """
 
 
 def _sweep_stale_codes() -> None:
@@ -71,8 +84,15 @@ async def run_handler(request: web.Request) -> web.Response:
 
     async def code_waiter() -> str:
         # run_login 在发码后 await 它: 阻塞到 /code 推入并 set Event, 上限 CODE_WAIT_TIMEOUT。
-        # 超时抛 TimeoutError → run_login 中止 → 其 finally 关浏览器(凭证不再驻留)。
-        await asyncio.wait_for(ev.wait(), timeout=CODE_WAIT_TIMEOUT)
+        # 内层超时抛 CodeWaitTimeout(而非裸 TimeoutError)→ 与外层 RUN_TOTAL_TIMEOUT 区分,
+        # 让日志/HTTP 消息能准确指出是「码一直没到」而非「整体跑太久」。
+        # run_login 不吞该异常 → 其 finally 关浏览器(凭证不再驻留)。
+        try:
+            await asyncio.wait_for(ev.wait(), timeout=CODE_WAIT_TIMEOUT)
+        except asyncio.TimeoutError as e:
+            raise CodeWaitTimeout(
+                f"等验证码超时(>{CODE_WAIT_TIMEOUT}s, code never arrived)"
+            ) from e
         entry = CODE_VALUES.pop(session, None)
         return entry[0] if entry else ""
 
@@ -90,9 +110,23 @@ async def run_handler(request: web.Request) -> web.Response:
         )
         log.info("run ok session=%s ticket=%s", session, result.get("ticket", "")[:24])
         return web.json_response({"ok": True, **result})
+    except CodeWaitTimeout:
+        # 内层: 等码超时, 验证码始终没到(邮件未送达 / DO 未推码)。
+        log.warning(
+            "run timeout session=%s (code-wait >%ds, code never arrived)",
+            session, CODE_WAIT_TIMEOUT,
+        )
+        return web.json_response(
+            {"ok": False, "error": f"code wait timed out (>{CODE_WAIT_TIMEOUT}s, code never arrived)"},
+            status=504,
+        )
     except asyncio.TimeoutError:
-        log.warning("run timeout session=%s (>%ds)", session, RUN_TOTAL_TIMEOUT)
-        return web.json_response({"ok": False, "error": "login timed out"}, status=504)
+        # 外层: 单次 /run 整体超时(第一因素/发码/提交某段太慢, 非单纯等码)。
+        log.warning("run timeout session=%s (total >%ds)", session, RUN_TOTAL_TIMEOUT)
+        return web.json_response(
+            {"ok": False, "error": f"login timed out (>{RUN_TOTAL_TIMEOUT}s)"},
+            status=504,
+        )
     except Exception as e:  # noqa: BLE001 - surface any login failure to the caller
         log.warning("run fail session=%s error=%s", session, e)
         return web.json_response({"ok": False, "error": str(e)}, status=500)

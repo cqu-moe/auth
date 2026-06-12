@@ -180,6 +180,40 @@ async def request_code(pg, sms_state):
     return False
 
 
+def classify_send_code(status: int, body: dict | None) -> str:
+    """判定发码响应: "sent" | "already_valid" | "failed"(纯函数, 便于单测)。
+
+    背景(2026-06 实测): 在验证码 600s 有效期内重登录/重试时, 发码端点不会再发新码,
+    而是返回形如:
+      {"code":412,"message":"您的验证码还在有效期内，请勿重复发送",
+       "data":{"result":false,"sendInterval":0,"expireTime":0}}
+    此时一份有效码其实已经发出(且会被嗅探/推入)——登录必须继续去 await 验证码, 不能当失败。
+
+    规则:
+      · HTTP 200 且 body.code==200 / body.data.result 为真 → "sent"(成功发出新码)。
+      · body.message 含「请勿重复发送」, 或(body.code==412 且 data.result 为假且
+        message 带「有效期内/已发送」语义)→ "already_valid"(旧码仍有效, 继续等码)。
+      · 其余 → "failed"。
+    """
+    body = body or {}
+    code = body.get("code")
+    data = body.get("data") if isinstance(body.get("data"), dict) else {}
+    result = data.get("result")
+    message = str(body.get("message") or "")
+
+    # 成功发出新码。
+    if status == 200 and (code == 200 or result is True):
+        return "sent"
+
+    # 旧码仍在有效期内, 端点拒绝重复发送 —— 视作「已有有效码」, 继续等码。
+    if "请勿重复发送" in message:
+        return "already_valid"
+    if code == 412 and result is False and any(k in message for k in ("有效期内", "已发送")):
+        return "already_valid"
+
+    return "failed"
+
+
 async def submit_code(pg, url, username, code, method):
     """表单导航式提交二次验证码(type=smsLogin/mailLogin, password=验证码明文)。"""
     try:
@@ -202,6 +236,29 @@ def install_ticket_sniffer(page, tickets):
                 tickets.append(loc)
         except Exception:
             pass
+    page.on("response", on_response)
+
+
+def install_send_code_sniffer(page, sms_state, method):
+    """监听发码响应(URL 含 send_marker, 如 sendMailCode), 捕获 HTTP status + 解析后的 JSON body。
+
+    body 用于 classify_send_code 判定「请勿重复发送(旧码仍有效)」等非 200 但应继续等码的情形;
+    `await resp.json()` 防御异常(发码响应偶有非 JSON / 解析失败), 失败时 body 留 None。
+    """
+    marker = METHOD[method]["send_marker"]
+
+    async def on_response(resp):
+        try:
+            if marker not in resp.url:
+                return
+            sms_state["status"] = resp.status
+            try:
+                sms_state["body"] = await resp.json()
+            except Exception:
+                sms_state["body"] = None
+        except Exception:
+            pass
+
     page.on("response", on_response)
 
 
@@ -277,9 +334,8 @@ async def run_login(student_id, password, service, method="mail", code_provider=
         page.set_default_timeout(15000)
         tickets = []
         install_ticket_sniffer(page, tickets)
-        sms_state = {"status": None}
-        page.on("response", lambda r: sms_state.__setitem__("status", r.status)
-                if METHOD[method]["send_marker"] in r.url else None)
+        sms_state = {"status": None, "body": None}
+        install_send_code_sniffer(page, sms_state, method)
         try:
             # 容器路径不落盘失败截图(凭证相邻产物 + 并发覆盖同名文件的隐患)。
             verdict = await do_first_factor(page, url, student_id, password, debug_screenshot=False)
@@ -296,8 +352,13 @@ async def run_login(student_id, password, service, method="mail", code_provider=
             await switch_2fa_tab(page, method)
             if not await request_code(page, sms_state):
                 raise RuntimeError("未找到「获取验证码」按钮(页面结构可能变化)")
-            if sms_state["status"] != 200:
-                raise RuntimeError(f"发码响应 status={sms_state['status']}(非200), 验证码可能未发出")
+            # 发码响应分类: "sent"(发出新码) / "already_valid"(旧码仍有效, 端点拒重发) 都应继续等码;
+            # 只有 "failed" 才中止。已发/请勿重复发送时一份有效码已在外, 会被嗅探/推入。
+            send_verdict = classify_send_code(sms_state["status"], sms_state["body"])
+            if send_verdict == "failed":
+                raise RuntimeError(
+                    f"发码失败 status={sms_state['status']} body={sms_state['body']}(验证码未发出)"
+                )
 
             # 替代 read_code 文件轮询: 等 /code 端点经 code_provider 推入。
             code = (await code_provider() or "").strip()
@@ -338,9 +399,8 @@ async def run(args):
         page.set_default_timeout(15000)
         tickets = []
         install_ticket_sniffer(page, tickets)
-        sms_state = {"status": None}
-        page.on("response", lambda r: sms_state.__setitem__("status", r.status)
-                if METHOD[args.method]["send_marker"] in r.url else None)
+        sms_state = {"status": None, "body": None}
+        install_send_code_sniffer(page, sms_state, args.method)
         try:
             verdict = await do_first_factor(page, url, username, password)
             if verdict == "success":
@@ -357,10 +417,14 @@ async def run(args):
             await switch_2fa_tab(page, args.method)
             if not await request_code(page, sms_state):
                 print("⚠ 未找到「获取验证码」按钮, 页面结构可能变化。", file=sys.stderr)
-            if sms_state["status"] == 200:
+            send_verdict = classify_send_code(sms_state["status"], sms_state["body"])
+            if send_verdict == "sent":
                 print(f"✓ 已发{'邮箱' if args.method == 'mail' else '短信'}验证码(发码 200), 请查收。")
+            elif send_verdict == "already_valid":
+                print("• 旧验证码仍在有效期内(端点拒绝重发), 直接用之前收到的码即可。")
             else:
-                print(f"⚠ 发码响应 status={sms_state['status']}(非200), 可能未发出。", file=sys.stderr)
+                print(f"⚠ 发码失败 status={sms_state['status']} body={sms_state['body']}, 可能未发出。",
+                      file=sys.stderr)
 
             if args.stop_before_code:
                 print("• --stop-before-code: 到此为止(已发码, 未提交)。")
