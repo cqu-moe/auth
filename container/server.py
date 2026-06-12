@@ -26,16 +26,19 @@ import cqu_login  # 改造后的登录器, 暴露 run_login(...)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("cqu-login-server")
 
-# ── 超时链路标定(2026-06 真实集成测试: CQU 2FA 邮件实际到达约 180s) ──────────────
+# ── 超时链路标定(CQU 邮件慢, 把等码上限抬到 ~10min) ─────────────────────────────
 # CQU 2FA 验证码自「点发码」起有效 600s。围绕这条硬上限标定两级超时:
-#   · CODE_WAIT_TIMEOUT(480s): 等 /code 推码的上限。必须 > 实测邮件到达(~180s)留足余量,
-#     又要 < 600s 有效期, 给提交验证码留 ~120s。180s 太紧(实测真实登录因此超时)。
-#   · RUN_TOTAL_TIMEOUT(540s): 单次 /run 整体上限, 含第一因素 + 发码开销 + CODE_WAIT + 提交。
-#     须 > CODE_WAIT(480s) + 第一因素/发码开销, 又 < 600s 有效期(过期再等码无意义)。
+#   · CODE_WAIT_TIMEOUT(570s): 等 /code 推码的上限。刻意停在距 600s 有效期约 30s 之前——
+#     即便码临近 deadline 才到, 也还留有余量提交后再过期; 若死等满 600s, 码会恰在到达那一刻失效。
+#   · RUN_TOTAL_TIMEOUT(660s): 单次 /run 整体上限, 含第一因素 + 570s 等码 + 提交/开销。
+#     须 > CODE_WAIT(570s) + 第一因素/发码开销, 故取 660s。
+# 不变式(必须成立):
+#   LOGIN_LOCK_TTL_MS(720s) > RUN_TOTAL_TIMEOUT(660s) > CODE_WAIT_TIMEOUT(570s),
+#   且 CODE_WAIT_TIMEOUT(570s) < 码有效期(600s)并留提交余量。
 # 改这两值须同步上调 src/services/cqu-2fa/single-flight.ts 的 LOGIN_LOCK_TTL_MS(须 > RUN_TOTAL_TIMEOUT)。
-CODE_WAIT_TIMEOUT = 480
+CODE_WAIT_TIMEOUT = 570
 # 单次 /run 的整体上限(秒): 含发码 + 等码 + 提交, 超时返回 504 而非永久挂住凭证路径。
-RUN_TOTAL_TIMEOUT = 540
+RUN_TOTAL_TIMEOUT = 660
 
 # session -> Event(被 /code set 唤醒)。
 CODE_EVENTS: dict[str, asyncio.Event] = {}
