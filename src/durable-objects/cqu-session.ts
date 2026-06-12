@@ -1,6 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
 import { CquSsoClient, type CasCookies, CquSsoError } from "../services/cqu-sso";
 import { decrypt } from "../services/crypto";
+import {
+  nextStatus,
+  type CquStatus,
+} from "../services/cqu-2fa/state-machine";
+import { shouldStartLogin } from "../services/cqu-2fa/single-flight";
 import type { Env } from "../types";
 
 const KEEPALIVE_INTERVAL_MS = 15 * 60 * 1000;
@@ -21,15 +26,31 @@ interface SessionState {
   cookies: CasCookies;
   objectId: string;
   tgt: string;
+  // 当前 TGT 的铸造时刻(ms)。alarm 用它判定是否到 +7h 主动重登窗口。
+  loginAt: number;
   lastKeepAlive: number;
   lastRequestedAt: number;
-  status: "active" | "expired" | "error";
   consecutiveFailures: number;
 }
 
 interface StoredCredentials {
   encryptedPassword: string;
   iv: string;
+}
+
+// single-flight 锁: 一次容器登录在途的标记。`token` 同时是容器侧 session 键,
+// deposit-code 凭它把 2FA 码 POST /code 路由到正确的在途 /run。
+interface LoginInFlight {
+  token: string;
+  startedAt: number;
+}
+
+// 容器 /run 的返回(见 container/server.py + cqu_login.run_login)。
+interface ContainerRunResult {
+  ok: boolean;
+  cookies?: CasCookies;
+  ticket?: string;
+  error?: string;
 }
 
 export class CquSessionDO extends DurableObject<Env> {
@@ -40,6 +61,16 @@ export class CquSessionDO extends DurableObject<Env> {
     if (!this.state) {
       this.state = (await this.ctx.storage.get<SessionState>("state")) ?? null;
     }
+  }
+
+  private async getStatus(): Promise<CquStatus> {
+    return (
+      (await this.ctx.storage.get<CquStatus>("status")) ?? "unbound"
+    );
+  }
+
+  private async setStatus(status: CquStatus): Promise<void> {
+    await this.ctx.storage.put("status", status);
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -75,12 +106,11 @@ export class CquSessionDO extends DurableObject<Env> {
           return Response.json({ ticket });
         }
         case "status": {
-          const status = await this.getStatus();
+          const status = await this.getStatusResponse();
           return Response.json(status);
         }
         case "destroy": {
-          await this.ctx.storage.deleteAll();
-          this.state = null;
+          await this.destroy();
           return Response.json({ success: true });
         }
         default:
@@ -93,35 +123,40 @@ export class CquSessionDO extends DurableObject<Env> {
     }
   }
 
+  /**
+   * 首登: 存凭证 + 经容器(patchright 浏览器登录器)铸第一份 TGT。
+   *
+   * 走与 relogin() 同一条容器路径; 成功落 cookies + loginAt + 状态机 FIRST_LOGIN_OK(→ active)。
+   *
+   * NOTE(onboarding, Phase 6 定稿): 真实首登要求绑定先 active(密保邮箱已设为专属地址、
+   * 2FA 邮件能被 CF 捕获)才能跑通——容器发码后 DO 必须能收到 deposit-code。Phase 5 这里
+   * 只负责「存凭证 + 触发容器登录」, 不强求 onboarding 时序完全闭合; 在尚未绑定 2FA 邮件的
+   * 环境里, 容器会在等码处超时返回失败, initSession 据此返回 {success:false}(route 据此回滚)。
+   */
   private async initSession(
     userId: string,
     studentId: string,
-    encryptedPassword: string,
-    iv: string
+    _encryptedPassword: string,
+    _iv: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      const password = await decrypt(
-        encryptedPassword,
-        iv,
-        this.env.ENCRYPTION_KEY
-      );
-      const result = await this.ssoClient.login(
-        studentId,
-        password,
-        DUMMY_SERVICE
-      );
+      // 占位 state, 让 runContainerLogin 能拿到 userId/studentId。
       this.state = {
         userId,
         studentId,
-        cookies: result.cookies,
+        cookies: { SOURCEID_TGC: "", SESSION: "", rg_objectid: "" },
         objectId: "",
         tgt: "",
+        loginAt: 0,
         lastKeepAlive: Date.now(),
         lastRequestedAt: Date.now(),
-        status: "active",
         consecutiveFailures: 0,
       };
-      await this.ctx.storage.put("state", this.state);
+      await this.setStatus("binding");
+      const ok = await this.containerLogin("FIRST_LOGIN_OK");
+      if (!ok) {
+        return { success: false, error: "CQU 登录失败（容器登录未成功）" };
+      }
       await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
       return { success: true };
     } catch (e) {
@@ -134,7 +169,8 @@ export class CquSessionDO extends DurableObject<Env> {
 
   private async getServiceTicket(service: string): Promise<string> {
     await this.loadState();
-    if (!this.state || this.state.status !== "active") {
+    const status = await this.getStatus();
+    if (!this.state || status !== "active") {
       throw new CquSsoError("SESSION_INACTIVE", "CQU session not active");
     }
     const serviceUrl = SERVICE_URLS[service];
@@ -146,25 +182,38 @@ export class CquSessionDO extends DurableObject<Env> {
     return this.ssoClient.getServiceTicket(this.state.cookies, serviceUrl);
   }
 
-  private async getStatus(): Promise<Record<string, unknown>> {
+  private async getStatusResponse(): Promise<Record<string, unknown>> {
     await this.loadState();
-    if (!this.state) return { status: "unbound" };
+    const status = await this.getStatus();
+    if (!this.state) return { status };
     return {
-      status: this.state.status,
+      status,
       studentId: this.state.studentId,
+      loginAt: this.state.loginAt,
       lastKeepAlive: this.state.lastKeepAlive,
       lastRequestedAt: this.state.lastRequestedAt,
     };
   }
 
+  private async destroy(): Promise<void> {
+    await this.ctx.storage.deleteAll();
+    this.state = null;
+    // deleteAll 已清掉 status/loginInFlight/pendingCode/state/credentials;
+    // 显式回到 unbound, 让后续 status 查询语义清晰(而非依赖默认值)。
+    await this.setStatus("unbound");
+  }
+
   async alarm(): Promise<void> {
     await this.loadState();
     if (!this.state) return;
+    const status = await this.getStatus();
+    // 已撤销/未绑定的会话不再保活。
+    if (status === "revoked" || status === "unbound") return;
 
     const outcome = await this.runKeepAlive();
 
     if (outcome === "active") {
-      this.state.status = "active";
+      await this.setStatus("active");
       this.state.lastKeepAlive = Date.now();
       this.state.consecutiveFailures = 0;
       await this.ctx.storage.put("state", this.state);
@@ -173,20 +222,20 @@ export class CquSessionDO extends DurableObject<Env> {
     }
 
     if (outcome === "expired") {
-      // Server reachable but credentials rejected — genuinely needs re-binding.
-      this.state.status = "error";
-      this.state.consecutiveFailures = 0;
-      console.error(
-        `[CquSession] ${this.state.studentId}: credentials rejected, status -> error (needs re-login)`
+      // 探针证实 TGT 服务端失效 — 触发容器重登铸新 TGT。
+      // relogin 自带 single-flight + 状态机(RELOGIN_START/OK/FAIL), 失败落 expired。
+      console.warn(
+        `[CquSession] ${this.state.studentId}: session expired server-side, triggering container relogin`
       );
+      await this.relogin();
+      this.state.consecutiveFailures = 0;
       await this.ctx.storage.put("state", this.state);
       await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
       return;
     }
 
-    // outcome === "transient": couldn't reach CQU SSO. The CAS session is
-    // almost certainly still valid server-side, so keep the existing cookies
-    // and status untouched and retry soon instead of falsely flagging re-login.
+    // outcome === "transient": 够不到 CQU SSO。CAS 会话服务端几乎肯定还有效,
+    // 保留 cookies/status 不动, 快重试而非误判重登。
     this.state.consecutiveFailures = (this.state.consecutiveFailures ?? 0) + 1;
     const fastRetry = this.state.consecutiveFailures <= MAX_FAST_RETRIES;
     const delay = fastRetry ? RETRY_INTERVAL_MS : KEEPALIVE_INTERVAL_MS;
@@ -198,66 +247,137 @@ export class CquSessionDO extends DurableObject<Env> {
   }
 
   /**
-   * One keepalive cycle. Returns:
-   * - "active":    session is (or was made) valid.
-   * - "expired":   server reachable but credentials rejected — real re-login needed.
-   * - "transient": couldn't reach CQU; cookies left intact, caller should retry soon.
+   * 一轮保活探针。返回:
+   * - "active":    凭已有 cookie 仍能换 ST, 会话有效。
+   * - "expired":   服务端可达但 TGT 失效 — 需真重登。
+   * - "transient": 够不到 CQU; cookie 原样保留, 调用方应快重试。
+   *
+   * NOTE: 与旧实现不同, 这里只「探针」, 不在 runKeepAlive 内直接重登;
+   * 重登(走容器)由 alarm() 在 outcome==="expired" 时统一触发, 以复用 single-flight。
    */
   private async runKeepAlive(): Promise<"active" | "expired" | "transient"> {
     const state = this.state!;
-    // 1. Probe: can the existing cookies still mint a service ticket?
     try {
       await this.ssoClient.getServiceTicket(state.cookies, DUMMY_SERVICE);
       return "active";
     } catch (e) {
       if (isTransientError(e)) {
-        console.warn(`[CquSession] ${state.studentId}: probe unreachable: ${errMsg(e)}`);
+        console.warn(
+          `[CquSession] ${state.studentId}: probe unreachable: ${errMsg(e)}`
+        );
         return "transient";
       }
-      // Non-network failure (e.g. TGT_EXPIRED): session invalid server-side.
-    }
-
-    // 2. Session expired server-side — try a fresh login. relogin() only
-    //    overwrites cookies on success, so a failure leaves the old ones intact.
-    try {
-      await this.relogin();
-      return "active";
-    } catch (e) {
-      if (isTransientError(e)) {
-        console.warn(`[CquSession] ${state.studentId}: relogin unreachable: ${errMsg(e)}`);
-        return "transient";
-      }
-      console.error(`[CquSession] ${state.studentId}: relogin rejected: ${errMsg(e)}`);
+      // 非网络失败(如 TGT_EXPIRED): 会话服务端失效。
       return "expired";
     }
   }
 
+  /**
+   * 容器驱动的重登。single-flight 保护: 已有在途登录(锁未过期)直接返回, 避免并发点火多个容器。
+   * 解密存储的密码 → 调容器 /run 铸新 TGT → 成功落 cookies + loginAt + RELOGIN_OK(→ active);
+   * 失败落 RELOGIN_FAIL(→ expired)。锁无论成败都清掉。
+   */
   private async relogin(): Promise<void> {
     if (!this.state) throw new Error("No state");
-    const creds =
-      await this.ctx.storage.get<StoredCredentials>("credentials");
-    if (!creds) throw new Error("No stored credentials");
-    const password = await decrypt(
-      creds.encryptedPassword,
-      creds.iv,
-      this.env.ENCRYPTION_KEY
-    );
-    const result = await this.ssoClient.login(
-      this.state.studentId,
-      password,
-      DUMMY_SERVICE
-    );
-    this.state.cookies = result.cookies;
+    const existing = await this.ctx.storage.get<LoginInFlight>("loginInFlight");
+    if (!shouldStartLogin(existing ?? null, Date.now())) {
+      // 已有在途登录, 让它跑完即可。
+      console.info(
+        `[CquSession] ${this.state.studentId}: relogin already in flight, skip`
+      );
+      return;
+    }
+    const status = await this.getStatus();
+    await this.setStatus(nextStatus(status, "RELOGIN_START"));
+    const ok = await this.containerLogin("RELOGIN_OK");
+    if (!ok) {
+      // containerLogin 失败时已把状态推到 RELOGIN_FAIL(→ expired) 并清锁。
+      console.error(`[CquSession] ${this.state.studentId}: relogin failed`);
+    }
+  }
+
+  /**
+   * 调容器 /run 跑一次完整浏览器登录(首登 / 重登共用)。
+   * 设置 single-flight 锁(token 作容器 session 键, deposit-code 凭它路由 2FA 码),
+   * 解密密码 → POST /run → 成功落 cookies + loginAt + `okEvent`; 失败 RELOGIN_FAIL。
+   * 锁无论成败都清。返回是否成功。
+   */
+  private async containerLogin(
+    okEvent: "FIRST_LOGIN_OK" | "RELOGIN_OK"
+  ): Promise<boolean> {
+    const state = this.state!;
+    const creds = await this.ctx.storage.get<StoredCredentials>("credentials");
+    if (!creds) {
+      await this.failLogin();
+      throw new Error("No stored credentials");
+    }
+
+    const token = crypto.randomUUID();
+    const lock: LoginInFlight = { token, startedAt: Date.now() };
+    await this.ctx.storage.put("loginInFlight", lock);
+
+    try {
+      const password = await decrypt(
+        creds.encryptedPassword,
+        creds.iv,
+        this.env.ENCRYPTION_KEY
+      );
+      const stub = this.getLoginContainer(state.userId);
+      const res = await stub.fetch(
+        new Request("https://c/run", {
+          method: "POST",
+          body: JSON.stringify({
+            studentId: state.studentId,
+            password,
+            service: DUMMY_SERVICE,
+            method: "mail",
+            session: token,
+          }),
+        })
+      );
+      const result = await res.json<ContainerRunResult>();
+      if (!res.ok || !result.ok || !result.cookies) {
+        await this.failLogin();
+        return false;
+      }
+
+      state.cookies = result.cookies;
+      state.loginAt = Date.now();
+      state.lastKeepAlive = Date.now();
+      await this.ctx.storage.put("state", state);
+      const status = await this.getStatus();
+      await this.setStatus(nextStatus(status, okEvent));
+      await this.ctx.storage.delete("loginInFlight");
+      return true;
+    } catch (e) {
+      console.error(
+        `[CquSession] ${state.studentId}: container login error: ${errMsg(e)}`
+      );
+      await this.failLogin();
+      return false;
+    }
+  }
+
+  /** 登录失败收尾: 状态机 RELOGIN_FAIL(→ expired) + 清 single-flight 锁。 */
+  private async failLogin(): Promise<void> {
+    const status = await this.getStatus();
+    await this.setStatus(nextStatus(status, "RELOGIN_FAIL"));
+    await this.ctx.storage.delete("loginInFlight");
+  }
+
+  /** 取该用户的浏览器登录器容器实例(寻址镜像 CQU_SESSION: idFromName → get)。 */
+  private getLoginContainer(userId: string): DurableObjectStub {
+    const id = this.env.CQU_LOGIN.idFromName(userId);
+    return this.env.CQU_LOGIN.get(id);
   }
 }
 
 function isTransientError(e: unknown): boolean {
-  // Network errors (timeout/reset) and an unparseable page (CQU maintenance)
-  // don't prove the credentials are bad — only a server-side auth rejection does.
+  // 网络错误(超时/重置)和不可解析页面(CQU 维护)不证明凭证坏 — 只有服务端 auth 拒绝才算。
   if (e instanceof CquSsoError) {
     return e.code === "NETWORK_ERROR" || e.code === "PARSE_ERROR";
   }
-  return true; // unknown failure: be conservative, retry rather than flag re-login
+  return true; // 未知失败: 保守, 重试而非误判重登。
 }
 
 function errMsg(e: unknown): string {
