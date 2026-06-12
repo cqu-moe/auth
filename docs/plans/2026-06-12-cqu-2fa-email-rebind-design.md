@@ -80,7 +80,7 @@
           → 原生点「获取验证码」（发码，浏览器内，瑞数 VM 自带 CAqWHAeT）──CQU 发码邮件──┐
           → run() 在此 await asyncio.Event（等码被推入，不轮询）◀──── DO 推 ────┐      │
                                                                               │      ▼
-[CQU 2FA 邮件] → {token}@bind.cqu.moe → CF Email Routing → Worker.email()      │  (邮件到达)
+[CQU 2FA 邮件] → {token}@bind.cqu-moe-inbox.com → CF Email Routing → Worker.email()      │  (邮件到达)
    · 目标地址 → 查 D1 → userId                                                 │
    · SPF=pass + envelope=sso@cqu.edu.cn + 源 IP∈202.202.0.0/24 否则丢弃        │
    · 主题分流 + 正则提 6 位码 → DO.depositCode(userId, {code, kind})           │
@@ -303,7 +303,7 @@ Email Worker 收码 ──┤   （hibernatable WS；2min TTL 下轮询来不及
 ## 9. 一次性绑定流程（Onboarding）
 
 用户在**自己真实浏览器**操作（避开瑞数自动化）：
-1. auth.cqu.moe opt-in → 系统签发 `<token>@bind.cqu.moe`，D1 写映射（status=pending = "正在绑定中"）。
+1. auth.cqu.moe opt-in → 系统签发 `<token>@bind.cqu-moe-inbox.com`，D1 写映射（status=pending = "正在绑定中"）。
 2. 用户去 CQU 自服务中心 `safe-center/bind-email-password/bind`，把**密保邮箱设为该地址**。
 3. 用户在 CQU 页点"发送验证码" → CQU 发绑定确认码到该地址 → Email Worker 捕获（kind=`bind_confirm`）→ DO 经 WS **秒推**给绑定页 UI（2min TTL 内）。
 4. 用户把码填进 CQU 自服务 → 绑定完成 → 系统标记 D1 status=active。
@@ -381,7 +381,7 @@ Email Worker 收码 ──┤   （hibernatable WS；2min TTL 下轮询来不及
 - [x] **密保邮箱接受外部域** — 已确认支持（用户实测）→ 直设方案成立。
 - [x] **CF Email Routing SPF 投递行为** — 已查证：CF 有 DMARC 闸 + 基线"SPF 或 DKIM"闸（2025-07-03），伪造 SPF-fail 大概率被拒在 Worker 前，**但 docs 歧义 → Worker 仍须自校验**；解析 **`ARC-Authentication-Results`**（authserv-id=mx.cloudflare.net），取 `smtp.mailfrom` 的 `spf=pass` + `smtp.remote-ip`，**不信** `Authentication-Results`/`Received-SPF`。见 §4.2。
 - [x] **`basic`（1 GiB）Chromium 不 OOM** — 已实测：peak 523 MiB、未 OOM、渲染成功 → **basic 设默认**（成本 ÷4）。
-- [ ] 专用收信 zone/域名选定（**勿在 cqu.moe 顶级开 catch-all**，会劫持现有 @cqu.moe 收信）。
+- [x] 专用收信域已选定：**`bind.cqu-moe-inbox.com`**（独立域名，在用户 CF 账户下；避免在 cqu.moe 顶级开 catch-all 劫持现有收信）。部署时在该 zone 开 Email Routing catch-all → `email()` Worker。
 - [ ] **ARC 信任锚集成验证（安全，必做）**：`email-handler` 用 `trustedCfArc()` 取**首个** ARC 段并要求 `^i=N; mx.cloudflare.net` 锚定。残留风险：若攻击者伪造的 `ARC-Authentication-Results: i=1; mx.cloudflare.net; spf=pass…` 在 `Headers.get()` 拼接中**排在 CF 真头之前**，会被误信。须发一封带伪造 ARC 头的测试邮件过真实 Email Routing，确认 Worker 实际看到的头顺序 / CF 是否剥离入站 ARC-AR（RFC 8601 建议 MTA 删除自身 authserv-id 的入站 Authentication-Results）。当前被"地址不可枚举 + CF stage-2 SPF/DKIM 闸 + IP∈202.202.0.0/24"多重兜底。Phase 7 补 prepend-伪造单测。
 
 ---
