@@ -8,6 +8,7 @@ export interface Env {
   ENCRYPTION_KEY: string;
   BETTER_AUTH_URL: string;
   BETTER_AUTH_SECRET: string;
+  BIND_EMAIL_DOMAIN: string;
 }
 
 export interface HonoEnv {

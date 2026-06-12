@@ -7,6 +7,7 @@ import {
   oauthProviderOpenIdConfigMetadata,
 } from "@better-auth/oauth-provider";
 import { cqu } from "./routes/cqu";
+import { cquBind } from "./routes/cqu-bind";
 import { admin } from "./routes/admin";
 import { handleEmail } from "./email-handler";
 import type { Env } from "./types";
@@ -34,6 +35,9 @@ app.all("/api/auth/*", async (c) => {
   return auth.handler(c.req.raw);
 });
 
+// 注：cqu.ts 有精确路径 POST /api/cqu/bind；cqu-bind.ts 全是 /api/cqu/bind/<sub>
+// 子路径。两者在 Hono trie 中是独立节点，互不遮蔽（与挂载顺序无关）。
+app.route("/api/cqu/bind", cquBind);
 app.route("/api/cqu", cqu);
 app.route("/api/admin", admin);
 
