@@ -6,7 +6,7 @@ import Layout from "../components/Layout";
 // Types
 // ────────────────────────────────────────────────────────────────────────────
 
-type Step = 1 | 2 | 3 | 4 | 5;
+type Step = 1 | 2 | 3 | 4;
 
 type WsState = "idle" | "connecting" | "open" | "closed" | "error";
 
@@ -97,7 +97,7 @@ function CopyButton({ text }: { text: string }) {
       ) : (
         <>
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
           </svg>
           复制
         </>
@@ -112,14 +112,13 @@ function CopyButton({ text }: { text: string }) {
 
 const STEP_LABELS: Record<Step, string> = {
   1: "说明",
-  2: "获取地址",
-  3: "验证邮箱",
-  4: "录入凭证",
-  5: "完成",
+  2: "绑定邮箱",
+  3: "录入凭证",
+  4: "完成",
 };
 
 function StepIndicator({ current }: { current: Step }) {
-  const steps: Step[] = [1, 2, 3, 4, 5];
+  const steps: Step[] = [1, 2, 3, 4];
   return (
     <nav aria-label="绑定进度" className="mb-8">
       <ol className="flex items-center gap-0">
@@ -237,10 +236,15 @@ function Step1Intro({ onNext }: { onNext: () => void }) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Step 2 — Get dedicated address
+// Step 2 — Get dedicated address AND await confirmation code via WebSocket
+//
+// The WS opens the moment the address is fetched and displayed, so we are
+// already listening before the user navigates to CQU self-service. This
+// eliminates the race where the CQU code email arrives while the user is
+// still on this page but the socket has not been opened yet.
 // ────────────────────────────────────────────────────────────────────────────
 
-function Step2Address({
+function Step2AddressAndCode({
   onNext,
   bindAddress,
   setBindAddress,
@@ -249,112 +253,22 @@ function Step2Address({
   bindAddress: string;
   setBindAddress: (addr: string) => void;
 }) {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  // ── Address fetch state ──────────────────────────────────────────────────
+  const [addrLoading, setAddrLoading] = useState(false);
+  const [addrError, setAddrError] = useState("");
 
-  useEffect(() => {
-    if (bindAddress) return; // already fetched
-    setLoading(true);
-    fetch("/api/cqu/bind/address", { method: "POST", credentials: "include" })
-      .then(async (res) => {
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({})) as { detail?: { error?: { message?: string } } };
-          throw new Error(data.detail?.error?.message ?? "获取地址失败，请稍后重试");
-        }
-        return res.json() as Promise<BindAddressResponse>;
-      })
-      .then((data) => {
-        setBindAddress(data.address);
-      })
-      .catch((err: Error) => {
-        setError(err.message);
-      })
-      .finally(() => {
-        setLoading(false);
-      });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold text-gray-900 mb-2">您的专属密保邮箱地址</h2>
-        <p className="text-sm text-gray-500">
-          请将以下地址设置为您在 CQU 自服务中心的密保邮箱，CQU 随后会向该地址发送验证码。
-        </p>
-      </div>
-
-      {error && <AlertBox variant="error">{error}</AlertBox>}
-
-      {loading ? (
-        <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-xl text-gray-400 text-sm">
-          <Spinner size="sm" color="gray" />
-          正在生成专属地址…
-        </div>
-      ) : bindAddress ? (
-        <div className="space-y-3">
-          <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
-            <p className="text-xs text-blue-600 font-medium mb-2">您的专属密保邮箱</p>
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <span className="font-mono text-sm font-semibold text-blue-900 break-all">
-                {bindAddress}
-              </span>
-              <CopyButton text={bindAddress} />
-            </div>
-          </div>
-
-          <div className="space-y-2 text-sm text-gray-600">
-            <p className="font-medium text-gray-900">操作步骤：</p>
-            <ol className="space-y-2 list-decimal list-inside">
-              <li>
-                打开{" "}
-                <a
-                  href="https://self.cqu.edu.cn"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-600 hover:text-blue-700 font-medium underline underline-offset-2"
-                >
-                  self.cqu.edu.cn
-                </a>
-                {" "}并登录
-              </li>
-              <li>进入「安全设置」→「绑定密保邮箱」</li>
-              <li>将密保邮箱设置为上方地址并保存</li>
-              <li>CQU 将发送一封验证邮件到该地址</li>
-            </ol>
-          </div>
-        </div>
-      ) : null}
-
-      <div className="flex gap-3">
-        <button
-          type="button"
-          onClick={onNext}
-          disabled={!bindAddress || loading}
-          className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-sm font-medium rounded-lg transition-colors"
-        >
-          我已设置，继续
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Step 3 — Await confirmation code via WebSocket
-// ────────────────────────────────────────────────────────────────────────────
-
-function Step3AwaitCode({ onNext }: { onNext: () => void }) {
+  // ── WebSocket state ──────────────────────────────────────────────────────
   const [wsState, setWsState] = useState<WsState>("idle");
   const [code, setCode] = useState<string>("");
   const [codeTs, setCodeTs] = useState<number | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
-  // Ref mirror of `code` so the `connect` callback (dep array []) can read the
-  // current value without capturing a stale closure.
+  // Ref mirror of `code` so the `connect` callback (dep array []) can read
+  // the current value without capturing a stale closure.
   const codeRef = useRef("");
 
+  // ── WS lifecycle ─────────────────────────────────────────────────────────
   const connect = useCallback(() => {
     if (!mountedRef.current) return;
     if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
@@ -386,8 +300,8 @@ function Step3AwaitCode({ onNext }: { onNext: () => void }) {
 
     ws.onclose = () => {
       // Stop reconnecting once unmounted or once a code has been received.
-      // Use codeRef (not the `code` state) because this callback is closed over
-      // the initial empty string due to useCallback([]).
+      // Use codeRef (not the `code` state) because this callback is closed
+      // over the initial empty string due to useCallback([]).
       if (!mountedRef.current || codeRef.current) {
         setWsState("closed");
         return;
@@ -416,13 +330,37 @@ function Step3AwaitCode({ onNext }: { onNext: () => void }) {
     };
   }, [connect]);
 
-  // Code expiry countdown (2-minute validity)
+  // ── Address fetch ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (bindAddress) return; // already fetched (e.g. user navigated back)
+    setAddrLoading(true);
+    fetch("/api/cqu/bind/address", { method: "POST", credentials: "include" })
+      .then(async (res) => {
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({})) as { detail?: { error?: { message?: string } } };
+          throw new Error(data.detail?.error?.message ?? "获取地址失败，请稍后重试");
+        }
+        return res.json() as Promise<BindAddressResponse>;
+      })
+      .then((data) => {
+        setBindAddress(data.address);
+      })
+      .catch((err: Error) => {
+        setAddrError(err.message);
+      })
+      .finally(() => {
+        setAddrLoading(false);
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Code expiry countdown (10-minute validity) ────────────────────────────
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   useEffect(() => {
     if (!codeTs) { setSecondsLeft(null); return; }
     const update = () => {
       const elapsed = Math.floor((Date.now() - codeTs) / 1000);
-      const remaining = 120 - elapsed;
+      const remaining = 600 - elapsed;
       setSecondsLeft(remaining > 0 ? remaining : 0);
     };
     update();
@@ -432,16 +370,67 @@ function Step3AwaitCode({ onNext }: { onNext: () => void }) {
 
   const codeExpired = secondsLeft !== null && secondsLeft <= 0;
 
+  // Format seconds as m:ss for the countdown badge
+  const formatCountdown = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m}:${sec.toString().padStart(2, "0")}`;
+  };
+
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-gray-900 mb-2">等待 CQU 验证码</h2>
+        <h2 className="text-xl font-semibold text-gray-900 mb-2">设置密保邮箱并等待验证码</h2>
         <p className="text-sm text-gray-500">
-          CQU 自服务中心保存密保邮箱后，会发送一封验证邮件。验证码将在到达时立即显示在下方——请在 2 分钟内将其填入 CQU 页面完成绑定。
+          将下方专属地址设置为 CQU 自服务中心的密保邮箱，CQU 随后会向该地址发送验证码——验证码到达后将立即显示在本页面。
         </p>
       </div>
 
-      {/* WS connection status */}
+      {addrError && <AlertBox variant="error">{addrError}</AlertBox>}
+
+      {/* ── Dedicated address ─────────────────────────────────────────────── */}
+      {addrLoading ? (
+        <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-xl text-gray-400 text-sm">
+          <Spinner size="sm" color="gray" />
+          正在生成专属地址…
+        </div>
+      ) : bindAddress ? (
+        <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
+          <p className="text-xs text-blue-600 font-medium mb-2">您的专属密保邮箱</p>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <span className="font-mono text-sm font-semibold text-blue-900 break-all">
+              {bindAddress}
+            </span>
+            <CopyButton text={bindAddress} />
+          </div>
+        </div>
+      ) : null}
+
+      {/* ── CQU operation steps ───────────────────────────────────────────── */}
+      {bindAddress && (
+        <div className="space-y-2 text-sm text-gray-600">
+          <p className="font-medium text-gray-900">操作步骤：</p>
+          <ol className="space-y-2 list-decimal list-inside">
+            <li>
+              打开{" "}
+              <a
+                href="https://self.cqu.edu.cn"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-600 hover:text-blue-700 font-medium underline underline-offset-2"
+              >
+                self.cqu.edu.cn
+              </a>
+              {" "}并登录
+            </li>
+            <li>进入「安全设置」→「绑定密保邮箱」</li>
+            <li>将密保邮箱设置为上方地址并保存</li>
+            <li>CQU 将发送一封验证邮件到该地址，验证码将自动显示在下方</li>
+          </ol>
+        </div>
+      )}
+
+      {/* ── WS connection status ──────────────────────────────────────────── */}
       <div className={`flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg ${
         wsState === "open"
           ? "bg-green-50 text-green-700"
@@ -465,7 +454,7 @@ function Step3AwaitCode({ onNext }: { onNext: () => void }) {
         {wsState === "idle" && "准备连接…"}
       </div>
 
-      {/* Code display */}
+      {/* ── Code display ──────────────────────────────────────────────────── */}
       {code ? (
         <div className={`p-5 rounded-xl border-2 ${codeExpired ? "border-gray-200 bg-gray-50" : "border-blue-300 bg-blue-50"}`}>
           <div className="flex items-center justify-between mb-3">
@@ -476,11 +465,11 @@ function Step3AwaitCode({ onNext }: { onNext: () => void }) {
               <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
                 codeExpired
                   ? "bg-gray-200 text-gray-500"
-                  : secondsLeft <= 30
+                  : secondsLeft <= 60
                   ? "bg-red-100 text-red-600"
                   : "bg-blue-100 text-blue-700"
               }`}>
-                {codeExpired ? "已过期" : `${secondsLeft}s`}
+                {codeExpired ? "已过期" : formatCountdown(secondsLeft)}
               </span>
             )}
           </div>
@@ -507,18 +496,20 @@ function Step3AwaitCode({ onNext }: { onNext: () => void }) {
         </div>
       )}
 
+      {/* ── Help tips ────────────────────────────────────────────────────── */}
       <div className="p-3 bg-gray-50 rounded-xl text-xs text-gray-500 space-y-1">
         <p className="font-medium text-gray-600">没有收到验证码？</p>
         <p>· 确认您已在 CQU 自服务中心点击「发送验证邮件」</p>
-        <p>· 邮件通常在 1 分钟内到达；如超时可在 CQU 页面重新发送</p>
-        <p>· 此页面保持打开，新验证码到达后会自动更新</p>
+        <p>· 邮件通常在 1 分钟内到达，验证码有效期约 10 分钟</p>
+        <p>· 如超时可在 CQU 页面重新发送，新验证码到达后会自动更新</p>
       </div>
 
       <div className="flex gap-3">
         <button
           type="button"
           onClick={onNext}
-          className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+          disabled={!bindAddress || addrLoading}
+          className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-sm font-medium rounded-lg transition-colors"
         >
           已在 CQU 完成验证，继续
         </button>
@@ -528,10 +519,10 @@ function Step3AwaitCode({ onNext }: { onNext: () => void }) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Step 4 — Enter CQU credentials
+// Step 3 — Enter CQU credentials
 // ────────────────────────────────────────────────────────────────────────────
 
-function Step4Credentials({ onSuccess }: { onSuccess: (studentId: string) => void }) {
+function Step3Credentials({ onSuccess }: { onSuccess: (studentId: string) => void }) {
   const [studentId, setStudentId] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -671,10 +662,10 @@ function Step4Credentials({ onSuccess }: { onSuccess: (studentId: string) => voi
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Step 5 — Done
+// Step 4 — Done
 // ────────────────────────────────────────────────────────────────────────────
 
-function Step5Done({ studentId }: { studentId: string }) {
+function Step4Done({ studentId }: { studentId: string }) {
   const [bindStatus, setBindStatus] = useState<BindStatusResponse | null>(null);
 
   useEffect(() => {
@@ -761,7 +752,7 @@ export default function CquBindWizard() {
   const [bindAddress, setBindAddress] = useState("");
   const [boundStudentId, setBoundStudentId] = useState("");
 
-  const goNext = () => setStep((s) => Math.min(s + 1, 5) as Step);
+  const goNext = () => setStep((s) => Math.min(s + 1, 4) as Step);
 
   return (
     <Layout>
@@ -782,22 +773,21 @@ export default function CquBindWizard() {
           <div>
             {step === 1 && <Step1Intro onNext={goNext} />}
             {step === 2 && (
-              <Step2Address
+              <Step2AddressAndCode
                 onNext={goNext}
                 bindAddress={bindAddress}
                 setBindAddress={setBindAddress}
               />
             )}
-            {step === 3 && <Step3AwaitCode onNext={goNext} />}
-            {step === 4 && (
-              <Step4Credentials
+            {step === 3 && (
+              <Step3Credentials
                 onSuccess={(sid) => {
                   setBoundStudentId(sid);
                   goNext();
                 }}
               />
             )}
-            {step === 5 && <Step5Done studentId={boundStudentId} />}
+            {step === 4 && <Step4Done studentId={boundStudentId} />}
           </div>
         </div>
       </div>
