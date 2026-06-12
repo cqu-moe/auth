@@ -96,6 +96,19 @@ export class CquSessionDO extends DurableObject<Env> {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+
+    // WS 升级分支(在 action switch 之前): 浏览器在绑定 onboarding 期间连上来等
+    // bind_confirm 码秒推。用 Hibernatable WebSocket — 接受 server 端后即可忘掉,
+    // DO 被驱逐也能存活, 唤醒后由 webSocket* 回调处理。鉴权/路由(只有正确用户的
+    // 浏览器能到达本 DO)由 Worker route(Task 6.2)负责; 本 DO 已按 idFromName(userId)
+    // 按用户寻址, 这里只管 accept。
+    if (request.headers.get("Upgrade") === "websocket") {
+      const pair = new WebSocketPair();
+      // pair[1] 是 server 端 — 交给 DO 托管(hibernatable); pair[0] 返回给客户端。
+      this.ctx.acceptWebSocket(pair[1]);
+      return new Response(null, { status: 101, webSocket: pair[0] });
+    }
+
     const action = url.pathname.split("/").pop();
 
     try {
@@ -146,6 +159,41 @@ export class CquSessionDO extends DurableObject<Env> {
       const message = e instanceof Error ? e.message : "Internal error";
       const code = e instanceof CquSsoError ? e.code : "INTERNAL_ERROR";
       return Response.json({ error: message, code }, { status: 500 });
+    }
+  }
+
+  // --- Hibernatable WebSocket 回调 ---
+  // 浏览器只 RECEIVE(bind_code 由 depositCode 主动 send), 这里的入站消息无业务用途。
+  // 签名对齐 @cloudflare/workers-types DurableObject 接口。
+
+  /** 客户端入站消息: 无业务语义(浏览器只收), 收到即丢弃。 */
+  async webSocketMessage(
+    _ws: WebSocket,
+    _message: string | ArrayBuffer
+  ): Promise<void> {
+    // no-op: 浏览器仅作为 bind_code 的接收端。
+  }
+
+  /** 连接关闭: 尽力回关一次, 让 hibernatable socket 干净下线。 */
+  async webSocketClose(
+    ws: WebSocket,
+    code: number,
+    _reason: string,
+    _wasClean: boolean
+  ): Promise<void> {
+    try {
+      ws.close(code, "client closed");
+    } catch {
+      // 已关闭/无法关闭: 忽略。
+    }
+  }
+
+  /** 连接出错: 尽力关闭, 不抛出。 */
+  async webSocketError(ws: WebSocket, _error: unknown): Promise<void> {
+    try {
+      ws.close(1011, "ws error");
+    } catch {
+      // 忽略。
     }
   }
 
@@ -266,13 +314,22 @@ export class CquSessionDO extends DurableObject<Env> {
     }
 
     if (kind === "bind_confirm") {
+      // 暂存: 浏览器若连接略晚(WS 还没建好), 仍能事后读到(Task 6.2 加读路径)。
       const pending: PendingCode = {
         code,
         kind,
         expiresAt: Date.now() + PENDING_CODE_TTL_MS,
       };
       await this.ctx.storage.put("pendingCode", pending);
-      // TODO Phase 6: push to browser over WebSocket
+      // 秒推所有已连接的浏览器(hibernatable WS)。send 失败(连接已断/正在关闭)忽略,
+      // pendingCode 兜底。
+      for (const ws of this.ctx.getWebSockets()) {
+        try {
+          ws.send(JSON.stringify({ type: "bind_code", code, ts: Date.now() }));
+        } catch {
+          // 忽略单个 socket 的发送失败, 不影响其它 socket 与暂存。
+        }
+      }
       return;
     }
 
