@@ -258,8 +258,8 @@ function Step2Address({
     fetch("/api/cqu/bind/address", { method: "POST", credentials: "include" })
       .then(async (res) => {
         if (!res.ok) {
-          const data = await res.json().catch(() => ({})) as { error?: string };
-          throw new Error(data.error ?? "获取地址失败，请稍后重试");
+          const data = await res.json().catch(() => ({})) as { detail?: { error?: { message?: string } } };
+          throw new Error(data.detail?.error?.message ?? "获取地址失败，请稍后重试");
         }
         return res.json() as Promise<BindAddressResponse>;
       })
@@ -351,6 +351,9 @@ function Step3AwaitCode({ onNext }: { onNext: () => void }) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
+  // Ref mirror of `code` so the `connect` callback (dep array []) can read the
+  // current value without capturing a stale closure.
+  const codeRef = useRef("");
 
   const connect = useCallback(() => {
     if (!mountedRef.current) return;
@@ -372,6 +375,7 @@ function Step3AwaitCode({ onNext }: { onNext: () => void }) {
       try {
         const msg = JSON.parse(evt.data as string) as { type: string; code?: string; ts?: number };
         if (msg.type === "bind_code" && msg.code) {
+          codeRef.current = msg.code;
           setCode(msg.code);
           setCodeTs(msg.ts ?? Date.now());
         }
@@ -381,9 +385,15 @@ function Step3AwaitCode({ onNext }: { onNext: () => void }) {
     };
 
     ws.onclose = () => {
-      if (!mountedRef.current) return;
+      // Stop reconnecting once unmounted or once a code has been received.
+      // Use codeRef (not the `code` state) because this callback is closed over
+      // the initial empty string due to useCallback([]).
+      if (!mountedRef.current || codeRef.current) {
+        setWsState("closed");
+        return;
+      }
       setWsState("closed");
-      // reconnect after 3 s unless unmounted
+      // reconnect after 3 s unless unmounted or code already in hand
       reconnectTimer.current = setTimeout(() => {
         if (mountedRef.current) connect();
       }, 3000);
@@ -551,7 +561,10 @@ function Step4Credentials({ onSuccess }: { onSuccess: (studentId: string) => voi
         signal: abortRef.current.signal,
       });
 
-      const data = await res.json() as { success?: boolean; error?: string; code?: string };
+      const data = await res.json() as {
+        success?: boolean;
+        detail?: { error?: { code?: string; message?: string } };
+      };
 
       if (res.ok && data.success) {
         onSuccess(studentId);
@@ -565,10 +578,12 @@ function Step4Credentials({ onSuccess }: { onSuccess: (studentId: string) => voi
         BIND_ACTIVATE_FAILED: "首次登录成功，但激活状态写入失败，请稍后重试",
         MISSING_FIELDS: "请填写学号和密码",
       };
+      const errCode = data.detail?.error?.code;
+      const errMessage = data.detail?.error?.message;
       setError(
-        (data.code && codeMessages[data.code])
-          ? codeMessages[data.code]
-          : data.error ?? "绑定失败，请检查学号和密码"
+        (errCode && codeMessages[errCode])
+          ? codeMessages[errCode]
+          : errMessage ?? "绑定失败，请检查学号和密码"
       );
     } catch (err) {
       if ((err as { name?: string }).name === "AbortError") return;
