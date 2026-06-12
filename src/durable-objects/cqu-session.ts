@@ -11,6 +11,8 @@ import type { Env } from "../types";
 const KEEPALIVE_INTERVAL_MS = 15 * 60 * 1000;
 const RETRY_INTERVAL_MS = 60 * 1000;
 const MAX_FAST_RETRIES = 5;
+// TGT 绝对寿命 ~8h；在 7h 处主动重铸, 留 ~1h 余量给重登流程(容器点火 + 发码 + 邮件到达 + 提交)。
+const PROACTIVE_RELOGIN_MS = 7 * 60 * 60 * 1000;
 const DUMMY_SERVICE = "https://my.cqu.edu.cn/authserver/authentication/cas";
 
 export const SERVICE_URLS: Record<string, string> = {
@@ -45,6 +47,21 @@ interface LoginInFlight {
   startedAt: number;
 }
 
+// 绑定确认码暂存(kind=bind_confirm)。Phase 6 经 WS 推浏览器后清除。
+interface PendingCode {
+  code: string;
+  kind: string;
+  expiresAt: number;
+}
+
+// CF Email Routing 提码后投递的载荷(见 src/email-handler.ts)。
+interface DepositCodePayload {
+  code: string;
+  kind: "login_2fa" | "bind_confirm";
+  sender?: string;
+  ts?: number;
+}
+
 // 容器 /run 的返回(见 container/server.py + cqu_login.run_login)。
 interface ContainerRunResult {
   ok: boolean;
@@ -52,6 +69,9 @@ interface ContainerRunResult {
   ticket?: string;
   error?: string;
 }
+
+// 暂存的绑定码 TTL: 2FA 邮件本身约 2min 有效, 暂存 5min 足够覆盖 WS 推送窗口。
+const PENDING_CODE_TTL_MS = 5 * 60 * 1000;
 
 export class CquSessionDO extends DurableObject<Env> {
   private state: SessionState | null = null;
@@ -104,6 +124,11 @@ export class CquSessionDO extends DurableObject<Env> {
             return Response.json({ error: "Missing service" }, { status: 400 });
           const ticket = await this.getServiceTicket(service);
           return Response.json({ ticket });
+        }
+        case "deposit-code": {
+          const body = await request.json<DepositCodePayload>();
+          await this.depositCode(body);
+          return Response.json({ success: true });
         }
         case "status": {
           const status = await this.getStatusResponse();
@@ -182,6 +207,67 @@ export class CquSessionDO extends DurableObject<Env> {
     return this.ssoClient.getServiceTicket(this.state.cookies, serviceUrl);
   }
 
+  /**
+   * CF Email Routing 提码后投递点(见 src/email-handler.ts POST /deposit-code)。
+   * 按 kind 分流:
+   *   - login_2fa  : 把码推给在途容器 /run(凭 loginInFlight.token 作 session 键路由)。
+   *                  无在途登录则记日志并忽略(迟到/无主码)。
+   *   - bind_confirm: 暂存 pendingCode(Phase 6 经 WS 秒推浏览器)。
+   */
+  private async depositCode(payload: DepositCodePayload): Promise<void> {
+    await this.loadState();
+    const { code, kind } = payload;
+
+    if (kind === "login_2fa") {
+      const lock = await this.ctx.storage.get<LoginInFlight>("loginInFlight");
+      if (!lock) {
+        console.warn(
+          `[CquSession] login_2fa code arrived but no login in flight, ignoring`
+        );
+        return;
+      }
+      const userId = this.state?.userId;
+      if (!userId) {
+        console.warn(
+          `[CquSession] login_2fa code arrived but no session state, ignoring`
+        );
+        return;
+      }
+      try {
+        const stub = this.getLoginContainer(userId);
+        const res = await stub.fetch(
+          new Request("https://c/code", {
+            method: "POST",
+            body: JSON.stringify({ session: lock.token, code }),
+          })
+        );
+        if (!res.ok) {
+          console.error(
+            `[CquSession] container /code returned non-ok status=${res.status}`
+          );
+        }
+      } catch (e) {
+        console.error(
+          `[CquSession] failed to push login_2fa code to container: ${errMsg(e)}`
+        );
+      }
+      return;
+    }
+
+    if (kind === "bind_confirm") {
+      const pending: PendingCode = {
+        code,
+        kind,
+        expiresAt: Date.now() + PENDING_CODE_TTL_MS,
+      };
+      await this.ctx.storage.put("pendingCode", pending);
+      // TODO Phase 6: push to browser over WebSocket
+      return;
+    }
+
+    console.warn(`[CquSession] deposit-code unknown kind: ${kind}`);
+  }
+
   private async getStatusResponse(): Promise<Record<string, unknown>> {
     await this.loadState();
     const status = await this.getStatus();
@@ -209,6 +295,21 @@ export class CquSessionDO extends DurableObject<Env> {
     const status = await this.getStatus();
     // 已撤销/未绑定的会话不再保活。
     if (status === "revoked" || status === "unbound") return;
+
+    // 主动重登: TGT 接近 ~8h 硬上限前(+7h)且当前 active, 提前重铸, 避免热路径在过期窗口取不到 ST。
+    if (
+      status === "active" &&
+      this.state.loginAt > 0 &&
+      Date.now() - this.state.loginAt >= PROACTIVE_RELOGIN_MS
+    ) {
+      console.info(
+        `[CquSession] ${this.state.studentId}: TGT age >= 7h, proactive relogin`
+      );
+      await this.relogin();
+      // relogin 内部已更新状态; 重新排 alarm 继续保活循环。
+      await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
+      return;
+    }
 
     const outcome = await this.runKeepAlive();
 
