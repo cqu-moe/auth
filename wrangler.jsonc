@@ -8,7 +8,7 @@
   "placement": { "hostname": "sso.cqu.edu.cn" },
 
   "vars": {
-    "BIND_EMAIL_DOMAIN": "bind.cqu-moe-inbox.com"
+    "BIND_EMAIL_DOMAIN": "cquotp.com"
   },
 
   "assets": {

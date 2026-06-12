@@ -24,7 +24,7 @@
 ### Task 0.1: 验证 CQU 密保邮箱接受外部域
 > ✅ **已确认（用户实测）**：CQU 密保邮箱接受外部域 → "直设专属地址"方案成立，无需降级转发。
 - 用真实账号登录 `self.cqu.edu.cn/cas-success/safe-center/bind-email-password/bind`，尝试把密保邮箱设为一个你控制的外部域地址（如 `probe@<你的测试域>`）。
-- **验证**：能否提交并收到"密保邮箱绑定验证码"邮件。✅ 已有真实样本（`密保邮箱绑定验证码.eml`，发件 `sso@cqu.edu.cn`，6 位码，TTL 2min）→ 基本确认可行，但需确认 `@bind.cqu-moe-inbox.com` 这类**你将用的真实域**不被拒。
+- **验证**：能否提交并收到"密保邮箱绑定验证码"邮件。✅ 已有真实样本（`密保邮箱绑定验证码.eml`，发件 `sso@cqu.edu.cn`，6 位码，TTL 2min）→ 基本确认可行，但需确认 `@cquotp.com` 这类**你将用的真实域**不被拒。
 - **失败应对**：若限制域 → 改走 §转发模式（用户保留自己邮箱 + 转发规则）为主。
 
 ### Task 0.2: 验证 CF Email Routing 对 SPF-fail 邮件的投递行为
@@ -41,7 +41,7 @@
 - 记录到设计文档 §11.5 / §12。
 
 ### Task 0.4: 选定专用收信域/zone
-- **勿在 cqu.moe 顶级开 catch-all**（会劫持现有 @cqu.moe 收信）。选一个专用 zone（如子域 `bind.cqu-moe-inbox.com` 独立 MX，或单独域名）。
+- **勿在 cqu.moe 顶级开 catch-all**（会劫持现有 @cqu.moe 收信）。选一个专用 zone（如子域 `cquotp.com` 独立 MX，或单独域名）。
 - 在 CF 开 Email Routing + catch-all，确认 MX 生效（`dig MX`）。
 
 ---
@@ -104,10 +104,10 @@ import { localPart } from "./address";
 
 describe("localPart", () => {
   it("extracts local part, lowercased", () => {
-    expect(localPart("AbC123@bind.cqu-moe-inbox.com")).toBe("abc123");
+    expect(localPart("AbC123@cquotp.com")).toBe("abc123");
   });
   it("strips +subaddressing", () => {
-    expect(localPart("tok+anything@bind.cqu-moe-inbox.com")).toBe("tok");
+    expect(localPart("tok+anything@cquotp.com")).toBe("tok");
   });
   it("returns empty for malformed", () => {
     expect(localPart("not-an-email")).toBe("");
@@ -474,7 +474,7 @@ export default {
 - 用 `密保邮箱绑定验证码.eml` 的内容 POST 到本地 email 端点：
   ```bash
   curl -X POST 'http://localhost:8787/cdn-cgi/handler/email' \
-    --url-query 'from=sso@cqu.edu.cn' --url-query 'to=testtok@bind.cqu-moe-inbox.com' \
+    --url-query 'from=sso@cqu.edu.cn' --url-query 'to=testtok@cquotp.com' \
     --header 'Content-Type: application/json' --data-binary @/Users/uu/Downloads/密保邮箱绑定验证码.eml
   ```
 - Expected: handler 解析出 `{code:"943754", kind:"bind_confirm"}` 并尝试 `CQU_SESSION.deposit-code`（DO 此时可能未实现 deposit-code → 看日志确认提码正确即可）。
@@ -622,7 +622,7 @@ export class CquLoginContainer extends Container<Env> {
 - commit `feat(do): hibernatable WS to push bind confirmation code to browser`
 
 ### Task 6.2: 绑定 onboarding 路由 + 前端页
-- Create `src/routes/cqu-bind.ts`：`POST /api/cqu/bind-address`（签发 `<token>@bind.cqu-moe-inbox.com`，D1 写 pending）、`GET /api/cqu/bind-status`、WS 升级端点 `/api/cqu/bind-ws`。
+- Create `src/routes/cqu-bind.ts`：`POST /api/cqu/bind-address`（签发 `<token>@cquotp.com`，D1 写 pending）、`GET /api/cqu/bind-status`、WS 升级端点 `/api/cqu/bind-ws`。
 - 前端 `frontend/src/` 加绑定页：显示专属地址 + 引导文案（去 CQU 设密保邮箱）+ WS 连接显示收到的确认码。
 - 手动 e2e：真实账号走完 §设计 §9 五步。
 - commit `feat(bind): onboarding flow + WS bind-code UI`
