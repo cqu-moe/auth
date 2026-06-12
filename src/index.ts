@@ -50,3 +50,4 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 export { CquSessionDO } from "./durable-objects/cqu-session";
+export { CquLoginContainer } from "./durable-objects/cqu-login-container";
