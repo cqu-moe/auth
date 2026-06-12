@@ -5,6 +5,9 @@ describe("nextStatus", () => {
   it("binding -> active on confirm+first login", () => {
     expect(nextStatus("binding", "FIRST_LOGIN_OK")).toBe("active");
   });
+  it("binding -> unbound on first login failure", () => {
+    expect(nextStatus("binding", "FIRST_LOGIN_FAIL")).toBe("unbound");
+  });
   it("active -> relogging on relogin trigger", () => {
     expect(nextStatus("active", "RELOGIN_START")).toBe("relogging");
   });

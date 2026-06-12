@@ -4,6 +4,7 @@ import { decrypt } from "../services/crypto";
 import {
   nextStatus,
   type CquStatus,
+  type CquEvent,
 } from "../services/cqu-2fa/state-machine";
 import { shouldStartLogin } from "../services/cqu-2fa/single-flight";
 import type { Env } from "../types";
@@ -178,8 +179,18 @@ export class CquSessionDO extends DurableObject<Env> {
         consecutiveFailures: 0,
       };
       await this.setStatus("binding");
-      const ok = await this.containerLogin("FIRST_LOGIN_OK");
-      if (!ok) {
+      const outcome = await this.containerLogin(
+        "FIRST_LOGIN_OK",
+        "FIRST_LOGIN_FAIL"
+      );
+      if (outcome === "in_flight") {
+        // 已有在途首登(如重复提交), 让它跑完; 不当失败回滚, 也不谎报成功。
+        return {
+          success: false,
+          error: "CQU 登录正在进行中（请勿重复提交）",
+        };
+      }
+      if (outcome === "failed") {
         return { success: false, error: "CQU 登录失败（容器登录未成功）" };
       }
       await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
@@ -374,24 +385,27 @@ export class CquSessionDO extends DurableObject<Env> {
   }
 
   /**
-   * 容器驱动的重登。single-flight 保护: 已有在途登录(锁未过期)直接返回, 避免并发点火多个容器。
+   * 容器驱动的重登。single-flight 保护已下沉到 containerLogin: 已有在途登录(锁未过期)时
+   * containerLogin 返回 "in_flight", 不点火第二个容器、不重设锁。
    * 解密存储的密码 → 调容器 /run 铸新 TGT → 成功落 cookies + loginAt + RELOGIN_OK(→ active);
    * 失败落 RELOGIN_FAIL(→ expired)。锁无论成败都清掉。
    */
   private async relogin(): Promise<void> {
     if (!this.state) throw new Error("No state");
-    const existing = await this.ctx.storage.get<LoginInFlight>("loginInFlight");
-    if (!shouldStartLogin(existing ?? null, Date.now())) {
-      // 已有在途登录, 让它跑完即可。
+    const outcome = await this.containerLogin(
+      "RELOGIN_OK",
+      "RELOGIN_FAIL",
+      // RELOGIN_START 仅在真正发起新登录时推进状态(active/expired → relogging);
+      // 命中在途锁则不动状态, 让在途登录自己收尾。
+      "RELOGIN_START"
+    );
+    if (outcome === "in_flight") {
       console.info(
         `[CquSession] ${this.state.studentId}: relogin already in flight, skip`
       );
       return;
     }
-    const status = await this.getStatus();
-    await this.setStatus(nextStatus(status, "RELOGIN_START"));
-    const ok = await this.containerLogin("RELOGIN_OK");
-    if (!ok) {
+    if (outcome === "failed") {
       // containerLogin 失败时已把状态推到 RELOGIN_FAIL(→ expired) 并清锁。
       console.error(`[CquSession] ${this.state.studentId}: relogin failed`);
     }
@@ -399,18 +413,44 @@ export class CquSessionDO extends DurableObject<Env> {
 
   /**
    * 调容器 /run 跑一次完整浏览器登录(首登 / 重登共用)。
+   *
+   * single-flight 在此集中: 先从 storage 读最新锁, 若已有「活的、未过期」在途登录
+   * (shouldStartLogin === false) 则返回 "in_flight", 不点火第二个容器、不覆盖锁,
+   * 这样 init()→containerLogin 与 relogin()→containerLogin 都能抵御重复触发
+   * (如绑定时的双击提交)。
+   *
    * 设置 single-flight 锁(token 作容器 session 键, deposit-code 凭它路由 2FA 码),
-   * 解密密码 → POST /run → 成功落 cookies + loginAt + `okEvent`; 失败 RELOGIN_FAIL。
-   * 锁无论成败都清。返回是否成功。
+   * 解密密码 → POST /run → 成功落 cookies + loginAt + `okEvent`; 失败走 `failEvent`。
+   * 锁无论成败都清。
+   *
+   * @param startEvent 真正发起新登录前推进状态机的事件(如 RELOGIN_START → relogging);
+   *                   命中在途锁时不会触发, 避免无谓的状态翻动。
+   * @returns "in_flight" 已有在途登录(未做任何改动) | "ok" 成功 | "failed" 失败
    */
   private async containerLogin(
-    okEvent: "FIRST_LOGIN_OK" | "RELOGIN_OK"
-  ): Promise<boolean> {
+    okEvent: "FIRST_LOGIN_OK" | "RELOGIN_OK",
+    failEvent: "FIRST_LOGIN_FAIL" | "RELOGIN_FAIL",
+    startEvent?: CquEvent
+  ): Promise<"in_flight" | "ok" | "failed"> {
     const state = this.state!;
+
+    // single-flight 守卫: 读最新锁, 活锁在途则直接退出, 不抢锁、不二次发码。
+    const existingLock =
+      await this.ctx.storage.get<LoginInFlight>("loginInFlight");
+    if (!shouldStartLogin(existingLock ?? null, Date.now())) {
+      return "in_flight";
+    }
+
     const creds = await this.ctx.storage.get<StoredCredentials>("credentials");
     if (!creds) {
-      await this.failLogin();
+      await this.failLogin(failEvent);
       throw new Error("No stored credentials");
+    }
+
+    // 确认要发起新登录后再推进状态机(如 RELOGIN_START → relogging)。
+    if (startEvent) {
+      const status = await this.getStatus();
+      await this.setStatus(nextStatus(status, startEvent));
     }
 
     const token = crypto.randomUUID();
@@ -438,31 +478,40 @@ export class CquSessionDO extends DurableObject<Env> {
       );
       const result = await res.json<ContainerRunResult>();
       if (!res.ok || !result.ok || !result.cookies) {
-        await this.failLogin();
-        return false;
+        await this.failLogin(failEvent);
+        return "failed";
       }
 
-      state.cookies = result.cookies;
-      state.loginAt = Date.now();
-      state.lastKeepAlive = Date.now();
-      await this.ctx.storage.put("state", state);
+      // I2: /run 阻塞期间(可达 ~5min)其它请求(如 getServiceTicket)可能已更新过
+      // state.lastRequestedAt 并落盘。不要用 await 之前抓取的快照整盘覆盖, 而是
+      // 重读最新 state 后只改 cookie/loginAt/lastKeepAlive 这几个本次登录拥有的字段。
+      const fresh =
+        (await this.ctx.storage.get<SessionState>("state")) ?? state;
+      const now = Date.now();
+      fresh.cookies = result.cookies;
+      fresh.loginAt = now;
+      fresh.lastKeepAlive = now;
+      this.state = fresh;
+      await this.ctx.storage.put("state", fresh);
       const status = await this.getStatus();
       await this.setStatus(nextStatus(status, okEvent));
       await this.ctx.storage.delete("loginInFlight");
-      return true;
+      return "ok";
     } catch (e) {
       console.error(
         `[CquSession] ${state.studentId}: container login error: ${errMsg(e)}`
       );
-      await this.failLogin();
-      return false;
+      await this.failLogin(failEvent);
+      return "failed";
     }
   }
 
-  /** 登录失败收尾: 状态机 RELOGIN_FAIL(→ expired) + 清 single-flight 锁。 */
-  private async failLogin(): Promise<void> {
+  /** 登录失败收尾: 按 `failEvent` 推进状态机(首登→unbound / 重登→expired) + 清 single-flight 锁。 */
+  private async failLogin(
+    failEvent: "FIRST_LOGIN_FAIL" | "RELOGIN_FAIL"
+  ): Promise<void> {
     const status = await this.getStatus();
-    await this.setStatus(nextStatus(status, "RELOGIN_FAIL"));
+    await this.setStatus(nextStatus(status, failEvent));
     await this.ctx.storage.delete("loginInFlight");
   }
 
