@@ -6,13 +6,23 @@
 
 ## 0. ✅ 已部署 + 已迁移 + PR 已开（session-2 两轮收尾，用户授权）
 
-**生产当前版本 = `62b85cfc`**（2026-06-13 13:24 部署）。本 feature 全部功能 + 本轮收尾（forward 模式、bound_at 修复、限频/告警、审计修复、可观测性、MEDIUM-1 deposit 投递可观测、wizard 文案、expiry 取证诊断）**全部上线**。迁移 `0003` 已 `apply --remote`（bound_at 脏行订正、复验 0 dirty）。
-**分支收尾 = PR #4**（https://github.com/cqu-moe/auth/pull/4，feat/cqu-2fa-email-rebind → main，48 commit，**留人工审阅合并**；不直接合以避开失败的 CF 容器构建）。
+**生产当前版本 = `b0301f99`**（2026-06-13 晚最新）。本 feature 全部 + 本轮所有收尾均上线：bound_at 修复、限频/告警、审计修复、可观测性、expiry 取证诊断、MEDIUM-1 deposit 可观测、wizard 文案、容器登录失败诊断、**forward 模式已禁用**、**unbind/revoke/un-revoke**、**Settings 绑定区块重写**。迁移 `0003` 已 `apply --remote`（bound_at 0 dirty）。
+
+**本轮关键决策与发现（重要）**：
+- **🔴 转发模式已禁用**（前端选项置灰不可选 + 后端 `/address` 对 `kind=forward` 返 403）。真实样本实测：Fastmail "Send a copy to" 是**真转发、保留 envelope=`sso@cqu.edu.cn`**（非 SRS，**推翻原"转发必被 SRS 改写"假设**）；但**码没在容器 570s 窗口内送达**（CQU 22:33 即发到用户邮箱、容器 22:43 报 `code never arrived`；疑 CF 邮件闸拒收无 DKIM 的转发件、或 Fastmail 转发太慢）。根因：**2FA 码 600s 硬有效期 + 转发多一跳 → forward 对"限时取码登录"不可靠**。代码保留（forward 白名单已改双源 §3），待更快/可靠的转发方案（如 Fastmail 账户级原生 Forwarding，DKIM 重签 + 即时）再开。
+- **解绑/吊销三件套**（后端齐；前端按用户要求只做 unbind）：
+  - **unbind**（用户自助彻底删）：`POST /api/cqu/bind/unbind` = 删 cqu_credentials + cqu_bind_addresses + DO destroy。Settings "解除绑定"调它。
+  - **revoke**（admin 禁用、留墓碑）：`POST /api/admin/users/:id/revoke-cqu` = D1 status→revoked + DO revoke(setStatus revoked + deleteAlarm + 清 loginInFlight，**保留**凭证/state)。
+  - **un-revoke**（admin 恢复）：`POST /api/admin/users/:id/unrevoke-cqu` = D1 status→active + DO unrevoke(setStatus expired + setAlarm now → 用保留凭证自愈)。
+  - 语义：unbind=删光 / revoke=禁用留墓碑 / un-revoke=恢复。三者自洽。两个 admin 端点查了 DO `res.ok`，避免半撤销谎报成功。
+- **Settings 绑定区块重写**（原是旧死逻辑：内联学号/密码 → 已废弃的纯 fetch `POST /api/cqu/bind`）。现：展示**专属邮箱地址(可复制)** + "绑定"跳向导 `/cqu/bind` + "解除绑定"调 unbind + 会话状态三态徽标。个人信息/修改密码区块未动。
+- **用户本人已切回 direct**（CQU 密保邮箱直连 `3fl0jmlb3dyt76lq@cquotp.com`、撤掉 Fastmail 转发规则）——direct 稳。
 
 **仍待办（需用户动作 / 需时间）**：
-1. **🟢 转发模式真实样本**（需你动作）：上线给真实用户前，用一封真实转发的 CQU 邮件发到某 forward token 地址，抓 `email.from` 实际形状（SRS 改写/Reply-To）后定校验——见 §3。forward 是 opt-in，没人用之前不影响 direct。
-2. **🔵 会话频繁 expired 根因**（需静置采数据）：取证诊断已上线（`new TGT exp=<iso>` 登录时打、`probe says expired: ... page=cas-login|waf-challenge` 过期时打）。**关键操作纪律：别再频繁部署**——本轮 4 次部署反复打断在途重登、制造了虚假高频（见 §2）；让系统静置几个周期，再看诊断日志判定是"定点过期"/"瑞数误判"/"真 TGT 短命"。限频 6/h + 连续失败告警已兜底防失控。
-3. **⚪ PR #4 合并**：人工审阅后合并（合并/push main 会触发一次失败的 CF 容器构建，不影响手动部署的 prod）。
+1. **🔵 会话频繁 expired 根因**（需静置采数据，最高优先）：取证诊断已上线（登录打 `new TGT exp=<iso>`、过期打 `probe says expired: ... page=cas-login|waf-challenge`）。疑"**定点过期**"（用户提示：按固定时刻而非时长过期；某次测试 8h 没过期）。**操作纪律：别频繁部署**（会打断在途重登造假高频）。限频 6/h + 连续失败告警兜底。用户已在 direct，会话可用（重登能成），只是 churn 偏多。静置后看 `new TGT exp` 的确切过期时刻能直接验证定点假设。
+2. **🔴 转发模式重开**（已禁用，见上"关键发现"）：重开前必须解决投递可靠性——码要在容器 570s 内到。试 Fastmail 账户级原生 Forwarding（DKIM 重签+即时）或其它即时转发；确认 CF 闸不拒。代码已留（白名单双源 §3、前端置灰、后端 403）。
+3. **⚪ PR #4 已过时 + 合并 main**：PR #4（github.com/cqu-moe/auth/pull/4）创建于早期 commit，**缺本轮 forward-禁用 / unbind/revoke / Settings 等改动**——需 `git push` 更新分支（或重建 PR）。合并/push main 会触发失败的 CF 容器构建（不影响手动部署 prod）。
+4. **⚪ 旧端点清理**：`cqu.ts` 的旧 `DELETE /api/cqu/bind`（漏删 cqu_bind_addresses）+ 旧 `POST/PUT /bind`（纯 fetch 登录，已废弃不可用）可日后删。
 
 ```bash
 # 运维参考（如需再次部署——但排查 expiry 期间应尽量少部署）：
