@@ -193,7 +193,8 @@ interface LiveCode {
   id: number;
   type: "login_2fa" | "bind_code";
   code: string;
-  ts: number;
+  ts: number;        // 原始收码时刻，仅用于「到达时间」展示
+  deadline: number;  // Date.now() + remainingMs，本地时钟 deadline，用于倒计时
   expired?: boolean;
 }
 
@@ -207,11 +208,10 @@ function formatTime(ts: number): string {
   return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-function CodeCountdown({ ts, onExpire }: { ts: number; onExpire?: () => void }) {
-  const [secondsLeft, setSecondsLeft] = useState<number>(() => {
-    const elapsed = Math.floor((Date.now() - ts) / 1000);
-    return Math.max(600 - elapsed, 0);
-  });
+function CodeCountdown({ deadline, onExpire }: { deadline: number; onExpire?: () => void }) {
+  const [secondsLeft, setSecondsLeft] = useState<number>(() =>
+    Math.max(0, Math.round((deadline - Date.now()) / 1000))
+  );
   const expiredFiredRef = useRef(false);
   // 用 ref 持有最新 onExpire，避免 callback identity 变化重置 expiredFiredRef
   const onExpireRef = useRef(onExpire);
@@ -220,8 +220,7 @@ function CodeCountdown({ ts, onExpire }: { ts: number; onExpire?: () => void }) 
   useEffect(() => {
     expiredFiredRef.current = false;
     const update = () => {
-      const elapsed = Math.floor((Date.now() - ts) / 1000);
-      const left = Math.max(600 - elapsed, 0);
+      const left = Math.max(0, Math.round((deadline - Date.now()) / 1000));
       setSecondsLeft(left);
       if (left === 0 && !expiredFiredRef.current) {
         expiredFiredRef.current = true;
@@ -231,7 +230,7 @@ function CodeCountdown({ ts, onExpire }: { ts: number; onExpire?: () => void }) 
     update();
     const t = setInterval(update, 1000);
     return () => clearInterval(t);
-  }, [ts]); // onExpire 通过 ref 访问，不需要列为 dep
+  }, [deadline]); // onExpire 通过 ref 访问，不需要列为 dep
 
   const expired = secondsLeft <= 0;
   const m = Math.floor(secondsLeft / 60);
@@ -266,6 +265,7 @@ function LiveCodeSection() {
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(false);
   const openRef = useRef(false);
   const retryCountRef = useRef(0);
@@ -291,27 +291,43 @@ function LiveCodeSection() {
       if (!mountedRef.current) { ws.close(); return; }
       retryCountRef.current = 0; // 连接成功 → 清零重试计数
       setWsState("open");
+      // keepalive：每 30s 发一次 ping，防止代理/CF 因空闲断连
+      if (pingTimer.current) clearInterval(pingTimer.current);
+      pingTimer.current = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send("ping");
+        }
+      }, 30000);
     };
 
     ws.onmessage = (evt) => {
       if (!mountedRef.current) return;
+      // 服务端 keepalive pong（非 JSON），直接忽略
+      if (evt.data === "pong") return;
       try {
         const msg = JSON.parse(evt.data as string) as {
           type: string;
           code?: string;
           ts?: number;
+          remainingMs?: number;
         };
         if (
           (msg.type === "login_2fa" || msg.type === "bind_code") &&
           msg.code
         ) {
+          const deadline = Date.now() + (typeof msg.remainingMs === "number" ? msg.remainingMs : 600000);
           const entry: LiveCode = {
             id: ++liveCodeIdCounter,
             type: msg.type as "login_2fa" | "bind_code",
             code: msg.code,
             ts: msg.ts ?? Date.now(),
+            deadline,
           };
-          setCodes((prev) => [entry, ...prev].slice(0, 3));
+          // 去重：已有相同 code 的卡不再新增（回放/重连不堆重复卡）
+          setCodes((prev) => {
+            if (prev.some((c) => c.code === entry.code)) return prev;
+            return [entry, ...prev].slice(0, 3);
+          });
         }
       } catch {
         // ignore malformed messages
@@ -319,6 +335,7 @@ function LiveCodeSection() {
     };
 
     ws.onclose = () => {
+      if (pingTimer.current) { clearInterval(pingTimer.current); pingTimer.current = null; }
       if (!mountedRef.current) return;
       if (!openRef.current) return;
       // 面板仍展开 → 有限重试（上限 MAX_RETRIES 次）
@@ -353,10 +370,14 @@ function LiveCodeSection() {
     if (open) {
       connect();
     } else {
-      // 折叠 → 关闭 WS 和重连定时器，清零重试计数
+      // 折叠 → 关闭 WS、重连定时器、ping 定时器，清零重试计数
       if (reconnectTimer.current) {
         clearTimeout(reconnectTimer.current);
         reconnectTimer.current = null;
+      }
+      if (pingTimer.current) {
+        clearInterval(pingTimer.current);
+        pingTimer.current = null;
       }
       wsRef.current?.close();
       wsRef.current = null;
@@ -365,6 +386,7 @@ function LiveCodeSection() {
     }
     return () => {
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      if (pingTimer.current) { clearInterval(pingTimer.current); pingTimer.current = null; }
       wsRef.current?.close();
       retryCountRef.current = 0;
     };
@@ -494,7 +516,7 @@ function LiveCodeSection() {
                         <span className="text-xs text-gray-400">{formatTime(item.ts)}</span>
                       </div>
                       <CodeCountdown
-                        ts={item.ts}
+                        deadline={item.deadline}
                         onExpire={() => markExpired(item.id)}
                       />
                     </div>
