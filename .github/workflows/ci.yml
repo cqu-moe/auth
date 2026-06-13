@@ -1,0 +1,48 @@
+name: CI
+
+# 质量门禁：PR（含对 feat 分支已开的 PR #4，每次 push 都会以 synchronize 触发）
+# 与 main 的直接 push 都跑。只做检查，不部署（部署见 deploy.yml，手动触发）。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同一分支的新 push 取消尚在跑的旧 run，省额度。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+
+      - name: Install (root)
+        run: npm ci
+
+      - name: Typecheck (backend)
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Install (frontend)
+        run: npm ci
+        working-directory: frontend
+
+      - name: Typecheck (frontend)
+        run: npx tsc --noEmit
+        working-directory: frontend
+
+      - name: Build (frontend)
+        run: npm run build
+        working-directory: frontend
