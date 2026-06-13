@@ -174,8 +174,8 @@ export class CquSessionDO extends DurableObject<Env> {
         }
         case "deposit-code": {
           const body = await request.json<DepositCodePayload>();
-          await this.depositCode(body);
-          return Response.json({ success: true });
+          const delivered = await this.depositCode(body);
+          return Response.json({ success: true, delivered });
         }
         case "status": {
           const status = await this.getStatusResponse();
@@ -305,8 +305,14 @@ export class CquSessionDO extends DurableObject<Env> {
    *   - login_2fa  : 把码推给在途容器 /run(凭 loginInFlight.token 作 session 键路由)。
    *                  无在途登录则记日志并忽略(迟到/无主码)。
    *   - bind_confirm: 暂存 pendingCode(Phase 6 经 WS 秒推浏览器)。
+   *
+   * @returns delivered —— 码是否真正送达目标:
+   *   - login_2fa  : 仅当(有在途登录锁 && 有 session 状态 && 容器 /code 返回 ok)为 true;
+   *                  无锁/无 state/!res.ok/异常 均 false(码被丢弃, 调用方据此记丢码而非 accepted)。
+   *   - bind_confirm: true(已落 pendingCode 兜底, 即便实时 WS 推送零接收方也不算丢)。
+   *   - 未知 kind   : false。
    */
-  private async depositCode(payload: DepositCodePayload): Promise<void> {
+  private async depositCode(payload: DepositCodePayload): Promise<boolean> {
     await this.loadState();
     const { code, kind } = payload;
 
@@ -316,14 +322,14 @@ export class CquSessionDO extends DurableObject<Env> {
         console.warn(
           `[CquSession] login_2fa code arrived but no login in flight, ignoring`
         );
-        return;
+        return false;
       }
       const userId = this.state?.userId;
       if (!userId) {
         console.warn(
           `[CquSession] login_2fa code arrived but no session state, ignoring`
         );
-        return;
+        return false;
       }
       try {
         const stub = this.getLoginContainer(userId);
@@ -337,13 +343,15 @@ export class CquSessionDO extends DurableObject<Env> {
           console.error(
             `[CquSession] container /code returned non-ok status=${res.status}`
           );
+          return false;
         }
+        return true;
       } catch (e) {
         console.error(
           `[CquSession] failed to push login_2fa code to container: ${errMsg(e)}`
         );
+        return false;
       }
-      return;
     }
 
     if (kind === "bind_confirm") {
@@ -363,10 +371,11 @@ export class CquSessionDO extends DurableObject<Env> {
           // 忽略单个 socket 的发送失败, 不影响其它 socket 与暂存。
         }
       }
-      return;
+      return true;
     }
 
     console.warn(`[CquSession] deposit-code unknown kind: ${kind}`);
+    return false;
   }
 
   private async getStatusResponse(): Promise<Record<string, unknown>> {

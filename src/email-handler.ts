@@ -225,8 +225,10 @@ export async function handleEmail(
 
   // 投递到用户的 Durable Object —— 复用 src/routes/cqu.ts 的寻址约定：
   // idFromName(userId) → get(id) → fetch(new Request(...))。
-  // deposit-code action 已在 DO 实现（src/durable-objects/cqu-session.ts 的 case "deposit-code"），
-  // 此处 res.ok 反映 DO 是否成功接收该投递请求。
+  // deposit-code action 已在 DO 实现（src/durable-objects/cqu-session.ts 的 case "deposit-code"）。
+  // DO 恒返回 200 {success:true, delivered}；delivered 才反映码是否真送达容器/暂存。
+  // 仅凭 res.ok 会把「DO 收到请求但码被静默 drop」（如 login_2fa 无在途锁）误记为 accepted，
+  // 掩盖丢码——故此处要求 res.ok && body.delivered===true 才算投递成功。
   let depositOk = false;
   try {
     const doId = env.CQU_SESSION.idFromName(bind.userId);
@@ -237,13 +239,21 @@ export async function handleEmail(
         body: JSON.stringify({ ...hit, sender: message.from, ts: Date.now() }),
       })
     );
-    depositOk = res.ok;
-    // 非 2xx：DO 未成功接收投递（码实际未入站），记 error 留痕。
-    if (!res.ok) {
+    // 解析 body 取 delivered；解析失败按未送达处理（false），并在下方 do_deposit 分叉记 error。
+    let delivered = false;
+    try {
+      const body = await res.json<{ delivered?: boolean }>();
+      delivered = body.delivered === true;
+    } catch {
+      // 响应体解析失败：无法确认送达，保守按未送达。
+    }
+    depositOk = res.ok && delivered;
+    // 非 2xx 或码未真送达（delivered!==true）：码实际未入站，记 error 留痕。
+    if (!depositOk) {
       console.error("[email] error", {
         token,
         stage: "do_deposit",
-        message: `deposit-code returned ${res.status}`,
+        message: `deposit-code returned status=${res.status} delivered=${delivered}`,
       });
     }
   } catch (err) {
