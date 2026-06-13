@@ -1,29 +1,35 @@
-name: Deploy
+name: CI / Deploy
 
-# 手动触发部署（Actions 页面点 "Run workflow"）。
-# 选手动而非 push main 自动：排查「会话定点过期」期间需要控制部署节奏，
-# 频繁自动部署会打断在途的容器重登、造成假高频。过期问题解决后可改为
-# on.push.branches=[main] 升级成自动 CD。
+# 每次 push：先过质量门禁，再按分支处理——
+#   main         → D1 迁移 + `wrangler deploy`（生产，接管 100% 流量）
+#   其他分支      → `wrangler versions upload`（上传 0 流量版本，可回滚）
 #
-# 需要的 repo secrets（Settings → Secrets and variables → Actions）：
-#   CLOUDFLARE_API_TOKEN   —— CF API token，权限至少：Workers Scripts:Edit、
-#                             D1:Edit、Cloudflare Containers:Edit（容器镜像推送）。
-#                             可用 "Edit Cloudflare Workers" 模板再补 D1 + Containers。
-#   CLOUDFLARE_ACCOUNT_ID  —— CF 账户 ID。
+# ⚠️ 注意：本 Worker 使用 Durable Objects（CquSessionDO + 容器本身即 DO），
+# Cloudflare **不为使用 DO 的 Worker 生成 preview URL**，故分支版本拿不到可点的
+# 预览链接——versions upload 仅做"构建+上传全链验证 + 可回滚版本"，无法直接访问测试。
+# 要可测试的分支环境只能另建独立预览 Worker（未做）。
 #
-# 容器构建：ubuntu-latest 自带并运行 Docker，`wrangler deploy` 会在 runner 上
-# 构建 linux/amd64 容器镜像并推送，与本地 `npm run deploy` 等价。
+# 容器构建：ubuntu-latest 自带并运行 Docker，wrangler 在 runner 上构建 linux/amd64
+# 容器镜像并推送，与本地 `npm run deploy` 等价。
+#
+# 需要的 repo secrets：CLOUDFLARE_API_TOKEN（Workers Scripts:Edit + D1:Edit +
+# Containers:Edit）、CLOUDFLARE_ACCOUNT_ID。
 on:
+  push:
+    branches: ['**']
   workflow_dispatch:
 
 concurrency:
-  group: deploy-production
-  cancel-in-progress: false
+  group: deploy-${{ github.ref }}
+  # 分支被新 push 取代时取消在跑的旧 run 省额度；生产部署绝不中途取消。
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
 
@@ -35,10 +41,10 @@ jobs:
             package-lock.json
             frontend/package-lock.json
 
+      # ── 质量门禁（任何分支都先过，门禁挂则不部署/不上传）──
       - name: Install (root)
         run: npm ci
 
-      # ── 部署前再过一遍质量门禁，手动部署也不放行坏代码 ──
       - name: Typecheck (backend)
         run: npm run typecheck
 
@@ -53,16 +59,20 @@ jobs:
         run: npx tsc --noEmit
         working-directory: frontend
 
-      # ── 迁移先行：D1 迁移幂等，仅 apply 未应用的（0000-0003 已在 prod，通常 no-op）──
-      - name: Apply D1 migrations (remote)
-        run: npx wrangler d1 migrations apply auth-cqu-moe-db --remote
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Build (frontend)
+        run: npm run build
+        working-directory: frontend
 
-      # ── 构建前端 + wrangler deploy（含容器构建/推送），复用项目 deploy 脚本 ──
-      - name: Build frontend & deploy (Worker + container)
-        run: npm run deploy
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # ── 生产（main）：迁移先行（幂等，仅 apply 未应用的），再部署接管流量 ──
+      - name: Apply D1 migrations (production)
+        if: github.ref == 'refs/heads/main'
+        run: npx wrangler d1 migrations apply auth-cqu-moe-db --remote
+
+      - name: Deploy to production (main)
+        if: github.ref == 'refs/heads/main'
+        run: npx wrangler deploy
+
+      # ── 其他分支：上传 0 流量版本（验证容器构建+上传全链 + 可回滚；无预览 URL）──
+      - name: Upload version, no traffic (non-main)
+        if: github.ref != 'refs/heads/main'
+        run: npx wrangler versions upload
