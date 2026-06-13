@@ -1,4 +1,4 @@
-import { useState, FormEvent, useEffect } from "react";
+import { useState, FormEvent, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
 import Layout from "../components/Layout";
@@ -183,6 +183,291 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// LiveCodeSection — 实时验证码面板（仅 bindStatus === "active" 时渲染）
+// ─────────────────────────────────────────────────────────────────────────────
+
+type WsState = "idle" | "connecting" | "open" | "closed" | "error";
+
+interface LiveCode {
+  id: number;
+  type: "login_2fa" | "bind_code";
+  code: string;
+  ts: number;
+}
+
+function buildWsUrl(): string {
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host}/api/cqu/binding/events`;
+}
+
+function formatTime(ts: number): string {
+  const d = new Date(ts);
+  return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function CodeCountdown({ ts }: { ts: number }) {
+  const [secondsLeft, setSecondsLeft] = useState<number>(() => {
+    const elapsed = Math.floor((Date.now() - ts) / 1000);
+    return Math.max(600 - elapsed, 0);
+  });
+
+  useEffect(() => {
+    const update = () => {
+      const elapsed = Math.floor((Date.now() - ts) / 1000);
+      setSecondsLeft(Math.max(600 - elapsed, 0));
+    };
+    update();
+    const t = setInterval(update, 1000);
+    return () => clearInterval(t);
+  }, [ts]);
+
+  const expired = secondsLeft <= 0;
+  const m = Math.floor(secondsLeft / 60);
+  const s = secondsLeft % 60;
+  const countdown = `${m}:${s.toString().padStart(2, "0")}`;
+
+  if (expired) {
+    return (
+      <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-400">
+        可能已过期
+      </span>
+    );
+  }
+
+  return (
+    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+      secondsLeft <= 60 ? "bg-red-100 text-red-600" : "bg-blue-100 text-blue-700"
+    }`}>
+      {countdown}
+    </span>
+  );
+}
+
+let liveCodeIdCounter = 0;
+
+function LiveCodeSection() {
+  const [open, setOpen] = useState(false);
+  const [wsState, setWsState] = useState<WsState>("idle");
+  const [codes, setCodes] = useState<LiveCode[]>([]);
+
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(false);
+  const openRef = useRef(false);
+
+  // Keep openRef in sync so WS close handler can check whether to reconnect
+  openRef.current = open;
+
+  const connect = useCallback(() => {
+    if (!mountedRef.current || !openRef.current) return;
+    if (
+      wsRef.current &&
+      (wsRef.current.readyState === WebSocket.OPEN ||
+        wsRef.current.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
+
+    setWsState("connecting");
+    const ws = new WebSocket(buildWsUrl());
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      if (!mountedRef.current) { ws.close(); return; }
+      setWsState("open");
+    };
+
+    ws.onmessage = (evt) => {
+      if (!mountedRef.current) return;
+      try {
+        const msg = JSON.parse(evt.data as string) as {
+          type: string;
+          code?: string;
+          ts?: number;
+        };
+        if (
+          (msg.type === "login_2fa" || msg.type === "bind_code") &&
+          msg.code
+        ) {
+          const entry: LiveCode = {
+            id: ++liveCodeIdCounter,
+            type: msg.type as "login_2fa" | "bind_code",
+            code: msg.code,
+            ts: msg.ts ?? Date.now(),
+          };
+          setCodes((prev) => [entry, ...prev].slice(0, 3));
+        }
+      } catch {
+        // ignore malformed messages
+      }
+    };
+
+    ws.onclose = () => {
+      if (!mountedRef.current) return;
+      setWsState("closed");
+      if (!openRef.current) return;
+      // 面板仍展开 → 重连一次（简单单次重连，不做退避）
+      reconnectTimer.current = setTimeout(() => {
+        if (mountedRef.current && openRef.current) connect();
+      }, 3000);
+    };
+
+    ws.onerror = () => {
+      if (!mountedRef.current) return;
+      setWsState("error");
+      ws.close();
+    };
+  }, []); // stable — reads state only via refs
+
+  // 展开时建立连接，折叠时关闭
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      connect();
+    } else {
+      // 折叠 → 关闭 WS 和重连定时器
+      if (reconnectTimer.current) {
+        clearTimeout(reconnectTimer.current);
+        reconnectTimer.current = null;
+      }
+      wsRef.current?.close();
+      wsRef.current = null;
+      setWsState("idle");
+    }
+    return () => {
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      wsRef.current?.close();
+    };
+  }, [open, connect]);
+
+  const typeLabelMap: Record<LiveCode["type"], string> = {
+    login_2fa: "登录码",
+    bind_code: "绑定码",
+  };
+
+  const typeBadgeClass: Record<LiveCode["type"], string> = {
+    login_2fa: "bg-indigo-100 text-indigo-700",
+    bind_code: "bg-blue-100 text-blue-700",
+  };
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+      {/* ── Collapsible header ─────────────────────────────────────────────── */}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-gray-50 transition-colors"
+        aria-expanded={open}
+      >
+        <div className="flex items-center gap-2">
+          <svg className="w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+          </svg>
+          <span className="text-base font-semibold text-gray-900">实时验证码</span>
+          {open && wsState === "open" && (
+            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" aria-hidden="true" />
+          )}
+        </div>
+        <svg
+          className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          aria-hidden="true"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {/* ── Collapsible body ───────────────────────────────────────────────── */}
+      {open && (
+        <div className="border-t border-gray-100 px-6 pb-6 pt-4 space-y-4">
+          {/* WS connection status */}
+          <div className={`flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg ${
+            wsState === "open"
+              ? "bg-green-50 text-green-700"
+              : wsState === "connecting"
+              ? "bg-blue-50 text-blue-600"
+              : wsState === "error" || wsState === "closed"
+              ? "bg-yellow-50 text-yellow-700"
+              : "bg-gray-50 text-gray-500"
+          }`}>
+            {wsState === "open" && (
+              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+            )}
+            {(wsState === "connecting") && (
+              <span className="w-3.5 h-3.5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            )}
+            {(wsState === "closed" || wsState === "error") && (
+              <span className="w-3.5 h-3.5 border-2 border-yellow-500 border-t-transparent rounded-full animate-spin" />
+            )}
+            {wsState === "open" && "实时监听中，验证码到达将立即显示"}
+            {wsState === "connecting" && "正在建立连接…"}
+            {wsState === "closed" && "连接中断，正在重连…"}
+            {wsState === "error" && "连接出错，正在重连…"}
+            {wsState === "idle" && "准备连接…"}
+          </div>
+
+          {/* Code list or empty hint */}
+          {codes.length === 0 ? (
+            <div className="p-6 border-2 border-dashed border-gray-200 rounded-xl text-center">
+              <svg className="w-8 h-8 text-gray-300 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+              <p className="text-sm text-gray-400 leading-relaxed">
+                去 CQU 登录页选「邮箱验证码」登录，<br />验证码会实时显示在这里。
+              </p>
+            </div>
+          ) : (
+            <ul className="space-y-3" role="list" aria-label="验证码列表">
+              {codes.map((item) => {
+                const expired = Math.floor((Date.now() - item.ts) / 1000) >= 600;
+                return (
+                  <li
+                    key={item.id}
+                    className={`p-4 rounded-xl border-2 ${
+                      expired ? "border-gray-200 bg-gray-50" : "border-blue-200 bg-blue-50"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${typeBadgeClass[item.type]}`}>
+                          {typeLabelMap[item.type]}
+                        </span>
+                        <span className="text-xs text-gray-400">{formatTime(item.ts)}</span>
+                      </div>
+                      <CodeCountdown ts={item.ts} />
+                    </div>
+                    <div className="flex items-center justify-between gap-4 flex-wrap">
+                      <span className={`font-mono text-3xl font-bold tracking-[0.25em] ${
+                        expired ? "text-gray-400" : "text-blue-900"
+                      }`}>
+                        {item.code}
+                      </span>
+                      <CopyButton text={item.code} />
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          <p className="text-xs text-gray-400">
+            最多显示最近 3 条；验证码自到达起约 10 分钟内有效。
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CquBindingSection() {
   const [status, setStatus] = useState<CquBindStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
@@ -354,6 +639,9 @@ function CquBindingSection() {
               </div>
             )}
           </div>
+
+          {/* ── 实时验证码 — 仅 active 时显示 ─────────────────────────────────── */}
+          {status?.bindStatus === "active" && <LiveCodeSection />}
 
           {/* ── Action buttons ───────────────────────────────────────────────── */}
           <div className="flex flex-wrap items-center gap-3">
