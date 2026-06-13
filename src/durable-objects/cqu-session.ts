@@ -630,6 +630,9 @@ export class CquSessionDO extends DurableObject<Env> {
       );
       const result = await res.json<ContainerRunResult>();
       if (!res.ok || !result.ok || !result.cookies) {
+        console.warn(
+          `[CquSession] ${state.studentId}: container /run not ok — httpStatus=${res.status} ok=${result.ok} hasCookies=${!!result.cookies} error=${result.error ?? "(none)"}`
+        );
         await this.failLogin(failEvent);
         return "failed";
       }
