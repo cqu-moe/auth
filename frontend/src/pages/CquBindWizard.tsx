@@ -8,6 +8,8 @@ import Layout from "../components/Layout";
 
 type Step = 1 | 2 | 3 | 4;
 
+type BindKind = "direct" | "forward";
+
 type WsState = "idle" | "connecting" | "open" | "closed" | "error";
 
 interface BindAddressResponse {
@@ -28,6 +30,12 @@ interface BindStatusResponse {
 function buildWsUrl(): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${window.location.host}/api/cqu/bind/ws`;
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function isValidEmail(s: string): boolean {
+  return EMAIL_RE.test(s.trim());
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -162,10 +170,31 @@ function StepIndicator({ current }: { current: Step }) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Step 1 — Intro / consent
+// Step 1 — Intro / consent + bind kind selection
 // ────────────────────────────────────────────────────────────────────────────
 
-function Step1Intro({ onNext }: { onNext: () => void }) {
+function Step1Intro({
+  onNext,
+  bindKind,
+  setBindKind,
+  forwardAddress,
+  setForwardAddress,
+}: {
+  onNext: () => void;
+  bindKind: BindKind;
+  setBindKind: (k: BindKind) => void;
+  forwardAddress: string;
+  setForwardAddress: (v: string) => void;
+}) {
+  const [forwardAddrTouched, setForwardAddrTouched] = useState(false);
+
+  const forwardAddrValid = isValidEmail(forwardAddress);
+  const showForwardError = forwardAddrTouched && forwardAddress.trim() !== "" && !forwardAddrValid;
+
+  const canProceed =
+    bindKind === "direct" ||
+    (bindKind === "forward" && forwardAddrValid);
+
   return (
     <div className="space-y-6">
       <div>
@@ -185,7 +214,7 @@ function Step1Intro({ onNext }: { onNext: () => void }) {
           <div>
             <p className="text-sm font-medium text-gray-900">专属密保邮箱</p>
             <p className="text-xs text-gray-500 mt-0.5">
-              我们为您生成一个专属收信地址，用于接收 CQU 安全邮箱的验证码。您需要将 CQU 自服务中心的密保邮箱设置为该地址。
+              我们为您生成一个专属收信地址，用于接收 CQU 安全邮箱的验证码。您需要将 CQU 自服务中心的密保邮箱设置为该地址（或设置转发规则）。
             </p>
           </div>
         </div>
@@ -219,6 +248,111 @@ function Step1Intro({ onNext }: { onNext: () => void }) {
         </div>
       </div>
 
+      {/* ── Bind kind selection ─────────────────────────────────────────────── */}
+      <div className="space-y-3">
+        <p className="text-sm font-medium text-gray-900">选择绑定方式</p>
+
+        {/* Direct option */}
+        <label
+          className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-colors ${
+            bindKind === "direct"
+              ? "border-blue-500 bg-blue-50"
+              : "border-gray-200 bg-white hover:border-gray-300"
+          }`}
+        >
+          <input
+            type="radio"
+            name="bindKind"
+            value="direct"
+            checked={bindKind === "direct"}
+            onChange={() => setBindKind("direct")}
+            className="mt-0.5 accent-blue-600"
+          />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-gray-900">直设模式</span>
+              <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">推荐</span>
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">
+              将 CQU 密保邮箱直接改为我们为您生成的专属地址。安全性更高，验证码直达，无中间环节。
+            </p>
+          </div>
+        </label>
+
+        {/* Forward option */}
+        <label
+          className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-colors ${
+            bindKind === "forward"
+              ? "border-blue-500 bg-blue-50"
+              : "border-gray-200 bg-white hover:border-gray-300"
+          }`}
+        >
+          <input
+            type="radio"
+            name="bindKind"
+            value="forward"
+            checked={bindKind === "forward"}
+            onChange={() => setBindKind("forward")}
+            className="mt-0.5 accent-blue-600"
+          />
+          <div className="flex-1 min-w-0">
+            <span className="text-sm font-medium text-gray-900">转发模式</span>
+            <p className="text-xs text-gray-500 mt-0.5">
+              保留您自己的邮箱作为 CQU 密保邮箱，在邮箱里添加转发规则，将 CQU 的邮件自动转发到我们的地址。
+            </p>
+          </div>
+        </label>
+
+        {/* Forward address input — shown only when forward is selected */}
+        {bindKind === "forward" && (
+          <div className="ml-0 space-y-3">
+            <div>
+              <label htmlFor="forward-addr" className="block text-sm font-medium text-gray-700 mb-1">
+                您的转发邮箱（即当前 CQU 密保邮箱）
+              </label>
+              <input
+                id="forward-addr"
+                type="email"
+                value={forwardAddress}
+                onChange={(e) => setForwardAddress(e.target.value)}
+                onBlur={() => setForwardAddrTouched(true)}
+                placeholder="example@gmail.com"
+                className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
+                  showForwardError ? "border-red-400 bg-red-50" : "border-gray-300"
+                }`}
+                autoComplete="email"
+              />
+              {showForwardError && (
+                <p className="mt-1 text-xs text-red-600">请输入合法的邮箱地址</p>
+              )}
+            </div>
+
+            {/* Deliverability notice */}
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 space-y-1.5">
+              <p className="font-semibold">转发器兼容性说明</p>
+              <p>
+                由于 CQU 域名不配置 DKIM，转发器必须能对转发邮件做 <strong>SRS 地址改写</strong>或用自身 DKIM 重签，
+                否则邮件会被我们的收信服务器拒收。
+              </p>
+              <p>
+                <strong>主流邮箱均支持</strong>：Gmail、QQ 邮箱、Outlook / Hotmail、163 / 126 等。
+                若使用自建邮件服务，请确认其支持 SRS。
+              </p>
+            </div>
+
+            {/* Security notice */}
+            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-xl text-xs text-yellow-800 space-y-1">
+              <p className="font-semibold">安全说明</p>
+              <p>
+                转发模式依赖您邮箱的转发链，安全性略低于直设模式。
+                即使出现最坏情况，风险也仅限于单次 CQU 会话重登失败，不会导致账号被他人接管。
+              </p>
+              <p>如果您对安全要求较高，建议使用直设模式。</p>
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-xl text-xs text-yellow-800">
         <strong>信任须知：</strong>绑定完成后，您应改用短信或微信验证方式自行登录 CQU，
         不要再依赖密保邮箱人工登录——因为该邮箱已由本系统托管，验证码将被自动处理。
@@ -227,7 +361,13 @@ function Step1Intro({ onNext }: { onNext: () => void }) {
       <button
         type="button"
         onClick={onNext}
-        className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+        disabled={!canProceed}
+        title={
+          bindKind === "forward" && !forwardAddrValid
+            ? "请填写合法的转发邮箱地址"
+            : undefined
+        }
+        className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-sm font-medium rounded-lg transition-colors"
       >
         开始绑定
       </button>
@@ -236,7 +376,7 @@ function Step1Intro({ onNext }: { onNext: () => void }) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Step 2 — Get dedicated address AND await confirmation code via WebSocket
+// Step 2 (direct) — Get dedicated address AND await confirmation code via WS
 //
 // The WS opens the moment the address is fetched and displayed, so we are
 // already listening before the user navigates to CQU self-service. This
@@ -244,7 +384,7 @@ function Step1Intro({ onNext }: { onNext: () => void }) {
 // still on this page but the socket has not been opened yet.
 // ────────────────────────────────────────────────────────────────────────────
 
-function Step2AddressAndCode({
+function Step2Direct({
   onNext,
   bindAddress,
   setBindAddress,
@@ -334,7 +474,12 @@ function Step2AddressAndCode({
   useEffect(() => {
     if (bindAddress) return; // already fetched (e.g. user navigated back)
     setAddrLoading(true);
-    fetch("/api/cqu/bind/address", { method: "POST", credentials: "include" })
+    fetch("/api/cqu/bind/address", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "direct" }),
+    })
       .then(async (res) => {
         if (!res.ok) {
           const data = await res.json().catch(() => ({})) as { detail?: { error?: { message?: string } } };
@@ -515,6 +660,176 @@ function Step2AddressAndCode({
         </button>
       </div>
     </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Step 2 (forward) — Get dedicated forward-inbox address, show setup guide
+//
+// In forward mode there is no bind_confirm step from CQU (the user keeps
+// their own mailbox as the security email and just adds a forward rule).
+// Therefore we do NOT connect a WebSocket and do NOT wait for any code.
+// The user reads the instructions, sets up the forward rule, then clicks
+// "已设置转发，继续" to proceed to Step 3.
+// ────────────────────────────────────────────────────────────────────────────
+
+function Step2Forward({
+  onNext,
+  bindAddress,
+  setBindAddress,
+  forwardAddress,
+}: {
+  onNext: () => void;
+  bindAddress: string;
+  setBindAddress: (addr: string) => void;
+  forwardAddress: string;
+}) {
+  const [addrLoading, setAddrLoading] = useState(false);
+  const [addrError, setAddrError] = useState("");
+
+  useEffect(() => {
+    if (bindAddress) return; // already fetched (e.g. user navigated back)
+    setAddrLoading(true);
+    fetch("/api/cqu/bind/address", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "forward", forwardAddress }),
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({})) as { detail?: { error?: { message?: string; code?: string } } };
+          const errCode = data.detail?.error?.code;
+          if (errCode === "INVALID_FORWARD_ADDRESS") {
+            throw new Error("转发邮箱地址格式不合法，请返回上一步重新填写");
+          }
+          throw new Error(data.detail?.error?.message ?? "获取地址失败，请稍后重试");
+        }
+        return res.json() as Promise<BindAddressResponse>;
+      })
+      .then((data) => {
+        setBindAddress(data.address);
+      })
+      .catch((err: Error) => {
+        setAddrError(err.message);
+      })
+      .finally(() => {
+        setAddrLoading(false);
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-semibold text-gray-900 mb-2">设置邮件转发规则</h2>
+        <p className="text-sm text-gray-500">
+          您选择了转发模式：CQU 密保邮箱保持不变，只需在您自己的邮箱里添加一条自动转发规则即可。
+        </p>
+      </div>
+
+      {addrError && (
+        <AlertBox variant="error">
+          {addrError}
+          {addrError.includes("返回上一步") && (
+            <span className="block mt-1 text-xs">如需修改邮箱地址，请点击浏览器返回或刷新页面。</span>
+          )}
+        </AlertBox>
+      )}
+
+      {/* ── Dedicated inbox address ───────────────────────────────────────── */}
+      {addrLoading ? (
+        <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-xl text-gray-400 text-sm">
+          <Spinner size="sm" color="gray" />
+          正在生成专属转发地址…
+        </div>
+      ) : bindAddress ? (
+        <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
+          <p className="text-xs text-blue-600 font-medium mb-2">转发目标地址（请将 CQU 邮件转发到此处）</p>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <span className="font-mono text-sm font-semibold text-blue-900 break-all">
+              {bindAddress}
+            </span>
+            <CopyButton text={bindAddress} />
+          </div>
+        </div>
+      ) : null}
+
+      {/* ── Forward setup instructions ────────────────────────────────────── */}
+      {bindAddress && (
+        <div className="space-y-2 text-sm text-gray-600">
+          <p className="font-medium text-gray-900">操作步骤：</p>
+          <ol className="space-y-2 list-decimal list-inside">
+            <li>
+              登录您的邮箱{forwardAddress ? <strong>（{forwardAddress}）</strong> : ""}，进入「设置」→「过滤器」或「自动转发」
+            </li>
+            <li>
+              新建一条过滤/转发规则：<strong>发件人为 sso@cqu.edu.cn 的邮件</strong>，自动转发到上方地址
+            </li>
+            <li>保存规则，完成后点击下方按钮继续</li>
+          </ol>
+        </div>
+      )}
+
+      {/* ── Compatibility reminder ────────────────────────────────────────── */}
+      {bindAddress && (
+        <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 space-y-1">
+          <p className="font-semibold">重要提示</p>
+          <p>
+            请确保您的邮箱在转发时会对邮件做地址改写（SRS）或用自身 DKIM 重签，
+            Gmail、QQ 邮箱、Outlook 等主流服务均支持。
+            若转发后我们未收到邮件，请检查转发器是否兼容。
+          </p>
+        </div>
+      )}
+
+      <div className="flex gap-3">
+        <button
+          type="button"
+          onClick={onNext}
+          disabled={!bindAddress || addrLoading}
+          className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-sm font-medium rounded-lg transition-colors"
+        >
+          已设置转发，继续
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Step 2 dispatcher — routes to direct or forward variant
+// ────────────────────────────────────────────────────────────────────────────
+
+function Step2AddressAndCode({
+  onNext,
+  bindAddress,
+  setBindAddress,
+  bindKind,
+  forwardAddress,
+}: {
+  onNext: () => void;
+  bindAddress: string;
+  setBindAddress: (addr: string) => void;
+  bindKind: BindKind;
+  forwardAddress: string;
+}) {
+  if (bindKind === "forward") {
+    return (
+      <Step2Forward
+        onNext={onNext}
+        bindAddress={bindAddress}
+        setBindAddress={setBindAddress}
+        forwardAddress={forwardAddress}
+      />
+    );
+  }
+  return (
+    <Step2Direct
+      onNext={onNext}
+      bindAddress={bindAddress}
+      setBindAddress={setBindAddress}
+    />
   );
 }
 
@@ -752,6 +1067,10 @@ export default function CquBindWizard() {
   const [bindAddress, setBindAddress] = useState("");
   const [boundStudentId, setBoundStudentId] = useState("");
 
+  // Bind kind selection — lifted to wizard root so Step2 can access it
+  const [bindKind, setBindKind] = useState<BindKind>("direct");
+  const [forwardAddress, setForwardAddress] = useState("");
+
   const goNext = () => setStep((s) => Math.min(s + 1, 4) as Step);
 
   return (
@@ -771,12 +1090,27 @@ export default function CquBindWizard() {
           <StepIndicator current={step} />
 
           <div>
-            {step === 1 && <Step1Intro onNext={goNext} />}
+            {step === 1 && (
+              <Step1Intro
+                onNext={goNext}
+                bindKind={bindKind}
+                setBindKind={(k) => {
+                  setBindKind(k);
+                  // Reset the fetched address when the user changes kind
+                  // so Step2 will re-fetch with the new parameters
+                  setBindAddress("");
+                }}
+                forwardAddress={forwardAddress}
+                setForwardAddress={setForwardAddress}
+              />
+            )}
             {step === 2 && (
               <Step2AddressAndCode
                 onNext={goNext}
                 bindAddress={bindAddress}
                 setBindAddress={setBindAddress}
+                bindKind={bindKind}
+                forwardAddress={forwardAddress}
               />
             )}
             {step === 3 && (
