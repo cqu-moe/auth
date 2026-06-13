@@ -30,7 +30,7 @@
 //       非账号接管。
 // ⚠️ 同样勿在此重新引入 ARC：转发模式校验的也只是 envelope（CF SPF 闸的对象）+ header From（MIME 内），
 // 不读 ARC-* 头。
-const CQU_SENDER = "sso@cqu.edu.cn";
+export const CQU_SENDER = "sso@cqu.edu.cn";
 
 export function envelopeSenderAllowed(envelopeFrom: string, senderWhitelist: string[]): boolean {
   const from = (envelopeFrom || "").trim().toLowerCase();

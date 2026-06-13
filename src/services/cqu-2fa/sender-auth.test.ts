@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { envelopeSenderAllowed, forwardSenderAllowed } from "./sender-auth";
+import { envelopeSenderAllowed, forwardSenderAllowed, CQU_SENDER } from "./sender-auth";
 
 describe("envelopeSenderAllowed", () => {
   const whitelist = ["sso@cqu.edu.cn"];
@@ -115,5 +115,31 @@ describe("forwardSenderAllowed", () => {
     expect(forwardSenderAllowed("fwd@user-mail.example", "sso@cqu.edu.cn", [])).toBe(
       false
     );
+  });
+});
+
+describe("forwardSenderAllowed with dual-source whitelist [forwardAddr, CQU_SENDER]", () => {
+  // forward 模式双源白名单（POST /address 实际写入的形状）：覆盖两类转发器。
+  //   - 真转发（如 Fastmail "Send a copy to"）：保留原始信封 sso@cqu.edu.cn（非 SRS 改写）。
+  //   - SRS 改写：信封被改成转发方地址（forwardAddr）。
+  // header From 两类下均仍是 sso@cqu.edu.cn。
+  const fwd = "fwd@user-mail.example";
+  const whitelist = [fwd, CQU_SENDER];
+
+  it("(a) accepts a true-forward: envelope=CQU AND header From=CQU", () => {
+    // Fastmail "Send a copy to" 这类真转发：信封仍是 sso@cqu.edu.cn。
+    expect(forwardSenderAllowed(CQU_SENDER, CQU_SENDER, whitelist)).toBe(true);
+  });
+
+  it("(b) accepts an SRS rewrite: envelope=forwardAddr AND header From=CQU", () => {
+    // SRS 改写：信封变成转发方地址，但 header From 仍是 sso@cqu.edu.cn。
+    expect(forwardSenderAllowed(fwd, CQU_SENDER, whitelist)).toBe(true);
+  });
+
+  it("(c) rejects when envelope is neither forwardAddr nor CQU even if header From=CQU", () => {
+    // 信封既非转发方也非 CQU：即便 header From 是 CQU 也必须拒。
+    expect(
+      forwardSenderAllowed("someone@else.example", CQU_SENDER, whitelist)
+    ).toBe(false);
   });
 });

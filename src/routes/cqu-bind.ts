@@ -5,6 +5,7 @@ import { encrypt } from "../services/crypto";
 import { errorResponse } from "../utils/error";
 import { cquBindAddresses, cquCredentials } from "../db/schema";
 import { genAddressToken } from "../services/cqu-2fa/token";
+import { CQU_SENDER } from "../services/cqu-2fa/sender-auth";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, sql } from "drizzle-orm";
 import { verifyAccessToken } from "better-auth/oauth2";
@@ -60,7 +61,9 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // 幂等：用户已有绑定地址行则直接返回；否则按请求体的绑定方式生成 token 写入 pending 行。
 // body { kind?: "direct"|"forward", forwardAddress?: string }：
 //   - 缺省 / "direct"：whitelist=["sso@cqu.edu.cn"]（现状）。
-//   - "forward"：要求 forwardAddress 是合法邮箱，whitelist=[该地址规范化(trim+lower)]。
+//   - "forward"：要求 forwardAddress 是合法邮箱，whitelist=去重([该地址规范化(trim+lower), CQU_SENDER])。
+//     双源白名单覆盖两类转发器：真转发（如 Fastmail "Send a copy to"，保留原始信封 sso@cqu.edu.cn）
+//     与 SRS 改写（信封变成转发方地址）。若 forwardAddress 规范化后即 CQU_SENDER，去重后只留一个。
 // userId 只取自 session/JWT（绝不取客户端入参）；域名只取自 c.env.BIND_EMAIL_DOMAIN。
 cquBind.post("/address", async (c) => {
   const user = c.get("user") as { id: string };
@@ -89,7 +92,10 @@ cquBind.post("/address", async (c) => {
       return errorResponse(c, "INVALID_FORWARD_ADDRESS", "转发邮箱地址不合法", 400);
     }
     kind = "forward";
-    senderWhitelist = JSON.stringify([forwardAddress]);
+    // 双源白名单：用户转发地址 + CQU_SENDER。去重——forwardAddress 规范化后若 === CQU_SENDER 只留一个。
+    const whitelist =
+      forwardAddress === CQU_SENDER ? [CQU_SENDER] : [forwardAddress, CQU_SENDER];
+    senderWhitelist = JSON.stringify(whitelist);
   } else if (body.kind !== undefined && body.kind !== "direct") {
     return errorResponse(c, "INVALID_KIND", "未知的绑定方式", 400);
   }

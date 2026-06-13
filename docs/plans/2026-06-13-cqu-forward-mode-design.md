@@ -13,7 +13,11 @@
 **转发模式**让用户**保留自己的邮箱作为 CQU 密保邮箱**，在自己邮箱里设转发规则，把 CQU 的验证码邮件转发到 `<token>@cquotp.com`。好处：用户不必放弃密保邮箱（仍能自己收 CQU 安全邮件），只是"抄送"一份验证码给我们。
 
 ### 关键障碍（为何不能照搬直设）
-邮件经用户邮箱转发后，**信封 MAIL FROM 被 SRS 改写**成转发方地址（不再是 `sso@cqu.edu.cn`）。CF 的 SPF 闸此时校验**转发方域**，只证明"来自该转发服务"，不证明"内容来自 CQU"。原始 `sso@cqu.edu.cn` 只剩在**邮件头 `From`** 里（可被伪造）。因此现有 `envelopeSenderAllowed(message.from, ["sso@cqu.edu.cn"])` 对转发邮件必然失败，信任模型必须重做。
+邮件经用户邮箱转发后，信封 MAIL FROM **可能**被 SRS 改写成转发方地址（不再是 `sso@cqu.edu.cn`），但**并非所有转发器都改写**。实测两类并存：
+- **真转发（保留原始信封）**：如 Fastmail 的 "Send a copy to"，**信封仍是 `sso@cqu.edu.cn`**，不做 SRS 改写。这推翻了本设计原先"转发必被 SRS 改写"的前提。
+- **SRS 改写**：信封被改成转发方地址；CF 的 SPF 闸此时校验**转发方域**，只证明"来自该转发服务"，不证明"内容来自 CQU"。
+
+原始 `sso@cqu.edu.cn` 在两类下都仍出现在**邮件头 `From`** 里（可被伪造）。因此 forward 的 envelope 白名单必须**双源**——同时容纳"用户转发地址"（SRS 路径）与 `sso@cqu.edu.cn`（真转发路径），信任模型据此重做。
 
 ---
 
@@ -24,16 +28,20 @@
 | 模式 | 主闸 | envelope 校验 | 附加校验 |
 |------|------|--------------|---------|
 | `direct` | 不可枚举 token | `envelope ∈ ["sso@cqu.edu.cn"]`（CF SPF 闸证明 CQU IP，**强**） | 无 |
-| `forward` | 不可枚举 token | `envelope ∈ [用户登记的转发地址]`（证明"穿过了该用户的转发器"，SPF 对转发方域成立） | parse 后 `email.from.address === "sso@cqu.edu.cn"`（补回 CQU 来源信号，**弱、可伪造**） |
+| `forward` | 不可枚举 token | `envelope ∈ 去重{用户登记的转发地址, "sso@cqu.edu.cn"}`（**双源**：SRS 路径命中转发地址，真转发路径命中 sso@cqu.edu.cn；均证明"穿过了该用户的转发器"，SPF 对相应域成立） | parse 后 `email.from.address === "sso@cqu.edu.cn"`（补回 CQU 来源信号，**弱、可伪造**） |
 
 ### 安全性陈述（必须知情同意）
-- 转发模式信任 = **不可枚举 token（主闸）** + **envelope ∈ 用户转发地址** + **header From=sso@cqu.edu.cn（可伪造）**。
+- 转发模式信任 = **不可枚举 token（主闸）** + **envelope ∈ 去重{用户转发地址, sso@cqu.edu.cn}** + **header From=sso@cqu.edu.cn（可伪造）**。
 - **本质弱于直设**：header From 不是签名、无密码学保证。若 token 泄露，转发模式比直设更易被注入伪造邮件。
 - **最坏后果有限**：注入的 6 位码最终提交给 CQU，假码 CQU 对不上 → 单次重登失败（**DoS 级**），**非账号接管**（夺号需攻击者拿到 CQU 真实下发的码，而该码只发到用户邮箱+我们地址）。
 - envelope ∈ 转发地址这道闸的价值：挡住"仅知道 token 者直投"（攻击者无法以转发方身份过 SPF），把可行攻击收窄为"先把伪造邮件塞进用户邮箱再被转发"。
 
 ### 投递性陷阱（写进用户文案）
-cqu.edu.cn **无 DKIM**，CF 在 Worker 前强制"SPF 或 DKIM 过一个"。若用户的转发器**不做 SRS 改写**（保留 envelope=sso@cqu.edu.cn 直转），转发器 IP 不在 cqu SPF 内 → SPF=fail + 无 DKIM → **CF 在进 Worker 前就拒收，邮件根本到不了**。只有会 SRS 改写 / 用自身 DKIM 重签的转发器（Gmail、QQ、Outlook 等主流都会）才转得进来。
+cqu.edu.cn **无 DKIM**，CF 在 Worker 前强制"SPF 或 DKIM 过一个"。两类转发器都能过这道闸：
+- **真转发（保留 envelope=sso@cqu.edu.cn）**：转发器若用**自身 DKIM 重签**邮件（如 Fastmail "Send a copy to" 实测可达），DKIM 过 → 进得来，且信封仍是 sso@cqu.edu.cn。仅有"裸直转、既不 SRS 也不 DKIM 重签"的转发器才会因 SPF=fail+无 DKIM 被 CF 在进 Worker 前拒收。
+- **SRS 改写**：转发器改写信封为自身域 + SPF 对该域成立 → 进得来，信封是转发方地址（Gmail、QQ、Outlook 等主流走此路）。
+
+双源白名单同时容纳这两类，故无需要求用户的转发器一定做 SRS 改写。
 
 ---
 
@@ -43,7 +51,7 @@ cqu.edu.cn **无 DKIM**，CF 在 Worker 前强制"SPF 或 DKIM 过一个"。若�
 - `kind: text` = `"direct" | "forward"`（已存在，默认 `direct`）
 - `senderWhitelist: text`（JSON 字符串数组，已存在）
   - direct: `["sso@cqu.edu.cn"]`
-  - forward: `["<用户转发地址的实际 envelope>"]`
+  - forward: 去重后的 `["<用户登记的转发地址>", "sso@cqu.edu.cn"]`（双源；若转发地址规范化后即 `sso@cqu.edu.cn` 则只留一个）
 
 ---
 
@@ -66,7 +74,7 @@ forwardSenderAllowed(envelopeFrom, headerFromAddress, senderWhitelist):
 ### 4.2 地址签发（`src/routes/cqu-bind.ts` `POST /address`）
 当前硬编码 `kind:"direct"` + `senderWhitelist:["sso@cqu.edu.cn"]`。改为按请求体的绑定方式分叉：
 - `direct`：同现状。
-- `forward`：body 带用户转发邮箱地址 → 校验是合法邮箱 → 写 `kind="forward"`, `senderWhitelist=[该地址]`。
+- `forward`：body 带用户转发邮箱地址 → 校验是合法邮箱 → 写 `kind="forward"`，`senderWhitelist=去重([forwardAddress(trim+lower), CQU_SENDER])`（**双源**白名单 `{用户转发地址, sso@cqu.edu.cn}`，覆盖 SRS 与真转发两类转发器）。`CQU_SENDER` 常量从 `src/services/cqu-2fa/sender-auth.ts` 导出复用，避免字面量漂移。去重：forwardAddress 规范化后若 === `sso@cqu.edu.cn` 则白名单只留一个。
 - 用户身份仍只取自 session/JWT（绝不取客户端入参作 userId）。
 
 ### 4.3 前端 wizard（`frontend/src/pages/CquBindWizard.tsx`）
