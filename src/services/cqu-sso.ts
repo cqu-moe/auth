@@ -107,9 +107,14 @@ export class CquSsoClient {
     );
 
     if (resp.status !== 302) {
+      // 诊断: 非 302 时读 body 做页面分类, 区分「真 CAS 登录页(真过期)」与
+      // 「瑞数挑战页(误判)」。只读 body 做分类, 绝不记录 body 原文; 分类结果随
+      // 错误消息上抛, 供 keepalive 日志观测。302 成功路径不受影响(此处仅失败分支)。
+      const body = await resp.text().catch(() => "");
+      const cls = classifyNon302Body(body);
       throw new CquSsoError(
         "TGT_EXPIRED",
-        "CAS session expired, got status " + resp.status
+        "CAS session expired, got status " + resp.status + " page=" + cls
       );
     }
 
@@ -134,4 +139,26 @@ export class CquSsoClient {
 
 function formatCasCookies(cookies: CasCookies): string {
   return `SOURCEID_TGC=${cookies.SOURCEID_TGC}; SESSION=${cookies.SESSION}; rg_objectid=${cookies.rg_objectid}`;
+}
+
+/**
+ * 诊断: 把 getServiceTicket 非 302 返回的页面 body 粗分类, 用于区分热路径取 ST
+ * 失败到底是「真过期」还是「瑞数误判」。**只看特征字符串做分类, 不记录 body 原文。**
+ *
+ * - "cas-login":     含 CAS 登录页特征(login-croypto / login-page-flowkey) → 真过期。
+ * - "waf-challenge": 含瑞数特征(CtLgrmkSWHBZ / botgate / debugger) 且无 CAS 标记 → 疑似误判。
+ * - "other":         两者都不命中 → 未知页面。
+ *
+ * 注意: 先判 CAS 标记 —— 瑞数挑战脚本也可能混进 CAS 登录页, 真登录页应优先认定为真过期。
+ */
+function classifyNon302Body(body: string): "cas-login" | "waf-challenge" | "other" {
+  const hasCasMarker =
+    body.includes("login-croypto") || body.includes("login-page-flowkey");
+  if (hasCasMarker) return "cas-login";
+  const hasWafMarker =
+    body.includes("CtLgrmkSWHBZ") ||
+    body.includes("botgate") ||
+    body.includes("debugger");
+  if (hasWafMarker) return "waf-challenge";
+  return "other";
 }

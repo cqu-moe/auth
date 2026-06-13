@@ -7,6 +7,7 @@ import {
   type CquEvent,
 } from "../services/cqu-2fa/state-machine";
 import { shouldStartLogin } from "../services/cqu-2fa/single-flight";
+import { decodeJwtExp } from "../services/cqu-2fa/jwt-exp";
 import {
   shouldProactiveRelogin,
   pruneAttempts,
@@ -476,6 +477,11 @@ export class CquSessionDO extends DurableObject<Env> {
         return "transient";
       }
       // 非网络失败(如 TGT_EXPIRED): 会话服务端失效。
+      // 诊断: 落 expired 前记一条 — errMsg 会带上含 status + page 分类的消息,
+      // 用于区分真过期(page=cas-login)与瑞数误判(page=waf-challenge)。
+      console.warn(
+        `[CquSession] ${state.studentId}: probe says expired: ${errMsg(e)}`
+      );
       return "expired";
     }
   }
@@ -629,6 +635,24 @@ export class CquSessionDO extends DurableObject<Env> {
       fresh.loginAt = now;
       fresh.lastKeepAlive = now;
       this.state = fresh;
+      // 诊断: 尽力解出新 TGT(SOURCEID_TGC, JWT) 的 exp, 观测其服务端寿命, 排查
+      // 会话疑似「定点过期」(按固定时刻而非固定时长)。绝不记录 token 本身, 只记
+      // exp 时刻与剩余分钟数。decodeJwtExp 纯函数不抛, 再用 try/catch 兜底, 确保
+      // 诊断绝不影响登录。
+      try {
+        const exp = decodeJwtExp(result.cookies.SOURCEID_TGC);
+        if (exp !== null) {
+          console.warn(
+            `[CquSession] ${state.studentId}: new TGT exp=${new Date(exp * 1000).toISOString()} (ageBudget=${Math.round((exp * 1000 - Date.now()) / 60000)}min)`
+          );
+        } else {
+          console.warn(
+            `[CquSession] ${state.studentId}: new TGT exp=undecodable`
+          );
+        }
+      } catch {
+        // 诊断失败绝不影响登录主流程。
+      }
       await this.ctx.storage.put("state", fresh);
       const status = await this.getStatus();
       await this.setStatus(nextStatus(status, okEvent));
