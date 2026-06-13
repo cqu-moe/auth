@@ -4,7 +4,10 @@ import { eq } from "drizzle-orm";
 import { cquBindAddresses } from "./db/schema";
 import { localPart } from "./services/cqu-2fa/address";
 import { extractCode } from "./services/cqu-2fa/extract-code";
-import { envelopeSenderAllowed } from "./services/cqu-2fa/sender-auth";
+import {
+  envelopeSenderAllowed,
+  forwardSenderAllowed,
+} from "./services/cqu-2fa/sender-auth";
 import type { Env } from "./types";
 
 const MAX_RAW_SIZE = 25 * 1024 * 1024; // 25 MiB 上限，超过即拒，避免 PostalMime 解析大邮件
@@ -20,15 +23,24 @@ const MAX_RAW_SIZE = 25 * 1024 * 1024; // 25 MiB 上限，超过即拒，避免 
 //   (c) 信封发件人白名单：envelopeSenderAllowed(message.from, whitelist)。`message.from` 是
 //       *信封* MAIL FROM（CF 文档明确：用于安全判断的字段），非可伪造的邮件头 From。
 //
-// 安全顺序（先校验、后解析正文）：
+// 安全顺序（先校验、后解析正文）—— 按 bind.kind 分叉：
 //   1. token → bind（D1），缺失/已 revoked 立即 setReject（pending 与 active 都收码）
 //   2. rawSize 上限校验
-//   3. 解析 senderWhitelist + envelopeSenderAllowed(message.from)，不过即 setReject
-//   4. 以上全过后，才 PostalMime.parse + extractCode
+//   3. 解析 senderWhitelist（JSON 数组）
+//   4a. kind=direct：envelopeSenderAllowed(message.from, whitelist=["sso@cqu.edu.cn"]) 不过即
+//       setReject → 过后 PostalMime.parse → extractCode。**现状不变。**
+//   4b. kind=forward：先 envelopeSenderAllowed(message.from, whitelist=[用户转发地址])——
+//       不过即 setReject 且 **不 parse**（不解析未过 envelope 闸的邮件）；过后 PostalMime.parse →
+//       取 header From 地址 → forwardSenderAllowed（再校验 header From===sso@cqu.edu.cn）→ extractCode。
 //
 // 信封发件人校验必须在 extractCode 之前运行：提码器信任正文来自 CQU，只有确认信封发件人在白名单内
-// （叠加上面 CF 平台 SPF 门：白名单内的 cqu.edu.cn 地址必来自 CQU 授权 IP）后，才允许把正文里的
+// （direct：叠加 CF 平台 SPF 门，白名单内的 cqu.edu.cn 地址必来自 CQU 授权 IP）后，才允许把正文里的
 // 6 位数字当作可信验证码提取。
+//
+// ⚠️ forward 的 CQU 来源信号在 *header From*（MIME 内、可伪造），**本质弱于直设**：direct 的
+// envelope=sso@cqu.edu.cn 由 CF SPF 闸背书来自 CQU IP；forward 的 envelope 只是用户转发方地址，
+// CQU 来源仅靠 header From===sso@cqu.edu.cn 这一可伪造信号补回。最坏后果是注入假码致单次重登失败
+// （DoS 级），非账号接管。详见 src/services/cqu-2fa/sender-auth.ts 的信任模型注释。
 //
 // ⚠️ 勿重新引入 ARC 头方案：旧实现读 `ARC-Authentication-Results` 并要求 CF 盖章
 // （trustedCfArc/parseInboundAuth/senderVerified）。但 `ARC-*` 是「转发链」认证头，只在 *转发*
@@ -38,7 +50,9 @@ const MAX_RAW_SIZE = 25 * 1024 * 1024; // 25 MiB 上限，超过即拒，避免 
 // 审计日志约定（Phase 7 加固）：每个有意义的「结果」只打一行，避免逐微步刷屏。
 //   - ACCEPT（成功提码并投递）：一行 console.log `[email] accepted`，含 kind（绝不含码值）。
 //   - REJECT（每条预期内拒绝）：一行 console.warn `[email] rejected`，reason 为稳定短码；
-//     from 仅在 sender_not_allowed 时打出（便于发现伪造/配置错）。
+//     from（信封 MAIL FROM）仅在发件人门相关 reason 打出（sender_not_allowed /
+//     forward_envelope_mismatch / forward_header_from_mismatch），便于发现伪造/配置错、校正转发地址。
+//     forward_header_from_mismatch **不**打印 header From 全文（避免噪声/日志注入）。
 //   - ERROR（基础设施故障——可能丢失合法验证码）：console.error `[email] error`，含 stage，必须显眼。
 // 永不记录 hit.code/验证码值，也永不记录原始 MIME 正文。
 //
@@ -118,33 +132,82 @@ export async function handleEmail(
     return message.setReject("invalid binding");
   }
 
-  // 信封发件人门：message.from 是信封 MAIL FROM（CF 平台 SPF 门已保证它来自被授权 IP）。
-  // 预期内拒绝（信封发件人不在白名单）。诊断打出 message.from 以便和真实邮件对照，判断是误拒
-  // 真信还是正确挡了非白名单发件人。不含验证码值。
-  if (!envelopeSenderAllowed(message.from, whitelist)) {
-    console.warn("[email] rejected", {
-      token,
-      reason: "sender_not_allowed",
-      from: message.from,
-    });
-    return message.setReject("sender not allowed");
+  // PostalMime.parse 的统一封装：parse 失败记 error（stage=parse）+ setReject，返回 null。
+  // direct 与 forward 共用同一段 parse 错误处理。
+  async function parseEmail(): Promise<Awaited<
+    ReturnType<typeof PostalMime.parse>
+  > | null> {
+    try {
+      return await PostalMime.parse(message.raw);
+    } catch (err) {
+      console.error("[email] error", {
+        token,
+        stage: "parse",
+        message: err instanceof Error ? err.message : String(err),
+      });
+      message.setReject("parse failure");
+      return null;
+    }
   }
 
-  // —— 自此以下，发件人已确认为可信 CQU 来源 ——
-  // 之后任何基础设施故障都可能导致「合法验证码丢失」，必须 console.error 留痕，不得静默吞。
-
-  // 发件人已确认为 CQU 官方后，才解析正文并提码（extractCode 信任正文来源）。
+  // 信封 + 发件人门（按 kind 分叉），通过后产出已解析的 email 供下游提码。
+  // message.from 是信封 MAIL FROM（CF 文档：用于安全判断的字段）。
   let email: Awaited<ReturnType<typeof PostalMime.parse>>;
-  try {
-    email = await PostalMime.parse(message.raw);
-  } catch (err) {
-    console.error("[email] error", {
-      token,
-      stage: "parse",
-      message: err instanceof Error ? err.message : String(err),
-    });
-    return message.setReject("parse failure");
+
+  if (bind.kind === "forward") {
+    // forward：whitelist=[用户登记的转发地址]。先校验 envelope ∈ 转发地址（证明穿过该用户转发器）。
+    // 不过即拒，且 **不 parse**（不解析未过 envelope 闸的邮件——降低对未授信邮件的解析面，
+    // 且 message.from 即用户需登记的实际 envelope，记录它便于校正登记地址 / SRS 兜底）。
+    if (!envelopeSenderAllowed(message.from, whitelist)) {
+      console.warn("[email] rejected", {
+        token,
+        reason: "forward_envelope_mismatch",
+        from: message.from,
+      });
+      return message.setReject("sender not allowed");
+    }
+
+    // envelope 已过 → 解析正文以读取 header From。
+    const parsed = await parseEmail();
+    if (!parsed) return; // parseEmail 已 setReject + 记 error
+    email = parsed;
+
+    // 校验 header From===sso@cqu.edu.cn（补回 CQU 来源信号，可伪造）。
+    // ⚠️ 实现铁律（待真实样本确认）：header From 在不同转发器下可能是 sso@cqu.edu.cn，也可能被
+    // SRS 改写为别的地址或挪到 Reply-To。本实现按 email.from.address===sso@cqu.edu.cn 做 v1，
+    // **必须用一封真实转发样本确认实际形状后才能信任上线**（项目历史三次栽在凭样本猜）。
+    // 不要凭空加 Reply-To 兜底（无样本佐证，YAGNI），仅在此标注此校验项待核。
+    const headerFrom = email.from?.address ?? "";
+    if (!forwardSenderAllowed(message.from, headerFrom, whitelist)) {
+      // header From 不是 CQU。不打印 headerFrom 全文（避免噪声/日志注入），只记 reason + envelope from。
+      console.warn("[email] rejected", {
+        token,
+        reason: "forward_header_from_mismatch",
+        from: message.from,
+      });
+      return message.setReject("sender not allowed");
+    }
+  } else {
+    // direct：whitelist=["sso@cqu.edu.cn"]。CF 平台 SPF 门已保证 envelope=sso@cqu.edu.cn 来自被授权 IP。
+    // 预期内拒绝（信封发件人不在白名单）。诊断打出 message.from 以便和真实邮件对照，判断是误拒
+    // 真信还是正确挡了非白名单发件人。不含验证码值。
+    if (!envelopeSenderAllowed(message.from, whitelist)) {
+      console.warn("[email] rejected", {
+        token,
+        reason: "sender_not_allowed",
+        from: message.from,
+      });
+      return message.setReject("sender not allowed");
+    }
+
+    // 发件人已确认为 CQU 官方后，才解析正文并提码（extractCode 信任正文来源）。
+    const parsed = await parseEmail();
+    if (!parsed) return; // parseEmail 已 setReject + 记 error
+    email = parsed;
   }
+
+  // —— 自此以下，发件人已确认为可信来源（direct: CQU IP；forward: 穿过用户转发器 + header From=CQU）——
+  // 之后任何基础设施故障都可能导致「合法验证码丢失」，必须 console.error 留痕，不得静默吞。
 
   const hit = extractCode(email.subject ?? "", email.text ?? email.html ?? "");
   if (!hit) {

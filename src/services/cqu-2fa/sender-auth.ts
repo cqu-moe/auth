@@ -17,8 +17,35 @@
 // 是「转发链」的认证头——只在 *转发* 路径（Send-to-an-email / SRS+ARC-sign）上添加，
 // *不会* 出现在投递给 Worker email() handler 的入站邮件上。于是该头恒缺失、校验恒返回 null、
 // 真实 CQU 邮件被全部误拒。该方案对 inbound-to-Worker 路径是错的，已删除。
+//
+// ── 转发模式（kind=forward）的发件人校验 ──
+// 转发模式下用户保留自己的邮箱作 CQU 密保邮箱，设转发规则把 CQU 邮件转发到我们地址。邮件经用户邮箱
+// 转发后，信封 MAIL FROM 被 SRS 改写成 *转发方* 地址（不再是 sso@cqu.edu.cn），CF 的 SPF 闸此时只
+// 证明「来自该转发服务」，不证明「内容来自 CQU」。原始 CQU 来源只剩在 *邮件头 From* 里（可伪造）。
+// 故 forward 的信任模型 =
+//   (1) envelope ∈ 用户登记的转发地址：证明邮件穿过了该用户的转发器（SPF 对转发方域成立），不靠它
+//       证明 CQU 来源——它只把可行攻击从「仅知 token 者直投」收窄为「先把伪造邮件塞进用户邮箱再被转发」。
+//   (2) header From 地址 === sso@cqu.edu.cn：补回 CQU 来源信号。**这是弱保证、可伪造**（header From
+//       非签名、cqu.edu.cn 无 DKIM），本质弱于直设；最坏后果是注入假码致单次重登失败（DoS 级），
+//       非账号接管。
+// ⚠️ 同样勿在此重新引入 ARC：转发模式校验的也只是 envelope（CF SPF 闸的对象）+ header From（MIME 内），
+// 不读 ARC-* 头。
+const CQU_SENDER = "sso@cqu.edu.cn";
+
 export function envelopeSenderAllowed(envelopeFrom: string, senderWhitelist: string[]): boolean {
   const from = (envelopeFrom || "").trim().toLowerCase();
   if (!from) return false;
   return senderWhitelist.some((s) => s.trim().toLowerCase() === from);
+}
+
+// forward 模式发件人校验（纯函数，可单测）：
+//   envelope ∈ 用户登记的转发地址（穿过该用户转发器）  &&  header From 地址 === CQU。
+// 顺序固定：envelope 不过直接 false（不看 header From）；envelope 过后再校验 header From。
+export function forwardSenderAllowed(
+  envelopeFrom: string,
+  headerFromAddress: string,
+  senderWhitelist: string[]
+): boolean {
+  if (!envelopeSenderAllowed(envelopeFrom, senderWhitelist)) return false;
+  return (headerFromAddress || "").trim().toLowerCase() === CQU_SENDER;
 }

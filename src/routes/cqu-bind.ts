@@ -52,12 +52,42 @@ cquBind.use("/*", async (c, next) => {
   return next();
 });
 
+// 基础邮箱格式校验（仅 forward 模式登记用户转发地址时使用）。不追求 RFC 完整性——只挡明显畸形，
+// 真正的可达性由后续真实转发邮件的 envelope 校验背书。
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 // POST /api/cqu/bind/address
-// 幂等：用户已有绑定地址行则直接返回；否则生成 token 写入 pending 行。
-// 域名只取自 c.env.BIND_EMAIL_DOMAIN（vars，已接线）。
+// 幂等：用户已有绑定地址行则直接返回；否则按请求体的绑定方式生成 token 写入 pending 行。
+// body { kind?: "direct"|"forward", forwardAddress?: string }：
+//   - 缺省 / "direct"：whitelist=["sso@cqu.edu.cn"]（现状）。
+//   - "forward"：要求 forwardAddress 是合法邮箱，whitelist=[该地址规范化(trim+lower)]。
+// userId 只取自 session/JWT（绝不取客户端入参）；域名只取自 c.env.BIND_EMAIL_DOMAIN。
 cquBind.post("/address", async (c) => {
   const user = c.get("user") as { id: string };
   const db = drizzle(c.env.DATABASE);
+
+  // 畸形 JSON body 不应裸 500，统一返回 400 INVALID_BODY（复刻 /credentials 的 try/catch）。
+  // 兼容空 body（无 Content-Type 的 POST）：解析失败回退到空对象，等价于「缺省 direct」。
+  let body: { kind?: string; forwardAddress?: string };
+  try {
+    body = await c.req.json<{ kind?: string; forwardAddress?: string }>();
+  } catch {
+    return errorResponse(c, "INVALID_BODY", "请求体不是合法 JSON", 400);
+  }
+
+  // 解析绑定方式。仅在创建新行时生效；已存在行保持原 kind（幂等，见下）。
+  let kind: "direct" | "forward" = "direct";
+  let senderWhitelist = JSON.stringify(["sso@cqu.edu.cn"]);
+  if (body.kind === "forward") {
+    const forwardAddress = (body.forwardAddress ?? "").trim().toLowerCase();
+    if (!EMAIL_RE.test(forwardAddress)) {
+      return errorResponse(c, "INVALID_FORWARD_ADDRESS", "转发邮箱地址不合法", 400);
+    }
+    kind = "forward";
+    senderWhitelist = JSON.stringify([forwardAddress]);
+  } else if (body.kind !== undefined && body.kind !== "direct") {
+    return errorResponse(c, "INVALID_KIND", "未知的绑定方式", 400);
+  }
 
   const existing = await db
     .select()
@@ -65,6 +95,7 @@ cquBind.post("/address", async (c) => {
     .where(eq(cquBindAddresses.userId, user.id))
     .get();
 
+  // 幂等：已存在绑定行直接返回现状，**不**因本次请求改 kind/whitelist。
   if (existing) {
     return c.json({
       address: `${existing.token}@${c.env.BIND_EMAIL_DOMAIN}`,
@@ -77,8 +108,8 @@ cquBind.post("/address", async (c) => {
     await db.insert(cquBindAddresses).values({
       token,
       userId: user.id,
-      kind: "direct",
-      senderWhitelist: JSON.stringify(["sso@cqu.edu.cn"]),
+      kind,
+      senderWhitelist,
       status: "pending",
       // 显式写真实时间戳：即便列默认值损坏（历史遗留），新行也拿到正确时间。
       boundAt: sql`(datetime('now'))`,
