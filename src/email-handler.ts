@@ -48,7 +48,9 @@ const MAX_RAW_SIZE = 25 * 1024 * 1024; // 25 MiB 上限，超过即拒，避免 
 // 邮件被全部误拒。已改为「CF 平台 SPF 门 + 信封发件人白名单 + 不可枚举地址」模型。
 //
 // 审计日志约定（Phase 7 加固）：每个有意义的「结果」只打一行，避免逐微步刷屏。
-//   - ACCEPT（成功提码并投递）：一行 console.log `[email] accepted`，含 kind（绝不含码值）。
+//   - ACCEPT（成功提码 **且** 投递到 DO 成功）：一行 console.log `[email] accepted`，含 kind（绝不含码值）。
+//     ⚠️ accepted 只在 depositOk 时打——提码后投递失败属丢码，记 error 而非 accepted（见末尾分叉），
+//     避免「确认发件人后丢码」被「accepted」措辞掩盖。
 //   - REJECT（每条预期内拒绝）：一行 console.warn `[email] rejected`，reason 为稳定短码；
 //     from（信封 MAIL FROM）仅在发件人门相关 reason 打出（sender_not_allowed /
 //     forward_envelope_mismatch / forward_header_from_mismatch），便于发现伪造/配置错、校正转发地址。
@@ -213,13 +215,18 @@ export async function handleEmail(
   if (!hit) {
     // 邮件已解析但未提到验证码：静默 drop（不出站、不回弹），但记 warn——发件人已校验通过却提不到码，
     // 多半是 CQU 邮件格式变更，需在日志里可见以便及时修提码正则。不记原始正文。
-    console.warn("[email] rejected", { token, reason: "no_code_extracted" });
+    console.warn("[email] rejected", {
+      token,
+      reason: "no_code_extracted",
+      kind: bind.kind,
+    });
     return;
   }
 
   // 投递到用户的 Durable Object —— 复用 src/routes/cqu.ts 的寻址约定：
   // idFromName(userId) → get(id) → fetch(new Request(...))。
-  // deposit-code action 由 Phase 5 实现，此处先接线（当前运行时可能 404）。
+  // deposit-code action 已在 DO 实现（src/durable-objects/cqu-session.ts 的 case "deposit-code"），
+  // 此处 res.ok 反映 DO 是否成功接收该投递请求。
   let depositOk = false;
   try {
     const doId = env.CQU_SESSION.idFromName(bind.userId);
@@ -231,9 +238,8 @@ export async function handleEmail(
       })
     );
     depositOk = res.ok;
-    // M1: 检查投递结果。Phase 5 前 deposit-code 还没实现，已知会 404——记录但不崩溃。
+    // 非 2xx：DO 未成功接收投递（码实际未入站），记 error 留痕。
     if (!res.ok) {
-      // TODO Phase 5: deposit-code action 落地后，此处 404 应消失；届时校验 res.ok 并据此处理。
       console.error("[email] error", {
         token,
         stage: "do_deposit",
@@ -249,11 +255,23 @@ export async function handleEmail(
     // 投递抛错也不抛出 handler（避免给上游退信/触发重投制造可观测的副作用）。
   }
 
-  // 单条 ACCEPT 审计行：发件人已校验通过 + 成功提码。记 kind（绝不记码值）+ depositOk。
-  console.log("[email] accepted", {
-    token,
-    userId: bind.userId,
-    kind: hit.kind,
-    depositOk,
-  });
+  // 终局审计行按投递结果分叉，避免「accepted」措辞掩盖丢码：
+  //   - depositOk：码已成功投递到 DO → 单条 ACCEPT（记 kind，绝不记码值）。
+  //   - 否则：码提取成功但投递失败（已在上方记过 do_deposit 故障），码被丢弃 →
+  //     终局记 error 而非 accepted，使「确认发件人后丢码」显眼可见（不退信/不重投，仅留痕）。
+  if (depositOk) {
+    console.log("[email] accepted", {
+      token,
+      userId: bind.userId,
+      kind: hit.kind,
+    });
+  } else {
+    console.error("[email] error", {
+      token,
+      userId: bind.userId,
+      stage: "do_deposit_outcome",
+      kind: hit.kind,
+      message: "code extracted but deposit failed — code dropped",
+    });
+  }
 }
