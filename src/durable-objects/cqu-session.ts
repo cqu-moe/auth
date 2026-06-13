@@ -7,6 +7,14 @@ import {
   type CquEvent,
 } from "../services/cqu-2fa/state-machine";
 import { shouldStartLogin } from "../services/cqu-2fa/single-flight";
+import {
+  shouldProactiveRelogin,
+  pruneAttempts,
+  shouldThrottleRelogin,
+  RELOGIN_RATE_WINDOW_MS,
+  MAX_RELOGINS_PER_WINDOW,
+  CONSECUTIVE_RELOGIN_FAIL_ALERT,
+} from "../services/cqu-2fa/relogin-policy";
 import type { Env } from "../types";
 
 const KEEPALIVE_INTERVAL_MS = 15 * 60 * 1000;
@@ -376,7 +384,7 @@ export class CquSessionDO extends DurableObject<Env> {
   private async destroy(): Promise<void> {
     await this.ctx.storage.deleteAll();
     this.state = null;
-    // deleteAll 已清掉 status/loginInFlight/pendingCode/state/credentials;
+    // deleteAll 已清掉 status/loginInFlight/pendingCode/state/credentials/reloginAttempts/reloginFailures;
     // 显式回到 unbound, 让后续 status 查询语义清晰(而非依赖默认值)。
     await this.setStatus("unbound");
   }
@@ -389,10 +397,14 @@ export class CquSessionDO extends DurableObject<Env> {
     if (status === "revoked" || status === "unbound") return;
 
     // 主动重登: TGT 接近 ~8h 硬上限前(+7h)且当前 active, 提前重铸, 避免热路径在过期窗口取不到 ST。
+    // 判定抽成纯函数 shouldProactiveRelogin(便于单测), 语义与旧内联条件完全一致(含 `>=` 边界)。
     if (
-      status === "active" &&
-      this.state.loginAt > 0 &&
-      Date.now() - this.state.loginAt >= PROACTIVE_RELOGIN_MS
+      shouldProactiveRelogin(
+        status,
+        this.state.loginAt,
+        Date.now(),
+        PROACTIVE_RELOGIN_MS
+      )
     ) {
       console.warn(
         `[CquSession] ${this.state.studentId}: TGT age >= 7h, proactive relogin`
@@ -473,6 +485,32 @@ export class CquSessionDO extends DurableObject<Env> {
    */
   private async relogin(): Promise<void> {
     if (!this.state) throw new Error("No state");
+    const studentId = this.state.studentId;
+    const now = Date.now();
+
+    // 重登限频(只在重登路径, 不进 containerLogin —— 否则会误伤永不该被限流的首登)。
+    // 读近期重登发起时刻, 裁到窗口; 若已达 runaway 闸则告警并直接 return:
+    // 不点火容器、不记录本次尝试、状态保持不变(不推进到 relogging), 避免自激循环烧穿容器/触瑞数风控。
+    const stored =
+      (await this.ctx.storage.get<number[]>("reloginAttempts")) ?? [];
+    const pruned = pruneAttempts(stored, now, RELOGIN_RATE_WINDOW_MS);
+    if (
+      shouldThrottleRelogin(
+        pruned,
+        now,
+        RELOGIN_RATE_WINDOW_MS,
+        MAX_RELOGINS_PER_WINDOW
+      )
+    ) {
+      console.error(
+        `[CquSession] ${studentId}: ALERT relogin throttled — ${pruned.length} relogins in last hour, skipping to avoid runaway/瑞数 risk`
+      );
+      return;
+    }
+    // 未限流: 记录本次发起时刻并落盘, 再继续容器登录。
+    pruned.push(now);
+    await this.ctx.storage.put("reloginAttempts", pruned);
+
     const outcome = await this.containerLogin(
       "RELOGIN_OK",
       "RELOGIN_FAIL",
@@ -481,21 +519,30 @@ export class CquSessionDO extends DurableObject<Env> {
       "RELOGIN_START"
     );
     if (outcome === "in_flight") {
+      // 命中在途锁: 不算一次失败、也不重置失败计数(让在途登录自己收尾)。
       console.info(
-        `[CquSession] ${this.state.studentId}: relogin already in flight, skip`
+        `[CquSession] ${studentId}: relogin already in flight, skip`
       );
       return;
     }
     if (outcome === "failed") {
       // containerLogin 失败时已把状态推到 RELOGIN_FAIL(→ expired) 并清锁。
-      console.error(`[CquSession] ${this.state.studentId}: relogin failed`);
+      console.error(`[CquSession] ${studentId}: relogin failed`);
+      // 连续重登失败计数自增 + 持久化; 达阈值告警(会话多半真坏: 密码改了/转发断了/瑞数变更)。
+      const failures =
+        ((await this.ctx.storage.get<number>("reloginFailures")) ?? 0) + 1;
+      await this.ctx.storage.put("reloginFailures", failures);
+      if (failures >= CONSECUTIVE_RELOGIN_FAIL_ALERT) {
+        console.error(
+          `[CquSession] ${studentId}: ALERT ${failures} consecutive relogin failures — session likely broken (密码改了/转发断了/瑞数变更)`
+        );
+      }
       return;
     }
-    // outcome === "ok": 重登成功, 新 TGT 已铸。warn 级以便在 observability 可见
-    // (info 级实测在当前配置下不可见; 重登成功此前无任何日志, 是观测盲区)。
-    console.warn(
-      `[CquSession] ${this.state.studentId}: relogin OK, new TGT minted`
-    );
+    // outcome === "ok": 重登成功, 新 TGT 已铸 —— 重置连续失败计数。warn 级以便在
+    // observability 可见(info 级实测在当前配置下不可见; 重登成功此前无任何日志, 是观测盲区)。
+    await this.ctx.storage.put("reloginFailures", 0);
+    console.warn(`[CquSession] ${studentId}: relogin OK, new TGT minted`);
   }
 
   /**
