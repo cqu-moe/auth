@@ -4,23 +4,22 @@
 > 仓库：`/Users/uu/Documents/Coding/cqu-moe/auth`，分支 `feat/cqu-2fa-email-rebind`（**未合并 main**）。
 > 关联（只读参考）：`/Users/uu/Documents/Coding/cqu-moe/cqu-api-endpoint-collection`
 
-## 0. ⭐ 醒来第一件事：部署 + 跑迁移（功能已实现但未上生产）
+## 0. ✅ 已部署 + 已迁移（本轮收尾时由用户授权完成）
 
-本轮所有新功能**已实现 + 双审 + 提交，但没有部署到生产**（生产部署是面向外部的动作，用户睡了不便自主上关键路径）。生产现在停在**安全的回滚版 `dc4848f5`**（只有 7h 阈值 + 可观测性，**新功能均未上**）。
+本轮新功能**已部署到生产**：版本 **`147f80e9`**（转发模式 + bound_at + 限频/告警 + 审计修复 + 可观测性全部上线）。迁移 **`0003` 已 `apply --remote`**，bound_at 脏行已订正为真实时间戳（复验 0 dirty）。部署后实测重登闭环 OK：`12:48 session expired → POST /run 200(容器登录) → [email] accepted(2FA 邮件捕获) → POST /code 200`，无报错。
 
-醒来要做（按序）：
+**仍待办（下个 session / 后续）**：
+1. **🟢 转发模式上线给真实用户前**：必须用一封真实转发的 CQU 邮件确认 `email.from` 实际形状（SRS 可能改写/挪到 Reply-To）——见 §3。代码已上线但 forward 是 opt-in，没人用之前不影响 direct。
+2. **🔵 会话频繁 expired**：观测到 ~每几小时就 expired（短于理论 8h），reactive 重登每次自愈、但 churn 偏多——见 §2 残留疑点。限频 6/h 已兜底防失控。值得查根因（CQU 会话变短？重登 TGT 没真刷新？网络抖动误判？）。
+3. **⚪ 分支合并 main**：仍未合（见 §6）。
+4. **⚪ 小项**：见 §6（wizard "返回上一步" 文案、MEDIUM-1 DO deposit-code 恒 200）。
+
 ```bash
-# 1. 部署（构建前端 + wrangler deploy；含本地 Docker 构建容器，需沙箱外/网络）
-npm run deploy
-
-# 2. 跑 D1 迁移（wrangler deploy 不跑迁移！0003 订正 bound_at 存量脏行）
-npx wrangler d1 migrations apply auth-cqu-moe-db --remote
-npm run db:migrate:local     # 本地也跑一遍
-
-# 3. 复验：observability 看下个 alarm 是新版本、relogin OK/proactive 是 warn 级
-npx wrangler whoami          # 账户应为 a666c560407022706a52a703923548d5
+# 复验/运维参考命令（部署+迁移已执行过；如需再次部署）：
+npm run deploy                                              # 前端构建 + wrangler deploy（沙箱外/Docker）
+npx wrangler d1 migrations apply auth-cqu-moe-db --remote   # 迁移（wrangler deploy 不跑迁移）
+npx wrangler whoami                                        # 账户应为 a666c560407022706a52a703923548d5
 ```
-**⚠️ 转发模式上线前必看 §3 的真实样本前置。**
 
 ## 1. 本轮干了什么（7 个提交，`ca08805`→`623478a`）
 
