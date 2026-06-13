@@ -4,6 +4,36 @@
 > 仓库：`/Users/uu/Documents/Coding/cqu-moe/auth`，分支 `feat/cqu-2fa-email-rebind`（**未合并 main**）。
 > 关联（只读参考）：`/Users/uu/Documents/Coding/cqu-moe/cqu-api-endpoint-collection`
 
+## 0′. ✅ session-3（2026-06-14，全部 subagent-driven + 审 + 已部署）
+
+**生产当前版本 = `e6fb6ec5`**。本轮四件事，prod 全部上线、git 已 push 同步、PR #4 已含本轮改动：
+
+1. **RESTful 化 CQU 绑定 API**（`ae5bf99` 后端 + `2e243a1` 前端）：资源 = 单数 `/api/cqu/binding`：
+   - `POST /api/cqu/binding`（创建/签发地址，新建 201 / 幂等 200；`kind=forward` 仍 403）
+   - `GET /api/cqu/binding`（`{address?, bindStatus, sessionStatus}`）
+   - `PUT /api/cqu/binding/credentials`（设凭证 + 首登）
+   - `GET /api/cqu/binding/events`（WS 升级，← 旧 `/ws`）
+   - `DELETE /api/cqu/binding`（解绑，204）
+   - admin：`PATCH /api/admin/users/:id/cqu-binding {status:"revoked"|"active"}`（取代旧 `revoke-cqu`/`unrevoke-cqu` 动词端点，查 DO `res.ok` 保 D1↔DO 一致）
+   - `cqu.ts` 删旧 `POST/PUT/DELETE /bind` + `GET /status`，**只留 `GET /service-ticket`**。前端 wizard + Settings 全改到新契约（DELETE 处理 204 无 body）。
+
+2. **实时验证码面板（live code view）**（`65571d9`+`e42b82e`+`13c39ca`+`daeb414`+`4d6e6ac`，→ prod `e6fb6ec5`）：用户手动登录 CQU 时能在 Settings 实时看到到达专属地址的码。
+   - 后端：`depositCode` 把 `login_2fa` **无条件广播给已连 WS** + 存 pendingCode。**⚠️ 返回值仍保留 silent-failure 告警链**：仅"无在途登录的手动码"从 `return false` 改 `true`（已送达用户面板），容器收码失败/退化态仍 `false`（照样 code_dropped 告警）。
+   - 回放发**真实收码 `ts` + 服务端算的 `remainingMs`**（不再用回放时刻 → 修了倒计时锚点错 + 10:01 时钟偏移；回放门槛收紧为"仍在 10min 有效期内"）。
+   - **WS keepalive** = `this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping","pong"))`（不唤醒休眠 DO、不计费；前端每 30s 发 `ping`，收到 `pong` 忽略）。
+   - 前端 `LiveCodeSection`（折叠面板，仅 bindStatus==="active" 渲染）：**按 code 去重**（解决快速开合/重连堆同码卡）、deadline 本地时钟倒计时、有限重连 5 次 + 重试按钮、onExpire 驱动卡片即时灰化。
+   - **关键约束（用户实测确认）**：CQU **同一时间只有一个有效验证码**（上一个没过期发不出新的）→ 无争用歧义，简单广播即可，无需"暂停自动重登"模式。
+
+3. **git 同步**：本地曾领先 origin 8 commit（prod 在跑但没 push）→ 已 `git push`，**PR #4 与 prod 对齐，回滚风险消除**。
+
+4. **CI/CD（GitHub Actions，`185ae9f`）**：
+   - `.github/workflows/ci.yml`：`on: pull_request + push:[main]`，跑 typecheck + test + 前端 tsc/build。**PR #4 上即生效**。
+   - `.github/workflows/deploy.yml`：**手动 `workflow_dispatch`**（门禁 → D1 migrate → `npm run deploy`，容器用 runner 自带 Docker 构建）。选手动而非 push-main-自动 = 不打断定点过期调查。
+   - **坑**：`workflow_dispatch` 需文件落到**默认分支 main** 才出现"Run workflow"按钮 → deploy.yml 要先上 main 才能用。
+   - **配套待用户做**：① GitHub repo 建 secret `CLOUDFLARE_API_TOKEN`（权限 Workers Scripts:Edit + D1:Edit + Containers:Edit）+ `CLOUDFLARE_ACCOUNT_ID`；② CF 面板**禁用 git-connected Workers Builds**（否则每次 push 失败 + 回滚风险）；③ 合 PR #4 → main（合前先做 ①②，合后 deploy.yml 手动按钮才可用）。
+
+---
+
 ## 0. ✅ 已部署 + 已迁移 + PR 已开（session-2 两轮收尾，用户授权）
 
 **生产当前版本 = `b0301f99`**（2026-06-13 晚最新）。本 feature 全部 + 本轮所有收尾均上线：bound_at 修复、限频/告警、审计修复、可观测性、expiry 取证诊断、MEDIUM-1 deposit 可观测、wizard 文案、容器登录失败诊断、**forward 模式已禁用**、**unbind/revoke/un-revoke**、**Settings 绑定区块重写**。迁移 `0003` 已 `apply --remote`（bound_at 0 dirty）。
