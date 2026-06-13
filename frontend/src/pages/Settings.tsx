@@ -187,13 +187,14 @@ function CopyButton({ text }: { text: string }) {
 // LiveCodeSection — 实时验证码面板（仅 bindStatus === "active" 时渲染）
 // ─────────────────────────────────────────────────────────────────────────────
 
-type WsState = "idle" | "connecting" | "open" | "closed" | "error";
+type WsState = "idle" | "connecting" | "open" | "closed" | "error" | "failed";
 
 interface LiveCode {
   id: number;
   type: "login_2fa" | "bind_code";
   code: string;
   ts: number;
+  expired?: boolean;
 }
 
 function buildWsUrl(): string {
@@ -206,21 +207,31 @@ function formatTime(ts: number): string {
   return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-function CodeCountdown({ ts }: { ts: number }) {
+function CodeCountdown({ ts, onExpire }: { ts: number; onExpire?: () => void }) {
   const [secondsLeft, setSecondsLeft] = useState<number>(() => {
     const elapsed = Math.floor((Date.now() - ts) / 1000);
     return Math.max(600 - elapsed, 0);
   });
+  const expiredFiredRef = useRef(false);
+  // 用 ref 持有最新 onExpire，避免 callback identity 变化重置 expiredFiredRef
+  const onExpireRef = useRef(onExpire);
+  useEffect(() => { onExpireRef.current = onExpire; }, [onExpire]);
 
   useEffect(() => {
+    expiredFiredRef.current = false;
     const update = () => {
       const elapsed = Math.floor((Date.now() - ts) / 1000);
-      setSecondsLeft(Math.max(600 - elapsed, 0));
+      const left = Math.max(600 - elapsed, 0);
+      setSecondsLeft(left);
+      if (left === 0 && !expiredFiredRef.current) {
+        expiredFiredRef.current = true;
+        onExpireRef.current?.();
+      }
     };
     update();
     const t = setInterval(update, 1000);
     return () => clearInterval(t);
-  }, [ts]);
+  }, [ts]); // onExpire 通过 ref 访问，不需要列为 dep
 
   const expired = secondsLeft <= 0;
   const m = Math.floor(secondsLeft / 60);
@@ -246,6 +257,8 @@ function CodeCountdown({ ts }: { ts: number }) {
 
 let liveCodeIdCounter = 0;
 
+const MAX_RETRIES = 5;
+
 function LiveCodeSection() {
   const [open, setOpen] = useState(false);
   const [wsState, setWsState] = useState<WsState>("idle");
@@ -255,6 +268,7 @@ function LiveCodeSection() {
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(false);
   const openRef = useRef(false);
+  const retryCountRef = useRef(0);
 
   // Keep openRef in sync so WS close handler can check whether to reconnect
   openRef.current = open;
@@ -275,6 +289,7 @@ function LiveCodeSection() {
 
     ws.onopen = () => {
       if (!mountedRef.current) { ws.close(); return; }
+      retryCountRef.current = 0; // 连接成功 → 清零重试计数
       setWsState("open");
     };
 
@@ -305,12 +320,18 @@ function LiveCodeSection() {
 
     ws.onclose = () => {
       if (!mountedRef.current) return;
-      setWsState("closed");
       if (!openRef.current) return;
-      // 面板仍展开 → 重连一次（简单单次重连，不做退避）
-      reconnectTimer.current = setTimeout(() => {
-        if (mountedRef.current && openRef.current) connect();
-      }, 3000);
+      // 面板仍展开 → 有限重试（上限 MAX_RETRIES 次）
+      if (retryCountRef.current < MAX_RETRIES) {
+        retryCountRef.current += 1;
+        setWsState("closed");
+        reconnectTimer.current = setTimeout(() => {
+          if (mountedRef.current && openRef.current) connect();
+        }, 3000);
+      } else {
+        // 超过上限 → 终态，停止重连
+        setWsState("failed");
+      }
     };
 
     ws.onerror = () => {
@@ -332,20 +353,29 @@ function LiveCodeSection() {
     if (open) {
       connect();
     } else {
-      // 折叠 → 关闭 WS 和重连定时器
+      // 折叠 → 关闭 WS 和重连定时器，清零重试计数
       if (reconnectTimer.current) {
         clearTimeout(reconnectTimer.current);
         reconnectTimer.current = null;
       }
       wsRef.current?.close();
       wsRef.current = null;
+      retryCountRef.current = 0;
       setWsState("idle");
     }
     return () => {
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       wsRef.current?.close();
+      retryCountRef.current = 0;
     };
   }, [open, connect]);
+
+  // 稳定引用：避免 onExpire 每轮渲染变化导致 CodeCountdown 的 expiredFiredRef 被重置
+  const markExpired = useCallback((id: number) => {
+    setCodes((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, expired: true } : c))
+    );
+  }, []);
 
   const typeLabelMap: Record<LiveCode["type"], string> = {
     login_2fa: "登录码",
@@ -397,22 +427,42 @@ function LiveCodeSection() {
               ? "bg-blue-50 text-blue-600"
               : wsState === "error" || wsState === "closed"
               ? "bg-yellow-50 text-yellow-700"
+              : wsState === "failed"
+              ? "bg-red-50 text-red-700"
               : "bg-gray-50 text-gray-500"
           }`}>
             {wsState === "open" && (
               <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
             )}
-            {(wsState === "connecting") && (
+            {wsState === "connecting" && (
               <span className="w-3.5 h-3.5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
             )}
             {(wsState === "closed" || wsState === "error") && (
               <span className="w-3.5 h-3.5 border-2 border-yellow-500 border-t-transparent rounded-full animate-spin" />
+            )}
+            {wsState === "failed" && (
+              <span className="w-3.5 h-3.5 text-red-500" aria-hidden="true">✕</span>
             )}
             {wsState === "open" && "实时监听中，验证码到达将立即显示"}
             {wsState === "connecting" && "正在建立连接…"}
             {wsState === "closed" && "连接中断，正在重连…"}
             {wsState === "error" && "连接出错，正在重连…"}
             {wsState === "idle" && "准备连接…"}
+            {wsState === "failed" && (
+              <>
+                <span>连接多次失败，请检查网络或登录状态</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    retryCountRef.current = 0;
+                    connect();
+                  }}
+                  className="ml-auto shrink-0 px-2 py-0.5 rounded border border-red-300 bg-white text-red-600 hover:bg-red-50 transition-colors"
+                >
+                  重试
+                </button>
+              </>
+            )}
           </div>
 
           {/* Code list or empty hint */}
@@ -428,7 +478,7 @@ function LiveCodeSection() {
           ) : (
             <ul className="space-y-3" role="list" aria-label="验证码列表">
               {codes.map((item) => {
-                const expired = Math.floor((Date.now() - item.ts) / 1000) >= 600;
+                const expired = !!item.expired;
                 return (
                   <li
                     key={item.id}
@@ -443,7 +493,10 @@ function LiveCodeSection() {
                         </span>
                         <span className="text-xs text-gray-400">{formatTime(item.ts)}</span>
                       </div>
-                      <CodeCountdown ts={item.ts} />
+                      <CodeCountdown
+                        ts={item.ts}
+                        onExpire={() => markExpired(item.id)}
+                      />
                     </div>
                     <div className="flex items-center justify-between gap-4 flex-wrap">
                       <span className={`font-mono text-3xl font-bold tracking-[0.25em] ${
