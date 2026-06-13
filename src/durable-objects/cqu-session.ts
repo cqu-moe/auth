@@ -417,6 +417,9 @@ export class CquSessionDO extends DurableObject<Env> {
    * cqu_bind_addresses.status=revoked 承载; 这里不 deleteAll, 故 revoked 是可逆禁用而非彻底清除。
    */
   private async revoke(): Promise<void> {
+    // 刻意直写 setStatus("revoked") 而非走 nextStatus 状态机: 撤销要从任意状态(含空/
+    // unbound 的 DO, admin 端点对未初始化的 DO 也会发 revoke)强制置位; 状态机表里
+    // unbound 无 REVOKE 转移, 走表会停在 unbound 而漏置墓碑。勿"修回"成走表。
     await this.setStatus("revoked");
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.delete("loginInFlight");
@@ -433,6 +436,9 @@ export class CquSessionDO extends DurableObject<Env> {
    * 复用现有 alarm/relogin 路径, 不改其逻辑。
    */
   private async unrevoke(): Promise<void> {
+    // 刻意直写 setStatus("expired") 而非走 nextStatus 状态机: 解除吊销要从任意状态(含
+    // 空/unbound 的 DO)强制置位让 alarm 探针接管; 状态机表里没有从 revoked/unbound 出发的
+    // UNREVOKE 转移, 走表会停在原态而无法恢复保活循环。勿"修回"成走表。
     await this.setStatus("expired");
     await this.ctx.storage.setAlarm(Date.now());
   }

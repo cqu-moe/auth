@@ -296,9 +296,19 @@ admin.post("/users/:id/revoke-cqu", async (c) => {
     const stub = c.env.CQU_SESSION.get(
       c.env.CQU_SESSION.idFromName(userId)
     );
-    await stub.fetch(
+    // DO 内部异常返回 500 JSON(不 reject)。不查 res.ok 会把它当成功而仍返回
+    // {success:true}, 但 D1 已置 revoked → 半撤销态。显式检查, 让 D1 与 DO 一致。
+    const res = await stub.fetch(
       new Request("https://do/revoke", { method: "POST" })
     );
+    if (!res.ok) {
+      return errorResponse(
+        c,
+        "REVOKE_CQU_FAILED",
+        "DO 操作失败，请重试",
+        500
+      );
+    }
 
     return c.json({ success: true, action: "cqu-revoked" });
   } catch (e) {
@@ -331,9 +341,19 @@ admin.post("/users/:id/unrevoke-cqu", async (c) => {
     const stub = c.env.CQU_SESSION.get(
       c.env.CQU_SESSION.idFromName(userId)
     );
-    await stub.fetch(
+    // DO 内部异常返回 500 JSON(不 reject)。不查 res.ok 会把它当成功而仍返回
+    // {success:true}, 但 D1 已置 active → 半恢复态。显式检查, 让 D1 与 DO 一致。
+    const res = await stub.fetch(
       new Request("https://do/unrevoke", { method: "POST" })
     );
+    if (!res.ok) {
+      return errorResponse(
+        c,
+        "UNREVOKE_CQU_FAILED",
+        "DO 操作失败，请重试",
+        500
+      );
+    }
 
     return c.json({ success: true, action: "cqu-unrevoked" });
   } catch (e) {
