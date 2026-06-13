@@ -66,13 +66,18 @@ cquBind.post("/address", async (c) => {
   const user = c.get("user") as { id: string };
   const db = drizzle(c.env.DATABASE);
 
-  // 畸形 JSON body 不应裸 500，统一返回 400 INVALID_BODY（复刻 /credentials 的 try/catch）。
-  // 兼容空 body（无 Content-Type 的 POST）：解析失败回退到空对象，等价于「缺省 direct」。
+  // 兼容空 body（旧前端不带 body 调用，无 Content-Type 的 POST）：空 body 视为 {} 等价「缺省 direct」。
+  // 非空 body 才解析；畸形 JSON 不裸 500，统一返回 400 INVALID_BODY。
   let body: { kind?: string; forwardAddress?: string };
-  try {
-    body = await c.req.json<{ kind?: string; forwardAddress?: string }>();
-  } catch {
-    return errorResponse(c, "INVALID_BODY", "请求体不是合法 JSON", 400);
+  const raw = await c.req.text();
+  if (raw.trim() === "") {
+    body = {};
+  } else {
+    try {
+      body = JSON.parse(raw) as { kind?: string; forwardAddress?: string };
+    } catch {
+      return errorResponse(c, "INVALID_BODY", "请求体不是合法 JSON", 400);
+    }
   }
 
   // 解析绑定方式。仅在创建新行时生效；已存在行保持原 kind（幂等，见下）。

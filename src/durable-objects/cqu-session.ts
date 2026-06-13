@@ -422,6 +422,9 @@ export class CquSessionDO extends DurableObject<Env> {
       this.state.lastKeepAlive = Date.now();
       this.state.consecutiveFailures = 0;
       await this.ctx.storage.put("state", this.state);
+      // 探针自愈回 active 也打断「连续重登失败」链, 避免遗留的 reloginFailures
+      // 误触 CONSECUTIVE_RELOGIN_FAIL_ALERT 告警。
+      await this.ctx.storage.put("reloginFailures", 0);
       await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
       return;
     }
