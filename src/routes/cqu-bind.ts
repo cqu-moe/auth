@@ -87,6 +87,9 @@ cquBind.post("/address", async (c) => {
   let kind: "direct" | "forward" = "direct";
   let senderWhitelist = JSON.stringify(["sso@cqu.edu.cn"]);
   if (body.kind === "forward") {
+    // 转发模式暂时禁用：前端已置灰不可选，此处再做后端硬拦截，防止绕过前端直接调用。
+    // 下方 forward 白名单构造逻辑保留在代码里（待重新开放），但因前置 return 永不执行。
+    return errorResponse(c, "FORWARD_MODE_DISABLED", "转发模式暂未开放，请使用直设模式", 403);
     const forwardAddress = (body.forwardAddress ?? "").trim().toLowerCase();
     if (!EMAIL_RE.test(forwardAddress)) {
       return errorResponse(c, "INVALID_FORWARD_ADDRESS", "转发邮箱地址不合法", 400);

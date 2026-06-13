@@ -279,27 +279,29 @@ function Step1Intro({
           </div>
         </label>
 
-        {/* Forward option */}
+        {/* Forward option — 暂时禁用：可见但不可选。
+            代码保留（state/分支/Step2Forward 均未删），仅置灰禁用，待重新开放。 */}
         <label
-          className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-colors ${
-            bindKind === "forward"
-              ? "border-blue-500 bg-blue-50"
-              : "border-gray-200 bg-white hover:border-gray-300"
-          }`}
+          className="flex items-start gap-3 p-4 rounded-xl border-2 border-gray-200 bg-gray-50 cursor-not-allowed opacity-60"
+          aria-disabled="true"
         >
           <input
             type="radio"
             name="bindKind"
             value="forward"
-            checked={bindKind === "forward"}
-            onChange={() => setBindKind("forward")}
-            className="mt-0.5 accent-blue-600"
+            checked={false}
+            disabled
+            onChange={() => {
+              /* 暂时禁用：转发模式不可选 */
+            }}
+            className="mt-0.5 accent-blue-600 cursor-not-allowed"
           />
           <div className="flex-1 min-w-0">
-            <span className="text-sm font-medium text-gray-900">转发模式</span>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <span className="text-sm font-medium text-gray-500">转发（暂不可用）</span>
+            <p className="text-xs text-gray-400 mt-0.5">
               保留您自己的邮箱作为 CQU 密保邮箱，在邮箱里添加转发规则，将 CQU 的邮件自动转发到我们的地址。
             </p>
+            <p className="text-xs text-gray-400 mt-1 font-medium">该模式暂未开放，请使用直设模式。</p>
           </div>
         </label>
 
