@@ -28,10 +28,12 @@
   "homepage": "https://github.com/cqu-moe/auth#readme",
   "dependencies": {
     "@better-auth/oauth-provider": "^1.6.11",
+    "@cloudflare/containers": "^0.3.7",
     "better-auth": "^1.6.11",
     "better-auth-cloudflare": "^0.3.0",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.22",
+    "postal-mime": "^2.7.4",
     "resend": "^6.12.3"
   },
   "devDependencies": {

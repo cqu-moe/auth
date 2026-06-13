@@ -7,6 +7,10 @@
 
   "placement": { "hostname": "sso.cqu.edu.cn" },
 
+  "vars": {
+    "BIND_EMAIL_DOMAIN": "cquotp.com"
+  },
+
   "assets": {
     "directory": "./frontend/dist",
     "binding": "ASSETS",
@@ -27,16 +31,35 @@
   }],
 
   "durable_objects": {
-    "bindings": [{
-      "name": "CQU_SESSION",
-      "class_name": "CquSessionDO"
-    }]
+    "bindings": [
+      {
+        "name": "CQU_SESSION",
+        "class_name": "CquSessionDO"
+      },
+      {
+        "name": "CQU_LOGIN",
+        "class_name": "CquLoginContainer"
+      }
+    ]
   },
 
-  "migrations": [{
-    "tag": "v1",
-    "new_classes": ["CquSessionDO"]
+  "containers": [{
+    "class_name": "CquLoginContainer",
+    "image": "./container/Dockerfile",
+    "max_instances": 5,
+    "instance_type": "basic"
   }],
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["CquSessionDO"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["CquLoginContainer"]
+    }
+  ],
 
   "observability": {
     "enabled": false,

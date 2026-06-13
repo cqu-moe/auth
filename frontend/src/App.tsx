@@ -7,6 +7,7 @@ import ResetPasswordConfirm from "./pages/ResetPasswordConfirm";
 import Settings from "./pages/Settings";
 import Admin from "./pages/Admin";
 import OAuthAuthorize from "./pages/OAuthAuthorize";
+import CquBindWizard from "./pages/CquBindWizard";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 function RootRedirect() {
@@ -53,6 +54,14 @@ export default function App() {
           element={
             <ProtectedRoute>
               <OAuthAuthorize />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/cqu/bind"
+          element={
+            <ProtectedRoute>
+              <CquBindWizard />
             </ProtectedRoute>
           }
         />

@@ -6,3 +6,5 @@ frontend/node_modules/
 *.tsbuildinfo
 .playwright-mcp/
 .DS_Store
+__pycache__/
+*.pyc
