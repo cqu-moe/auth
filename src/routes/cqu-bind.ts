@@ -10,23 +10,21 @@ import { drizzle } from "drizzle-orm/d1";
 import { eq, sql } from "drizzle-orm";
 import { verifyAccessToken } from "better-auth/oauth2";
 
-// CQU 绑定 onboarding 后端路由（Phase 6.2）。
+// CQU 绑定资源路由（RESTful 重构）。
+//
+// 资源 = 单数 `/api/cqu/binding`（每用户至多一条绑定行）。挂载于 `/api/cqu/binding`。
+//   POST   /api/cqu/binding              创建绑定、签发专属地址（幂等：已存在→200，新建→201）
+//   GET    /api/cqu/binding              绑定状态 + DO 会话状态
+//   PUT    /api/cqu/binding/credentials  设凭证 + 触发首登，成功后标记 active
+//   GET    /api/cqu/binding/events       升级 WS，转发到本用户 DO（bind_confirm 码秒推）
+//   DELETE /api/cqu/binding              彻底解绑（删两表 + DO destroy），成功 204
 //
 // 安全契约（关键）：每条路由的 DO/用户身份 **只** 从已认证的 session/JWT 推导
 // （`c.get("user").id`），**绝不** 取自客户端请求体/查询参数。鉴权中间件与
 // `cqu.ts` 完全一致（Bearer JWT 优先，回退 Better Auth session）。
-//
-// 路由路径（挂载于 /api/cqu/bind）：
-//   POST /api/cqu/bind/address      签发/复用专属绑定地址（幂等）
-//   GET  /api/cqu/bind/ws           升级 WS，转发到本用户 DO（bind_confirm 码秒推）
-//   GET  /api/cqu/bind/status       绑定状态 + DO 会话状态
-//   POST /api/cqu/bind/credentials  录入 CQU 凭证 + 触发首登，成功后标记 active
-//
-// 与 cqu.ts 的 `POST /api/cqu/bind`（精确路径）不冲突：本router 全部是
-// /api/cqu/bind/<sub> 子路径，trie 中是独立节点，互不遮蔽。
-const cquBind = new Hono<HonoEnv>();
+const cquBinding = new Hono<HonoEnv>();
 
-cquBind.use("/*", async (c, next) => {
+cquBinding.use("/*", async (c, next) => {
   const authHeader = c.req.header("Authorization");
 
   if (authHeader?.startsWith("Bearer ")) {
@@ -57,15 +55,17 @@ cquBind.use("/*", async (c, next) => {
 // 真正的可达性由后续真实转发邮件的 envelope 校验背书。
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// POST /api/cqu/bind/address
-// 幂等：用户已有绑定地址行则直接返回；否则按请求体的绑定方式生成 token 写入 pending 行。
+// POST /api/cqu/binding （← 原 POST /address）
+// 创建绑定、签发专属地址。
+// 幂等：用户已有绑定地址行则直接返回现状（200），不因本次请求改 kind/whitelist；
+//       新建成功返回 201。
 // body { kind?: "direct"|"forward", forwardAddress?: string }：
 //   - 缺省 / "direct"：whitelist=["sso@cqu.edu.cn"]（现状）。
 //   - "forward"：要求 forwardAddress 是合法邮箱，whitelist=去重([该地址规范化(trim+lower), CQU_SENDER])。
 //     双源白名单覆盖两类转发器：真转发（如 Fastmail "Send a copy to"，保留原始信封 sso@cqu.edu.cn）
 //     与 SRS 改写（信封变成转发方地址）。若 forwardAddress 规范化后即 CQU_SENDER，去重后只留一个。
 // userId 只取自 session/JWT（绝不取客户端入参）；域名只取自 c.env.BIND_EMAIL_DOMAIN。
-cquBind.post("/address", async (c) => {
+cquBinding.post("/", async (c) => {
   const user = c.get("user") as { id: string };
   const db = drizzle(c.env.DATABASE);
 
@@ -109,7 +109,7 @@ cquBind.post("/address", async (c) => {
     .where(eq(cquBindAddresses.userId, user.id))
     .get();
 
-  // 幂等：已存在绑定行直接返回现状，**不**因本次请求改 kind/whitelist。
+  // 幂等：已存在绑定行直接返回现状（200），**不**因本次请求改 kind/whitelist。
   if (existing) {
     return c.json({
       address: `${existing.token}@${c.env.BIND_EMAIL_DOMAIN}`,
@@ -143,39 +143,21 @@ cquBind.post("/address", async (c) => {
     });
   }
 
-  return c.json({
-    address: `${token}@${c.env.BIND_EMAIL_DOMAIN}`,
-    status: "pending",
-  });
+  // 新建成功 → 201 Created。
+  return c.json(
+    {
+      address: `${token}@${c.env.BIND_EMAIL_DOMAIN}`,
+      status: "pending",
+    },
+    201
+  );
 });
 
-// GET /api/cqu/bind/ws
-// 认证后把原始请求 **原样** 转发给本用户 DO，让 DO 看到 Upgrade: websocket 并回 101。
-// 用户 id 只来自 session/JWT；DO 按 idFromName(user.id) 寻址。
-cquBind.get("/ws", async (c) => {
-  if (c.req.header("Upgrade") !== "websocket") {
-    return errorResponse(c, "UPGRADE_REQUIRED", "需要 WebSocket 升级请求", 426);
-  }
-  // CSWSH 防护：WS 握手不受 CORS 约束，但浏览器会在跨源握手时携带 session cookie。
-  // 恶意站点可借受害者 cookie 打开本端点并接收推送的 bind_code。session 级 DO 寻址
-  // 拦不住（同一用户被跨源劫持），必须在转发前校验 Origin 同源。浏览器握手必带 Origin，
-  // 缺失 Origin 视为可疑（非浏览器）一并拒绝。
-  const origin = c.req.header("Origin");
-  const allowedOrigin = new URL(c.env.BETTER_AUTH_URL).origin;
-  if (!origin || origin !== allowedOrigin) {
-    return errorResponse(c, "FORBIDDEN_ORIGIN", "WebSocket 来源不被允许", 403);
-  }
-  const user = c.get("user") as { id: string };
-  const stub = c.env.CQU_SESSION.get(c.env.CQU_SESSION.idFromName(user.id));
-  // 原始请求不可改：DO 的 WS 升级分支依赖 Upgrade 头返回 101 + webSocket。
-  return stub.fetch(c.req.raw);
-});
-
-// GET /api/cqu/bind/status
+// GET /api/cqu/binding （← 原 GET /status）
 // 返回 { address?, bindStatus, sessionStatus }：
 //   - bindStatus / address 来自 cqu_bind_addresses 行（地址用 token + 域名重建）
 //   - sessionStatus 来自 DO 的 status action
-cquBind.get("/status", async (c) => {
+cquBinding.get("/", async (c) => {
   const user = c.get("user") as { id: string };
   const db = drizzle(c.env.DATABASE);
 
@@ -204,12 +186,12 @@ cquBind.get("/status", async (c) => {
   });
 });
 
-// POST /api/cqu/bind/credentials
+// PUT /api/cqu/binding/credentials （← 原 POST /credentials）
 // body { studentId, password }。要求已存在绑定地址行（否则 400 "先获取绑定地址"）。
 // 加密密码 → upsert cqu_credentials → 触发 DO /init 首登。
 // 成功 → cqu_bind_addresses.status = "active"；首登失败 → 回滚本次新插入的凭证行
 // （对齐 cqu.ts），绑定地址保留 pending，不标记 active。
-cquBind.post("/credentials", async (c) => {
+cquBinding.put("/credentials", async (c) => {
   const user = c.get("user") as { id: string };
 
   // #5: 畸形 JSON body 不应裸 500，统一返回 400 INVALID_BODY。
@@ -328,7 +310,7 @@ cquBind.post("/credentials", async (c) => {
       .set({ status: "active" })
       .where(eq(cquBindAddresses.userId, user.id));
   } catch (err) {
-    console.error("[cqu-bind] activate update failed after successful init", {
+    console.error("[cqu-binding] activate update failed after successful init", {
       userId: user.id,
       err,
     });
@@ -343,13 +325,36 @@ cquBind.post("/credentials", async (c) => {
   return c.json({ success: true, studentId });
 });
 
-// POST /api/cqu/bind/unbind
+// GET /api/cqu/binding/events （← 原 GET /ws）
+// 认证后把原始请求 **原样** 转发给本用户 DO，让 DO 看到 Upgrade: websocket 并回 101。
+// 用户 id 只来自 session/JWT；DO 按 idFromName(user.id) 寻址。
+cquBinding.get("/events", async (c) => {
+  if (c.req.header("Upgrade") !== "websocket") {
+    return errorResponse(c, "UPGRADE_REQUIRED", "需要 WebSocket 升级请求", 426);
+  }
+  // CSWSH 防护：WS 握手不受 CORS 约束，但浏览器会在跨源握手时携带 session cookie。
+  // 恶意站点可借受害者 cookie 打开本端点并接收推送的 bind_code。session 级 DO 寻址
+  // 拦不住（同一用户被跨源劫持），必须在转发前校验 Origin 同源。浏览器握手必带 Origin，
+  // 缺失 Origin 视为可疑（非浏览器）一并拒绝。
+  const origin = c.req.header("Origin");
+  const allowedOrigin = new URL(c.env.BETTER_AUTH_URL).origin;
+  if (!origin || origin !== allowedOrigin) {
+    return errorResponse(c, "FORBIDDEN_ORIGIN", "WebSocket 来源不被允许", 403);
+  }
+  const user = c.get("user") as { id: string };
+  const stub = c.env.CQU_SESSION.get(c.env.CQU_SESSION.idFromName(user.id));
+  // 原始请求不可改：DO 的 WS 升级分支依赖 Upgrade 头返回 101 + webSocket。
+  return stub.fetch(c.req.raw);
+});
+
+// DELETE /api/cqu/binding （← 原 POST /unbind）
 // 彻底解绑：删除 cqu_credentials + cqu_bind_addresses（旧 DELETE /api/cqu/bind 漏删了
-// 后者，残留地址行会让 /address 幂等命中旧 token、绑定状态显示错乱），再 destroy DO 会话。
+// 后者，残留地址行会让创建幂等命中旧 token、绑定状态显示错乱），再 destroy DO 会话。
+// 成功返回 204（无 body）。
 // userId 只取自 session/JWT（鉴权中间件已 set），绝不取客户端入参。
 // 删表失败返回可重试错误而非裸 500；DO destroy 失败仅记日志不阻断（两张表已删干净，
 // 业务上已是解绑态，DO 储存会在下次保活/重绑时被覆盖）。
-cquBind.post("/unbind", async (c) => {
+cquBinding.delete("/", async (c) => {
   const user = c.get("user") as { id: string };
   const db = drizzle(c.env.DATABASE);
 
@@ -357,7 +362,7 @@ cquBind.post("/unbind", async (c) => {
   try {
     await db.delete(cquCredentials).where(eq(cquCredentials.userId, user.id));
   } catch (err) {
-    console.error("[cqu-bind] unbind: delete cqu_credentials failed", {
+    console.error("[cqu-binding] unbind: delete cqu_credentials failed", {
       userId: user.id,
       err,
     });
@@ -367,7 +372,7 @@ cquBind.post("/unbind", async (c) => {
   try {
     await db.delete(cquBindAddresses).where(eq(cquBindAddresses.userId, user.id));
   } catch (err) {
-    console.error("[cqu-bind] unbind: delete cqu_bind_addresses failed", {
+    console.error("[cqu-binding] unbind: delete cqu_bind_addresses failed", {
       userId: user.id,
       err,
     });
@@ -379,13 +384,14 @@ cquBind.post("/unbind", async (c) => {
     const stub = c.env.CQU_SESSION.get(c.env.CQU_SESSION.idFromName(user.id));
     await stub.fetch(new Request("https://do/destroy", { method: "POST" }));
   } catch (err) {
-    console.error("[cqu-bind] unbind: DO destroy failed (non-fatal)", {
+    console.error("[cqu-binding] unbind: DO destroy failed (non-fatal)", {
       userId: user.id,
       err,
     });
   }
 
-  return c.json({ success: true });
+  // 成功解绑 → 204 No Content（无 body）。
+  return c.body(null, 204);
 });
 
-export { cquBind };
+export { cquBinding };

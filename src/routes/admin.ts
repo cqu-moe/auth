@@ -272,95 +272,62 @@ admin.patch("/users/:id", async (c) => {
   return errorResponse(c, "INVALID_ACTION", "需要 action 或 role 参数", 400);
 });
 
-// POST /api/admin/users/:id/revoke-cqu - Revoke (吊销) a user's CQU binding.
-// Distinct from the user-self unbind (POST /api/cqu/bind/unbind, which deletes
-// credentials + addresses + destroys the DO). Revoke is an admin/system action:
-// mark the binding disabled but keep the tombstone — set cqu_bind_addresses.status
-// = revoked (the email pipeline rejects codes for revoked bindings) and tell the DO
-// to revoke (status → revoked, stop the keepalive/relogin alarm, clear the in-flight
-// lock) WITHOUT deleting state/credentials, so the binding is preserved for audit.
-// admin/superAdmin gating is handled by the admin.use("/*") middleware above.
-admin.post("/users/:id/revoke-cqu", async (c) => {
+// PATCH /api/admin/users/:id/cqu-binding - Change a user's CQU binding status.
+// body { status: "revoked" | "active" } — REST 化的吊销/恢复（取代旧的
+// POST .../revoke-cqu 与 .../unrevoke-cqu 两个动词端点），把绑定视作可 PATCH 状态的资源。
+//
+// 与用户自助解绑（DELETE /api/cqu/binding，删凭证+地址+destroy DO）不同：revoke/active
+// 是 admin/系统动作，**保留** state/credentials（留痕审计），仅翻转状态：
+//   - revoked：标记 cqu_bind_addresses.status=revoked（邮件管道拒收 revoked 绑定的码）+
+//     DO /revoke（status → revoked，停 keepalive/relogin alarm，清在途锁）。
+//   - active：翻回 cqu_bind_addresses.status=active（邮件管道恢复收码）+ DO /unrevoke
+//     （status → expired + 立即 fire alarm，让保活探测复验存活 cookie 或凭凭证重登）。
+// admin/superAdmin gating 由上方 admin.use("/*") 中间件覆盖。
+admin.patch("/users/:id/cqu-binding", async (c) => {
   const userId = c.req.param("id");
-  try {
-    // D1 tombstone: mark all of this user's bind addresses revoked. Idempotent —
-    // 0 rows matched (no binding) is a safe no-op. Credentials are NOT deleted.
-    const db = drizzle(c.env.DATABASE);
-    await db
-      .update(cquBindAddresses)
-      .set({ status: "revoked" })
-      .where(eq(cquBindAddresses.userId, userId));
+  const body = await c.req
+    .json<{ status?: string }>()
+    .catch(() => ({}) as { status?: string });
+  const status = body.status;
 
-    // DO: stop the session (status → revoked, deleteAlarm, clear loginInFlight).
-    // Empty/never-initialized DO is a safe no-op (revoke just sets status).
-    const stub = c.env.CQU_SESSION.get(
-      c.env.CQU_SESSION.idFromName(userId)
+  if (status !== "revoked" && status !== "active") {
+    return errorResponse(
+      c,
+      "INVALID_STATUS",
+      'status 必须是 "revoked" 或 "active"',
+      400
     );
-    // DO 内部异常返回 500 JSON(不 reject)。不查 res.ok 会把它当成功而仍返回
-    // {success:true}, 但 D1 已置 revoked → 半撤销态。显式检查, 让 D1 与 DO 一致。
-    const res = await stub.fetch(
-      new Request("https://do/revoke", { method: "POST" })
-    );
-    if (!res.ok) {
-      return errorResponse(
-        c,
-        "REVOKE_CQU_FAILED",
-        "DO 操作失败，请重试",
-        500
-      );
-    }
-
-    return c.json({ success: true, action: "cqu-revoked" });
-  } catch (e) {
-    console.error(
-      `[admin] revoke-cqu failed for userId=${userId}: ${e instanceof Error ? e.message : String(e)}`
-    );
-    return errorResponse(c, "REVOKE_CQU_FAILED", "撤销 CQU 绑定失败", 500);
   }
-});
 
-// POST /api/admin/users/:id/unrevoke-cqu - Un-revoke (恢复) a revoked CQU binding,
-// the inverse of revoke-cqu. Flip cqu_bind_addresses.status back to active so the
-// email pipeline accepts codes again, and tell the DO to unrevoke (status → expired
-// + fire alarm now) so the keepalive probe either re-validates the surviving cookies
-// back to active or relogins via the retained credentials. State/credentials are NOT
-// touched — recovery relies on them. admin/superAdmin gating handled by the
-// admin.use("/*") middleware above.
-admin.post("/users/:id/unrevoke-cqu", async (c) => {
-  const userId = c.req.param("id");
   try {
-    // D1: mark this user's bind addresses active again. Idempotent — 0 rows
-    // matched (no binding) is a safe no-op.
     const db = drizzle(c.env.DATABASE);
+    // D1: 翻转该用户所有绑定地址行的状态。幂等 — 0 行匹配（无绑定）是安全 no-op。
+    // 凭证 NOT 删除。
     await db
       .update(cquBindAddresses)
-      .set({ status: "active" })
+      .set({ status })
       .where(eq(cquBindAddresses.userId, userId));
 
-    // DO: resume the session (status → expired, setAlarm now → keepalive/relogin).
-    const stub = c.env.CQU_SESSION.get(
-      c.env.CQU_SESSION.idFromName(userId)
-    );
+    // DO：revoked → /revoke（status → revoked，deleteAlarm，清 loginInFlight）；
+    // active → /unrevoke（status → expired，setAlarm now → keepalive/relogin）。
+    // 空/未初始化 DO 是安全 no-op（只设 status）。
+    const action = status === "revoked" ? "revoke" : "unrevoke";
+    const stub = c.env.CQU_SESSION.get(c.env.CQU_SESSION.idFromName(userId));
     // DO 内部异常返回 500 JSON(不 reject)。不查 res.ok 会把它当成功而仍返回
-    // {success:true}, 但 D1 已置 active → 半恢复态。显式检查, 让 D1 与 DO 一致。
+    // {success:true}, 但 D1 已翻转 → 半完成态。显式检查, 让 D1 与 DO 一致。
     const res = await stub.fetch(
-      new Request("https://do/unrevoke", { method: "POST" })
+      new Request(`https://do/${action}`, { method: "POST" })
     );
     if (!res.ok) {
-      return errorResponse(
-        c,
-        "UNREVOKE_CQU_FAILED",
-        "DO 操作失败，请重试",
-        500
-      );
+      return errorResponse(c, "CQU_BINDING_UPDATE_FAILED", "DO 操作失败，请重试", 500);
     }
 
-    return c.json({ success: true, action: "cqu-unrevoked" });
+    return c.json({ success: true, status });
   } catch (e) {
     console.error(
-      `[admin] unrevoke-cqu failed for userId=${userId}: ${e instanceof Error ? e.message : String(e)}`
+      `[admin] cqu-binding ${status} failed for userId=${userId}: ${e instanceof Error ? e.message : String(e)}`
     );
-    return errorResponse(c, "UNREVOKE_CQU_FAILED", "解除吊销失败，请重试", 500);
+    return errorResponse(c, "CQU_BINDING_UPDATE_FAILED", "更新 CQU 绑定状态失败", 500);
   }
 });
 
