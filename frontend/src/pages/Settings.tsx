@@ -1,12 +1,21 @@
 import { useState, FormEvent, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
 import Layout from "../components/Layout";
 
-interface CquStatus {
-  status: string;
+// DO /status 返回的会话状态对象（active/relogin_required/... + studentId）；
+// 后端在 DO 非 2xx 或解析失败时回传 { error: true } sentinel。
+interface CquSessionStatus {
+  status?: string;
   studentId?: string;
-  lastKeepAlive?: number;
-  lastRequestedAt?: number;
+  error?: boolean;
+}
+
+// GET /api/cqu/bind/status 的响应形状。
+interface CquBindStatus {
+  address?: string;
+  bindStatus: "pending" | "active" | "revoked" | "unbound";
+  sessionStatus: CquSessionStatus;
 }
 
 function ChangePasswordSection() {
@@ -127,88 +136,34 @@ function ChangePasswordSection() {
   );
 }
 
-function CquBindForm({
-  onSubmit,
-  loading,
-  isRebind,
-  onCancel,
-}: {
-  onSubmit: (studentId: string, password: string) => void;
-  loading: boolean;
-  isRebind: boolean;
-  onCancel?: () => void;
-}) {
-  const [studentId, setStudentId] = useState("");
-  const [cquPassword, setCquPassword] = useState("");
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
 
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    onSubmit(studentId, cquPassword);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // 剪贴板不可用时静默失败，地址仍可手动选中复制。
+    }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
-        <label htmlFor="studentId" className="block text-sm font-medium text-gray-700 mb-1">
-          学号
-        </label>
-        <input
-          id="studentId"
-          type="text"
-          value={studentId}
-          onChange={(e) => setStudentId(e.target.value)}
-          required
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          placeholder="输入您的学号"
-        />
-      </div>
-
-      <div>
-        <label htmlFor="cquPassword" className="block text-sm font-medium text-gray-700 mb-1">
-          CQU 统一认证密码
-        </label>
-        <input
-          id="cquPassword"
-          type="password"
-          value={cquPassword}
-          onChange={(e) => setCquPassword(e.target.value)}
-          required
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          placeholder="输入 CQU 统一认证密码"
-        />
-      </div>
-
-      <div className="flex items-center gap-3">
-        <button
-          type="submit"
-          disabled={loading}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
-        >
-          {loading && (
-            <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-          )}
-          {loading ? "绑定中..." : isRebind ? "确认换绑" : "绑定账户"}
-        </button>
-        {onCancel && (
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={loading}
-            className="px-4 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 text-sm font-medium rounded-lg transition-colors"
-          >
-            取消
-          </button>
-        )}
-      </div>
-    </form>
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors flex-shrink-0"
+      aria-label="复制到剪贴板"
+    >
+      {copied ? "已复制" : "复制"}
+    </button>
   );
 }
 
 function CquBindingSection() {
-  const [status, setStatus] = useState<CquStatus | null>(null);
+  const [status, setStatus] = useState<CquBindStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
-  const [showRebindForm, setShowRebindForm] = useState(false);
-  const [bindLoading, setBindLoading] = useState(false);
   const [unbindLoading, setUnbindLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -216,9 +171,9 @@ function CquBindingSection() {
   const fetchStatus = async () => {
     setStatusLoading(true);
     try {
-      const res = await fetch("/api/cqu/status");
+      const res = await fetch("/api/cqu/bind/status", { credentials: "include" });
       if (res.ok) {
-        const data = await res.json() as CquStatus;
+        const data = await res.json() as CquBindStatus;
         setStatus(data);
       }
     } catch {
@@ -232,34 +187,6 @@ function CquBindingSection() {
     void fetchStatus();
   }, []);
 
-  const handleBind = async (studentId: string, password: string) => {
-    setError("");
-    setSuccess("");
-    setBindLoading(true);
-
-    const isRebind = status && status.status !== "unbound";
-    try {
-      const res = await fetch("/api/cqu/bind", {
-        method: isRebind ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ studentId, password }),
-      });
-
-      if (res.ok) {
-        setSuccess(isRebind ? "已成功换绑新 CQU 账户" : "CQU 账户绑定成功");
-        setShowRebindForm(false);
-        await fetchStatus();
-      } else {
-        const data = await res.json() as { message?: string };
-        setError(data.message ?? "绑定失败，请检查学号和密码");
-      }
-    } catch {
-      setError("请求失败，请稍后重试");
-    } finally {
-      setBindLoading(false);
-    }
-  };
-
   const handleUnbind = async () => {
     if (!confirm("确认解除 CQU 账户绑定？解绑后将无法通过本系统访问重庆大学相关服务。")) return;
     setError("");
@@ -267,14 +194,18 @@ function CquBindingSection() {
     setUnbindLoading(true);
 
     try {
-      const res = await fetch("/api/cqu/bind", { method: "DELETE" });
+      const res = await fetch("/api/cqu/bind/unbind", {
+        method: "POST",
+        credentials: "include",
+      });
       if (res.ok) {
         setSuccess("已成功解除 CQU 账户绑定");
-        setShowRebindForm(false);
         await fetchStatus();
       } else {
-        const data = await res.json() as { message?: string };
-        setError(data.message ?? "解绑失败，请稍后重试");
+        const data = await res.json().catch(() => ({})) as {
+          detail?: { error?: { message?: string } };
+        };
+        setError(data.detail?.error?.message ?? "解绑失败，请稍后重试");
       }
     } catch {
       setError("请求失败，请稍后重试");
@@ -295,6 +226,10 @@ function CquBindingSection() {
     );
   }
 
+  const isBound = status != null && status.bindStatus !== "unbound";
+  const sessionActive = status?.sessionStatus?.status === "active";
+  const studentId = status?.sessionStatus?.studentId;
+
   return (
     <div className="bg-white rounded-2xl border border-gray-200 p-6">
       <h3 className="text-base font-semibold text-gray-900 mb-4">CQU 账户绑定</h3>
@@ -310,67 +245,67 @@ function CquBindingSection() {
         </div>
       )}
 
-      {status && status.status !== "unbound" ? (
+      {isBound ? (
         <div className="space-y-4">
           <div className="flex flex-col gap-3 p-4 bg-gray-50 rounded-xl">
             <div className="flex items-center justify-between">
               <span className="text-sm text-gray-500">学号</span>
-              <span className="text-sm font-medium text-gray-900">{status.studentId}</span>
+              <span className="text-sm font-medium text-gray-900">{studentId ?? "—"}</span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-sm text-gray-500">会话状态</span>
               <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ${
-                status.status === "active"
+                sessionActive
                   ? "bg-green-100 text-green-700"
                   : "bg-yellow-100 text-yellow-700"
               }`}>
                 <span className={`w-1.5 h-1.5 rounded-full ${
-                  status.status === "active" ? "bg-green-500" : "bg-yellow-500"
+                  sessionActive ? "bg-green-500" : "bg-yellow-500"
                 }`} />
-                {status.status === "active" ? "正常" : "需要重新登录"}
+                {sessionActive ? "正常" : "需要重新登录"}
               </span>
             </div>
+            {status?.address && (
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm text-gray-500 flex-shrink-0">专属邮箱</span>
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-mono text-xs text-gray-900 truncate">{status.address}</span>
+                  <CopyButton text={status.address} />
+                </div>
+              </div>
+            )}
           </div>
 
-          {showRebindForm ? (
-            <div className="pt-2 border-t border-gray-100">
-              <p className="text-sm text-gray-500 mb-4">
-                输入新的 CQU 账号信息，换绑失败不会影响当前绑定。
-              </p>
-              <CquBindForm
-                onSubmit={handleBind}
-                loading={bindLoading}
-                isRebind
-                onCancel={() => { setShowRebindForm(false); setError(""); }}
-              />
-            </div>
-          ) : (
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => { setShowRebindForm(true); setError(""); setSuccess(""); }}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
-              >
-                绑定新账号
-              </button>
-              <button
-                onClick={handleUnbind}
-                disabled={unbindLoading}
-                className="px-4 py-2 border border-red-300 text-red-600 hover:bg-red-50 disabled:opacity-50 text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
-              >
-                {unbindLoading && (
-                  <span className="w-4 h-4 border-2 border-red-400 border-t-transparent rounded-full animate-spin" />
-                )}
-                {unbindLoading ? "解绑中..." : "解除绑定"}
-              </button>
-            </div>
-          )}
+          <div className="flex items-center gap-3">
+            <Link
+              to="/cqu/bind"
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              绑定新账号
+            </Link>
+            <button
+              onClick={handleUnbind}
+              disabled={unbindLoading}
+              className="px-4 py-2 border border-red-300 text-red-600 hover:bg-red-50 disabled:opacity-50 text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
+            >
+              {unbindLoading && (
+                <span className="w-4 h-4 border-2 border-red-400 border-t-transparent rounded-full animate-spin" />
+              )}
+              {unbindLoading ? "解绑中..." : "解除绑定"}
+            </button>
+          </div>
         </div>
       ) : (
         <div>
           <p className="text-sm text-gray-500 mb-4">
             绑定 CQU 账户后，您可以通过本系统访问重庆大学相关服务。
           </p>
-          <CquBindForm onSubmit={handleBind} loading={bindLoading} isRebind={false} />
+          <Link
+            to="/cqu/bind"
+            className="inline-block px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            绑定 CQU 账户
+          </Link>
         </div>
       )}
     </div>

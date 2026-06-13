@@ -182,6 +182,8 @@ cqu.put("/bind", async (c) => {
 });
 
 // DELETE /api/cqu/bind
+// 注：前端已改用 POST /api/cqu/bind/unbind（同时删 cqu_bind_addresses 表 + destroy DO）。
+// 此端点保留兼容，但只删 cqu_credentials，会遗留 cqu_bind_addresses 行，不要再让前端调用。
 cqu.delete("/bind", async (c) => {
   const user = c.get("user") as { id: string };
   const db = drizzle(c.env.DATABASE);

@@ -343,4 +343,49 @@ cquBind.post("/credentials", async (c) => {
   return c.json({ success: true, studentId });
 });
 
+// POST /api/cqu/bind/unbind
+// 彻底解绑：删除 cqu_credentials + cqu_bind_addresses（旧 DELETE /api/cqu/bind 漏删了
+// 后者，残留地址行会让 /address 幂等命中旧 token、绑定状态显示错乱），再 destroy DO 会话。
+// userId 只取自 session/JWT（鉴权中间件已 set），绝不取客户端入参。
+// 删表失败返回可重试错误而非裸 500；DO destroy 失败仅记日志不阻断（两张表已删干净，
+// 业务上已是解绑态，DO 储存会在下次保活/重绑时被覆盖）。
+cquBind.post("/unbind", async (c) => {
+  const user = c.get("user") as { id: string };
+  const db = drizzle(c.env.DATABASE);
+
+  // ① 删凭证表。② 删绑定地址表。任一失败都返回可重试错误，避免半解绑残留。
+  try {
+    await db.delete(cquCredentials).where(eq(cquCredentials.userId, user.id));
+  } catch (err) {
+    console.error("[cqu-bind] unbind: delete cqu_credentials failed", {
+      userId: user.id,
+      err,
+    });
+    return errorResponse(c, "UNBIND_FAILED", "解绑失败，请稍后重试", 503);
+  }
+
+  try {
+    await db.delete(cquBindAddresses).where(eq(cquBindAddresses.userId, user.id));
+  } catch (err) {
+    console.error("[cqu-bind] unbind: delete cqu_bind_addresses failed", {
+      userId: user.id,
+      err,
+    });
+    return errorResponse(c, "UNBIND_FAILED", "解绑失败，请稍后重试", 503);
+  }
+
+  // ③ DO destroy：best-effort。两张表已删，业务上已解绑；DO 失败不应回滚或阻断成功响应。
+  try {
+    const stub = c.env.CQU_SESSION.get(c.env.CQU_SESSION.idFromName(user.id));
+    await stub.fetch(new Request("https://do/destroy", { method: "POST" }));
+  } catch (err) {
+    console.error("[cqu-bind] unbind: DO destroy failed (non-fatal)", {
+      userId: user.id,
+      err,
+    });
+  }
+
+  return c.json({ success: true });
+});
+
 export { cquBind };
