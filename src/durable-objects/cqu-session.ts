@@ -189,6 +189,10 @@ export class CquSessionDO extends DurableObject<Env> {
           await this.revoke();
           return Response.json({ success: true });
         }
+        case "unrevoke": {
+          await this.unrevoke();
+          return Response.json({ success: true });
+        }
         default:
           return Response.json({ error: "Unknown action" }, { status: 404 });
       }
@@ -416,6 +420,21 @@ export class CquSessionDO extends DurableObject<Env> {
     await this.setStatus("revoked");
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.delete("loginInFlight");
+  }
+
+  /**
+   * 解除吊销(恢复): revoke 的逆操作 —— 把被吊销的会话拉回保活循环。
+   *   ① status → expired: alarm() 对 revoked/unbound 早退, 但对 expired 不早退,
+   *      会照常跑保活探针 —— 旧 cookie 还活就探回 active, 真过期则用保留的 credentials
+   *      容器重登铸新 TGT。置成 expired 而非直接 active, 是因为吊销期间 TGT 可能已自然失效,
+   *      让 alarm 的探针去判定实际状态, 而不是谎报 active。
+   *   ② setAlarm(now): 立即触发一次 alarm, 不等下个 keepalive 周期才恢复。
+   * 不 deleteAll、不清 credentials/state —— 恢复正要靠这些保留的容器凭证与会话快照。
+   * 复用现有 alarm/relogin 路径, 不改其逻辑。
+   */
+  private async unrevoke(): Promise<void> {
+    await this.setStatus("expired");
+    await this.ctx.storage.setAlarm(Date.now());
   }
 
   async alarm(): Promise<void> {

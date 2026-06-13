@@ -309,6 +309,41 @@ admin.post("/users/:id/revoke-cqu", async (c) => {
   }
 });
 
+// POST /api/admin/users/:id/unrevoke-cqu - Un-revoke (恢复) a revoked CQU binding,
+// the inverse of revoke-cqu. Flip cqu_bind_addresses.status back to active so the
+// email pipeline accepts codes again, and tell the DO to unrevoke (status → expired
+// + fire alarm now) so the keepalive probe either re-validates the surviving cookies
+// back to active or relogins via the retained credentials. State/credentials are NOT
+// touched — recovery relies on them. admin/superAdmin gating handled by the
+// admin.use("/*") middleware above.
+admin.post("/users/:id/unrevoke-cqu", async (c) => {
+  const userId = c.req.param("id");
+  try {
+    // D1: mark this user's bind addresses active again. Idempotent — 0 rows
+    // matched (no binding) is a safe no-op.
+    const db = drizzle(c.env.DATABASE);
+    await db
+      .update(cquBindAddresses)
+      .set({ status: "active" })
+      .where(eq(cquBindAddresses.userId, userId));
+
+    // DO: resume the session (status → expired, setAlarm now → keepalive/relogin).
+    const stub = c.env.CQU_SESSION.get(
+      c.env.CQU_SESSION.idFromName(userId)
+    );
+    await stub.fetch(
+      new Request("https://do/unrevoke", { method: "POST" })
+    );
+
+    return c.json({ success: true, action: "cqu-unrevoked" });
+  } catch (e) {
+    console.error(
+      `[admin] unrevoke-cqu failed for userId=${userId}: ${e instanceof Error ? e.message : String(e)}`
+    );
+    return errorResponse(c, "UNREVOKE_CQU_FAILED", "解除吊销失败，请重试", 500);
+  }
+});
+
 // Shape of a row returned by adapter.findMany({ model: "oauthClient" }).
 // Fields are camelCase (the oauthClient DB model's field names). Array/json
 // fields are typed as `unknown` because the adapter's output transform may, in
