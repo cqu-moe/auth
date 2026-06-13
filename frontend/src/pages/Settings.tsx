@@ -319,7 +319,7 @@ function CquBindingSection() {
           <div className="flex flex-col gap-0 divide-y divide-gray-100 border border-gray-200 rounded-xl overflow-hidden">
             {/* Student ID row */}
             <div className="flex items-center justify-between px-4 py-3 bg-gray-50">
-              <span className="text-sm text-gray-500">学号</span>
+              <span className="text-sm text-gray-500">统一身份认证账号</span>
               <span className="text-sm font-medium text-gray-900">{studentId ?? "—"}</span>
             </div>
 

@@ -222,7 +222,7 @@ cquBind.post("/credentials", async (c) => {
   const { studentId, password } = body;
 
   if (!studentId || !password) {
-    return errorResponse(c, "MISSING_FIELDS", "缺少学号或密码", 400);
+    return errorResponse(c, "MISSING_FIELDS", "缺少统一身份认证账号或密码", 400);
   }
 
   const db = drizzle(c.env.DATABASE);

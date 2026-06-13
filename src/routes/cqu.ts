@@ -47,7 +47,7 @@ cqu.post("/bind", async (c) => {
   }>();
 
   if (!studentId || !password) {
-    return errorResponse(c, "MISSING_FIELDS", "缺少学号或密码", 400);
+    return errorResponse(c, "MISSING_FIELDS", "缺少统一身份认证账号或密码", 400);
   }
 
   const { ciphertext, iv } = await encrypt(password, c.env.ENCRYPTION_KEY);
@@ -112,7 +112,7 @@ cqu.put("/bind", async (c) => {
   }>();
 
   if (!studentId || !password) {
-    return errorResponse(c, "MISSING_FIELDS", "缺少学号或密码", 400);
+    return errorResponse(c, "MISSING_FIELDS", "缺少统一身份认证账号或密码", 400);
   }
 
   const db = drizzle(c.env.DATABASE);

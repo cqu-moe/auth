@@ -880,18 +880,18 @@ function Step3Credentials({ onSuccess }: { onSuccess: (studentId: string) => voi
       }
 
       const codeMessages: Record<string, string> = {
-        CQU_LOGIN_FAILED: "CQU 登录失败，请检查学号和密码是否正确",
+        CQU_LOGIN_FAILED: "CQU 登录失败，请检查统一身份认证账号和密码是否正确",
         NO_BIND_ADDRESS: "尚未完成密保邮箱设置，请刷新页面后重新开始",
         INVALID_BODY: "请求格式错误，请刷新页面重试",
         BIND_ACTIVATE_FAILED: "首次登录成功，但激活状态写入失败，请稍后重试",
-        MISSING_FIELDS: "请填写学号和密码",
+        MISSING_FIELDS: "请填写统一身份认证账号和密码",
       };
       const errCode = data.detail?.error?.code;
       const errMessage = data.detail?.error?.message;
       setError(
         (errCode && codeMessages[errCode])
           ? codeMessages[errCode]
-          : errMessage ?? "绑定失败，请检查学号和密码"
+          : errMessage ?? "绑定失败，请检查统一身份认证账号和密码"
       );
     } catch (err) {
       if ((err as { name?: string }).name === "AbortError") return;
@@ -906,7 +906,7 @@ function Step3Credentials({ onSuccess }: { onSuccess: (studentId: string) => voi
       <div>
         <h2 className="text-xl font-semibold text-gray-900 mb-2">录入 CQU 凭证</h2>
         <p className="text-sm text-gray-500">
-          输入您的 CQU 统一认证学号和密码。系统将立即发起首次登录——由于需要等待 2FA 邮件，此过程可能需要几分钟，请耐心等待。
+          输入您的 CQU 统一身份认证账号和密码。系统将立即发起首次登录——由于需要等待 2FA 邮件，此过程可能需要几分钟，请耐心等待。
         </p>
       </div>
 
@@ -915,7 +915,7 @@ function Step3Credentials({ onSuccess }: { onSuccess: (studentId: string) => voi
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label htmlFor="bind-studentId" className="block text-sm font-medium text-gray-700 mb-1">
-            学号
+            统一身份认证账号
           </label>
           <input
             id="bind-studentId"
@@ -926,7 +926,7 @@ function Step3Credentials({ onSuccess }: { onSuccess: (studentId: string) => voi
             disabled={loading}
             autoComplete="username"
             className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500"
-            placeholder="输入您的学号"
+            placeholder="输入您的统一身份认证账号"
           />
         </div>
 
@@ -1022,7 +1022,7 @@ function Step4Done({ studentId }: { studentId: string }) {
         <div className="p-4 bg-gray-50 rounded-xl text-sm space-y-2">
           <p className="font-medium text-gray-900">绑定信息</p>
           <div className="flex items-center justify-between py-1 border-b border-gray-200">
-            <span className="text-gray-500">学号</span>
+            <span className="text-gray-500">统一身份认证账号</span>
             <span className="font-medium text-gray-900">{studentId}</span>
           </div>
           {bindStatus?.bindStatus && (
