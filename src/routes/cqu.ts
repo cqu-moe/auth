@@ -5,7 +5,7 @@ import { encrypt } from "../services/crypto";
 import { errorResponse } from "../utils/error";
 import { cquCredentials } from "../db/schema";
 import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { requireCquScope } from "../middleware/scope";
 import { verifyAccessToken } from "better-auth/oauth2";
 
@@ -70,6 +70,8 @@ cqu.post("/bind", async (c) => {
     studentId,
     encryptedPassword: ciphertext,
     iv,
+    // 显式写真实时间戳：即便列默认值损坏（历史遗留），新行也拿到正确时间。
+    boundAt: sql`(datetime('now'))`,
   });
 
   // Initialize DO session

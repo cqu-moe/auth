@@ -6,7 +6,7 @@ import { errorResponse } from "../utils/error";
 import { cquBindAddresses, cquCredentials } from "../db/schema";
 import { genAddressToken } from "../services/cqu-2fa/token";
 import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { verifyAccessToken } from "better-auth/oauth2";
 
 // CQU 绑定 onboarding 后端路由（Phase 6.2）。
@@ -80,6 +80,8 @@ cquBind.post("/address", async (c) => {
       kind: "direct",
       senderWhitelist: JSON.stringify(["sso@cqu.edu.cn"]),
       status: "pending",
+      // 显式写真实时间戳：即便列默认值损坏（历史遗留），新行也拿到正确时间。
+      boundAt: sql`(datetime('now'))`,
     });
   } catch (err) {
     // #6: 并发同用户请求会撞 user_id UNIQUE 约束。优雅退化到「返回已存在行」，
@@ -215,6 +217,8 @@ cquBind.post("/credentials", async (c) => {
         studentId,
         encryptedPassword: ciphertext,
         iv,
+        // 显式写真实时间戳：即便列默认值损坏（历史遗留），新行也拿到正确时间。
+        boundAt: sql`(datetime('now'))`,
       });
       insertedCredsId = newId;
     } catch (err) {

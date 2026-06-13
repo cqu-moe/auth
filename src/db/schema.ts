@@ -1,4 +1,5 @@
 import { sqliteTable, text, integer, primaryKey } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 
 // Better Auth core tables
 
@@ -69,7 +70,9 @@ export const cquCredentials = sqliteTable("cqu_credentials", {
   studentId: text("student_id").notNull(),
   encryptedPassword: text("encrypted_password").notNull(),
   iv: text("iv").notNull(),
-  boundAt: text("bound_at").notNull().default("(datetime('now'))"),
+  // SQL 表达式默认值：必须用 sql`` 包裹，否则 Drizzle 把它当字符串字面量，
+  // 既污染 DDL 默认值，又会在 INSERT 时作为绑定参数写入字面串 "(datetime('now'))"。
+  boundAt: text("bound_at").notNull().default(sql`(datetime('now'))`),
   lastLoginAt: text("last_login_at"),
   status: text("status").notNull().default("active"),
 });
@@ -89,6 +92,8 @@ export const cquBindAddresses = sqliteTable("cqu_bind_addresses", {
   kind: text("kind").notNull().default("direct"),       // direct | forward
   senderWhitelist: text("sender_whitelist").notNull(),  // JSON 字符串数组
   status: text("status").notNull().default("pending"),  // pending | active | revoked
-  boundAt: text("bound_at").notNull().default("(datetime('now'))"),
+  // SQL 表达式默认值：必须用 sql`` 包裹，否则 Drizzle 把它当字符串字面量，
+  // 既污染 DDL 默认值，又会在 INSERT 时作为绑定参数写入字面串 "(datetime('now'))"。
+  boundAt: text("bound_at").notNull().default(sql`(datetime('now'))`),
   lastCodeAt: text("last_code_at"),
 });
