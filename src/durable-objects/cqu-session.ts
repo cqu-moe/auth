@@ -61,6 +61,9 @@ interface LoginInFlight {
 interface PendingCode {
   code: string;
   kind: string;
+  // DO 真实收到该码的时刻(ms, 原始值)。回放时原样发回, 作前端倒计时锚点 + 去重键,
+  // 不能用 Date.now() 顶替, 否则倒计时锚点漂移且无法去重。
+  ts: number;
   expiresAt: number;
 }
 
@@ -84,6 +87,36 @@ interface ContainerRunResult {
 // 暂存兜底必须比它活得更久, 否则迟到/重连的浏览器回放到的是已被后端作废的码;
 // 取 12min 留 ~2min 余量覆盖时钟漂移与 WS 重连窗口。
 const PENDING_CODE_TTL_MS = 12 * 60 * 1000;
+
+// 展示用有效期: 客户端倒计时基线 + 回放门槛(超此即死码, 不回放)。
+// 注意它与 PENDING_CODE_TTL_MS 语义不同:
+//   - CODE_VALIDITY_MS(10min) = 码对用户「可用/可展示」的有效期, 算 remainingMs 与回放门槛用;
+//   - PENDING_CODE_TTL_MS(12min) = pendingCode 在 DO 里的暂存窗口, 比有效期多留 ~2min 余量
+//     覆盖时钟漂移与 WS 重连。10min < 12min 是有意为之: 暂存还在但已超有效期的码不再回放。
+const CODE_VALIDITY_MS = 10 * 60 * 1000;
+
+// 服务端→客户端的码消息(live 广播 + 回放统一用此契约, 前端按此解析)。
+// kind 映射: bind_confirm → "bind_code", login_2fa → "login_2fa"。
+// ts = DO 真实收码时刻(原始值, 回放也发这个); remainingMs = 发送时现算的剩余有效期。
+interface CodeMessage {
+  type: "login_2fa" | "bind_code";
+  code: string;
+  ts: number;
+  remainingMs: number;
+}
+
+function buildCodeMessage(
+  kind: string,
+  code: string,
+  ts: number
+): CodeMessage {
+  return {
+    type: kind === "bind_confirm" ? "bind_code" : "login_2fa",
+    code,
+    ts,
+    remainingMs: Math.max(0, CODE_VALIDITY_MS - (Date.now() - ts)),
+  };
+}
 
 export class CquSessionDO extends DurableObject<Env> {
   private state: SessionState | null = null;
@@ -117,32 +150,36 @@ export class CquSessionDO extends DurableObject<Env> {
       const pair = new WebSocketPair();
       // pair[1] 是 server 端 — 交给 DO 托管(hibernatable); pair[0] 返回给客户端。
       this.ctx.acceptWebSocket(pair[1]);
+      // keepalive: 客户端定期发字符串 "ping", 运行时直接回 "pong"。auto-response 在
+      // 运行时层完成, 不唤醒 DO(不计 billable duration), 也不进 webSocketMessage 回调,
+      // 故 JSON 码消息不受影响。setWebSocketAutoResponse 设的是整个 DO 的单一全局配对,
+      // 幂等(重复调用只是覆盖为同一值), 每条新连接都走这条配置, 在此设置即可。
+      this.ctx.setWebSocketAutoResponse(
+        new WebSocketRequestResponsePair("ping", "pong")
+      );
       // 回放兜底: 码可能在浏览器 WS 连上(或重连)之前就到了, depositCode 的实时 send
-      // 推给了零个 socket 而丢失。此处在 accept 后立刻读暂存的 pendingCode, 若仍有效
-      // (未过期)就按其 kind 主动补推给这条新连接, 让迟到/重连的浏览器立即收到:
+      // 推给了零个 socket 而丢失。此处在 accept 后立刻读暂存的 pendingCode, 若仍在有效期内
+      // 就按其 kind 主动补推给这条新连接, 让迟到/重连的浏览器立即收到:
       //   - bind_confirm → type:"bind_code"(绑定向导用)
       //   - login_2fa    → type:"login_2fa"(用户实时面板用)
+      // ts 发 pending.ts 原始值(真实收码时刻), 让前端倒计时锚点正确 + 能据此去重;
+      // 门槛用「仍在有效期内」(Date.now() - pending.ts < CODE_VALIDITY_MS)而非
+      // expiresAt, 不回放已超 10min 展示有效期的死码(尽管暂存窗口 12min 还没到)。
       const pending =
         await this.ctx.storage.get<PendingCode>("pendingCode");
-      if (pending && pending.expiresAt > Date.now()) {
-        const replayType =
-          pending.kind === "bind_confirm"
-            ? "bind_code"
-            : pending.kind === "login_2fa"
-              ? "login_2fa"
-              : null;
-        if (replayType) {
-          try {
-            pair[1].send(
-              JSON.stringify({
-                type: replayType,
-                code: pending.code,
-                ts: Date.now(),
-              })
-            );
-          } catch {
-            // 回放补推失败(连接已断/正在关闭)忽略, 不影响 accept 与 101 返回。
-          }
+      if (
+        pending &&
+        (pending.kind === "bind_confirm" || pending.kind === "login_2fa") &&
+        Date.now() - pending.ts < CODE_VALIDITY_MS
+      ) {
+        try {
+          pair[1].send(
+            JSON.stringify(
+              buildCodeMessage(pending.kind, pending.code, pending.ts)
+            )
+          );
+        } catch {
+          // 回放补推失败(连接已断/正在关闭)忽略, 不影响 accept 与 101 返回。
         }
       }
       return new Response(null, { status: 101, webSocket: pair[0] });
@@ -339,15 +376,18 @@ export class CquSessionDO extends DurableObject<Env> {
       // 无条件副作用(不管在途与否, 先做): 把码暴露给用户实时面板。
       // 暂存 pendingCode 兜底(浏览器迟到/重连时由 fetch WS 升级分支回放), 再秒推所有已连接的
       // 浏览器(hibernatable WS), 写法复刻 bind_confirm 分支。
+      const ts = Date.now();
       const pending: PendingCode = {
         code,
         kind,
-        expiresAt: Date.now() + PENDING_CODE_TTL_MS,
+        ts,
+        expiresAt: ts + PENDING_CODE_TTL_MS,
       };
       await this.ctx.storage.put("pendingCode", pending);
+      const message = JSON.stringify(buildCodeMessage(kind, code, ts));
       for (const ws of this.ctx.getWebSockets()) {
         try {
-          ws.send(JSON.stringify({ type: "login_2fa", code, ts: Date.now() }));
+          ws.send(message);
         } catch {
           // 忽略单个 socket 的发送失败, 不影响其它 socket 与暂存。
         }
@@ -394,17 +434,20 @@ export class CquSessionDO extends DurableObject<Env> {
 
     if (kind === "bind_confirm") {
       // 暂存: 浏览器若连接略晚(WS 还没建好), 仍能事后读到(Task 6.2 加读路径)。
+      const ts = Date.now();
       const pending: PendingCode = {
         code,
         kind,
-        expiresAt: Date.now() + PENDING_CODE_TTL_MS,
+        ts,
+        expiresAt: ts + PENDING_CODE_TTL_MS,
       };
       await this.ctx.storage.put("pendingCode", pending);
       // 秒推所有已连接的浏览器(hibernatable WS)。send 失败(连接已断/正在关闭)忽略,
       // pendingCode 兜底。
+      const message = JSON.stringify(buildCodeMessage(kind, code, ts));
       for (const ws of this.ctx.getWebSockets()) {
         try {
-          ws.send(JSON.stringify({ type: "bind_code", code, ts: Date.now() }));
+          ws.send(message);
         } catch {
           // 忽略单个 socket 的发送失败, 不影响其它 socket 与暂存。
         }
