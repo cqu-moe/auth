@@ -701,7 +701,7 @@ function Step2Forward({
           const data = await res.json().catch(() => ({})) as { detail?: { error?: { message?: string; code?: string } } };
           const errCode = data.detail?.error?.code;
           if (errCode === "INVALID_FORWARD_ADDRESS") {
-            throw new Error("转发邮箱地址格式不合法，请返回上一步重新填写");
+            throw new Error("转发邮箱地址格式不合法，请刷新页面后重新填写");
           }
           throw new Error(data.detail?.error?.message ?? "获取地址失败，请稍后重试");
         }
@@ -731,8 +731,8 @@ function Step2Forward({
       {addrError && (
         <AlertBox variant="error">
           {addrError}
-          {addrError.includes("返回上一步") && (
-            <span className="block mt-1 text-xs">如需修改邮箱地址，请点击浏览器返回或刷新页面。</span>
+          {addrError.includes("刷新页面") && (
+            <span className="block mt-1 text-xs">如需修改邮箱地址，请刷新页面后重新填写。</span>
           )}
         </AlertBox>
       )}
@@ -879,7 +879,7 @@ function Step3Credentials({ onSuccess }: { onSuccess: (studentId: string) => voi
 
       const codeMessages: Record<string, string> = {
         CQU_LOGIN_FAILED: "CQU 登录失败，请检查学号和密码是否正确",
-        NO_BIND_ADDRESS: "请先完成密保邮箱设置（请返回上一步）",
+        NO_BIND_ADDRESS: "尚未完成密保邮箱设置，请刷新页面后重新开始",
         INVALID_BODY: "请求格式错误，请刷新页面重试",
         BIND_ACTIVATE_FAILED: "首次登录成功，但激活状态写入失败，请稍后重试",
         MISSING_FIELDS: "请填写学号和密码",
