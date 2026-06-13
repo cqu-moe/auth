@@ -11,7 +11,7 @@ interface CquSessionStatus {
   error?: boolean;
 }
 
-// GET /api/cqu/bind/status 的响应形状。
+// GET /api/cqu/binding 的响应形状。
 interface CquBindStatus {
   address?: string;
   bindStatus: "pending" | "active" | "revoked" | "unbound";
@@ -195,7 +195,7 @@ function CquBindingSection() {
     setStatusLoading(true);
     setStatusError(false);
     try {
-      const res = await fetch("/api/cqu/bind/status", { credentials: "include" });
+      const res = await fetch("/api/cqu/binding", { credentials: "include" });
       if (res.ok) {
         const data = await res.json() as CquBindStatus;
         setStatus(data);
@@ -226,8 +226,8 @@ function CquBindingSection() {
     setUnbindLoading(true);
 
     try {
-      const res = await fetch("/api/cqu/bind/unbind", {
-        method: "POST",
+      const res = await fetch("/api/cqu/binding", {
+        method: "DELETE",
         credentials: "include",
       });
       if (res.ok) {

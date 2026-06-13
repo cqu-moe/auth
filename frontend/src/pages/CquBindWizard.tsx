@@ -29,7 +29,7 @@ interface BindStatusResponse {
 
 function buildWsUrl(): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/api/cqu/bind/ws`;
+  return `${protocol}//${window.location.host}/api/cqu/binding/events`;
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -476,7 +476,7 @@ function Step2Direct({
   useEffect(() => {
     if (bindAddress) return; // already fetched (e.g. user navigated back)
     setAddrLoading(true);
-    fetch("/api/cqu/bind/address", {
+    fetch("/api/cqu/binding", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -692,7 +692,7 @@ function Step2Forward({
   useEffect(() => {
     if (bindAddress) return; // already fetched (e.g. user navigated back)
     setAddrLoading(true);
-    fetch("/api/cqu/bind/address", {
+    fetch("/api/cqu/binding", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
@@ -859,8 +859,8 @@ function Step3Credentials({ onSuccess }: { onSuccess: (studentId: string) => voi
     abortRef.current = new AbortController();
 
     try {
-      const res = await fetch("/api/cqu/bind/credentials", {
-        method: "POST",
+      const res = await fetch("/api/cqu/binding/credentials", {
+        method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ studentId, password }),
@@ -986,7 +986,7 @@ function Step4Done({ studentId }: { studentId: string }) {
   const [bindStatus, setBindStatus] = useState<BindStatusResponse | null>(null);
 
   useEffect(() => {
-    fetch("/api/cqu/bind/status", { credentials: "include" })
+    fetch("/api/cqu/binding", { credentials: "include" })
       .then((r) => r.ok ? r.json() as Promise<BindStatusResponse> : Promise.reject())
       .then(setBindStatus)
       .catch(() => {/* best-effort */});
