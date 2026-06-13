@@ -26,11 +26,13 @@
 
 3. **git 同步**：本地曾领先 origin 8 commit（prod 在跑但没 push）→ 已 `git push`，**PR #4 与 prod 对齐，回滚风险消除**。
 
-4. **CI/CD（GitHub Actions，`185ae9f`）**：
-   - `.github/workflows/ci.yml`：`on: pull_request + push:[main]`，跑 typecheck + test + 前端 tsc/build。**PR #4 上即生效**。
-   - `.github/workflows/deploy.yml`：**手动 `workflow_dispatch`**（门禁 → D1 migrate → `npm run deploy`，容器用 runner 自带 Docker 构建）。选手动而非 push-main-自动 = 不打断定点过期调查。
-   - **坑**：`workflow_dispatch` 需文件落到**默认分支 main** 才出现"Run workflow"按钮 → deploy.yml 要先上 main 才能用。
-   - **配套待用户做**：① GitHub repo 建 secret `CLOUDFLARE_API_TOKEN`（权限 Workers Scripts:Edit + D1:Edit + Containers:Edit）+ `CLOUDFLARE_ACCOUNT_ID`；② CF 面板**禁用 git-connected Workers Builds**（否则每次 push 失败 + 回滚风险）；③ 合 PR #4 → main（合前先做 ①②，合后 deploy.yml 手动按钮才可用）。
+4. **CI/CD（GitHub Actions）— 已落地，两条路径均实测通过 ✅**：单一工作流 `.github/workflows/deploy.yml`（`on: push` 所有分支 + `workflow_dispatch`；docs/md `paths-ignore` 不触发）。先过门禁（backend typecheck + test + frontend tsc/build），再按分支：
+   - **main → D1 迁移（`wrangler d1 migrations apply --remote`，幂等）+ `wrangler deploy`**（生产，接管 100% 流量）。
+   - **其他分支 → `wrangler versions upload`**（上传 0 流量版本，可回滚）。
+   - 容器在 ubuntu-latest 自带 Docker 上构建 linux/amd64 镜像（与本地 `npm run deploy` 等价）。actions 用 v5（Node 24，规避 6/16 Node20 弃用）。
+   - **⚠️ DO 限制**：本 Worker 用 Durable Objects（CquSessionDO + 容器本身即 DO）→ CF **不为其生成 preview URL**，故分支版本**拿不到可点预览链接**（versions upload 仅做"构建+上传全链验证 + 可回滚版本"）。要可测分支环境只能另建独立预览 Worker（未做）。
+   - **配套已完成**：repo secret `CLOUDFLARE_API_TOKEN`（Workers Scripts/D1/Containers:Edit）+ `CLOUDFLARE_ACCOUNT_ID`（=`a666c560407022706a52a703923548d5`）已设；用户已**禁用 CF git-connected Workers Builds**；**PR #4 已 squash 合并进 main**（commit `c55bf91`，远程 feat 分支已删），**main 自动部署已实测成功**（prod 现由 Actions 部署）。
+   - 后续可选优化：Docker 层缓存加速容器构建（现每次分支 push 全量重建 chromium 镜像，慢）；如分支 push 太频可把 versions upload 限定到带 PR 的分支。
 
 ---
 
