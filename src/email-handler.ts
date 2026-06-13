@@ -48,9 +48,12 @@ const MAX_RAW_SIZE = 25 * 1024 * 1024; // 25 MiB 上限，超过即拒，避免 
 // 邮件被全部误拒。已改为「CF 平台 SPF 门 + 信封发件人白名单 + 不可枚举地址」模型。
 //
 // 审计日志约定（Phase 7 加固）：每个有意义的「结果」只打一行，避免逐微步刷屏。
-//   - ACCEPT（成功提码 **且** 投递到 DO 成功）：一行 console.log `[email] accepted`，含 kind（绝不含码值）。
-//     ⚠️ accepted 只在 depositOk 时打——提码后投递失败属丢码，记 error 而非 accepted（见末尾分叉），
-//     避免「确认发件人后丢码」被「accepted」措辞掩盖。
+//   - ACCEPT（成功提码 **且** 容器路径投递成功）：一行 console.log `[email] accepted`，含 kind（绝不含码值）。
+//     ⚠️ accepted 只在 depositOk 时打——容器路径投递失败记 error 而非 accepted（见末尾分叉），
+//     避免「确认发件人后容器收码失败」被「accepted」措辞掩盖。
+//     注意 login_2fa 现在永不「凭空丢弃」：DO 会无条件先把码广播给用户实时面板 + 暂存兜底，
+//     code_dropped（do_deposit_outcome）现专指「系统自动重登时容器收码失败/退化态」，
+//     无在途登录的手动码会以 delivered===true 记 accepted。
 //   - REJECT（每条预期内拒绝）：一行 console.warn `[email] rejected`，reason 为稳定短码；
 //     from（信封 MAIL FROM）仅在发件人门相关 reason 打出（sender_not_allowed /
 //     forward_envelope_mismatch / forward_header_from_mismatch），便于发现伪造/配置错、校正转发地址。
@@ -226,9 +229,11 @@ export async function handleEmail(
   // 投递到用户的 Durable Object —— 复用 src/routes/cqu.ts 的寻址约定：
   // idFromName(userId) → get(id) → fetch(new Request(...))。
   // deposit-code action 已在 DO 实现（src/durable-objects/cqu-session.ts 的 case "deposit-code"）。
-  // DO 恒返回 200 {success:true, delivered}；delivered 才反映码是否真送达容器/暂存。
-  // 仅凭 res.ok 会把「DO 收到请求但码被静默 drop」（如 login_2fa 无在途锁）误记为 accepted，
-  // 掩盖丢码——故此处要求 res.ok && body.delivered===true 才算投递成功。
+  // DO 恒返回 200 {success:true, delivered}；delivered 才反映码是否真送达「容器路径」。
+  // 注意 login_2fa 现在永不「凭空丢弃」：DO 会无条件先把码广播给用户实时面板（WS）+ 暂存兜底，
+  // 再按是否有在途登录决定容器路径。delivered===false 不再意味码丢失，而专指「系统自动重登时
+  // 容器收码失败/退化态」（无在途登录的手动码 delivered===true）。
+  // 仅凭 res.ok 仍不足以判定容器路径成败——故此处要求 res.ok && body.delivered===true 才算投递成功。
   let depositOk = false;
   try {
     const doId = env.CQU_SESSION.idFromName(bind.userId);
@@ -265,10 +270,11 @@ export async function handleEmail(
     // 投递抛错也不抛出 handler（避免给上游退信/触发重投制造可观测的副作用）。
   }
 
-  // 终局审计行按投递结果分叉，避免「accepted」措辞掩盖丢码：
-  //   - depositOk：码已成功投递到 DO → 单条 ACCEPT（记 kind，绝不记码值）。
-  //   - 否则：码提取成功但投递失败（已在上方记过 do_deposit 故障），码被丢弃 →
-  //     终局记 error 而非 accepted，使「确认发件人后丢码」显眼可见（不退信/不重投，仅留痕）。
+  // 终局审计行按容器路径投递结果分叉，避免「accepted」措辞掩盖容器收码失败：
+  //   - depositOk：码已成功送达容器路径（或 login_2fa 无在途的手动码已送实时面板）→ 单条 ACCEPT（记 kind，绝不记码值）。
+  //   - 否则：码提取成功但容器路径投递失败（已在上方记过 do_deposit 故障）→ 终局记 error 而非 accepted。
+  //     对 login_2fa 而言这专指「系统自动重登时容器收码失败/退化态」——码本身已被 DO 广播给用户实时面板 +
+  //     暂存兜底，并非凭空丢弃；此 error 仅用于让「系统重登收码失败」显眼可见（不退信/不重投，仅留痕）。
   if (depositOk) {
     console.log("[email] accepted", {
       token,

@@ -119,24 +119,30 @@ export class CquSessionDO extends DurableObject<Env> {
       this.ctx.acceptWebSocket(pair[1]);
       // 回放兜底: 码可能在浏览器 WS 连上(或重连)之前就到了, depositCode 的实时 send
       // 推给了零个 socket 而丢失。此处在 accept 后立刻读暂存的 pendingCode, 若仍有效
-      // (未过期且 kind=bind_confirm)就主动补推给这条新连接, 让迟到/重连的浏览器立即收到。
+      // (未过期)就按其 kind 主动补推给这条新连接, 让迟到/重连的浏览器立即收到:
+      //   - bind_confirm → type:"bind_code"(绑定向导用)
+      //   - login_2fa    → type:"login_2fa"(用户实时面板用)
       const pending =
         await this.ctx.storage.get<PendingCode>("pendingCode");
-      if (
-        pending &&
-        pending.kind === "bind_confirm" &&
-        pending.expiresAt > Date.now()
-      ) {
-        try {
-          pair[1].send(
-            JSON.stringify({
-              type: "bind_code",
-              code: pending.code,
-              ts: Date.now(),
-            })
-          );
-        } catch {
-          // 回放补推失败(连接已断/正在关闭)忽略, 不影响 accept 与 101 返回。
+      if (pending && pending.expiresAt > Date.now()) {
+        const replayType =
+          pending.kind === "bind_confirm"
+            ? "bind_code"
+            : pending.kind === "login_2fa"
+              ? "login_2fa"
+              : null;
+        if (replayType) {
+          try {
+            pair[1].send(
+              JSON.stringify({
+                type: replayType,
+                code: pending.code,
+                ts: Date.now(),
+              })
+            );
+          } catch {
+            // 回放补推失败(连接已断/正在关闭)忽略, 不影响 accept 与 101 返回。
+          }
         }
       }
       return new Response(null, { status: 101, webSocket: pair[0] });
@@ -310,13 +316,18 @@ export class CquSessionDO extends DurableObject<Env> {
   /**
    * CF Email Routing 提码后投递点(见 src/email-handler.ts POST /deposit-code)。
    * 按 kind 分流:
-   *   - login_2fa  : 把码推给在途容器 /run(凭 loginInFlight.token 作 session 键路由)。
-   *                  无在途登录则记日志并忽略(迟到/无主码)。
+   *   - login_2fa  : 无条件先把码暴露给用户实时面板(暂存 pendingCode + 广播 login_2fa),
+   *                  再按是否有在途登录决定容器路径——有在途登录则推给容器 /code
+   *                  (凭 loginInFlight.token 作 session 键路由), 无在途登录是用户手动登录的码,
+   *                  已送达实时面板, 不再算丢码。
    *   - bind_confirm: 暂存 pendingCode(Phase 6 经 WS 秒推浏览器)。
    *
-   * @returns delivered —— 码是否真正送达目标:
-   *   - login_2fa  : 仅当(有在途登录锁 && 有 session 状态 && 容器 /code 返回 ok)为 true;
-   *                  无锁/无 state/!res.ok/异常 均 false(码被丢弃, 调用方据此记丢码而非 accepted)。
+   * @returns delivered —— 码是否真正送达「容器路径」目标(决定调用方记 accepted 还是 code_dropped):
+   *   - login_2fa  : 无在途登录 → true(已送达用户实时面板, 不算丢码);
+   *                  有在途登录但无 session 状态(退化态) → false(码已广播无害, 但容器路径走不通);
+   *                  有在途登录且推容器: 容器 /code 返回 ok → true, !res.ok/异常 → false。
+   *                  即 code_dropped(false) 现专指「系统自动重登时容器收码失败/退化态」,
+   *                  不再表示「码凭空丢弃」(码至少已广播给用户实时面板)。
    *   - bind_confirm: true(已落 pendingCode 兜底, 即便实时 WS 推送零接收方也不算丢)。
    *   - 未知 kind   : false。
    */
@@ -325,15 +336,34 @@ export class CquSessionDO extends DurableObject<Env> {
     const { code, kind } = payload;
 
     if (kind === "login_2fa") {
+      // 无条件副作用(不管在途与否, 先做): 把码暴露给用户实时面板。
+      // 暂存 pendingCode 兜底(浏览器迟到/重连时由 fetch WS 升级分支回放), 再秒推所有已连接的
+      // 浏览器(hibernatable WS), 写法复刻 bind_confirm 分支。
+      const pending: PendingCode = {
+        code,
+        kind,
+        expiresAt: Date.now() + PENDING_CODE_TTL_MS,
+      };
+      await this.ctx.storage.put("pendingCode", pending);
+      for (const ws of this.ctx.getWebSockets()) {
+        try {
+          ws.send(JSON.stringify({ type: "login_2fa", code, ts: Date.now() }));
+        } catch {
+          // 忽略单个 socket 的发送失败, 不影响其它 socket 与暂存。
+        }
+      }
+
       const lock = await this.ctx.storage.get<LoginInFlight>("loginInFlight");
       if (!lock) {
-        console.warn(
-          `[CquSession] login_2fa code arrived but no login in flight, ignoring`
+        // 无在途登录 = 用户手动登录触发的码, 已送达上方实时面板。不再算丢码。
+        console.info(
+          `[CquSession] login_2fa code arrived with no login in flight → broadcast to user live panel`
         );
-        return false;
+        return true;
       }
       const userId = this.state?.userId;
       if (!userId) {
+        // 退化态: 有在途登录锁却无 session 状态, 容器路径走不通。码已广播无害, 但容器收码失败。
         console.warn(
           `[CquSession] login_2fa code arrived but no session state, ignoring`
         );
