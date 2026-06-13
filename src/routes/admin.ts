@@ -6,7 +6,7 @@ import type { HonoEnv } from "../types";
 import { createAuth, OAUTH_SCOPES } from "../auth";
 import { isLoopbackHost } from "@better-auth/core/utils/host";
 import { errorResponse } from "../utils/error";
-import { oauthClientCquScopes } from "../db/schema";
+import { oauthClientCquScopes, cquBindAddresses } from "../db/schema";
 import {
   hashOAuthClientSecret,
   generateOAuthClientSecret,
@@ -270,6 +270,43 @@ admin.patch("/users/:id", async (c) => {
   }
 
   return errorResponse(c, "INVALID_ACTION", "需要 action 或 role 参数", 400);
+});
+
+// POST /api/admin/users/:id/revoke-cqu - Revoke (吊销) a user's CQU binding.
+// Distinct from the user-self unbind (POST /api/cqu/bind/unbind, which deletes
+// credentials + addresses + destroys the DO). Revoke is an admin/system action:
+// mark the binding disabled but keep the tombstone — set cqu_bind_addresses.status
+// = revoked (the email pipeline rejects codes for revoked bindings) and tell the DO
+// to revoke (status → revoked, stop the keepalive/relogin alarm, clear the in-flight
+// lock) WITHOUT deleting state/credentials, so the binding is preserved for audit.
+// admin/superAdmin gating is handled by the admin.use("/*") middleware above.
+admin.post("/users/:id/revoke-cqu", async (c) => {
+  const userId = c.req.param("id");
+  try {
+    // D1 tombstone: mark all of this user's bind addresses revoked. Idempotent —
+    // 0 rows matched (no binding) is a safe no-op. Credentials are NOT deleted.
+    const db = drizzle(c.env.DATABASE);
+    await db
+      .update(cquBindAddresses)
+      .set({ status: "revoked" })
+      .where(eq(cquBindAddresses.userId, userId));
+
+    // DO: stop the session (status → revoked, deleteAlarm, clear loginInFlight).
+    // Empty/never-initialized DO is a safe no-op (revoke just sets status).
+    const stub = c.env.CQU_SESSION.get(
+      c.env.CQU_SESSION.idFromName(userId)
+    );
+    await stub.fetch(
+      new Request("https://do/revoke", { method: "POST" })
+    );
+
+    return c.json({ success: true, action: "cqu-revoked" });
+  } catch (e) {
+    console.error(
+      `[admin] revoke-cqu failed for userId=${userId}: ${e instanceof Error ? e.message : String(e)}`
+    );
+    return errorResponse(c, "REVOKE_CQU_FAILED", "撤销 CQU 绑定失败", 500);
+  }
 });
 
 // Shape of a row returned by adapter.findMany({ model: "oauthClient" }).

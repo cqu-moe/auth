@@ -185,6 +185,10 @@ export class CquSessionDO extends DurableObject<Env> {
           await this.destroy();
           return Response.json({ success: true });
         }
+        case "revoke": {
+          await this.revoke();
+          return Response.json({ success: true });
+        }
         default:
           return Response.json({ error: "Unknown action" }, { status: 404 });
       }
@@ -397,6 +401,21 @@ export class CquSessionDO extends DurableObject<Env> {
     // deleteAll 已清掉 status/loginInFlight/pendingCode/state/credentials/reloginAttempts/reloginFailures;
     // 显式回到 unbound, 让后续 status 查询语义清晰(而非依赖默认值)。
     await this.setStatus("unbound");
+  }
+
+  /**
+   * 撤销(吊销): 管理员/系统触发的「标记禁用、保留墓碑」, 区别于 destroy(用户自助彻底删)。
+   *   ① status → revoked: alarm() 已对 revoked 早退不再保活/重登; getServiceTicket 因 status≠active
+   *      拒发 ST; email 管道对 revoked 拒收码 —— 三处都凭 status 闸住, 此处置位即生效。
+   *   ② deleteAlarm: 立即停掉 keepalive/主动重登的 alarm 循环, 不等下次触发自然早退。
+   *   ③ delete loginInFlight: 清在途登录锁, 防残留锁挡住后续(如解封后)的合法登录。
+   * 与 destroy 的关键区别: **保留** state/credentials —— 凭证留痕便于审计, 墓碑由 D1
+   * cqu_bind_addresses.status=revoked 承载; 这里不 deleteAll, 故 revoked 是可逆禁用而非彻底清除。
+   */
+  private async revoke(): Promise<void> {
+    await this.setStatus("revoked");
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.delete("loginInFlight");
   }
 
   async alarm(): Promise<void> {
