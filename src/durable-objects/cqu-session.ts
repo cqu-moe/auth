@@ -394,7 +394,7 @@ export class CquSessionDO extends DurableObject<Env> {
       this.state.loginAt > 0 &&
       Date.now() - this.state.loginAt >= PROACTIVE_RELOGIN_MS
     ) {
-      console.info(
+      console.warn(
         `[CquSession] ${this.state.studentId}: TGT age >= 7h, proactive relogin`
       );
       await this.relogin();
@@ -489,7 +489,13 @@ export class CquSessionDO extends DurableObject<Env> {
     if (outcome === "failed") {
       // containerLogin 失败时已把状态推到 RELOGIN_FAIL(→ expired) 并清锁。
       console.error(`[CquSession] ${this.state.studentId}: relogin failed`);
+      return;
     }
+    // outcome === "ok": 重登成功, 新 TGT 已铸。warn 级以便在 observability 可见
+    // (info 级实测在当前配置下不可见; 重登成功此前无任何日志, 是观测盲区)。
+    console.warn(
+      `[CquSession] ${this.state.studentId}: relogin OK, new TGT minted`
+    );
   }
 
   /**
