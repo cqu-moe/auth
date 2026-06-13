@@ -27,8 +27,9 @@ npm run db:migrate:local             # 本地 D1 执行 migration
 # 测试
 npm run test                         # vitest run（Node 普通 pool，见 vitest.config.ts；当前测试是 runtime-agnostic crypto，不需要 Workers pool）
 
-# 部署 (GitHub 连接 Cloudflare，push 到 main 自动构建部署)
-npm run deploy                       # 手动部署: 构建前端 + wrangler deploy
+# 部署 (GitHub Actions: push main → 自动迁移+部署接管流量; 其他分支 → versions upload 0 流量版本)
+# 见 .github/workflows/deploy.yml; CF git-connected Workers Builds 已禁用(构建不了容器); 需 secrets CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID
+npm run deploy                       # 备用手动部署: 构建前端 + wrangler deploy (需本地 Docker 构建容器)
 ```
 
 ## Architecture
@@ -39,7 +40,8 @@ npm run deploy                       # 手动部署: 构建前端 + wrangler dep
 src/index.ts          → Hono 路由入口，catch-all 转发 ASSETS (run_worker_first 模式)
 src/auth.ts           → Better Auth 配置 (角色: user/admin/superAdmin, RBAC, OAuth 2.1 Provider)
 src/db/schema.ts      → Drizzle schema: cquCredentials, oauthClientCquScopes
-src/routes/cqu.ts     → CQU 绑定/解绑/状态/service-ticket
+src/routes/cqu.ts     → 仅 GET /api/cqu/service-ticket (OAuth 客户端取 ST)
+src/routes/cqu-bind.ts → RESTful 绑定资源 /api/cqu/binding (POST 创建/GET 状态/PUT credentials/GET events WS/DELETE 解绑)
 src/routes/admin.ts   → 用户管理、OAuth 客户端 scope 配置 (需 admin 角色)
 src/services/cqu-sso.ts → CAS 登录流程、ticket 获取、会话保活
 src/services/crypto.ts  → AES-256-GCM (凭证加密) + AES-ECB (CQU SSO 密码加密)
@@ -97,3 +99,7 @@ Secrets (via `wrangler secret`): `ENCRYPTION_KEY`, `BETTER_AUTH_URL`, `BETTER_AU
 - `npm run deploy` 是手动部署的备用方式，常规部署通过 push 到 main 自动触发
 - **Better Auth admin 插件自定义 `ac` 时必须 spread `defaultStatements` + 角色 spread `adminAc.statements`**（`better-auth/plugins/admin/access`），否则内置端点（listUsers/setRole/banUser…）缺 `user:["list","set-role",...]` 动作，权限校验全失败抛 FORBIDDEN；而 `auth.api.*` 抛的 APIError 无 try/catch 会被 Hono 兜底成**通用 500**，伪装成"服务器崩溃"。前端路由守卫也要同时放行 `admin` 和 `superAdmin`
 - admin 层轮换/直写 OAuth client secret 必须复刻插件 `defaultHasher`（`base64Url.encode(SHA-256(secret), {padding:false})`，存储模式 `"hashed"`，见 `src/utils/oauth-secret.ts`）；插件的 rotate/delete 端点有 `userId===session.user.id` 的 owner 硬校验，admin 用不了，只能走 adapter 直操
+- **项目 API 一律 RESTful**：资源名词 + HTTP 方法语义 + 正确状态码（201 创建/204 删除/200 读写）。绑定流程=资源 `/api/cqu/binding`；admin 吊销/恢复=`PATCH /api/admin/users/:id/cqu-binding {status:"revoked"|"active"}`，不用动词端点
+- 部署用 **GitHub Actions**（`.github/workflows/deploy.yml`）而非 CF Workers Builds：容器构建需 Docker，CF git-connected Workers Builds 构建不了容器（已禁用）；runner/本地自带 Docker 可构建。push main → 迁移+部署；其他分支 → `versions upload` 0 流量版本
+- CF **不为使用 Durable Objects 的 Worker 生成 preview URL** → 分支 `versions upload` 拿不到可点预览链接；要可测分支环境只能另建独立预览 Worker
+- DO 可休眠 WebSocket keepalive：`this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping","pong"))`，运行时层直接应答 ping、不唤醒休眠 DO（前端定期发 `"ping"`）
