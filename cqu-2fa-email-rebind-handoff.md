@@ -4,22 +4,24 @@
 > 仓库：`/Users/uu/Documents/Coding/cqu-moe/auth`，分支 `feat/cqu-2fa-email-rebind`（**未合并 main**）。
 > 关联（只读参考）：`/Users/uu/Documents/Coding/cqu-moe/cqu-api-endpoint-collection`
 
-## 0. ✅ 已部署 + 已迁移（本轮收尾时由用户授权完成）
+## 0. ✅ 已部署 + 已迁移 + PR 已开（session-2 两轮收尾，用户授权）
 
-本轮新功能**已部署到生产**：版本 **`147f80e9`**（转发模式 + bound_at + 限频/告警 + 审计修复 + 可观测性全部上线）。迁移 **`0003` 已 `apply --remote`**，bound_at 脏行已订正为真实时间戳（复验 0 dirty）。部署后实测重登闭环 OK：`12:48 session expired → POST /run 200(容器登录) → [email] accepted(2FA 邮件捕获) → POST /code 200`，无报错。
+**生产当前版本 = `62b85cfc`**（2026-06-13 13:24 部署）。本 feature 全部功能 + 本轮收尾（forward 模式、bound_at 修复、限频/告警、审计修复、可观测性、MEDIUM-1 deposit 投递可观测、wizard 文案、expiry 取证诊断）**全部上线**。迁移 `0003` 已 `apply --remote`（bound_at 脏行订正、复验 0 dirty）。
+**分支收尾 = PR #4**（https://github.com/cqu-moe/auth/pull/4，feat/cqu-2fa-email-rebind → main，48 commit，**留人工审阅合并**；不直接合以避开失败的 CF 容器构建）。
 
-**仍待办（下个 session / 后续）**：
-1. **🟢 转发模式上线给真实用户前**：必须用一封真实转发的 CQU 邮件确认 `email.from` 实际形状（SRS 可能改写/挪到 Reply-To）——见 §3。代码已上线但 forward 是 opt-in，没人用之前不影响 direct。
-2. **🔵 会话频繁 expired**：观测到 ~每几小时就 expired（短于理论 8h），reactive 重登每次自愈、但 churn 偏多——见 §2 残留疑点。限频 6/h 已兜底防失控。值得查根因（CQU 会话变短？重登 TGT 没真刷新？网络抖动误判？）。
-3. **⚪ 分支合并 main**：仍未合（见 §6）。
-4. **⚪ 小项**：见 §6（wizard "返回上一步" 文案、MEDIUM-1 DO deposit-code 恒 200）。
+**仍待办（需用户动作 / 需时间）**：
+1. **🟢 转发模式真实样本**（需你动作）：上线给真实用户前，用一封真实转发的 CQU 邮件发到某 forward token 地址，抓 `email.from` 实际形状（SRS 改写/Reply-To）后定校验——见 §3。forward 是 opt-in，没人用之前不影响 direct。
+2. **🔵 会话频繁 expired 根因**（需静置采数据）：取证诊断已上线（`new TGT exp=<iso>` 登录时打、`probe says expired: ... page=cas-login|waf-challenge` 过期时打）。**关键操作纪律：别再频繁部署**——本轮 4 次部署反复打断在途重登、制造了虚假高频（见 §2）；让系统静置几个周期，再看诊断日志判定是"定点过期"/"瑞数误判"/"真 TGT 短命"。限频 6/h + 连续失败告警已兜底防失控。
+3. **⚪ PR #4 合并**：人工审阅后合并（合并/push main 会触发一次失败的 CF 容器构建，不影响手动部署的 prod）。
 
 ```bash
-# 复验/运维参考命令（部署+迁移已执行过；如需再次部署）：
+# 运维参考（如需再次部署——但排查 expiry 期间应尽量少部署）：
 npm run deploy                                              # 前端构建 + wrangler deploy（沙箱外/Docker）
 npx wrangler d1 migrations apply auth-cqu-moe-db --remote   # 迁移（wrangler deploy 不跑迁移）
-npx wrangler whoami                                        # 账户应为 a666c560407022706a52a703923548d5
+# 查 expiry 诊断数据（静置后）：observability 搜 "new TGT exp" / "probe says expired"
 ```
+
+> 已完成并上线的小项：wizard "返回上一步"→"刷新页面重填"文案（efcedc5）；MEDIUM-1 deposit `delivered` 字段使丢码不再误记 accepted（d61f785）。下面 §1 是 session-2 第一轮提交表；第二轮提交 `1c8ef3b`(docs)→`778d6ee`(expiry诊断)→`d61f785`(MEDIUM-1)→`efcedc5`(wizard)。
 
 ## 1. 本轮干了什么（7 个提交，`ca08805`→`623478a`）
 
