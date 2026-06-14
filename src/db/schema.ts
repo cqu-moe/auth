@@ -97,3 +97,18 @@ export const cquBindAddresses = sqliteTable("cqu_bind_addresses", {
   boundAt: text("bound_at").notNull().default(sql`(datetime('now'))`),
   lastCodeAt: text("last_code_at"),
 });
+
+export const userEntitlement = sqliteTable(
+  "user_entitlement",
+  {
+    userId: text("user_id").notNull(),
+    subsystem: text("subsystem").notNull(),
+    capability: text("capability").notNull(),
+    value: text("value").notNull(), // flag:'1' | quota:数字串 | '' 约定无限
+    // SQL 表达式默认值必须 sql`` 包裹(否则 Drizzle 当字符串字面量,污染 DDL 且 INSERT 写入字面串)。
+    updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.subsystem, table.capability] }),
+  ]
+);
