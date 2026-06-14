@@ -6,6 +6,14 @@ import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { errorResponse } from "../utils/error";
 
+// 一组 scope 是否满足某个所需 cqu ticket scope。
+// cqu:ticket:* 是通配,满足任何 required(含 any 与符号 key);
+// 否则必须精确含有 required。注意:cqu:ticket:any 不授予符号 key(最小权限),
+// 反之亦然 —— 它们是各自独立的 required 值,只有 * 跨越两者。
+export function scopeSatisfies(scopes: string[], required: string): boolean {
+  return scopes.includes(required) || scopes.includes("cqu:ticket:*");
+}
+
 export function requireCquScope(service: string) {
   return async (c: Context<HonoEnv>, next: Next) => {
     const authHeader = c.req.header("Authorization");
@@ -34,11 +42,8 @@ export function requireCquScope(service: string) {
 
     const grantedScopes = (payload.scope as string)?.split(" ") ?? [];
     const requiredScope = `cqu:ticket:${service}`;
-    const hasTokenScope =
-      grantedScopes.includes(requiredScope) ||
-      grantedScopes.includes("cqu:ticket:*");
 
-    if (!hasTokenScope) {
+    if (!scopeSatisfies(grantedScopes, requiredScope)) {
       return errorResponse(c, "FORBIDDEN", `缺少所需的 scope: ${requiredScope}`, 403);
     }
 
@@ -51,10 +56,7 @@ export function requireCquScope(service: string) {
         .where(eq(oauthClientCquScopes.clientId, clientId))
         .all();
       const clientScopes = rows.map((r) => r.scope);
-      if (
-        !clientScopes.includes(requiredScope) &&
-        !clientScopes.includes("cqu:ticket:*")
-      ) {
+      if (!scopeSatisfies(clientScopes, requiredScope)) {
         return errorResponse(c, "FORBIDDEN", "该应用未被授权访问此 CQU 服务", 403);
       }
     }

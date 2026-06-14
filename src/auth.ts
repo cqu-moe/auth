@@ -54,6 +54,7 @@ export const OAUTH_SCOPES = [
   "cqu:ticket:jxpj",
   "cqu:ticket:library",
   "cqu:ticket:card",
+  "cqu:ticket:any",
 ];
 
 export function createAuth(env: Env, request: Request) {
