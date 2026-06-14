@@ -432,8 +432,16 @@ admin.post("/users/:id/entitlements/preset", async (c) => {
   // 仅删预设涵盖的 (subsystem,capability) 对（按 userId 限定），不动用户其它无关行。
   // 按完整复合键逐对删除，避免不同子系统下同名 capability 被误删；预设很小（数项），
   // 逐对删除清晰且远低于 D1 的 100 绑定参数上限。
-  for (const it of items) {
-    await db
+  //
+  // 原子化:把全部 per-pair delete + 单条 insert 合进一个 db.batch([...])(单 D1 事务),
+  // 即便 insert 因任何原因失败也不会留下「已删旧值、未插预设」的半完成态(用户被静默
+  // 部分清空)。presetToItems 不会产出空数组(真实预设至少一项),但仍守一手:items 为空时
+  // 不走 batch(batch 要求非空数组),按无可应用项返回。
+  if (items.length === 0) {
+    return c.json({ success: true, applied: 0 });
+  }
+  const stmts = items.map((it) =>
+    db
       .delete(userEntitlement)
       .where(
         and(
@@ -441,9 +449,9 @@ admin.post("/users/:id/entitlements/preset", async (c) => {
           eq(userEntitlement.subsystem, it.subsystem),
           eq(userEntitlement.capability, it.capability)
         )
-      );
-  }
-  await db.insert(userEntitlement).values(
+      )
+  );
+  const ins = db.insert(userEntitlement).values(
     items.map((it) => ({
       userId,
       subsystem: it.subsystem,
@@ -451,6 +459,7 @@ admin.post("/users/:id/entitlements/preset", async (c) => {
       value: it.value,
     }))
   );
+  await db.batch([stmts[0], ...stmts.slice(1), ins]);
   return c.json({ success: true, applied: items.length });
 });
 
