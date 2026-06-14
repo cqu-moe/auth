@@ -18,7 +18,10 @@ export function requireCquScope(service: string) {
   return async (c: Context<HonoEnv>, next: Next) => {
     const authHeader = c.req.header("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
-      return next();
+      // 取 CQU 票必须凭带 cqu:ticket:* scope 的 Bearer 访问令牌 + 客户端授权。
+      // 仅 cookie 的调用方一律拒绝(避免任意登录会话零授权铸符号票);
+      // 第一方子系统的 cookie/离线取票走 RPC 路径(C2),不走此公共路由。
+      return errorResponse(c, "UNAUTHORIZED", "取票需要 Bearer 访问令牌", 401);
     }
 
     const token = authHeader.substring(7);
