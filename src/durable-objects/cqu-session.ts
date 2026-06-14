@@ -17,6 +17,7 @@ import {
   MAX_RELOGINS_PER_WINDOW,
   CONSECUTIVE_RELOGIN_FAIL_ALERT,
 } from "../services/cqu-2fa/relogin-policy";
+import { resolveCaps } from "../services/entitlements";
 import type { Env } from "../types";
 
 const KEEPALIVE_INTERVAL_MS = 15 * 60 * 1000;
@@ -346,6 +347,11 @@ export class CquSessionDO extends DurableObject<Env> {
   // DO 是取票的权威 chokepoint(route/RPC/cookie 各入口最终都汇到这里)。
   // 不论上游是否已校验,凡 serviceUrl 输入此处都【无条件】再做 host 校验红线;
   // service(符号 key)走白名单表。解析出的 target 永远是受信 URL,绝不回传原始 input。
+  //
+  // 安全闸落在此唯一 chokepoint(route / 未来 RPC getCquTicket / DO 内铸都汇于此;
+  // betterAuth HTTP rateLimit 覆盖不到 RPC 与 DO 内铸):
+  //   ① D5 opt-in:广路径(serviceUrl)取票要求 user 的 cqu.quicklogin = true(符号 key 不受此限)。
+  // NOTE: keepalive 探针走 this.ssoClient.getServiceTicket(...) 直连, 不经本方法, 故不受这些闸影响。
   private async getServiceTicket(arg: {
     service?: string;
     serviceUrl?: string;
@@ -356,6 +362,8 @@ export class CquSessionDO extends DurableObject<Env> {
       throw new CquSsoError("SESSION_INACTIVE", "CQU session not active");
     }
 
+    // ① 定模式 + 解析受信 target。broad = serviceUrl 模式(广路径快捷登录)。
+    const broad = !!arg.serviceUrl;
     let target: string;
     if (arg.serviceUrl) {
       // 权威再校验(red line):即便 route 已校验,RPC/其他入口仍汇于此。
@@ -374,6 +382,19 @@ export class CquSessionDO extends DurableObject<Env> {
         "MISSING_SERVICE",
         "Missing service or serviceUrl"
       );
+    }
+
+    // ② D5 — 浏览器插件快捷登录 opt-in:仅广路径(serviceUrl)受限;符号 key 取票不受此闸。
+    // quicklogin flag 永远不是「取票闸」本身(出票的权威校验在 host 校验 + scope),
+    // 它只表达「用户是否同意插件替他用任意广路径取 ST」—— 未同意则广路径直接拒。
+    if (broad) {
+      const caps = await resolveCaps(this.env.DATABASE, this.state.userId, "cqu");
+      if (caps.cqu?.quicklogin !== true) {
+        throw new CquSsoError(
+          "QUICKLOGIN_NOT_ENABLED",
+          "未开启浏览器插件快捷登录"
+        );
+      }
     }
 
     this.state.lastRequestedAt = Date.now();
