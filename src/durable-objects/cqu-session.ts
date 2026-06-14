@@ -391,7 +391,14 @@ export class CquSessionDO extends DurableObject<Env> {
     let target: string;
     if (arg.serviceUrl) {
       // 权威再校验(red line):即便 route 已校验,RPC/其他入口仍汇于此。
-      target = validateCquServiceUrl(arg.serviceUrl);
+      // validateCquServiceUrl 抛的是普通 Error,会被 DO fetch catch 映射成
+      // INTERNAL_ERROR(伪装成服务器崩溃);包成 CquSsoError 让 RPC getCquTicket
+      // 与 route 都能回传准确的 INVALID_SERVICE_URL。
+      try {
+        target = validateCquServiceUrl(arg.serviceUrl);
+      } catch {
+        throw new CquSsoError("INVALID_SERVICE_URL", "非法的 serviceUrl");
+      }
     } else if (arg.service) {
       const symbolic = SERVICE_URLS[arg.service];
       if (!symbolic) {
