@@ -15,5 +15,7 @@ export interface HonoEnv {
   Bindings: Env;
   Variables: {
     user: { id: string; [key: string]: unknown };
+    // 已校验的 DO service-ticket URL(canonical),阶段一→阶段二传递,见 routes/cqu.ts。
+    stDoUrl: string;
   };
 }

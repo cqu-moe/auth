@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { CquSsoClient, type CasCookies, CquSsoError } from "../services/cqu-sso";
 import { decrypt } from "../services/crypto";
+import { validateCquServiceUrl } from "../services/service-url";
 import {
   nextStatus,
   type CquStatus,
@@ -210,9 +211,16 @@ export class CquSessionDO extends DurableObject<Env> {
         }
         case "service-ticket": {
           const service = url.searchParams.get("service");
-          if (!service)
-            return Response.json({ error: "Missing service" }, { status: 400 });
-          const ticket = await this.getServiceTicket(service);
+          const serviceUrl = url.searchParams.get("serviceUrl");
+          if (!service && !serviceUrl)
+            return Response.json(
+              { error: "Missing service or serviceUrl" },
+              { status: 400 }
+            );
+          const ticket = await this.getServiceTicket({
+            service: service ?? undefined,
+            serviceUrl: serviceUrl ?? undefined,
+          });
           return Response.json({ ticket });
         }
         case "deposit-code": {
@@ -335,19 +343,42 @@ export class CquSessionDO extends DurableObject<Env> {
     }
   }
 
-  private async getServiceTicket(service: string): Promise<string> {
+  // DO 是取票的权威 chokepoint(route/RPC/cookie 各入口最终都汇到这里)。
+  // 不论上游是否已校验,凡 serviceUrl 输入此处都【无条件】再做 host 校验红线;
+  // service(符号 key)走白名单表。解析出的 target 永远是受信 URL,绝不回传原始 input。
+  private async getServiceTicket(arg: {
+    service?: string;
+    serviceUrl?: string;
+  }): Promise<string> {
     await this.loadState();
     const status = await this.getStatus();
     if (!this.state || status !== "active") {
       throw new CquSsoError("SESSION_INACTIVE", "CQU session not active");
     }
-    const serviceUrl = SERVICE_URLS[service];
-    if (!serviceUrl) {
-      throw new CquSsoError("UNKNOWN_SERVICE", `Unknown service: ${service}`);
+
+    let target: string;
+    if (arg.serviceUrl) {
+      // 权威再校验(red line):即便 route 已校验,RPC/其他入口仍汇于此。
+      target = validateCquServiceUrl(arg.serviceUrl);
+    } else if (arg.service) {
+      const symbolic = SERVICE_URLS[arg.service];
+      if (!symbolic) {
+        throw new CquSsoError(
+          "UNKNOWN_SERVICE",
+          `Unknown service: ${arg.service}`
+        );
+      }
+      target = symbolic;
+    } else {
+      throw new CquSsoError(
+        "MISSING_SERVICE",
+        "Missing service or serviceUrl"
+      );
     }
+
     this.state.lastRequestedAt = Date.now();
     await this.ctx.storage.put("state", this.state);
-    return this.ssoClient.getServiceTicket(this.state.cookies, serviceUrl);
+    return this.ssoClient.getServiceTicket(this.state.cookies, target);
   }
 
   /**
