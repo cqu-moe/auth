@@ -4,9 +4,11 @@ import { admin } from "better-auth/plugins/admin";
 import { defaultStatements, adminAc } from "better-auth/plugins/admin/access";
 import { jwt } from "better-auth/plugins/jwt";
 import { createAccessControl } from "better-auth/plugins/access";
+import { customSession } from "better-auth/plugins";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { Resend } from "resend";
 import type { Env } from "./types";
+import { resolveCaps } from "./services/entitlements";
 
 // Must spread the admin plugin's defaultStatements: its built-in endpoints
 // (listUsers/setRole/banUser/...) authorize against actions like
@@ -104,6 +106,14 @@ export function createAuth(env: Env, request: Request) {
               oauthAuthServerConfig: true,
               openidConfig: true,
             },
+          }),
+          // customSession 必须放在 plugins 数组最后:它内部调用 getSession()
+          // 拿到已组装好的 {user, session}(含 admin 的 role),再追加 caps。
+          // 返回值会"完全替换" get-session 响应体,故必须显式回传 user+session。
+          customSession(async ({ user, session }) => {
+            const caps = await resolveCaps(env.DATABASE, user.id);
+            delete (caps as any).cqu; // 不向 SPA 会话披露 quicklogin;设置页另用专用查询
+            return { user, session, caps };
           }),
         ],
         rateLimit: {
