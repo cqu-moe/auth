@@ -3,7 +3,7 @@
 > 给**实现各子系统(日历、教评、浏览器插件…)的 agent / 开发者**读。
 > auth.cqu.moe 是统一身份提供方:用户登录 + 分级能力(entitlements)+ 代理访问 CQU CAS。
 > 设计依据见 `docs/plans/2026-06-14-firstparty-entitlements-design.md`。
-> **本指南描述目标接入契约;若某接口标注「计划中」,以设计文档/实现计划为准,接入前确认已上线。**
+> **本指南描述已上线的接入契约**(2026-06-14 起 auth 侧 entitlements + RPC + serviceUrl 取票全部实现)。
 
 ---
 
@@ -59,16 +59,27 @@ if (!sess) return new Response("unauthorized", { status: 401 })
 if (!sess.caps.calendar?.sync) return new Response("功能未开通", { status: 403 })
 
 // 3) 取 CQU service ticket(见 §3;离线任务同样可调,无需用户在场)
-const r = await env.AUTH.getCquTicket({ clientId: "calendar", service: "jwxt", userId: sess.user.id })
-if ("error" in r) { /* 处理 not-bound / forbidden */ }
+//    ⚠️ getCquTicket 必须传本 client 的 clientSecret(把它存成你 Worker 的 secret)。
+//    RPC 是进程内调用、任一被绑定 Worker 都能自报任意 clientId,故 auth 端强制校验
+//    client_secret(M-6),不验证就只返回 { error: "INVALID_CLIENT" }。
+const r = await env.AUTH.getCquTicket({
+  clientId: "calendar",
+  clientSecret: env.CQU_AUTH_CLIENT_SECRET,   // 注册时拿到的机密、存成 Worker secret
+  service: "jwxt",                            // 或广域:serviceUrl: "https://my.cqu.edu.cn/..."(需 cqu:ticket:any + 用户 cqu.quicklogin opt-in)
+  userId: sess.user.id,
+})
+if ("error" in r) { /* INVALID_CLIENT | FORBIDDEN | SESSION_INACTIVE | RATE_LIMITED | QUICKLOGIN_NOT_ENABLED | INVALID_SERVICE_URL */ }
 else { const st = r.ticket /* ST-... */ }
 ```
 
-> RPC 形态(`verifySession` / `getCquTicket` 签名)为**计划中**接口,以实现计划为准。
+> 已实现签名:
+> - `verifySession(cookieHeader: string | null) → null | { user, caps }`(caps 实时,全子系统)。
+> - `getCquTicket({ clientId, clientSecret, service?, serviceUrl?, userId }) → { ticket } | { error }`。
+>   取票全程经 auth 的 DO 万能闸:host 校验 + 用户 `cqu.quicklogin` opt-in(仅 serviceUrl 广域路径)+ 限流 + 审计。
 
 ### 1.3 离线 / 后台任务
 
-Cron Worker 等用户不在场的场景:**直接 `env.AUTH.getCquTicket({...})`,全程无 cookie/token**。授权 = service binding 机器信任 + client-scope + 用户 CQU 会话 `active`。CQU 会话由 auth 的 Durable Object 常驻维护(无人值守续命),用户只需**绑定过一次**。
+Cron Worker 等用户不在场的场景:**直接 `env.AUTH.getCquTicket({...})`,全程无用户 cookie/token**(只需带本 client 的 `clientSecret`)。授权 = service binding 机器信任 + `clientSecret` 校验 + client-scope + 用户 CQU 会话 `active`。CQU 会话由 auth 的 Durable Object 常驻维护(无人值守续命),用户只需**绑定过一次**。
 
 ---
 
@@ -184,7 +195,7 @@ if (count > limit) return deny(`同步上限 ${limit} 条`)
 - 授予 scope `cqu:ticket:any`(广域;语义="任意 `*.cqu.edu.cn` 白名单 host")或 `cqu:ticket:*`。
 - 走 §2.1 PKCE 拿 token(可 `offline_access` 缓存,免每次重登)。
 
-### 5.2 取票接口(计划中)
+### 5.2 取票接口
 
 ```
 GET https://auth.cqu.moe/api/cqu/service-ticket?serviceUrl=<完整CQU服务URL>
