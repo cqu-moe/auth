@@ -8,7 +8,7 @@ import { customSession } from "better-auth/plugins";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { Resend } from "resend";
 import type { Env } from "./types";
-import { resolveCaps } from "./services/entitlements";
+import { resolveCaps, subsystemForAccessToken } from "./services/entitlements";
 
 // Must spread the admin plugin's defaultStatements: its built-in endpoints
 // (listUsers/setRole/banUser/...) authorize against actions like
@@ -102,6 +102,15 @@ export function createAuth(env: Env, request: Request) {
             loginPage: "/login",
             consentPage: "/oauth/authorize",
             scopes: OAUTH_SCOPES,
+            // 按 client→subsystem 只盖该片 caps(最小披露);拿不到映射则盖空 {},绝不盖全量。
+            // 用 customAccessTokenClaims(oauth-provider)而非 jwt.definePayload:
+            // 已核实 OAuth access token 不经 definePayload,且 definePayload 入参无 client_id。
+            customAccessTokenClaims: async (info) => {
+              const sub = subsystemForAccessToken(info);
+              if (!sub) return {};
+              const caps = await resolveCaps(env.DATABASE, info.user!.id, sub);
+              return { caps };
+            },
             silenceWarnings: {
               oauthAuthServerConfig: true,
               openidConfig: true,
