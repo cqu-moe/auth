@@ -128,6 +128,15 @@ export function createAuth(env: Env, request: Request) {
             return { user, session, caps };
           }),
         ],
+        // 一次登录 auth.cqu.moe → cookie 覆盖所有 *.cqu.moe 子域(第一方一体化 SSO)。
+        // trustedOrigins 是顶层选项,通配符匹配整个 origin(含 :// 与 *);baseURL 已自动可信。
+        trustedOrigins: ["https://*.cqu.moe"],
+        advanced: {
+          // 必须显式写 domain: "cqu.moe"。省略时 better-auth 默认取
+          // new URL(baseURL).hostname = "auth.cqu.moe",cookie 仅作用于该单一子域,
+          // 跨子域 SSO 会静默失败;写 "cqu.moe" 浏览器才会按 ".cqu.moe" 全子域生效。
+          crossSubDomainCookies: { enabled: true, domain: "cqu.moe" },
+        },
         rateLimit: {
           enabled: true,
           window: 60,
