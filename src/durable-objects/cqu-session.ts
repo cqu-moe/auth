@@ -17,6 +17,16 @@ import {
   MAX_RELOGINS_PER_WINDOW,
   CONSECUTIVE_RELOGIN_FAIL_ALERT,
 } from "../services/cqu-2fa/relogin-policy";
+import {
+  pruneStMintLog,
+  stMintThrottled,
+  distinctBroadHosts,
+  type StMintRecord,
+  ST_MINT_RATE_WINDOW_MS,
+  MAX_ST_MINTS_PER_USER,
+  MAX_ST_MINTS_PER_CLIENT,
+  DISTINCT_HOST_ALERT_THRESHOLD,
+} from "../services/st-mint-policy";
 import { resolveCaps } from "../services/entitlements";
 import type { Env } from "../types";
 
@@ -218,9 +228,14 @@ export class CquSessionDO extends DurableObject<Env> {
               { error: "Missing service or serviceUrl" },
               { status: 400 }
             );
+          // clientId 空串(route 在无 azp/client_id 时传 "")按 null 处理 —— 自成限频桶。
+          const clientId = url.searchParams.get("clientId") || null;
+          const source = url.searchParams.get("source") ?? undefined;
           const ticket = await this.getServiceTicket({
             service: service ?? undefined,
             serviceUrl: serviceUrl ?? undefined,
+            clientId,
+            source,
           });
           return Response.json({ ticket });
         }
@@ -348,13 +363,18 @@ export class CquSessionDO extends DurableObject<Env> {
   // 不论上游是否已校验,凡 serviceUrl 输入此处都【无条件】再做 host 校验红线;
   // service(符号 key)走白名单表。解析出的 target 永远是受信 URL,绝不回传原始 input。
   //
-  // 安全闸落在此唯一 chokepoint(route / 未来 RPC getCquTicket / DO 内铸都汇于此;
+  // 安全闸都落在此唯一 chokepoint(route / 未来 RPC getCquTicket / DO 内铸都汇于此;
   // betterAuth HTTP rateLimit 覆盖不到 RPC 与 DO 内铸):
-  //   ① D5 opt-in:广路径(serviceUrl)取票要求 user 的 cqu.quicklogin = true(符号 key 不受此限)。
+  //   ① D5 opt-in:广路径(serviceUrl)取票要求 user 的 cqu.quicklogin = true(符号 key 不受此限);
+  //   ② D6 限频:对所有取票(两模式)做 per-user + per-client 滑动窗口限频(StMintRecord 落 storage);
+  //   ③ D6 告警:广路径上若窗口内不同 host 数越阈值则告警(开放重定向探测信号, 只告警不拦);
+  //   ④ D6 审计:成功取票后打一条结构化日志(绝不含 ticket/cookies/密码)。
   // NOTE: keepalive 探针走 this.ssoClient.getServiceTicket(...) 直连, 不经本方法, 故不受这些闸影响。
   private async getServiceTicket(arg: {
     service?: string;
     serviceUrl?: string;
+    clientId?: string | null;
+    source?: string;
   }): Promise<string> {
     await this.loadState();
     const status = await this.getStatus();
@@ -397,9 +417,61 @@ export class CquSessionDO extends DurableObject<Env> {
       }
     }
 
-    this.state.lastRequestedAt = Date.now();
+    // ③ D6 — 限频(所有取票, 两模式都过)。先读窗口内记录, 裁剪后判定 per-user/per-client 闸。
+    const now = Date.now();
+    const clientId = arg.clientId ?? null;
+    const stored =
+      (await this.ctx.storage.get<StMintRecord[]>("stMintLog")) ?? [];
+    const pruned = pruneStMintLog(stored, now, ST_MINT_RATE_WINDOW_MS);
+    if (
+      stMintThrottled(
+        pruned,
+        clientId,
+        MAX_ST_MINTS_PER_USER,
+        MAX_ST_MINTS_PER_CLIENT
+      )
+    ) {
+      console.error(
+        `[CquSession] ${this.state.studentId}: ALERT ST mint rate-limited (clientId=${clientId ?? "?"})`
+      );
+      throw new CquSsoError("RATE_LIMITED", "取票过于频繁,请稍后再试");
+    }
+
+    // ④ D6 — distinct-host 告警(仅广路径):窗口内不同 broad host 数(含本次候选)越阈值即告警。
+    // 只告警, 不抛 —— 它是「拿本服务当 ST 中继的开放重定向探测」信号, 不是硬错误。
+    const host = new URL(target).hostname;
+    if (broad && distinctBroadHosts(pruned, host) > DISTINCT_HOST_ALERT_THRESHOLD) {
+      console.error(
+        `[CquSession] ${this.state.studentId}: ALERT ST mint distinct broad hosts > ${DISTINCT_HOST_ALERT_THRESHOLD} in window (open-redirector probe signal, clientId=${clientId ?? "?"})`
+      );
+    }
+
+    // ⑤ 记录本次尝试 + 铸票 + 审计。先把尝试落 storage(镜像 relogin() 的「铸前记录」),
+    // 让限频对「铸票失败死循环」也鲁棒(失败也算一次尝试, 不会绕过窗口闸)。
+    this.state.lastRequestedAt = now;
     await this.ctx.storage.put("state", this.state);
-    return this.ssoClient.getServiceTicket(this.state.cookies, target);
+    const record: StMintRecord = { ts: now, clientId, host, broad };
+    pruned.push(record);
+    await this.ctx.storage.put("stMintLog", pruned);
+
+    const ticket = await this.ssoClient.getServiceTicket(
+      this.state.cookies,
+      target
+    );
+
+    // D6 审计(结构化; CF observability 抓 console)。绝不记录 ticket / cookies / 密码。
+    console.log(
+      JSON.stringify({
+        evt: "st_mint",
+        userId: this.state.userId,
+        clientId,
+        host,
+        broad,
+        source: arg.source ?? "route",
+        ts: now,
+      })
+    );
+    return ticket;
   }
 
   /**

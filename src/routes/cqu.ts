@@ -23,6 +23,12 @@ cqu.use("/*", async (c, next) => {
         jwksUrl: `${c.env.BETTER_AUTH_URL}/api/auth/jwks`,
       });
       c.set("user", { id: payload.sub as string });
+      // 取票客户端身份: OAuth 标准用 azp(authorized party), 兼容 client_id。
+      // 转发给 DO 做 per-client 限频与审计(无则 DO 视为 null)。
+      c.set(
+        "clientId",
+        (payload.azp ?? payload.client_id) as string | undefined
+      );
       return next();
     } catch {
       return errorResponse(c, "UNAUTHORIZED", "无效的访问令牌", 401);
@@ -64,6 +70,9 @@ cqu.get(
     }
 
     const doUrl = new URL("https://do/service-ticket");
+    // per-client 限频/审计身份 + 入口标记;两种模式都带。clientId 缺省传空串(DO 按 null 处理)。
+    doUrl.searchParams.set("clientId", c.get("clientId") ?? "");
+    doUrl.searchParams.set("source", "route");
 
     if (picked.mode === "url") {
       let canonical: string;
