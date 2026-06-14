@@ -125,7 +125,7 @@ export function createAuth(env: Env, request: Request) {
           // 返回值会"完全替换" get-session 响应体,故必须显式回传 user+session。
           customSession(async ({ user, session }) => {
             const caps = await resolveCaps(env.DATABASE, user.id);
-            delete (caps as any).cqu; // 不向 SPA 会话披露 quicklogin;设置页另用专用查询
+            delete (caps as any).cqu; // 不向 SPA 会话披露 quicklogin;设置页改用 GET /api/cqu/quicklogin 专门读写
             return { user, session, caps };
           }),
         ],

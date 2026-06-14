@@ -543,6 +543,124 @@ function LiveCodeSection() {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// QuickLoginSection — 浏览器插件快捷登录的用户自助 opt-in 开关
+// GET /api/cqu/quicklogin 读当前状态；PUT 切换。后端仅认 session（绝不接受 Bearer），
+// 故只能由登录用户本人操作自己的 cqu.quicklogin entitlement。
+// ─────────────────────────────────────────────────────────────────────────────
+function QuickLoginSection() {
+  const [enabled, setEnabled] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const fetchState = async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const res = await fetch("/api/cqu/quicklogin", { credentials: "include" });
+      if (res.ok) {
+        const data = (await res.json()) as { enabled?: boolean };
+        setEnabled(data.enabled === true);
+      } else {
+        setLoadError(true);
+      }
+    } catch {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchState();
+  }, []);
+
+  const handleToggle = async () => {
+    if (saving) return;
+    const next = !enabled;
+    setError("");
+    setSaving(true);
+    try {
+      const res = await fetch("/api/cqu/quicklogin", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { enabled?: boolean };
+        setEnabled(data.enabled === true);
+      } else {
+        setError("保存失败，请稍后重试");
+      }
+    } catch {
+      setError("请求失败，请检查网络连接后重试");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-200 p-6">
+      <h3 className="text-base font-semibold text-gray-900 mb-4">浏览器插件快捷登录</h3>
+
+      {error && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex items-center gap-2 text-gray-400 text-sm">
+          <span className="w-4 h-4 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
+          加载中...
+        </div>
+      ) : loadError ? (
+        <div className="space-y-3">
+          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+            获取设置失败，请稍后重试。
+          </div>
+          <button
+            type="button"
+            onClick={() => void fetchState()}
+            className="px-4 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-medium rounded-lg transition-colors"
+          >
+            重新加载
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-gray-900">允许浏览器插件快捷登录</p>
+            <p className="mt-1 text-sm text-gray-500 leading-relaxed">
+              开启后，浏览器插件可代你向 *.cqu.edu.cn 取一次性登录票，免去手动登录。可随时关闭。
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={enabled}
+            aria-label="允许浏览器插件快捷登录"
+            disabled={saving}
+            onClick={() => void handleToggle()}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 ${
+              enabled ? "bg-blue-600" : "bg-gray-300"
+            }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                enabled ? "translate-x-6" : "translate-x-1"
+              }`}
+            />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CquBindingSection() {
   const [status, setStatus] = useState<CquBindStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
@@ -790,6 +908,9 @@ export default function Settings() {
 
           {/* CQU 绑定 */}
           <CquBindingSection />
+
+          {/* 浏览器插件快捷登录自助开关 */}
+          <QuickLoginSection />
         </div>
       </div>
     </Layout>

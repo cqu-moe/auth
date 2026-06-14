@@ -208,7 +208,7 @@ Authorization: Bearer EXT_ACCESS_TOKEN
 ### 5.3 必须知道的约束
 
 - **`serviceUrl` 由 auth 服务端严格校验**(https + 解析后 `*.cqu.edu.cn` host + 拒 userinfo/异常端口)。非法直接 403——别指望"它来自 SSO 页"就被信任。
-- **用户级 opt-in**:用户须在设置里开启 `cqu.quicklogin`,否则即使 token 在也签不出 ST。
+- **用户级 opt-in**:用户须在设置里开启 `cqu.quicklogin`,否则即使 token 在也签不出 ST。该开关由用户**自助**读写:`GET /api/cqu/quicklogin` → `{enabled}`、`PUT /api/cqu/quicklogin {enabled}`(仅认 auth 站登录 session,**绝不接受 Bearer/OAuth token** —— OAuth client 不能替用户翻这个开关);设置页已内置开关。superAdmin 也可经 admin entitlement 路由代写。
 - **失败一律降级到原生登录页,绝不伪造流程**:
   - 服务未在 CQU CAS 注册 → 报"不支持此服务"。
   - 非 `?ticket=` 回调(POST-binding 等)→ 交回服务自身登录按钮。

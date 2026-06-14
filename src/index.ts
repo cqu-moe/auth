@@ -8,6 +8,7 @@ import {
 } from "@better-auth/oauth-provider";
 import { cqu } from "./routes/cqu";
 import { cquBinding } from "./routes/cqu-bind";
+import { cquQuicklogin } from "./routes/cqu-quicklogin";
 import { admin } from "./routes/admin";
 import { handleEmail } from "./email-handler";
 import type { Env } from "./types";
@@ -35,9 +36,11 @@ app.all("/api/auth/*", async (c) => {
   return auth.handler(c.req.raw);
 });
 
-// CQU 绑定资源挂在独立子树 /api/cqu/binding；cqu.ts（仅剩 service-ticket）挂在 /api/cqu。
-// 两者在 Hono trie 中是独立节点，互不遮蔽（与挂载顺序无关）。
+// CQU 绑定资源挂在独立子树 /api/cqu/binding；快捷登录自助开关挂 /api/cqu/quicklogin
+// （session-only，绝不接受 Bearer，故意不挂在 cqu.ts 的 /api/cqu/* 子树下）；
+// cqu.ts（仅剩 service-ticket）挂在 /api/cqu。三者在 Hono trie 中是独立节点，互不遮蔽（与挂载顺序无关）。
 app.route("/api/cqu/binding", cquBinding);
+app.route("/api/cqu/quicklogin", cquQuicklogin);
 app.route("/api/cqu", cqu);
 app.route("/api/admin", admin);
 
