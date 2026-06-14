@@ -28,6 +28,7 @@ import {
   DISTINCT_HOST_ALERT_THRESHOLD,
 } from "../services/st-mint-policy";
 import { resolveCaps } from "../services/entitlements";
+import { cquErrorHttpStatus } from "../services/cqu-error-status";
 import type { Env } from "../types";
 
 const KEEPALIVE_INTERVAL_MS = 15 * 60 * 1000;
@@ -269,8 +270,11 @@ export class CquSessionDO extends DurableObject<Env> {
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : "Internal error";
+      // 策略/客户端错误(CquSsoError)映射各自语义的 4xx(429/403/409/400),
+      // 而非一律 500(伪装成服务器崩溃)。非 CquSsoError 仍回 500。
       const code = e instanceof CquSsoError ? e.code : "INTERNAL_ERROR";
-      return Response.json({ error: message, code }, { status: 500 });
+      const status = e instanceof CquSsoError ? cquErrorHttpStatus(code) : 500;
+      return Response.json({ error: message, code }, { status });
     }
   }
 

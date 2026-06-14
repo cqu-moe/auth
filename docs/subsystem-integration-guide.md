@@ -155,7 +155,9 @@ Authorization: Bearer ACCESS_TOKEN
 
 **安全模型**:你的 client **只会被 admin 授予它需要的服务**(日历→`jwxt`,教评→`jxpj`),取不到别的。校验是双层:token scope **且** 该 client 在 `oauth_client_cqu_scopes` 注册过。**能力(caps)不参与普通取票**——取票安全只看 client。
 
-用返回的 ST 访问对应 CQU 系统(`<服务URL>?ticket=ST-...`)完成 CAS 认证。前置:用户必须已在 `auth.cqu.moe/settings` 绑定 CQU 且会话 `active`;未绑定/会话未激活 → 取票失败(当前 `SESSION_INACTIVE`,HTTP **500**;计划改 **409**),引导用户去绑定页。
+用返回的 ST 访问对应 CQU 系统(`<服务URL>?ticket=ST-...`)完成 CAS 认证。前置:用户必须已在 `auth.cqu.moe/settings` 绑定 CQU 且会话 `active`;未绑定/会话未激活 → 取票失败(`SESSION_INACTIVE`,HTTP **409**),引导用户去绑定页。
+
+取票错误码 → HTTP 状态(策略/客户端错误回 4xx,可据此判定是否可重试):`SESSION_INACTIVE` **409** · `RATE_LIMITED` **429**(限频,可退避后重试) · `QUICKLOGIN_NOT_ENABLED` **403**(见 §5,广路径未开 opt-in) · `INVALID_SERVICE_URL`/`UNKNOWN_SERVICE`/缺参数 **400**。服务端/未知错误(TGT 过期、无票、网络等)仍回 **500**。
 
 ---
 
