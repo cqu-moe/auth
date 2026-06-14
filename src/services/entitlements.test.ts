@@ -113,6 +113,25 @@ describe("validateEntitlementItems (admin write validation)", () => {
     expect(validateEntitlementItems(null as unknown as [])).not.toBe(null);
     expect(validateEntitlementItems({} as unknown as [])).not.toBe(null);
   });
+  it("rejects duplicate (subsystem, capability) pairs → non-null error", () => {
+    // Same composite PK twice: delete-then-insert would wipe the row then fail
+    // the insert on the PK, silently emptying the user's entitlements. Reject early.
+    const err = validateEntitlementItems([
+      { subsystem: "calendar", capability: "sync", value: "1" },
+      { subsystem: "calendar", capability: "sync", value: "1" },
+    ]);
+    expect(err).not.toBe(null);
+    expect(typeof err).toBe("string");
+  });
+  it("allows same capability name across different subsystems → null", () => {
+    // (eval, submit) and (calendar, sync) differ by subsystem; not a duplicate.
+    expect(
+      validateEntitlementItems([
+        { subsystem: "calendar", capability: "sync", value: "1" },
+        { subsystem: "eval", capability: "submit", value: "1" },
+      ])
+    ).toBe(null);
+  });
 });
 
 describe("presetToItems (admin one-click apply)", () => {

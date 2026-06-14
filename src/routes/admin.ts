@@ -389,9 +389,15 @@ admin.put("/users/:id/entitlements", async (c) => {
   if (invalid) return errorResponse(c, "INVALID_ENTITLEMENTS", invalid, 400);
 
   const db = drizzle(c.env.DATABASE);
-  await db.delete(userEntitlement).where(eq(userEntitlement.userId, userId));
+  const del = db
+    .delete(userEntitlement)
+    .where(eq(userEntitlement.userId, userId));
+  // 原子替换:delete + insert 走 D1 batch(单事务),即便 insert 因任何原因失败也不会
+  // 留下「已删全量、未插新值」的半完成态(用户被静默清空)。items 为空时只删不插
+  // (batch 要求非空数组,故空时单跑 delete)。validateEntitlementItems 已拒重复键,
+  // 这里是纵深防御:批内任一语句失败 → 整批回滚。
   if (items!.length > 0) {
-    await db.insert(userEntitlement).values(
+    const ins = db.insert(userEntitlement).values(
       items!.map((it) => ({
         userId,
         subsystem: it.subsystem,
@@ -399,6 +405,9 @@ admin.put("/users/:id/entitlements", async (c) => {
         value: it.value,
       }))
     );
+    await db.batch([del, ins]);
+  } else {
+    await del;
   }
   return c.json({ success: true });
 });
