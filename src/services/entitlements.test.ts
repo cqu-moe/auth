@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { rowsToCaps, subsystemForAccessToken } from "./entitlements";
+import {
+  rowsToCaps,
+  subsystemForAccessToken,
+  validateEntitlementItems,
+  presetToItems,
+} from "./entitlements";
 
 describe("rowsToCaps", () => {
   const rows = [
@@ -52,5 +57,79 @@ describe("subsystemForAccessToken (least-disclosure gating)", () => {
   });
   it("user present, valid subsystem 'cqu' → 'cqu'", () => {
     expect(subsystemForAccessToken({ user: { id: "u1" }, metadata: { subsystem: "cqu" } })).toBe("cqu");
+  });
+});
+
+describe("validateEntitlementItems (admin write validation)", () => {
+  it("accepts valid mixed flag + quota items → null", () => {
+    const items = [
+      { subsystem: "calendar", capability: "sync", value: "1" },
+      { subsystem: "calendar", capability: "sync_limit", value: "200" },
+      { subsystem: "eval", capability: "submit", value: "1" },
+    ];
+    expect(validateEntitlementItems(items)).toBe(null);
+  });
+  it("rejects unknown subsystem → non-null error", () => {
+    const err = validateEntitlementItems([
+      { subsystem: "billing", capability: "sync", value: "1" },
+    ]);
+    expect(err).not.toBe(null);
+    expect(typeof err).toBe("string");
+  });
+  it("rejects unknown capability → non-null error", () => {
+    const err = validateEntitlementItems([
+      { subsystem: "calendar", capability: "nope", value: "1" },
+    ]);
+    expect(err).not.toBe(null);
+  });
+  it.each(["2", "0", "true", ""])("rejects flag with bad value %s → non-null error", (bad) => {
+    const err = validateEntitlementItems([
+      { subsystem: "calendar", capability: "sync", value: bad },
+    ]);
+    expect(err).not.toBe(null);
+  });
+  it.each(["-1", "abc", "1.5", "Infinity"])("rejects quota with bad value %s → non-null error", (bad) => {
+    const err = validateEntitlementItems([
+      { subsystem: "calendar", capability: "sync_limit", value: bad },
+    ]);
+    expect(err).not.toBe(null);
+  });
+  it("accepts quota with '' (unlimited) → null", () => {
+    expect(
+      validateEntitlementItems([
+        { subsystem: "calendar", capability: "sync_limit", value: "" },
+      ])
+    ).toBe(null);
+  });
+  it("accepts plain non-negative integer quota → null", () => {
+    expect(
+      validateEntitlementItems([
+        { subsystem: "calendar", capability: "sync_limit", value: "0" },
+      ])
+    ).toBe(null);
+  });
+  it("rejects non-array input → non-null error", () => {
+    expect(validateEntitlementItems("nope" as unknown as [])).not.toBe(null);
+    expect(validateEntitlementItems(null as unknown as [])).not.toBe(null);
+    expect(validateEntitlementItems({} as unknown as [])).not.toBe(null);
+  });
+});
+
+describe("presetToItems (admin one-click apply)", () => {
+  it("flattens 学生 preset incl. flag + quota items", () => {
+    const items = presetToItems("学生");
+    expect(items).not.toBe(null);
+    expect(items).toContainEqual({ subsystem: "calendar", capability: "sync", value: "1" });
+    expect(items).toContainEqual({ subsystem: "calendar", capability: "sync_limit", value: "50" });
+    expect(items).toContainEqual({ subsystem: "eval", capability: "submit", value: "1" });
+  });
+  it("translates null quota to '' and includes share flag for 助教", () => {
+    const items = presetToItems("助教");
+    expect(items).not.toBe(null);
+    expect(items).toContainEqual({ subsystem: "calendar", capability: "sync_limit", value: "" });
+    expect(items).toContainEqual({ subsystem: "calendar", capability: "share", value: "1" });
+  });
+  it("returns null for an unknown preset name", () => {
+    expect(presetToItems("unknown")).toBe(null);
   });
 });

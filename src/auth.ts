@@ -21,6 +21,7 @@ export const statement = {
   cquScope: ["assign", "revoke"],
   auditLog: ["read"],
   role: ["assign", "revoke"],
+  entitlement: ["assign", "revoke"],
 } as const;
 
 export const ac = createAccessControl(statement);
@@ -38,6 +39,7 @@ export const roles = {
     cquScope: ["assign", "revoke"],
     auditLog: ["read"],
     role: ["assign", "revoke"],
+    entitlement: ["assign", "revoke"],
   }),
 };
 
