@@ -12,11 +12,12 @@ import type { Env } from "./types";
 // 纯 scope 映射在 services/required-scope.ts(单独成模块以便 Node-pool 单测);此处再导出。
 export { requiredScopeForTarget };
 
-// 最小返回形状:仅含验证 client_secret 所需的哈希值。adapter.findOne 返回完整行,
-// 这里只取 clientSecret(存储为 hashed 模式的 SHA-256/base64url)。
+// 最小返回形状:验证 client_secret 所需的哈希值 + disabled 闸。adapter.findOne
+// 返回完整行,这里只取 clientSecret(hashed 模式 SHA-256/base64url)与 disabled。
 interface OAuthClientSecretRow {
   clientId: string;
   clientSecret?: string | null;
+  disabled?: boolean | null;
 }
 
 // 定长比较:逐字符 XOR 累加,避免 secret 哈希比较的早退时序泄漏。长度不等直接 false。
@@ -100,6 +101,10 @@ export class AuthService extends WorkerEntrypoint<Env> {
       where: [{ field: "clientId", value: args.clientId }],
     });
     if (!client || !client.clientSecret) return { error: "INVALID_CLIENT" };
+    // 被禁用的 client 绝不许铸票(镜像 OAuth 端点对 disabled 的封禁)。回同一 opaque
+    // INVALID_CLIENT(不回特异错误),避免向调用方泄露「该 client 存在但被禁」的状态。
+    // 置于 secret 比对前,确保 disabled client 永不触达 scope/DO。
+    if (client.disabled) return { error: "INVALID_CLIENT" };
     const presentedHash = await hashOAuthClientSecret(args.clientSecret);
     if (!constantTimeEquals(presentedHash, client.clientSecret)) {
       return { error: "INVALID_CLIENT" };
