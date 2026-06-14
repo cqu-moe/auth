@@ -31,6 +31,28 @@ describe("rowsToCaps", () => {
     const caps = rowsToCaps([{ subsystem: "calendar", capability: "sync_limit", value: bad }]);
     expect(caps.calendar.sync_limit).toBe(null);
   });
+  it("overflow quota (digits past safe-int range) → null, not Infinity/imprecise", () => {
+    // ~30 digits passes /^\d+$/ but Number() loses precision / can become a huge
+    // imprecise float. Downstream a non-null number that exceeds the real value =
+    // quota bypass. It must fall to null (= unset), and crucially never Infinity.
+    const huge = "9".repeat(30);
+    const caps = rowsToCaps([
+      { subsystem: "calendar", capability: "sync_limit", value: huge },
+    ]);
+    expect(caps.calendar.sync_limit).toBe(null);
+    expect(caps.calendar.sync_limit).not.toBe(Infinity);
+    expect(Number.isFinite(caps.calendar.sync_limit as number)).toBe(false);
+  });
+  it("Number.MAX_SAFE_INTEGER quota is still accepted as a number", () => {
+    const caps = rowsToCaps([
+      {
+        subsystem: "calendar",
+        capability: "sync_limit",
+        value: String(Number.MAX_SAFE_INTEGER),
+      },
+    ]);
+    expect(caps.calendar.sync_limit).toBe(Number.MAX_SAFE_INTEGER);
+  });
 });
 
 describe("subsystemForAccessToken (least-disclosure gating)", () => {
@@ -93,6 +115,44 @@ describe("validateEntitlementItems (admin write validation)", () => {
       { subsystem: "calendar", capability: "sync_limit", value: bad },
     ]);
     expect(err).not.toBe(null);
+  });
+  it("rejects overflow quota (unsafe integer) → non-null error", () => {
+    // 20-digit value passes /^\d+$/ but is far past Number.MAX_SAFE_INTEGER;
+    // storing it would let rowsToCaps lose precision → quota bypass. Reject on write.
+    const err = validateEntitlementItems([
+      { subsystem: "calendar", capability: "sync_limit", value: "9".repeat(20) },
+    ]);
+    expect(err).not.toBe(null);
+    expect(typeof err).toBe("string");
+  });
+  it("accepts a normal quota '200' → null", () => {
+    expect(
+      validateEntitlementItems([
+        { subsystem: "calendar", capability: "sync_limit", value: "200" },
+      ])
+    ).toBe(null);
+  });
+  it("accepts Number.MAX_SAFE_INTEGER quota → null (boundary)", () => {
+    expect(
+      validateEntitlementItems([
+        {
+          subsystem: "calendar",
+          capability: "sync_limit",
+          value: String(Number.MAX_SAFE_INTEGER), // "9007199254740991"
+        },
+      ])
+    ).toBe(null);
+  });
+  it("rejects one past Number.MAX_SAFE_INTEGER → non-null error (boundary)", () => {
+    expect(
+      validateEntitlementItems([
+        {
+          subsystem: "calendar",
+          capability: "sync_limit",
+          value: String(Number.MAX_SAFE_INTEGER + 1), // "9007199254740992"
+        },
+      ])
+    ).not.toBe(null);
   });
   it("accepts quota with '' (unlimited) → null", () => {
     expect(

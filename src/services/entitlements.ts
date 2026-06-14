@@ -15,8 +15,14 @@ export function rowsToCaps(rows: Row[], only?: Subsystem): Caps {
       const row = rows.find((r) => r.subsystem === sub && r.capability === key);
       if (def.type === "flag") out[sub][key] = row?.value === "1";
       else
-        // quota:仅接受纯非负整数串(`^\d+$`),否则视为未设(null=无限)——防恶意/脏行
-        out[sub][key] = row && /^\d+$/.test(row.value) ? Number(row.value) : null;
+        // quota:仅接受纯非负整数串(`^\d+$`)且在 JS 安全整数范围内,否则视为未设(null=无限)。
+        // 仅 `^\d+$` 不够:任意长数字串(如 30 位)会被 Number() 解析成 Infinity/失精浮点,
+        // 下游把超出真实值的数字当配额 → 配额绕过。写侧(validateEntitlementItems)现已拒
+        // 存溢出值,故此处 null 兜底只为防御脏行/历史遗留数据。
+        out[sub][key] =
+          row && /^\d+$/.test(row.value) && Number.isSafeInteger(Number(row.value))
+            ? Number(row.value)
+            : null;
     }
   }
   return out;
@@ -50,8 +56,9 @@ type Item = { subsystem: string; capability: string; value: string };
  *  - value 与能力类型匹配:
  *      flag  → 必须恰为 "1"(授予 flag = 写一行 value="1";撤销 = 删行)。
  *              "0"/"true"/"" 一律拒绝;
- *      quota → 必须匹配 /^\d+$/(非负整数串) 或 ""(空串约定无限)。
- *              "-1"/"abc"/"1.5"/"Infinity" 一律拒绝。
+ *      quota → 必须匹配 /^\d+$/(非负整数串) 且在 JS 安全整数范围内(Number.isSafeInteger),
+ *              或 ""(空串约定无限)。"-1"/"abc"/"1.5"/"Infinity" 及溢出安全整数的超长数字串
+ *              (如 20 位)一律拒绝 —— 否则存下后 rowsToCaps 会失精/变 Infinity → 配额绕过。
  * 输入不是数组也拒绝。
  */
 export function validateEntitlementItems(items: Item[]): string | null {
@@ -72,8 +79,13 @@ export function validateEntitlementItems(items: Item[]): string | null {
         return `能力 ${subsystem}.${capability} 是开关,值必须为 "1"(撤销请删除该行),收到：${value}`;
       }
     } else {
-      // quota:非负整数串 或 ""(无限)
-      if (value !== "" && !/^\d+$/.test(value)) {
+      // quota:非负整数串(且在 JS 安全整数范围内) 或 ""(无限)。
+      // 仅 /^\d+$/ 会放过任意长数字串,存下后 rowsToCaps 解析成 Infinity/失精 → 配额绕过。
+      // 这里在写侧就拒掉溢出值,从源头杜绝。
+      if (
+        value !== "" &&
+        (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)))
+      ) {
         return `能力 ${subsystem}.${capability} 是配额,值必须是非负整数或留空(无限),收到：${value}`;
       }
     }
