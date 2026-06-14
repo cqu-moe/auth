@@ -9,6 +9,7 @@ import { oauthProvider } from "@better-auth/oauth-provider";
 import { Resend } from "resend";
 import type { Env } from "./types";
 import { resolveCaps, subsystemForAccessToken } from "./services/entitlements";
+import { isCquMoeHost } from "./utils/cookie-domain";
 
 // Must spread the admin plugin's defaultStatements: its built-in endpoints
 // (listUsers/setRole/banUser/...) authorize against actions like
@@ -130,13 +131,19 @@ export function createAuth(env: Env, request: Request) {
         ],
         // 一次登录 auth.cqu.moe → cookie 覆盖所有 *.cqu.moe 子域(第一方一体化 SSO)。
         // trustedOrigins 是顶层选项,通配符匹配整个 origin(含 :// 与 *);baseURL 已自动可信。
+        // dev(localhost)下保留无害 —— baseURL 已自动可信,不靠它。
         trustedOrigins: ["https://*.cqu.moe"],
-        advanced: {
-          // 必须显式写 domain: "cqu.moe"。省略时 better-auth 默认取
-          // new URL(baseURL).hostname = "auth.cqu.moe",cookie 仅作用于该单一子域,
-          // 跨子域 SSO 会静默失败;写 "cqu.moe" 浏览器才会按 ".cqu.moe" 全子域生效。
-          crossSubDomainCookies: { enabled: true, domain: "cqu.moe" },
-        },
+        // 跨子域 cookie 的 Domain 只在 auth host 真为 cqu.moe(生产)时才设。
+        // 必须显式写 domain: "cqu.moe":省略时 better-auth 默认取
+        // new URL(baseURL).hostname = "auth.cqu.moe",cookie 仅作用于该单一子域,
+        // 跨子域 SSO 会静默失败;写 "cqu.moe" 浏览器才会按 ".cqu.moe" 全子域生效。
+        // 但在 localhost(.dev.vars BETTER_AUTH_URL=http://localhost:8787)上若仍写
+        // Domain=cqu.moe,浏览器会因 Domain 与响应 host 不匹配而【拒收】该 cookie →
+        // npm run dev 的登录/会话直接坏掉。故 isCquMoeHost 为假(dev/非 cqu.moe)时
+        // 整个省略 crossSubDomainCookies,让 better-auth 回落到 host-only cookie。
+        advanced: isCquMoeHost(env.BETTER_AUTH_URL)
+          ? { crossSubDomainCookies: { enabled: true, domain: "cqu.moe" } }
+          : {},
         rateLimit: {
           enabled: true,
           window: 60,
