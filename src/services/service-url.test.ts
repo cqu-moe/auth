@@ -21,6 +21,9 @@ describe("validateCquServiceUrl", () => {
     "https://lib.cqu.edu.cn\\@evil.com/x",    // 反斜杠(曾 ACCEPT 的 blocker)
     "https://my.cqu.edu.cn:8443/x",           // 异常端口
     "https://my.cqu.edu.cn./x",               // 尾点(pinned REJECT:cn.==cn 风险)
+    "https://.cqu.edu.cn/x",                  // 前导空 label(defense-in-depth REJECT)
+    "https://my..cqu.edu.cn/x",               // 中间空 label(defense-in-depth REJECT)
+    "https://cqu.edu.cn../x",                 // 尾部空 label(已被尾点闸 REJECT,完整性收录)
     "https://my。cqu。edu。cn/x",              // 全角点(non-ascii,pinned REJECT)
     "https://my.cqu.edu.cn\r\n.evil.com/x",   // CRLF 注入形
     "https://my.cqu.edu.cn%252e.evil.com/x",  // 双重编码点

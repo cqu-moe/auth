@@ -230,7 +230,11 @@ export class CquSessionDO extends DurableObject<Env> {
             );
           // clientId 空串(route 在无 azp/client_id 时传 "")按 null 处理 —— 自成限频桶。
           const clientId = url.searchParams.get("clientId") || null;
-          const source = url.searchParams.get("source") ?? undefined;
+          // source 审计标签防伪:只认固定白名单(route/rpc), 其余(含缺失)归 "unknown",
+          // 杜绝不受信调用方往审计日志 source 字段注入任意值(log-forging 防御纵深)。
+          const rawSource = url.searchParams.get("source");
+          const source =
+            rawSource === "route" || rawSource === "rpc" ? rawSource : "unknown";
           const ticket = await this.getServiceTicket({
             service: service ?? undefined,
             serviceUrl: serviceUrl ?? undefined,
