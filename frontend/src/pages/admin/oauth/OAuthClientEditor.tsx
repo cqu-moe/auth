@@ -11,6 +11,17 @@ import { emptyEditorState, stateFromClient, cleanList } from "./payload";
 import { CredentialModal } from "./CredentialModal";
 import { Modal, Toggle, FieldLabel, StringListInput, inputClass } from "../../../components/ui";
 
+// ---------------------------------------------------------------------------
+// Local helper: a consistent section heading + light top-border divider.
+// ---------------------------------------------------------------------------
+function SectionHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="border-t border-gray-100 pt-4 pb-1">
+      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{children}</p>
+    </div>
+  );
+}
+
 // --- OAuth client editor (create + edit) ---
 export function OAuthClientEditor({
   client,
@@ -272,6 +283,7 @@ export function OAuthClientEditor({
 
   return (
     <Modal onClose={onClose}>
+      {/* ── Sticky header ── */}
       <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <h3 className="text-base font-semibold text-gray-900">
           {isEdit ? "编辑 OAuth 客户端" : "新建 OAuth 客户端"}
@@ -300,6 +312,12 @@ export function OAuthClientEditor({
           </div>
         ) : (
           <>
+            {/* ════════════════════════════════════════
+                § 1  基础
+                ════════════════════════════════════════ */}
+            <SectionHeading>基础</SectionHeading>
+
+            {/* Client ID — edit mode readonly display */}
             {isEdit && client && (
               <div>
                 <FieldLabel>Client ID</FieldLabel>
@@ -309,7 +327,6 @@ export function OAuthClientEditor({
               </div>
             )}
 
-            {/* --- Essentials --- */}
             <div>
               <FieldLabel>名称</FieldLabel>
               <input
@@ -330,6 +347,24 @@ export function OAuthClientEditor({
                 addLabel="添加回调 URI"
               />
             </div>
+
+            <div>
+              <FieldLabel>客户端类型 (type)</FieldLabel>
+              <select
+                value={state.type}
+                onChange={(e) => patch("type", e.target.value)}
+                className={inputClass}
+              >
+                {CLIENT_TYPE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* ════════════════════════════════════════
+                § 2  权限
+                ════════════════════════════════════════ */}
+            <SectionHeading>权限</SectionHeading>
 
             <div>
               <FieldLabel hint="空格分隔">允许的 scope</FieldLabel>
@@ -362,19 +397,6 @@ export function OAuthClientEditor({
               </div>
             </div>
 
-            <div>
-              <FieldLabel>客户端类型 (type)</FieldLabel>
-              <select
-                value={state.type}
-                onChange={(e) => patch("type", e.target.value)}
-                className={inputClass}
-              >
-                {CLIENT_TYPE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </div>
-
             <Toggle
               checked={state.skip_consent}
               onChange={(v) => patch("skip_consent", v)}
@@ -382,14 +404,38 @@ export function OAuthClientEditor({
               hint="授权时不向用户展示同意页面"
             />
 
-            {/* --- Advanced --- */}
+            {/* CQU 服务权限 — belongs with permissions */}
+            <div>
+              <p className="text-xs font-medium text-gray-700 mb-2">CQU 服务权限</p>
+              <div className="space-y-1">
+                {ALL_CQU_SCOPES.map((scope) => (
+                  <label
+                    key={scope.key}
+                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={state.cqu_scopes.includes(scope.key)}
+                      onChange={() => toggleCquScope(scope.key)}
+                      className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                    />
+                    <span className="text-sm text-gray-700">{scope.label}</span>
+                    <span className="text-xs text-gray-400 font-mono ml-auto">{scope.key}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* ════════════════════════════════════════
+                § 3  高级（折叠）
+                ════════════════════════════════════════ */}
             <div className="border-t border-gray-100 pt-4">
               <button
                 type="button"
                 onClick={() => setShowAdvanced((v) => !v)}
                 className="text-sm font-medium text-blue-600 hover:text-blue-700"
               >
-                {showAdvanced ? "▾ 收起完整配置" : "▸ 展开完整配置"}
+                {showAdvanced ? "▾ 收起高级配置" : "▸ 展开高级配置"}
               </button>
             </div>
 
@@ -475,33 +521,13 @@ export function OAuthClientEditor({
               </div>
             )}
 
-            {/* --- CQU service scopes --- */}
-            <div className="border-t border-gray-100 pt-4">
-              <p className="text-xs font-medium text-gray-700 mb-2">CQU 服务权限</p>
-              <div className="space-y-1">
-                {ALL_CQU_SCOPES.map((scope) => (
-                  <label
-                    key={scope.key}
-                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={state.cqu_scopes.includes(scope.key)}
-                      onChange={() => toggleCquScope(scope.key)}
-                      className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-                    />
-                    <span className="text-sm text-gray-700">{scope.label}</span>
-                    <span className="text-xs text-gray-400 font-mono ml-auto">{scope.key}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            {/* --- Secret (edit mode only) --- */}
+            {/* ════════════════════════════════════════
+                § 4  密钥（edit mode only）
+                ════════════════════════════════════════ */}
             {isEdit && state.token_endpoint_auth_method !== "none" && (
-              <div className="border-t border-gray-100 pt-4">
-                <p className="text-xs font-medium text-gray-700 mb-2">客户端密钥</p>
-                <p className="text-xs text-gray-400 mb-3">出于安全考虑，现有密钥不会显示。重新生成后旧密钥立即失效。</p>
+              <>
+                <SectionHeading>密钥</SectionHeading>
+                <p className="text-xs text-gray-400">出于安全考虑，现有密钥不会显示。重新生成后旧密钥立即失效。</p>
                 <button
                   type="button"
                   onClick={handleRotate}
@@ -511,12 +537,13 @@ export function OAuthClientEditor({
                   {rotating && <span className="w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />}
                   重新生成密钥
                 </button>
-              </div>
+              </>
             )}
           </>
         )}
       </div>
 
+      {/* ── Sticky footer ── */}
       {!initLoading && (
         <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex items-center justify-end gap-2">
           <button
