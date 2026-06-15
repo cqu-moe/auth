@@ -3,7 +3,7 @@ import {
   CAPABILITIES,
   type CapDef,
   type Subsystem,
-} from "../../../../src/capabilities";
+} from "../../../../../src/capabilities";
 import type { User, EntitlementRow, EntitlementForm } from "../types";
 import { SUBSYSTEM_LABELS, PRESET_NAMES, readErrorMessage } from "../constants";
 import { Modal, FieldLabel, inputClass } from "../../../components/ui";

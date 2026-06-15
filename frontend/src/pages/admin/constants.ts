@@ -1,4 +1,4 @@
-import { PRESETS } from "../../../src/capabilities";
+import { PRESETS } from "../../../../src/capabilities";
 
 // 子系统中文名(展示用;键来自 CAPABILITIES,缺省回退键名本身)。
 export const SUBSYSTEM_LABELS: Record<string, string> = {
