@@ -17,6 +17,9 @@ import {
   RELOGIN_RATE_WINDOW_MS,
   MAX_RELOGINS_PER_WINDOW,
   CONSECUTIVE_RELOGIN_FAIL_ALERT,
+  classifyLoginFailure,
+  shouldRequireReauth,
+  nextKeepaliveDelayMs,
 } from "../services/cqu-2fa/relogin-policy";
 import {
   pruneStMintLog,
@@ -35,6 +38,8 @@ import type { Env } from "../types";
 const KEEPALIVE_INTERVAL_MS = 15 * 60 * 1000;
 const RETRY_INTERVAL_MS = 60 * 1000;
 const MAX_FAST_RETRIES = 5;
+// 熔断: transient(瑞数/网络)连续失败时 keepalive 退避封顶(从 15min 指数涨到 6h)。
+const KEEPALIVE_MAX_BACKOFF_MS = 6 * 60 * 60 * 1000;
 // TGT 绝对寿命 ~8h；在 7h 处主动重铸, 留 ~1h 余量给重登流程(容器点火 + 发码 + 邮件到达 + 提交)。
 const PROACTIVE_RELOGIN_MS = 7 * 60 * 60 * 1000;
 const DUMMY_SERVICE = "https://my.cqu.edu.cn/authserver/authentication/cas";
@@ -134,6 +139,9 @@ function buildCodeMessage(
 
 export class CquSessionDO extends DurableObject<Env> {
   private state: SessionState | null = null;
+  // 熔断: containerLogin 把本次失败原因(credential/transient)暂存于此, 供同一
+  // relogin 调用链读取。DO 单线程, 仅在一次 alarm→relogin→containerLogin 链内有效。
+  private lastLoginFailReason: "credential" | "transient" = "transient";
   private ssoClient = new CquSsoClient();
 
   private async loadState(): Promise<void> {
@@ -388,6 +396,10 @@ export class CquSessionDO extends DurableObject<Env> {
     await this.loadState();
     const status = await this.getStatus();
     if (!this.state || status !== "active") {
+      // needs_reauth: 凭据真死(熔断终态), 区分于一般 SESSION_INACTIVE, 让前端提示重绑。
+      if (status === "needs_reauth") {
+        throw new CquSsoError("NEEDS_REAUTH", "CQU session needs re-auth (请重新绑定)");
+      }
       throw new CquSsoError("SESSION_INACTIVE", "CQU session not active");
     }
 
@@ -661,7 +673,12 @@ export class CquSessionDO extends DurableObject<Env> {
     if (!this.state) return;
     const status = await this.getStatus();
     // 已撤销/未绑定的会话不再保活。
-    if (status === "revoked" || status === "unbound") return;
+    if (
+      status === "revoked" ||
+      status === "unbound" ||
+      status === "needs_reauth"
+    )
+      return;
 
     // 主动重登: TGT 接近 ~8h 硬上限前(+7h)且当前 active, 提前重铸, 避免热路径在过期窗口取不到 ST。
     // 判定抽成纯函数 shouldProactiveRelogin(便于单测), 语义与旧内联条件完全一致(含 `>=` 边界)。
@@ -677,6 +694,13 @@ export class CquSessionDO extends DurableObject<Env> {
         `[CquSession] ${this.state.studentId}: TGT age >= 7h, proactive relogin`
       );
       await this.relogin();
+      // 熔断: relogin 若落 needs_reauth(连续凭据失败), 停止保活、不再重排(等用户重绑)。
+      if ((await this.getStatus()) === "needs_reauth") {
+        console.error(
+          `[CquSession] ${this.state.studentId}: keepalive halted — needs_reauth`
+        );
+        return;
+      }
       // relogin 内部已更新状态; 重新排 alarm 继续保活循环。
       await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
       return;
@@ -690,8 +714,9 @@ export class CquSessionDO extends DurableObject<Env> {
       this.state.consecutiveFailures = 0;
       await this.ctx.storage.put("state", this.state);
       // 探针自愈回 active 也打断「连续重登失败」链, 避免遗留的 reloginFailures
-      // 误触 CONSECUTIVE_RELOGIN_FAIL_ALERT 告警。
+      // 误触告警; 同时清零熔断的「连续凭据失败」计数(会话已证实健康)。
       await this.ctx.storage.put("reloginFailures", 0);
+      await this.ctx.storage.put("credentialFailures", 0);
       await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
       return;
     }
@@ -705,15 +730,27 @@ export class CquSessionDO extends DurableObject<Env> {
       await this.relogin();
       this.state.consecutiveFailures = 0;
       await this.ctx.storage.put("state", this.state);
+      // 熔断: relogin 若落 needs_reauth(连续凭据失败), 停止保活、不再重排(等用户重绑)。
+      if ((await this.getStatus()) === "needs_reauth") {
+        console.error(
+          `[CquSession] ${this.state.studentId}: keepalive halted — needs_reauth`
+        );
+        return;
+      }
       await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
       return;
     }
 
     // outcome === "transient": 够不到 CQU SSO。CAS 会话服务端几乎肯定还有效,
-    // 保留 cookies/status 不动, 快重试而非误判重登。
+    // 保留 cookies/status 不动, 快重试而非误判重登。连续失败时指数退避(封顶 6h),
+    // 止住刷屏 + 降瑞数风控, 但仍会自愈(可达即回 active)。
     this.state.consecutiveFailures = (this.state.consecutiveFailures ?? 0) + 1;
-    const fastRetry = this.state.consecutiveFailures <= MAX_FAST_RETRIES;
-    const delay = fastRetry ? RETRY_INTERVAL_MS : KEEPALIVE_INTERVAL_MS;
+    const delay = nextKeepaliveDelayMs(this.state.consecutiveFailures, {
+      fastRetries: MAX_FAST_RETRIES,
+      fastMs: RETRY_INTERVAL_MS,
+      baseMs: KEEPALIVE_INTERVAL_MS,
+      capMs: KEEPALIVE_MAX_BACKOFF_MS,
+    });
     console.warn(
       `[CquSession] ${this.state.studentId}: keepalive unreachable (attempt #${this.state.consecutiveFailures}), keeping session, retrying in ${delay}ms`
     );
@@ -802,11 +839,29 @@ export class CquSessionDO extends DurableObject<Env> {
     }
     if (outcome === "failed") {
       // containerLogin 失败时已把状态推到 RELOGIN_FAIL(→ expired) 并清锁。
-      console.error(`[CquSession] ${studentId}: relogin failed`);
-      // 连续重登失败计数自增 + 持久化; 达阈值告警(会话多半真坏: 密码改了/转发断了/瑞数变更)。
+      const reason = this.lastLoginFailReason;
+      console.error(`[CquSession] ${studentId}: relogin failed (reason=${reason})`);
+      // 连续重登失败计数自增 + 持久化(通用告警, 不分原因)。
       const failures =
         ((await this.ctx.storage.get<number>("reloginFailures")) ?? 0) + 1;
       await this.ctx.storage.put("reloginFailures", failures);
+
+      // 熔断(混合): 仅「凭据」失败累计 —— 达阈值落 needs_reauth 终态(凭据真死, 停保活,
+      // 等用户重绑)。「瑞数/瞬态」失败不累计, 交 keepalive 退避自愈, 绝不误杀。
+      if (reason === "credential") {
+        const credFails =
+          ((await this.ctx.storage.get<number>("credentialFailures")) ?? 0) + 1;
+        await this.ctx.storage.put("credentialFailures", credFails);
+        if (shouldRequireReauth(credFails)) {
+          const status = await this.getStatus();
+          await this.setStatus(nextStatus(status, "REAUTH_REQUIRED"));
+          console.error(
+            `[CquSession] ${studentId}: ALERT circuit broken — ${credFails} consecutive CREDENTIAL failures → needs_reauth (疑似改密, 需用户重绑)`
+          );
+          return;
+        }
+      }
+
       if (failures >= CONSECUTIVE_RELOGIN_FAIL_ALERT) {
         console.error(
           `[CquSession] ${studentId}: ALERT ${failures} consecutive relogin failures — session likely broken (密码改了/转发断了/瑞数变更)`
@@ -814,9 +869,10 @@ export class CquSessionDO extends DurableObject<Env> {
       }
       return;
     }
-    // outcome === "ok": 重登成功, 新 TGT 已铸 —— 重置连续失败计数。warn 级以便在
-    // observability 可见(info 级实测在当前配置下不可见; 重登成功此前无任何日志, 是观测盲区)。
+    // outcome === "ok": 重登成功, 新 TGT 已铸 —— 重置连续失败 + 连续凭据失败计数。warn 级
+    // 以便在 observability 可见(info 级实测在当前配置下不可见; 重登成功此前无任何日志, 是观测盲区)。
     await this.ctx.storage.put("reloginFailures", 0);
+    await this.ctx.storage.put("credentialFailures", 0);
     console.warn(`[CquSession] ${studentId}: relogin OK, new TGT minted`);
   }
 
@@ -890,6 +946,8 @@ export class CquSessionDO extends DurableObject<Env> {
         console.warn(
           `[CquSession] ${state.studentId}: container /run not ok — httpStatus=${res.status} ok=${result.ok} hasCookies=${!!result.cookies} error=${result.error ?? "(none)"}`
         );
+        // 熔断: 把失败归类(凭据真死 vs 瑞数/瞬态)暂存, 供 relogin 决定是否落 needs_reauth。
+        this.lastLoginFailReason = classifyLoginFailure(result.error);
         await this.failLogin(failEvent);
         return "failed";
       }
@@ -931,6 +989,8 @@ export class CquSessionDO extends DurableObject<Env> {
       console.error(
         `[CquSession] ${state.studentId}: container login error: ${errMsg(e)}`
       );
+      // 容器/网络层异常 = 瞬态, 不当凭据死(不累计熔断)。
+      this.lastLoginFailReason = "transient";
       await this.failLogin(failEvent);
       return "failed";
     }

@@ -5,6 +5,10 @@ import {
   shouldThrottleRelogin,
   RELOGIN_RATE_WINDOW_MS,
   MAX_RELOGINS_PER_WINDOW,
+  classifyLoginFailure,
+  shouldRequireReauth,
+  MAX_CREDENTIAL_FAILS,
+  nextKeepaliveDelayMs,
 } from "./relogin-policy";
 
 describe("shouldProactiveRelogin", () => {
@@ -102,5 +106,68 @@ describe("shouldThrottleRelogin", () => {
     expect(
       shouldThrottleRelogin([...insideWindow, ...expired], now, windowMs, max)
     ).toBe(false);
+  });
+});
+
+describe("classifyLoginFailure", () => {
+  it("CQU 明确凭据错误码 -> credential", () => {
+    expect(classifyLoginFailure("first-factor failed: fail:用户名或密码错误")).toBe(
+      "credential"
+    );
+    expect(classifyLoginFailure("fail:账号已锁定")).toBe("credential");
+  });
+  it("歧义『回到登录页(密码错误/瑞数软重挑战)』-> transient(保守, 不误杀)", () => {
+    // 含『密码错误』但被『回到登录页』优先判为歧义/瑞数 → 不当凭据死。
+    expect(
+      classifyLoginFailure("first-factor failed: fail:回到登录页(密码错误/瑞数软重挑战)")
+    ).toBe("transient");
+  });
+  it("瑞数/未知/未渲染/超时 -> transient", () => {
+    expect(classifyLoginFailure("fail:未判定 url=https://sso.cqu.edu.cn/login")).toBe(
+      "transient"
+    );
+    expect(classifyLoginFailure("fail:登录页未渲染(疑似被瑞数挑战/限流)")).toBe(
+      "transient"
+    );
+    expect(classifyLoginFailure("NETWORK_ERROR: CQU SSO unreachable: timeout")).toBe(
+      "transient"
+    );
+  });
+  it("空/未知默认 transient(安全)", () => {
+    expect(classifyLoginFailure(undefined)).toBe("transient");
+    expect(classifyLoginFailure("")).toBe("transient");
+    expect(classifyLoginFailure("some unrecognized error")).toBe("transient");
+  });
+});
+
+describe("shouldRequireReauth", () => {
+  it("连续凭据失败达 MAX_CREDENTIAL_FAILS -> true", () => {
+    expect(shouldRequireReauth(MAX_CREDENTIAL_FAILS)).toBe(true);
+    expect(shouldRequireReauth(MAX_CREDENTIAL_FAILS + 1)).toBe(true);
+  });
+  it("未达阈值 -> false", () => {
+    expect(shouldRequireReauth(0)).toBe(false);
+    expect(shouldRequireReauth(MAX_CREDENTIAL_FAILS - 1)).toBe(false);
+  });
+});
+
+describe("nextKeepaliveDelayMs", () => {
+  const opts = {
+    fastRetries: 5,
+    fastMs: 60_000, // 60s
+    baseMs: 15 * 60_000, // 15min
+    capMs: 6 * 60 * 60_000, // 6h
+  };
+  it("快重试窗口内(<= fastRetries) -> fastMs", () => {
+    expect(nextKeepaliveDelayMs(1, opts)).toBe(opts.fastMs);
+    expect(nextKeepaliveDelayMs(5, opts)).toBe(opts.fastMs);
+  });
+  it("超过快重试 -> 从 baseMs 指数退避", () => {
+    expect(nextKeepaliveDelayMs(6, opts)).toBe(opts.baseMs); // 15min
+    expect(nextKeepaliveDelayMs(7, opts)).toBe(opts.baseMs * 2); // 30min
+    expect(nextKeepaliveDelayMs(8, opts)).toBe(opts.baseMs * 4); // 1h
+  });
+  it("封顶 capMs", () => {
+    expect(nextKeepaliveDelayMs(99, opts)).toBe(opts.capMs);
   });
 });

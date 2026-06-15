@@ -24,6 +24,20 @@ describe("nextStatus", () => {
     expect(nextStatus("active", "REVOKE")).toBe("revoked");
     expect(nextStatus("expired", "REVOKE")).toBe("revoked");
   });
+  it("expired -> needs_reauth on REAUTH_REQUIRED(熔断: 凭据真死)", () => {
+    expect(nextStatus("expired", "REAUTH_REQUIRED")).toBe("needs_reauth");
+  });
+  it("needs_reauth -> binding on re-bind(恢复路径)", () => {
+    expect(nextStatus("needs_reauth", "START_BIND")).toBe("binding");
+  });
+  it("needs_reauth -> revoked / unbound", () => {
+    expect(nextStatus("needs_reauth", "REVOKE")).toBe("revoked");
+    expect(nextStatus("needs_reauth", "UNBIND")).toBe("unbound");
+  });
+  it("needs_reauth 是终态: 非恢复事件保持不变", () => {
+    expect(nextStatus("needs_reauth", "RELOGIN_OK")).toBe("needs_reauth");
+    expect(nextStatus("needs_reauth", "RELOGIN_START")).toBe("needs_reauth");
+  });
   it("illegal transition keeps current", () => {
     expect(nextStatus("revoked", "RELOGIN_OK")).toBe("revoked");
   });

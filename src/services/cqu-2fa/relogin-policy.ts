@@ -63,3 +63,67 @@ export function shouldThrottleRelogin(
 ): boolean {
   return pruneAttempts(recentAttempts, now, windowMs).length >= maxInWindow;
 }
+
+// ── 熔断(混合): 凭据真死 → needs_reauth; 瑞数/网络瞬态 → 退避自愈 ──────────────
+// 连续「凭据」失败到此阈值即落终态 needs_reauth(停 alarm、等用户重绑)。2 次:
+// 给偶发误分类留 1 次容错; 又因瑞数间歇(成功即清零), 自愈会话几乎到不了 2 连。
+export const MAX_CREDENTIAL_FAILS = 2;
+
+/**
+ * 把容器登录失败原因(do_first_factor 的 verdict 字符串)归类为:
+ * - "credential": CQU 明确的账密/账号错误码(密码错/用户名或密码/账号锁定冻结)→ 真死, 该重绑。
+ * - "transient":  瑞数挑战/限流/未判定/未渲染/网络超时, 以及歧义的『回到登录页(密码错误/
+ *                 瑞数软重挑战)』兜底 → 不证明凭据坏, 退避自愈。
+ *
+ * 关键: **先判 transient/歧义/瑞数标记**, 命中即 transient —— 宁可不终止也不误杀一个
+ * 会自愈的瑞数会话(误终止会逼用户重绑, 而重绑同样会被瑞数挡, 徒增挫败)。只有干净的
+ * CQU 凭据错误码(不带『回到登录页』包装)才判 credential。空/未知默认 transient。
+ */
+export function classifyLoginFailure(
+  error: string | null | undefined
+): "credential" | "transient" {
+  const s = error ?? "";
+  const transientMarkers = [
+    "回到登录页",
+    "未判定",
+    "登录页未渲染",
+    "瑞数",
+    "限流",
+    "超时",
+    "timeout",
+    "网络",
+    "Network",
+    "NETWORK",
+    "发码",
+  ];
+  if (transientMarkers.some((m) => s.includes(m))) return "transient";
+  const credentialMarkers = [
+    "用户名或密码",
+    "密码错误",
+    "账号",
+    "帐号",
+    "锁定",
+    "冻结",
+  ];
+  if (credentialMarkers.some((m) => s.includes(m))) return "credential";
+  return "transient";
+}
+
+/** 连续「凭据」失败计数是否已达到熔断阈值(应落 needs_reauth 终态)。 */
+export function shouldRequireReauth(credentialFailures: number): boolean {
+  return credentialFailures >= MAX_CREDENTIAL_FAILS;
+}
+
+/**
+ * keepalive 探针「瞬态(transient)」失败后下一次 alarm 的延迟(纯函数, 便于单测)。
+ * - consecutiveFailures <= fastRetries: 快重试(fastMs), 抓瑞数间歇的放行窗口;
+ * - 超过后: 从 baseMs 指数退避, 封顶 capMs —— 止住刷屏 + 降瑞数风控, 但仍会自愈。
+ */
+export function nextKeepaliveDelayMs(
+  consecutiveFailures: number,
+  opts: { fastRetries: number; fastMs: number; baseMs: number; capMs: number }
+): number {
+  if (consecutiveFailures <= opts.fastRetries) return opts.fastMs;
+  const steps = consecutiveFailures - opts.fastRetries - 1;
+  return Math.min(opts.baseMs * 2 ** steps, opts.capMs);
+}
