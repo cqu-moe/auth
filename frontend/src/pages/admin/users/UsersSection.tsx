@@ -1,7 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type { User, UsersResponse } from "../types";
 import { ROLE_OPTIONS } from "../constants";
 import { EntitlementPanel } from "./EntitlementPanel";
+
+type StatusFilter = "all" | "normal" | "banned";
 
 // --- Users Section ---
 export function UsersSection() {
@@ -13,10 +15,22 @@ export function UsersSection() {
   // 当前打开「分级权益」面板的用户(null = 关闭)。
   const [entitlementUser, setEntitlementUser] = useState<User | null>(null);
 
-  const fetchUsers = useCallback(async (page = 1) => {
+  // 搜索框
+  const [search, setSearch] = useState("");
+  // 状态筛选（当前页客户端过滤）
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+
+  // 用于存储当前实际生效的搜索词（防止竞态：分页按钮触发 fetchUsers 时读最新词）
+  const searchRef = useRef("");
+
+  const fetchUsers = useCallback(async (page = 1, term = searchRef.current) => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/admin/users?page=${page}&limit=20`);
+      const params = new URLSearchParams({ page: String(page), limit: "20" });
+      if (term.trim()) {
+        params.set("search", term.trim());
+      }
+      const res = await fetch(`/api/admin/users?${params.toString()}`);
       if (res.ok) {
         const data = await res.json() as UsersResponse;
         setUsers(data.data);
@@ -31,9 +45,21 @@ export function UsersSection() {
     }
   }, []);
 
+  // 初次加载
   useEffect(() => {
-    void fetchUsers(1);
+    void fetchUsers(1, "");
   }, [fetchUsers]);
+
+  // 搜索防抖：300ms 后从第 1 页重新拉取
+  useEffect(() => {
+    // 跳过初次挂载（search 初始值 "" 已由上方 useEffect 处理）
+    searchRef.current = search;
+    const timer = setTimeout(() => {
+      void fetchUsers(1, search);
+    }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
 
   const updateUser = async (id: string, payload: Record<string, unknown>) => {
     setActionLoading(id);
@@ -55,6 +81,13 @@ export function UsersSection() {
     }
   };
 
+  // 状态筛选（当前页客户端过滤）
+  const visibleUsers = users.filter((u) => {
+    if (statusFilter === "normal") return !u.banned;
+    if (statusFilter === "banned") return u.banned;
+    return true;
+  });
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-gray-400 text-sm py-8">
@@ -73,6 +106,57 @@ export function UsersSection() {
         </div>
       )}
 
+      {/* 搜索框 + 状态筛选 */}
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        {/* 搜索框 */}
+        <div className="relative flex-1 min-w-48">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="搜索用户名或邮箱…"
+            className="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 pr-7 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+            aria-label="搜索用户"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs leading-none"
+              aria-label="清除搜索"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {/* 状态分段筛选 */}
+        <div className="flex items-center gap-1 border border-gray-200 rounded-lg p-0.5 bg-gray-50 text-xs">
+          {(
+            [
+              { value: "all", label: "全部" },
+              { value: "normal", label: "正常" },
+              { value: "banned", label: "已封禁" },
+            ] as { value: StatusFilter; label: string }[]
+          ).map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setStatusFilter(opt.value)}
+              className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
+                statusFilter === opt.value
+                  ? "bg-white text-gray-900 shadow-sm"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {statusFilter !== "all" && (
+          <span className="text-xs text-gray-400">仅筛选当前页</span>
+        )}
+      </div>
+
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -85,7 +169,7 @@ export function UsersSection() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {users.map((user) => (
+            {visibleUsers.map((user) => (
               <tr key={user.id} className="hover:bg-gray-50 transition-colors">
                 <td className="py-3 px-4">
                   <div className="font-medium text-gray-900">{user.name}</div>
