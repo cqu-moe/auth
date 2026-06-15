@@ -4,24 +4,23 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import ResetPassword from "./pages/ResetPassword";
 import ResetPasswordConfirm from "./pages/ResetPasswordConfirm";
-import Settings from "./pages/Settings";
+import Dashboard from "./pages/Dashboard";
+import Security from "./pages/Security";
+import CquAccount from "./pages/CquAccount";
 import Admin from "./pages/Admin";
 import OAuthAuthorize from "./pages/OAuthAuthorize";
 import CquBindWizard from "./pages/CquBindWizard";
 import ProtectedRoute from "./components/ProtectedRoute";
+import FullPageSpinner from "./components/FullPageSpinner";
 
 function RootRedirect() {
   const { data: session, isPending } = authClient.useSession();
 
   if (isPending) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
+    return <FullPageSpinner />;
   }
 
-  return <Navigate to={session ? "/settings" : "/login"} replace />;
+  return <Navigate to={session ? "/dashboard" : "/login"} replace />;
 }
 
 export default function App() {
@@ -33,11 +32,28 @@ export default function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/reset-password/confirm" element={<ResetPasswordConfirm />} />
+        <Route path="/settings" element={<Navigate to="/security" replace />} />
         <Route
-          path="/settings"
+          path="/dashboard"
           element={
             <ProtectedRoute>
-              <Settings />
+              <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/security"
+          element={
+            <ProtectedRoute>
+              <Security />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/cqu"
+          element={
+            <ProtectedRoute>
+              <CquAccount />
             </ProtectedRoute>
           }
         />

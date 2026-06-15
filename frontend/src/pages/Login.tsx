@@ -21,7 +21,7 @@ export default function Login() {
     if (error) {
       setError(error.message ?? "登录失败，请检查邮箱和密码");
     } else {
-      navigate("/settings");
+      navigate("/dashboard");
     }
   };
 
