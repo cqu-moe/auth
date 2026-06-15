@@ -47,7 +47,11 @@
     "class_name": "CquLoginContainer",
     "image": "./container/Dockerfile",
     "max_instances": 5,
-    "instance_type": "basic"
+    "instance_type": "basic",
+    // 容器登录默认就近请求来源(近中国)→ 踩 CQU 间歇封锁的近机房 CF 出口 IP。
+    // 钉到北美西部(海外干净 IP, 实测海外可登)绕开封锁; 登录异步重型(2FA 邮件主导),
+    // 跨洋延迟可忽略。先观测几天, 不行再换区(如 WEUR)。
+    "constraints": { "regions": ["WNAM"] }
   }],
 
   "migrations": [
