@@ -7,7 +7,7 @@ import ResetPasswordConfirm from "./pages/ResetPasswordConfirm";
 import Dashboard from "./pages/Dashboard";
 import Security from "./pages/Security";
 import CquAccount from "./pages/CquAccount";
-import Admin from "./pages/Admin";
+import Admin from "./pages/admin/Admin";
 import OAuthAuthorize from "./pages/OAuthAuthorize";
 import CquBindWizard from "./pages/CquBindWizard";
 import ProtectedRoute from "./components/ProtectedRoute";
