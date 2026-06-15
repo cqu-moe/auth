@@ -5,6 +5,8 @@ import { CAPABILITIES, PRESETS, SUBSYSTEMS, type Subsystem } from "../capabiliti
 
 type Row = { subsystem: string; capability: string; value: string };
 export type Caps = Record<string, Record<string, boolean | number | null>>;
+// schedule 离线消费的形状(只 calendar 片;见 issue #7 / AuthService.getCaps)。
+export type CalendarCaps = Caps["calendar"];
 
 export function rowsToCaps(rows: Row[], only?: Subsystem): Caps {
   const subs = (only ? [only] : SUBSYSTEMS) as Subsystem[];
@@ -26,6 +28,20 @@ export function rowsToCaps(rows: Row[], only?: Subsystem): Caps {
     }
   }
   return out;
+}
+
+/**
+ * 把权益行收敛成 RPC getCaps(`AuthService.getCaps`,见 issue #7)的返回形状。
+ *  - 零行 → null:等同「用户不存在/无任何权益」。schedule 离线 cron 据此 fail-closed
+ *    (硬撤销 = 删光行 → 自然停同步、停公开链接;撤销终态正确)。
+ *  - 有行 → 只盖 calendar 片(最小披露:schedule 仅消费 calendar,eval/cqu 绝不外泄)。
+ *    形状与 verifySession 返回的 caps.calendar 一致(#6 七字段)。仅有非-calendar 行时,
+ *    calendar 片为全 false/null —— 语义是「用户存在但无 calendar 权益」,schedule 同样不开同步。
+ * 纯函数(不碰 DB),便于 Node-pool 单测;DB 取行交给 resolveCapsForRpc。
+ */
+export function rowsToCapsForRpc(rows: Row[]): { calendar: CalendarCaps } | null {
+  if (rows.length === 0) return null;
+  return { calendar: rowsToCaps(rows, "calendar").calendar };
 }
 
 /**
@@ -129,4 +145,20 @@ export async function resolveCaps(
     .where(eq(userEntitlement.userId, userId))
     .all();
   return rowsToCaps(rows, only);
+}
+
+/**
+ * RPC getCaps 的 DB 包装:直查 user_entitlement(无 cookie/session),交 rowsToCapsForRpc
+ * 收敛成 { calendar } | null。供 AuthService.getCaps(离线 schedule 同步)调用。
+ */
+export async function resolveCapsForRpc(
+  db: D1Database,
+  userId: string
+): Promise<{ calendar: CalendarCaps } | null> {
+  const rows = await drizzle(db)
+    .select()
+    .from(userEntitlement)
+    .where(eq(userEntitlement.userId, userId))
+    .all();
+  return rowsToCapsForRpc(rows);
 }

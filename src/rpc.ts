@@ -2,7 +2,12 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 import { createAuth } from "./auth";
-import { resolveCaps, type Caps } from "./services/entitlements";
+import {
+  resolveCaps,
+  resolveCapsForRpc,
+  type Caps,
+  type CalendarCaps,
+} from "./services/entitlements";
 import { scopeSatisfies } from "./middleware/scope";
 import { hashOAuthClientSecret } from "./utils/oauth-secret";
 import { oauthClientCquScopes } from "./db/schema";
@@ -67,10 +72,58 @@ export class AuthService extends WorkerEntrypoint<Env> {
   }
 
   /**
+   * M-6 客户端认证闸(getCquTicket / getCaps 共用,单点可审计)。RPC 进程内调用方
+   * 自报 clientId 不可信,必须验 client_secret。返回 true 仅当全部满足,否则 false:
+   *  - client 存在且有 clientSecret;
+   *  - client 未被禁用(disabled);此检查【先于】secret 比对 —— disabled client 永不
+   *    触达后续闸,且对外回 opaque(由调用方统一映射成 INVALID_CLIENT / null),
+   *    不泄露「存在但被禁」状态;
+   *  - 呈递 secret 的哈希(hashOAuthClientSecret)与存储哈希定长比较(constantTimeEquals)相等。
+   */
+  private async authenticateClient(
+    clientId: string,
+    clientSecret: string
+  ): Promise<boolean> {
+    // dummy Request 仅用于构造 auth 上下文。
+    const auth = createAuth(this.env, new Request("https://auth.cqu.moe"));
+    const ctx = await auth.$context;
+    const client = await ctx.adapter.findOne<OAuthClientSecretRow>({
+      model: "oauthClient",
+      where: [{ field: "clientId", value: clientId }],
+    });
+    if (!client || !client.clientSecret) return false;
+    if (client.disabled) return false;
+    const presentedHash = await hashOAuthClientSecret(clientSecret);
+    return constantTimeEquals(presentedHash, client.clientSecret);
+  }
+
+  /**
+   * 取用户当前、权威的 calendar caps(离线读取,SECURITY-SENSITIVE)。供 schedule 的
+   * 离线同步 cron 做权益门禁 / 硬撤销(见 issue #7)。锁死顺序:
+   *   ① 认证调用方 client(M-6,见 authenticateClient):验 clientId+client_secret。
+   *      getCaps 是【按任意 userId 枚举】的原语 —— 无 per-user 凭证(不同于 verifySession
+   *      以用户 cookie 为凭证,只能查持有者),不验则任一被绑定 Worker 都能扫全体用户的
+   *      权益画像。认证失败 → null(opaque)。
+   *   ② 直查 user_entitlement(无 cookie/session)→ 只盖 calendar 片(最小披露,
+   *      schedule 仅消费 calendar)。零行 → null(用户不存在/无权益,schedule fail-closed)。
+   */
+  async getCaps(args: {
+    clientId: string;
+    clientSecret: string;
+    userId: string;
+  }): Promise<{ calendar: CalendarCaps } | null> {
+    if (!args.userId) return null;
+    if (!(await this.authenticateClient(args.clientId, args.clientSecret))) {
+      return null;
+    }
+    return resolveCapsForRpc(this.env.DATABASE, args.userId);
+  }
+
+  /**
    * 取 CQU CAS Service Ticket(取票第二入口,SECURITY-CRITICAL)。锁死顺序:
-   *   ① 认证 clientId(M-6 红线):按 clientId 查 OAuth client,用 hashOAuthClientSecret
-   *      验证呈递的 client_secret 与存储哈希一致(定长比较)。RPC 调用方自报 clientId,
-   *      不验 secret 则任意绑定 Worker 都能冒充任意 client —— 故所有调用都强制验证。
+   *   ① 认证 clientId(M-6 红线,见 authenticateClient):验呈递的 client_secret 与存储哈希
+   *      一致(定长比较)。RPC 调用方自报 clientId,不验 secret 则任意绑定 Worker 都能冒充
+   *      任意 client —— 故所有调用都强制验证。
    *   ② 定所需 scope + 模式:serviceUrl → "cqu:ticket:any";service → "cqu:ticket:"+key;
    *      皆缺 → MISSING_TARGET。
    *   ③ client-scope 授权:读 oauth_client_cqu_scopes,scopeSatisfies 不过 → FORBIDDEN
@@ -90,23 +143,9 @@ export class AuthService extends WorkerEntrypoint<Env> {
     serviceUrl?: string;
     userId: string;
   }): Promise<{ ticket: string } | { error: string }> {
-    // ① 认证 clientId + client_secret(M-6)。dummy Request 仅用于构造 auth 上下文。
-    const auth = createAuth(
-      this.env,
-      new Request("https://auth.cqu.moe")
-    );
-    const ctx = await auth.$context;
-    const client = await ctx.adapter.findOne<OAuthClientSecretRow>({
-      model: "oauthClient",
-      where: [{ field: "clientId", value: args.clientId }],
-    });
-    if (!client || !client.clientSecret) return { error: "INVALID_CLIENT" };
-    // 被禁用的 client 绝不许铸票(镜像 OAuth 端点对 disabled 的封禁)。回同一 opaque
-    // INVALID_CLIENT(不回特异错误),避免向调用方泄露「该 client 存在但被禁」的状态。
-    // 置于 secret 比对前,确保 disabled client 永不触达 scope/DO。
-    if (client.disabled) return { error: "INVALID_CLIENT" };
-    const presentedHash = await hashOAuthClientSecret(args.clientSecret);
-    if (!constantTimeEquals(presentedHash, client.clientSecret)) {
+    // ① 认证 clientId + client_secret(M-6)。disabled client 在闸内即被拒,且回同一
+    // opaque INVALID_CLIENT(不泄露「存在但被禁」),确保其永不触达 scope/DO。
+    if (!(await this.authenticateClient(args.clientId, args.clientSecret))) {
       return { error: "INVALID_CLIENT" };
     }
 

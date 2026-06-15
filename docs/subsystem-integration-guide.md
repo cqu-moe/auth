@@ -73,13 +73,31 @@ else { const st = r.ticket /* ST-... */ }
 ```
 
 > 已实现签名:
-> - `verifySession(cookieHeader: string | null) → null | { user, caps }`(caps 实时,全子系统)。
+> - `verifySession(cookieHeader: string | null) → null | { user, caps }`(caps 实时,全子系统;需用户 cookie,**仅在线**)。
+> - `getCaps({ clientId, clientSecret, userId }) → null | { calendar }`(**离线**读权益:无 cookie/session,直查 entitlements 表,只返回你这片 caps;须验 `client_secret`,见 §1.3)。
 > - `getCquTicket({ clientId, clientSecret, service?, serviceUrl?, userId }) → { ticket } | { error }`。
 >   取票全程经 auth 的 DO 万能闸:host 校验 + 用户 `cqu.quicklogin` opt-in(仅 serviceUrl 广域路径)+ 限流 + 审计。
 
 ### 1.3 离线 / 后台任务
 
 Cron Worker 等用户不在场的场景:**直接 `env.AUTH.getCquTicket({...})`,全程无用户 cookie/token**(只需带本 client 的 `clientSecret`)。授权 = service binding 机器信任 + `clientSecret` 校验 + client-scope + 用户 CQU 会话 `active`。CQU 会话由 auth 的 Durable Object 常驻维护(无人值守续命),用户只需**绑定过一次**。
+
+**离线读能力(caps)**:后台无 cookie/session,**用不了 `verifySession`** 读 caps;改用 `getCaps` 按 userId 直查权益:
+
+```ts
+const caps = await env.AUTH.getCaps({
+  clientId: "calendar",
+  clientSecret: env.CQU_AUTH_CLIENT_SECRET,
+  userId,
+})
+//  → null | { calendar: { sync, external, share, sub_limit, share_limit, sync_interval, manual_refresh } }
+if (!caps?.calendar?.sync) { /* 无权益/未开通 → 停同步(fail-closed) */ }
+```
+
+- 只返回**你这片**(当前为 `calendar`;最小披露,直查 `user_entitlement` 表,实时权威)。字段集见 §4 / `src/capabilities.ts`。
+- `null` = 用户不存在 / 无任何权益行 → 调用方按**无权益 fail-closed**(硬撤销 = 删光权益行即天然停同步、停公开链接)。
+- 同样**须验 `client_secret`(M-6)**:`getCaps` 是按任意 `userId` 枚举的原语,无 per-user 凭证(不同于 `verifySession` 以用户 cookie 为凭证、只能查持有者),不验则任一被绑定 Worker 可扫全员权益画像。
+- ⚠️ **认证失败也返回 `null`**(clientId 不存在 / secret 错 / client 被禁用,opaque 刻意不可区分于"无权益")。传错凭证 → **全员被判无权益、无显式报错**。接入时务必确认 clientId/secret 正确(可用同套凭证调 `getCquTicket` 联调验证)。
 
 ---
 
@@ -168,7 +186,7 @@ Authorization: Bearer ACCESS_TOKEN
 caps 形状(你只拿到自己这片,`<subsystem>` = 你注册 client 时的 `metadata.subsystem`):
 
 ```jsonc
-{ "caps": { "calendar": { "sync": true, "sync_limit": 200, "share": false } } }
+{ "caps": { "calendar": { "sync": true, "sub_limit": 50, "share": false } } }
 //                        ↑flag      ↑quota(数字,null=无限)  ↑flag
 ```
 
@@ -179,8 +197,8 @@ caps 形状(你只拿到自己这片,`<subsystem>` = 你注册 client 时的 `me
 
 ```ts
 if (!caps.calendar.sync) return deny("自动同步未开通")
-const limit = caps.calendar.sync_limit ?? Infinity   // null → 无限
-if (count > limit) return deny(`同步上限 ${limit} 条`)
+const limit = caps.calendar.sub_limit ?? Infinity   // null → 无限
+if (count > limit) return deny(`订阅上限 ${limit} 条`)
 ```
 
 > 能力清单(有哪些 `subsystem.capability`、flag/quota)由 auth 仓库的 `src/capabilities.ts` 常量定义,**是唯一权威**;新增能力需在 auth 侧加并重部署。接入前对一下你子系统的能力 key。

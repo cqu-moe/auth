@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   rowsToCaps,
+  rowsToCapsForRpc,
   subsystemForAccessToken,
   validateEntitlementItems,
   presetToItems,
@@ -61,6 +62,45 @@ describe("rowsToCaps", () => {
       },
     ]);
     expect(caps.calendar.sub_limit).toBe(Number.MAX_SAFE_INTEGER);
+  });
+});
+
+describe("rowsToCapsForRpc (offline getCaps for schedule)", () => {
+  const calendarShape = {
+    sync: true,
+    external: false,
+    share: false,
+    sub_limit: 50,
+    share_limit: null,
+    sync_interval: null,
+    manual_refresh: null,
+  };
+  it("zero rows → null (user absent / no entitlements; schedule fail-closed)", () => {
+    // 离线 cron 拿不到任何权益行,等同「用户不存在/无 caps」。返回 null 让 schedule
+    // 按无权益处理:硬撤销(删光行)即天然停同步、停公开链接。
+    expect(rowsToCapsForRpc([])).toBe(null);
+  });
+  it("returns only the calendar slice (least-disclosure; eval/cqu withheld)", () => {
+    const rows = [
+      { subsystem: "calendar", capability: "sync", value: "1" },
+      { subsystem: "calendar", capability: "sub_limit", value: "50" },
+      { subsystem: "eval", capability: "submit", value: "1" },
+      { subsystem: "cqu", capability: "quicklogin", value: "1" },
+    ];
+    const out = rowsToCapsForRpc(rows);
+    expect(out).toEqual({ calendar: calendarShape });
+    // schedule 只消费 calendar;eval/cqu 绝不外泄(最小披露)。
+    expect(Object.keys(out!)).toEqual(["calendar"]);
+  });
+  it("rows present but no calendar caps → calendar slice of false/null, not null", () => {
+    // 有权益行(仅 eval)→ 用户存在,只是无 calendar 权益。返回 calendar 全 false/null,
+    // schedule 读 sync:false → 不开同步(与 null 同效,但语义是「存在但未授权」)。
+    const out = rowsToCapsForRpc([
+      { subsystem: "eval", capability: "submit", value: "1" },
+    ]);
+    expect(out).not.toBe(null);
+    expect(out!.calendar.sync).toBe(false);
+    expect(out!.calendar.sub_limit).toBe(null);
   });
 });
 

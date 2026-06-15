@@ -49,7 +49,7 @@ src/services/st-mint-policy.ts → 纯函数:ST 出票限流(per-user/per-client
 src/routes/cqu.ts     → GET /api/cqu/service-ticket(取 ST，需 Bearer；?service=key 或 ?serviceUrl=广域)
 src/routes/cqu-bind.ts → RESTful 绑定资源 /api/cqu/binding (POST 创建/GET 状态/PUT credentials/GET events WS/DELETE 解绑)
 src/routes/admin.ts   → 用户管理、OAuth 客户端 scope 配置、per-user entitlement CRUD+预设 (需 admin/superAdmin)
-src/rpc.ts            → AuthService extends WorkerEntrypoint：verifySession + getCquTicket(拓扑① Service Binding RPC)
+src/rpc.ts            → AuthService extends WorkerEntrypoint：verifySession + getCaps(离线权益,schedule cron 用) + getCquTicket(拓扑① Service Binding RPC)；getCquTicket/getCaps 共用 authenticateClient(M-6 client_secret 闸)
 src/services/cqu-sso.ts → CAS 登录流程、ticket 获取、会话保活(哑层,不做 URL 校验)
 src/services/crypto.ts  → AES-256-GCM (凭证加密) + AES-ECB (CQU SSO 密码加密)
 src/durable-objects/cqu-session.ts → CQU 会话状态机，15 分钟 alarm keepalive；getServiceTicket 是取票万能闸(host 校验+quicklogin opt-in+限流+审计)
