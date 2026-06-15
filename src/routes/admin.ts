@@ -15,6 +15,7 @@ import {
   validateEntitlementItems,
   presetToItems,
 } from "../services/entitlements";
+import { pickSearchField } from "../services/admin-search";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, and } from "drizzle-orm";
 
@@ -226,10 +227,11 @@ admin.get("/users", async (c) => {
   const auth = createAuth(c.env, c.req.raw);
   const page = Math.max(1, parseInt(c.req.query("page") ?? "1"));
   const limit = Math.min(Math.max(1, parseInt(c.req.query("limit") ?? "20")), 100);
+  const search = pickSearchField(c.req.query("search"));
 
   const result = await auth.api.listUsers({
     headers: c.req.raw.headers,
-    query: { limit, offset: (page - 1) * limit },
+    query: { limit, offset: (page - 1) * limit, ...(search ?? {}) },
   });
 
   return c.json({
