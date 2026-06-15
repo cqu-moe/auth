@@ -118,6 +118,38 @@ def aes_encrypt_password(croypto_b64, password):
     return b64encode(AES.new(key, AES.MODE_ECB).encrypt(pad(password.encode(), 16))).decode()
 
 
+async def _fail_fingerprint(pg):
+    """TEMP 诊断(抓到瑞数封锁真实形态后移除): 第一因素「未判定」失败页的紧凑指纹 ——
+    title + 特征命中表 + HTML 长度 + 正文头部 120 字。挑战页为公开内容, 仍只截短片段, 不 dump 整页。
+    任何一步抛错都吞掉, 绝不让诊断影响登录主流程。"""
+    try:
+        html = await pg.content()
+    except Exception:
+        html = ""
+    try:
+        text = (await pg.locator("body").inner_text()) if await pg.locator("body").count() else ""
+    except Exception:
+        text = ""
+    try:
+        title = await pg.title()
+    except Exception:
+        title = ""
+
+    def hit(*ss):
+        return "1" if any(s in html for s in ss) else "0"
+
+    head = " ".join(text.split())[:120]
+    return (
+        f"fp title={title!r} len={len(html)} "
+        f"caslogin={hit('login-croypto', 'login-page-flowkey')} "
+        f"botgate={hit('botgate')} debuggerkw={hit('debugger')} ctlgr={hit('CtLgrmkSWHBZ')} "
+        f"captcha={hit('captcha', '验证码')} "
+        f"forbidden={hit('403', 'Forbidden', '拒绝访问', '禁止访问')} "
+        f"slider={hit('slider', '滑块', 'nc_iconfont', 'geetest')} "
+        f"head={head!r}"
+    )
+
+
 async def do_first_factor(pg, url, username, password, debug_screenshot=True):
     """加载 → 表单导航式提交密码。返回 'success'(直接ticket) / '2fa' / 'fail:...'。
 
@@ -144,10 +176,13 @@ async def do_first_factor(pg, url, username, password, debug_screenshot=True):
         err = ""
     if not err and await pg.locator("#login-croypto").count():
         err = "回到登录页(密码错误/瑞数软重挑战)"
+    # TEMP 诊断(抓到瑞数封锁真实形态后移除): 仅对「未判定」兜底附加页面指纹;
+    # 已知错误(密码错/回登录页)不附加, 避免污染用户可见错误。
+    diag = "" if err else " | " + await _fail_fingerprint(pg)
     if debug_screenshot:
         await pg.screenshot(path="firstfactor_fail.png", full_page=True)
-        return "fail:" + (err or f"未判定 url={pg.url[:70]}") + " (见 firstfactor_fail.png)"
-    return "fail:" + (err or f"未判定 url={pg.url[:70]}")
+        return "fail:" + (err or f"未判定 url={pg.url[:70]}") + " (见 firstfactor_fail.png)" + diag
+    return "fail:" + (err or f"未判定 url={pg.url[:70]}") + diag
 
 
 async def switch_2fa_tab(pg, method):
