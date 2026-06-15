@@ -95,22 +95,38 @@ export class CquSsoClient {
     cookies: CasCookies,
     serviceUrl: string
   ): Promise<string> {
-    const resp = await ssoFetch(
-      `${SSO_BASE}/login?service=${encodeURIComponent(serviceUrl)}`,
-      {
-        headers: {
-          "User-Agent": BROWSER_UA,
-          Cookie: formatCasCookies(cookies),
-        },
-        redirect: "manual",
-      }
-    );
+    let resp: Response;
+    try {
+      resp = await ssoFetch(
+        `${SSO_BASE}/login?service=${encodeURIComponent(serviceUrl)}`,
+        {
+          headers: {
+            "User-Agent": BROWSER_UA,
+            Cookie: formatCasCookies(cookies),
+          },
+          redirect: "manual",
+        }
+      );
+    } catch (e) {
+      // TEMP 诊断(抓到瑞数封锁真实形态后移除): 网络层失败(超时/重置)没有 body,
+      // 记 code+msg, 用于量化「连接被挂起/超时」占封锁的比例。
+      console.log(
+        JSON.stringify({
+          event: "sso.service_ticket.diag",
+          status: 0,
+          networkError: e instanceof CquSsoError ? e.code : "UNKNOWN",
+          message: e instanceof Error ? e.message : String(e),
+        })
+      );
+      throw e;
+    }
 
     if (resp.status !== 302) {
       // 诊断: 非 302 时读 body 做页面分类, 区分「真 CAS 登录页(真过期)」与
       // 「瑞数挑战页(误判)」。只读 body 做分类, 绝不记录 body 原文; 分类结果随
       // 错误消息上抛, 供 keepalive 日志观测。302 成功路径不受影响(此处仅失败分支)。
       const body = await resp.text().catch(() => "");
+      logServiceTicketDiag(resp.status, body); // TEMP 诊断: 抓瑞数挑战页真实指纹
       const cls = classifyNon302Body(body);
       throw new CquSsoError(
         "TGT_EXPIRED",
@@ -161,4 +177,35 @@ function classifyNon302Body(body: string): "cas-login" | "waf-challenge" | "othe
     body.includes("debugger");
   if (hasWafMarker) return "waf-challenge";
   return "other";
+}
+
+/**
+ * TEMP 诊断(抓到瑞数挑战页真实形态后移除): getServiceTicket 拿到非 302 时, 把页面
+ * 指纹打到日志 —— 状态码 + 候选特征命中表 + <title> + 折叠空白后的头部 200 字符。
+ * 失败页是登录页/挑战页(公开内容, 无凭据/ticket); 仍只截短片段, 不 dump 整页。
+ */
+function logServiceTicketDiag(status: number, body: string): void {
+  const has = (s: string) => body.includes(s);
+  const head = body.replace(/\s+/g, " ").trim().slice(0, 200);
+  const title = body.match(/<title>([^<]*)<\/title>/i)?.[1]?.trim() ?? "";
+  console.log(
+    JSON.stringify({
+      event: "sso.service_ticket.diag",
+      status,
+      bodyLen: body.length,
+      title,
+      markers: {
+        casLogin: has("login-croypto") || has("login-page-flowkey"),
+        botgate: has("botgate"),
+        debuggerKw: has("debugger"),
+        ctlgr: has("CtLgrmkSWHBZ"),
+        captcha: has("captcha") || has("验证码"),
+        forbidden:
+          has("403") || has("Forbidden") || has("拒绝") || has("禁止"),
+        challenge:
+          has("challenge") || has("瑞数") || has("acw_") || has("redirect"),
+      },
+      head,
+    })
+  );
 }
