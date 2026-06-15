@@ -9,27 +9,36 @@ import {
 describe("rowsToCaps", () => {
   const rows = [
     { subsystem: "calendar", capability: "sync", value: "1" },
-    { subsystem: "calendar", capability: "sync_limit", value: "200" },
+    { subsystem: "calendar", capability: "sub_limit", value: "200" },
     { subsystem: "eval", capability: "submit", value: "1" },
   ];
+  const calendarShape = {
+    sync: true,
+    external: false,
+    share: false,
+    sub_limit: 200,
+    share_limit: null,
+    sync_interval: null,
+    manual_refresh: null,
+  };
   it("maps flags to booleans and quotas to numbers", () => {
     const caps = rowsToCaps(rows);
-    expect(caps.calendar).toEqual({ sync: true, sync_limit: 200, share: false });
+    expect(caps.calendar).toEqual(calendarShape);
     expect(caps.eval).toEqual({ submit: true, batch: false });
   });
   it("can scope to a single subsystem (least-disclosure for JWT)", () => {
     const caps = rowsToCaps(rows, "calendar");
-    expect(caps).toEqual({ calendar: { sync: true, sync_limit: 200, share: false } });
+    expect(caps).toEqual({ calendar: calendarShape });
     expect((caps as any).eval).toBeUndefined();
   });
   it("absent quota defaults to null (= unset), absent flag to false", () => {
     const caps = rowsToCaps([]);
     expect(caps.calendar.sync).toBe(false);
-    expect(caps.calendar.sync_limit).toBe(null);
+    expect(caps.calendar.sub_limit).toBe(null);
   });
   it.each(["-1", "Infinity", "abc", "1e9", "3.5"])("rejects malformed quota %s → null", (bad) => {
-    const caps = rowsToCaps([{ subsystem: "calendar", capability: "sync_limit", value: bad }]);
-    expect(caps.calendar.sync_limit).toBe(null);
+    const caps = rowsToCaps([{ subsystem: "calendar", capability: "sub_limit", value: bad }]);
+    expect(caps.calendar.sub_limit).toBe(null);
   });
   it("overflow quota (digits past safe-int range) → null, not Infinity/imprecise", () => {
     // ~30 digits passes /^\d+$/ but Number() loses precision / can become a huge
@@ -37,21 +46,21 @@ describe("rowsToCaps", () => {
     // quota bypass. It must fall to null (= unset), and crucially never Infinity.
     const huge = "9".repeat(30);
     const caps = rowsToCaps([
-      { subsystem: "calendar", capability: "sync_limit", value: huge },
+      { subsystem: "calendar", capability: "sub_limit", value: huge },
     ]);
-    expect(caps.calendar.sync_limit).toBe(null);
-    expect(caps.calendar.sync_limit).not.toBe(Infinity);
-    expect(Number.isFinite(caps.calendar.sync_limit as number)).toBe(false);
+    expect(caps.calendar.sub_limit).toBe(null);
+    expect(caps.calendar.sub_limit).not.toBe(Infinity);
+    expect(Number.isFinite(caps.calendar.sub_limit as number)).toBe(false);
   });
   it("Number.MAX_SAFE_INTEGER quota is still accepted as a number", () => {
     const caps = rowsToCaps([
       {
         subsystem: "calendar",
-        capability: "sync_limit",
+        capability: "sub_limit",
         value: String(Number.MAX_SAFE_INTEGER),
       },
     ]);
-    expect(caps.calendar.sync_limit).toBe(Number.MAX_SAFE_INTEGER);
+    expect(caps.calendar.sub_limit).toBe(Number.MAX_SAFE_INTEGER);
   });
 });
 
@@ -86,7 +95,7 @@ describe("validateEntitlementItems (admin write validation)", () => {
   it("accepts valid mixed flag + quota items → null", () => {
     const items = [
       { subsystem: "calendar", capability: "sync", value: "1" },
-      { subsystem: "calendar", capability: "sync_limit", value: "200" },
+      { subsystem: "calendar", capability: "sub_limit", value: "200" },
       { subsystem: "eval", capability: "submit", value: "1" },
     ];
     expect(validateEntitlementItems(items)).toBe(null);
@@ -112,7 +121,7 @@ describe("validateEntitlementItems (admin write validation)", () => {
   });
   it.each(["-1", "abc", "1.5", "Infinity"])("rejects quota with bad value %s → non-null error", (bad) => {
     const err = validateEntitlementItems([
-      { subsystem: "calendar", capability: "sync_limit", value: bad },
+      { subsystem: "calendar", capability: "sub_limit", value: bad },
     ]);
     expect(err).not.toBe(null);
   });
@@ -120,7 +129,7 @@ describe("validateEntitlementItems (admin write validation)", () => {
     // 20-digit value passes /^\d+$/ but is far past Number.MAX_SAFE_INTEGER;
     // storing it would let rowsToCaps lose precision → quota bypass. Reject on write.
     const err = validateEntitlementItems([
-      { subsystem: "calendar", capability: "sync_limit", value: "9".repeat(20) },
+      { subsystem: "calendar", capability: "sub_limit", value: "9".repeat(20) },
     ]);
     expect(err).not.toBe(null);
     expect(typeof err).toBe("string");
@@ -128,7 +137,7 @@ describe("validateEntitlementItems (admin write validation)", () => {
   it("accepts a normal quota '200' → null", () => {
     expect(
       validateEntitlementItems([
-        { subsystem: "calendar", capability: "sync_limit", value: "200" },
+        { subsystem: "calendar", capability: "sub_limit", value: "200" },
       ])
     ).toBe(null);
   });
@@ -137,7 +146,7 @@ describe("validateEntitlementItems (admin write validation)", () => {
       validateEntitlementItems([
         {
           subsystem: "calendar",
-          capability: "sync_limit",
+          capability: "sub_limit",
           value: String(Number.MAX_SAFE_INTEGER), // "9007199254740991"
         },
       ])
@@ -148,7 +157,7 @@ describe("validateEntitlementItems (admin write validation)", () => {
       validateEntitlementItems([
         {
           subsystem: "calendar",
-          capability: "sync_limit",
+          capability: "sub_limit",
           value: String(Number.MAX_SAFE_INTEGER + 1), // "9007199254740992"
         },
       ])
@@ -157,14 +166,14 @@ describe("validateEntitlementItems (admin write validation)", () => {
   it("accepts quota with '' (unlimited) → null", () => {
     expect(
       validateEntitlementItems([
-        { subsystem: "calendar", capability: "sync_limit", value: "" },
+        { subsystem: "calendar", capability: "sub_limit", value: "" },
       ])
     ).toBe(null);
   });
   it("accepts plain non-negative integer quota → null", () => {
     expect(
       validateEntitlementItems([
-        { subsystem: "calendar", capability: "sync_limit", value: "0" },
+        { subsystem: "calendar", capability: "sub_limit", value: "0" },
       ])
     ).toBe(null);
   });
@@ -199,13 +208,13 @@ describe("presetToItems (admin one-click apply)", () => {
     const items = presetToItems("学生");
     expect(items).not.toBe(null);
     expect(items).toContainEqual({ subsystem: "calendar", capability: "sync", value: "1" });
-    expect(items).toContainEqual({ subsystem: "calendar", capability: "sync_limit", value: "50" });
+    expect(items).toContainEqual({ subsystem: "calendar", capability: "sub_limit", value: "50" });
     expect(items).toContainEqual({ subsystem: "eval", capability: "submit", value: "1" });
   });
   it("translates null quota to '' and includes share flag for 助教", () => {
     const items = presetToItems("助教");
     expect(items).not.toBe(null);
-    expect(items).toContainEqual({ subsystem: "calendar", capability: "sync_limit", value: "" });
+    expect(items).toContainEqual({ subsystem: "calendar", capability: "sub_limit", value: "" });
     expect(items).toContainEqual({ subsystem: "calendar", capability: "share", value: "1" });
   });
   it("returns null for an unknown preset name", () => {

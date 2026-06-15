@@ -11,9 +11,15 @@ export interface CapDef {
 
 export const CAPABILITIES = {
   calendar: {
-    sync: { type: "flag", label: "日历同步" },
-    sync_limit: { type: "quota", label: "同步上限", unit: "条" }, // value 存数字;null=无限
-    share: { type: "flag", label: "共享日历" },
+    // 字段集与 schedule(cqu-moe/schedule-cloudflare)的 CalendarCaps 契约对齐(见 issue #6)。
+    // schedule 经 Service Binding RPC 消费 caps.calendar;缺字段会让 schedule fail-closed。
+    sync: { type: "flag", label: "日历同步" }, // 个人课表自动同步开关
+    external: { type: "flag", label: "外部订阅" }, // 教师/教室/实验室/课程/行政班 公开课表订阅
+    share: { type: "flag", label: "共享日历" }, // 共享链接开关
+    sub_limit: { type: "quota", label: "订阅上限", unit: "条" }, // 订阅数量上限;null=无限
+    share_limit: { type: "quota", label: "分享链接上限", unit: "条" }, // 每用户分享链接总数;null=无限
+    sync_interval: { type: "quota", label: "同步间隔", unit: "分钟" }, // 自动同步间隔档位(越小越新鲜);null=默认/最长。实际下限受 cron 每小时一次限制
+    manual_refresh: { type: "quota", label: "每日手动刷新上限", unit: "次/天" }, // null=无限
   },
   eval: {
     submit: { type: "flag", label: "提交评教" },
@@ -33,9 +39,20 @@ export const PRESETS: Record<
   string,
   Record<string, Record<string, number | null>>
 > = {
-  学生: { calendar: { sync: 1, sync_limit: 50 }, eval: { submit: 1 } },
+  学生: {
+    calendar: { sync: 1, external: 1, sub_limit: 50, sync_interval: 360, manual_refresh: 5 },
+    eval: { submit: 1 },
+  },
   助教: {
-    calendar: { sync: 1, sync_limit: null, share: 1 },
+    calendar: {
+      sync: 1,
+      external: 1,
+      share: 1,
+      sub_limit: null,
+      share_limit: null,
+      sync_interval: 60,
+      manual_refresh: null,
+    },
     eval: { submit: 1, batch: 1 },
   },
 };
