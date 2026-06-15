@@ -91,7 +91,35 @@ function extractText(html: string, id: string): string | null {
  * service ticket(`getServiceTicket`)、在线探活(`checkOnline`)。
  */
 export class CquSsoClient {
+  /**
+   * 取 service ticket。间歇性封锁(瑞数/CF IP)下, 网络超时与瑞数误判(非 cas-login
+   * 的非 302)都是 transient —— 退避重试可在约 70% 单次成功率下把整体成功率拉高很多。
+   * 真过期(cas-login)与 NO_TICKET 不重试, 直接上抛(交容器重登 / 暴露异常)。
+   * opts 仅供测试注入(0 退避 / 指定次数); 生产用默认值。
+   */
   async getServiceTicket(
+    cookies: CasCookies,
+    serviceUrl: string,
+    opts: { maxAttempts?: number; baseBackoffMs?: number } = {}
+  ): Promise<string> {
+    const maxAttempts = opts.maxAttempts ?? ST_MAX_ATTEMPTS;
+    const baseBackoffMs = opts.baseBackoffMs ?? ST_BASE_BACKOFF_MS;
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await this.mintServiceTicketOnce(cookies, serviceUrl);
+      } catch (e) {
+        lastErr = e;
+        if (!isRetryableSsoError(e) || attempt === maxAttempts) throw e;
+        // 指数退避: 400ms, 800ms, ...(默认 3 次 = 最多 2 次退避)。
+        await sleep(baseBackoffMs * 2 ** (attempt - 1));
+      }
+    }
+    throw lastErr; // 不可达(循环只在 return/throw 退出), 仅满足 TS 控制流。
+  }
+
+  /** 单次取 ST。失败按语义抛 CquSsoError, 由 getServiceTicket 决定是否重试。 */
+  private async mintServiceTicketOnce(
     cookies: CasCookies,
     serviceUrl: string
   ): Promise<string> {
@@ -122,15 +150,25 @@ export class CquSsoClient {
     }
 
     if (resp.status !== 302) {
-      // 诊断: 非 302 时读 body 做页面分类, 区分「真 CAS 登录页(真过期)」与
-      // 「瑞数挑战页(误判)」。只读 body 做分类, 绝不记录 body 原文; 分类结果随
-      // 错误消息上抛, 供 keepalive 日志观测。302 成功路径不受影响(此处仅失败分支)。
+      // 非 302 时读 body 做页面分类, 区分「真 CAS 登录页(真过期)」与「瑞数挑战页(误判)」。
+      // 只读 body 做分类, 绝不记录 body 原文。302 成功路径不受影响(此处仅失败分支)。
       const body = await resp.text().catch(() => "");
       logServiceTicketDiag(resp.status, body); // TEMP 诊断: 抓瑞数挑战页真实指纹
       const cls = classifyNon302Body(body);
+      // 只有正向认出 CAS 登录页(login-croypto)才判真过期 TGT_EXPIRED(不重试, 交容器重登);
+      // 其余(瑞数误判 / 未知页)判 WAF_CHALLENGE(可重试)—— 判据只依赖已验证的 cas-login 信号。
+      if (cls === "cas-login") {
+        throw new CquSsoError(
+          "TGT_EXPIRED",
+          "CAS session expired, got status " + resp.status + " page=" + cls
+        );
+      }
       throw new CquSsoError(
-        "TGT_EXPIRED",
-        "CAS session expired, got status " + resp.status + " page=" + cls
+        "WAF_CHALLENGE",
+        "Non-302 from SSO (likely WAF/throttle), got status " +
+          resp.status +
+          " page=" +
+          cls
       );
     }
 
@@ -207,5 +245,24 @@ function logServiceTicketDiag(status: number, body: string): void {
       },
       head,
     })
+  );
+}
+
+// ── ST 取票重试参数 ───────────────────────────────────────────────────────────
+// 间歇性封锁下, 网络超时与瑞数误判都是 transient; 退避重试在约 70% 单次成功率下
+// 把整体成功率拉高很多。改动小、对成功路径零影响(首次即成功)。
+const ST_MAX_ATTEMPTS = 3; // 总尝试次数(含首次)
+const ST_BASE_BACKOFF_MS = 400; // 指数退避基数: 400ms, 800ms
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 取 ST 时哪些 CquSsoError 值得重试: 网络层失败(超时/重置)与瑞数误判挑战页。
+ *  真过期(TGT_EXPIRED)与 NO_TICKET 不重试。 */
+export function isRetryableSsoError(e: unknown): boolean {
+  return (
+    e instanceof CquSsoError &&
+    (e.code === "NETWORK_ERROR" || e.code === "WAF_CHALLENGE")
   );
 }

@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { CquSsoClient, type CasCookies, CquSsoError } from "../services/cqu-sso";
 import { decrypt } from "../services/crypto";
 import { validateCquServiceUrl } from "../services/service-url";
+import { isTransientSsoError } from "../services/sso-error-policy";
 import {
   nextStatus,
   type CquStatus,
@@ -735,7 +736,7 @@ export class CquSessionDO extends DurableObject<Env> {
       await this.ssoClient.getServiceTicket(state.cookies, DUMMY_SERVICE);
       return "active";
     } catch (e) {
-      if (isTransientError(e)) {
+      if (isTransientSsoError(e)) {
         console.warn(
           `[CquSession] ${state.studentId}: probe unreachable: ${errMsg(e)}`
         );
@@ -949,14 +950,6 @@ export class CquSessionDO extends DurableObject<Env> {
     const id = this.env.CQU_LOGIN.idFromName(userId);
     return this.env.CQU_LOGIN.get(id);
   }
-}
-
-function isTransientError(e: unknown): boolean {
-  // 网络错误(超时/重置)和不可解析页面(CQU 维护)不证明凭证坏 — 只有服务端 auth 拒绝才算。
-  if (e instanceof CquSsoError) {
-    return e.code === "NETWORK_ERROR" || e.code === "PARSE_ERROR";
-  }
-  return true; // 未知失败: 保守, 重试而非误判重登。
 }
 
 function errMsg(e: unknown): string {
