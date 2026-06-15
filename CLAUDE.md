@@ -18,7 +18,9 @@ cd frontend && npm run dev           # Vite dev (localhost:5173, /api 代理到 
 
 # 类型检查
 npm run typecheck                    # 后端 (根目录 tsconfig)
-cd frontend && npx tsc --noEmit      # 前端 (单独 tsconfig)
+cd frontend && npx tsc -b            # 前端 (⚠️ 必须 -b：frontend/tsconfig.json 是 {files:[],references:[...]}，
+                                     #    plain `tsc --noEmit` 对它是空操作、永远 exit 0、查不出任何错误；
+                                     #    真·gate 是 `tsc -b`(跟随 project references，即 npm run build 用的命令))
 
 # 数据库
 # ⚠️ 勿用 npm run db:generate：本项目 drizzle/migrations 无 meta/ 基线(0000-0004 全是手写
@@ -82,7 +84,18 @@ CQU 自定义 scope: `cqu:ticket:{jwxt,jxpj,library,card}` + `cqu:ticket:any`(�
 React 19 + React Router 7 + Tailwind CSS 4 SPA。
 `createAuthClient()` 无参数调用 — 默认同源 + `/api/auth` basePath。
 
-页面：Login, Register, ResetPassword, ResetPasswordConfirm, Settings (含 CQU 绑定), Admin, OAuthAuthorize。
+**用户中心 (UserCenterLayout 侧边栏外壳)**：登录后 `/` → `/dashboard`。三页 + admin：
+- `/dashboard` (`pages/Dashboard.tsx`)：概览。账户摘要 + **我的权益/配额上限**(只读) + CQU 绑定快照。权益读会话里已有的 `caps`(零取数)，经 `lib/caps.ts` 的 `useCaps()` + 纯函数 `capsToView()` 渲染(flag→已开通/未开通徽章, quota→上限值或「无限」)。**只展示上限，不展示已用量**(usage 在 calendar/schedule 子系统,auth 不掌握)。
+- `/security` (`pages/Security.tsx`)：个人信息 + 修改密码。
+- `/cqu` (`pages/CquAccount.tsx`)：CQU 绑定状态 + 实时验证码(WebSocket) + 浏览器插件快捷登录开关。绑定向导仍在 `/cqu/bind`(`CquBindWizard`)。
+- `/settings` → 302 `/security`(旧书签兼容)。`/admin`(admin/superAdmin)。
+- 旧 `Settings.tsx` 已拆解退役；旧 `components/Layout.tsx`(顶导航)仅剩 `OAuthAuthorize`/`CquBindWizard` 在用。
+
+**共享 UI 原语 `components/ui/`**：`Modal/Toggle/CopyButton/StringListInput/FieldLabel/inputClass/Card/CardHeader/Badge`(barrel `index.ts`)，用户中心与 admin 共用。
+
+**Admin 模块化 `pages/admin/`**：原 1696 行单文件已拆成 `Admin.tsx`(壳, 用 UserCenterLayout, 子 Tab 用户/OAuth) + `types.ts` + `constants.ts`(含 `readErrorMessage`) + `users/{UsersSection,EntitlementPanel}.tsx` + `oauth/{OAuthClientsSection,OAuthClientEditor(分区:基础/权限/高级/密钥),CredentialModal,DeleteConfirmModal,payload.ts}`。用户管理含搜索框(debounce 300ms → `GET /api/admin/users?search=`)+ 状态筛选(仅当前页)。
+
+`src/capabilities.ts` 是前后端共享的能力目录,前端经 `../../../src/capabilities` 直接 import(注意各文件相对深度)。
 
 ### Cloudflare Bindings
 
