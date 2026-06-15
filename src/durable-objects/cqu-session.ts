@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { CquSsoClient, type CasCookies, CquSsoError } from "../services/cqu-sso";
 import { decrypt } from "../services/crypto";
+import { validateCquServiceUrl } from "../services/service-url";
 import {
   nextStatus,
   type CquStatus,
@@ -16,6 +17,18 @@ import {
   MAX_RELOGINS_PER_WINDOW,
   CONSECUTIVE_RELOGIN_FAIL_ALERT,
 } from "../services/cqu-2fa/relogin-policy";
+import {
+  pruneStMintLog,
+  stMintThrottled,
+  distinctBroadHosts,
+  type StMintRecord,
+  ST_MINT_RATE_WINDOW_MS,
+  MAX_ST_MINTS_PER_USER,
+  MAX_ST_MINTS_PER_CLIENT,
+  DISTINCT_HOST_ALERT_THRESHOLD,
+} from "../services/st-mint-policy";
+import { resolveCaps } from "../services/entitlements";
+import { cquErrorHttpStatus } from "../services/cqu-error-status";
 import type { Env } from "../types";
 
 const KEEPALIVE_INTERVAL_MS = 15 * 60 * 1000;
@@ -210,9 +223,25 @@ export class CquSessionDO extends DurableObject<Env> {
         }
         case "service-ticket": {
           const service = url.searchParams.get("service");
-          if (!service)
-            return Response.json({ error: "Missing service" }, { status: 400 });
-          const ticket = await this.getServiceTicket(service);
+          const serviceUrl = url.searchParams.get("serviceUrl");
+          if (!service && !serviceUrl)
+            return Response.json(
+              { error: "Missing service or serviceUrl" },
+              { status: 400 }
+            );
+          // clientId 空串(route 在无 azp/client_id 时传 "")按 null 处理 —— 自成限频桶。
+          const clientId = url.searchParams.get("clientId") || null;
+          // source 审计标签防伪:只认固定白名单(route/rpc), 其余(含缺失)归 "unknown",
+          // 杜绝不受信调用方往审计日志 source 字段注入任意值(log-forging 防御纵深)。
+          const rawSource = url.searchParams.get("source");
+          const source =
+            rawSource === "route" || rawSource === "rpc" ? rawSource : "unknown";
+          const ticket = await this.getServiceTicket({
+            service: service ?? undefined,
+            serviceUrl: serviceUrl ?? undefined,
+            clientId,
+            source,
+          });
           return Response.json({ ticket });
         }
         case "deposit-code": {
@@ -241,8 +270,11 @@ export class CquSessionDO extends DurableObject<Env> {
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : "Internal error";
+      // 策略/客户端错误(CquSsoError)映射各自语义的 4xx(429/403/409/400),
+      // 而非一律 500(伪装成服务器崩溃)。非 CquSsoError 仍回 500。
       const code = e instanceof CquSsoError ? e.code : "INTERNAL_ERROR";
-      return Response.json({ error: message, code }, { status: 500 });
+      const status = e instanceof CquSsoError ? cquErrorHttpStatus(code) : 500;
+      return Response.json({ error: message, code }, { status });
     }
   }
 
@@ -335,19 +367,126 @@ export class CquSessionDO extends DurableObject<Env> {
     }
   }
 
-  private async getServiceTicket(service: string): Promise<string> {
+  // DO 是取票的权威 chokepoint(route/RPC/cookie 各入口最终都汇到这里)。
+  // 不论上游是否已校验,凡 serviceUrl 输入此处都【无条件】再做 host 校验红线;
+  // service(符号 key)走白名单表。解析出的 target 永远是受信 URL,绝不回传原始 input。
+  //
+  // 安全闸都落在此唯一 chokepoint(route / 未来 RPC getCquTicket / DO 内铸都汇于此;
+  // betterAuth HTTP rateLimit 覆盖不到 RPC 与 DO 内铸):
+  //   ① D5 opt-in:广路径(serviceUrl)取票要求 user 的 cqu.quicklogin = true(符号 key 不受此限);
+  //   ② D6 限频:对所有取票(两模式)做 per-user + per-client 滑动窗口限频(StMintRecord 落 storage);
+  //   ③ D6 告警:广路径上若窗口内不同 host 数越阈值则告警(开放重定向探测信号, 只告警不拦);
+  //   ④ D6 审计:成功取票后打一条结构化日志(绝不含 ticket/cookies/密码)。
+  // NOTE: keepalive 探针走 this.ssoClient.getServiceTicket(...) 直连, 不经本方法, 故不受这些闸影响。
+  private async getServiceTicket(arg: {
+    service?: string;
+    serviceUrl?: string;
+    clientId?: string | null;
+    source?: string;
+  }): Promise<string> {
     await this.loadState();
     const status = await this.getStatus();
     if (!this.state || status !== "active") {
       throw new CquSsoError("SESSION_INACTIVE", "CQU session not active");
     }
-    const serviceUrl = SERVICE_URLS[service];
-    if (!serviceUrl) {
-      throw new CquSsoError("UNKNOWN_SERVICE", `Unknown service: ${service}`);
+
+    // ① 定模式 + 解析受信 target。broad = serviceUrl 模式(广路径快捷登录)。
+    const broad = !!arg.serviceUrl;
+    let target: string;
+    if (arg.serviceUrl) {
+      // 权威再校验(red line):即便 route 已校验,RPC/其他入口仍汇于此。
+      // validateCquServiceUrl 抛的是普通 Error,会被 DO fetch catch 映射成
+      // INTERNAL_ERROR(伪装成服务器崩溃);包成 CquSsoError 让 RPC getCquTicket
+      // 与 route 都能回传准确的 INVALID_SERVICE_URL。
+      try {
+        target = validateCquServiceUrl(arg.serviceUrl);
+      } catch {
+        throw new CquSsoError("INVALID_SERVICE_URL", "非法的 serviceUrl");
+      }
+    } else if (arg.service) {
+      const symbolic = SERVICE_URLS[arg.service];
+      if (!symbolic) {
+        throw new CquSsoError(
+          "UNKNOWN_SERVICE",
+          `Unknown service: ${arg.service}`
+        );
+      }
+      target = symbolic;
+    } else {
+      throw new CquSsoError(
+        "MISSING_SERVICE",
+        "Missing service or serviceUrl"
+      );
     }
-    this.state.lastRequestedAt = Date.now();
+
+    // ② D5 — 浏览器插件快捷登录 opt-in:仅广路径(serviceUrl)受限;符号 key 取票不受此闸。
+    // quicklogin flag 永远不是「取票闸」本身(出票的权威校验在 host 校验 + scope),
+    // 它只表达「用户是否同意插件替他用任意广路径取 ST」—— 未同意则广路径直接拒。
+    if (broad) {
+      const caps = await resolveCaps(this.env.DATABASE, this.state.userId, "cqu");
+      if (caps.cqu?.quicklogin !== true) {
+        throw new CquSsoError(
+          "QUICKLOGIN_NOT_ENABLED",
+          "未开启浏览器插件快捷登录"
+        );
+      }
+    }
+
+    // ③ D6 — 限频(所有取票, 两模式都过)。先读窗口内记录, 裁剪后判定 per-user/per-client 闸。
+    const now = Date.now();
+    const clientId = arg.clientId ?? null;
+    const stored =
+      (await this.ctx.storage.get<StMintRecord[]>("stMintLog")) ?? [];
+    const pruned = pruneStMintLog(stored, now, ST_MINT_RATE_WINDOW_MS);
+    if (
+      stMintThrottled(
+        pruned,
+        clientId,
+        MAX_ST_MINTS_PER_USER,
+        MAX_ST_MINTS_PER_CLIENT
+      )
+    ) {
+      console.error(
+        `[CquSession] ${this.state.studentId}: ALERT ST mint rate-limited (clientId=${clientId ?? "?"})`
+      );
+      throw new CquSsoError("RATE_LIMITED", "取票过于频繁,请稍后再试");
+    }
+
+    // ④ D6 — distinct-host 告警(仅广路径):窗口内不同 broad host 数(含本次候选)越阈值即告警。
+    // 只告警, 不抛 —— 它是「拿本服务当 ST 中继的开放重定向探测」信号, 不是硬错误。
+    const host = new URL(target).hostname;
+    if (broad && distinctBroadHosts(pruned, host) > DISTINCT_HOST_ALERT_THRESHOLD) {
+      console.error(
+        `[CquSession] ${this.state.studentId}: ALERT ST mint distinct broad hosts > ${DISTINCT_HOST_ALERT_THRESHOLD} in window (open-redirector probe signal, clientId=${clientId ?? "?"})`
+      );
+    }
+
+    // ⑤ 记录本次尝试 + 铸票 + 审计。先把尝试落 storage(镜像 relogin() 的「铸前记录」),
+    // 让限频对「铸票失败死循环」也鲁棒(失败也算一次尝试, 不会绕过窗口闸)。
+    this.state.lastRequestedAt = now;
     await this.ctx.storage.put("state", this.state);
-    return this.ssoClient.getServiceTicket(this.state.cookies, serviceUrl);
+    const record: StMintRecord = { ts: now, clientId, host, broad };
+    pruned.push(record);
+    await this.ctx.storage.put("stMintLog", pruned);
+
+    const ticket = await this.ssoClient.getServiceTicket(
+      this.state.cookies,
+      target
+    );
+
+    // D6 审计(结构化; CF observability 抓 console)。绝不记录 ticket / cookies / 密码。
+    console.log(
+      JSON.stringify({
+        evt: "st_mint",
+        userId: this.state.userId,
+        clientId,
+        host,
+        broad,
+        source: arg.source ?? "route",
+        ts: now,
+      })
+    );
+    return ticket;
   }
 
   /**

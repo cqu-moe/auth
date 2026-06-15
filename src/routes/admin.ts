@@ -6,13 +6,17 @@ import type { HonoEnv } from "../types";
 import { createAuth, OAUTH_SCOPES } from "../auth";
 import { isLoopbackHost } from "@better-auth/core/utils/host";
 import { errorResponse } from "../utils/error";
-import { oauthClientCquScopes, cquBindAddresses } from "../db/schema";
+import { oauthClientCquScopes, cquBindAddresses, userEntitlement } from "../db/schema";
 import {
   hashOAuthClientSecret,
   generateOAuthClientSecret,
 } from "../utils/oauth-secret";
+import {
+  validateEntitlementItems,
+  presetToItems,
+} from "../services/entitlements";
 import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 const admin = new Hono<HonoEnv>();
 
@@ -184,6 +188,23 @@ async function hasOAuthClientPermission(
   return res.success === true;
 }
 
+// Gate entitlement WRITE endpoints by the entitlement ACL. The admin middleware
+// only checks the admin/superAdmin role string; per the roles config only
+// superAdmin holds entitlement:["assign","revoke"] (plain admins read-only). The
+// write routes mutate the user_entitlement table directly, so enforce the
+// permission here or a read-only admin could grant/revoke entitlements.
+async function hasEntitlementPermission(
+  c: Context<HonoEnv>,
+  auth: ReturnType<typeof createAuth>,
+  action: "assign" | "revoke"
+): Promise<boolean> {
+  const res = await auth.api.userHasPermission({
+    headers: c.req.raw.headers,
+    body: { permissions: { entitlement: [action] } },
+  });
+  return res.success === true;
+}
+
 // Middleware: require admin or superAdmin role
 admin.use("/*", async (c, next) => {
   const auth = createAuth(c.env, c.req.raw);
@@ -329,6 +350,140 @@ admin.patch("/users/:id/cqu-binding", async (c) => {
     );
     return errorResponse(c, "CQU_BINDING_UPDATE_FAILED", "更新 CQU 绑定状态失败", 500);
   }
+});
+
+// ── Per-user entitlements ────────────────────────────────────────────────────
+// 事实源是 user_entitlement 表(每用户 × 子系统 × 能力的授权值)。读对 admin/
+// superAdmin 开放(中间件已 gate 角色);写(替换/套用/删除)额外要 entitlement 权限,
+// 只有 superAdmin 持有 —— 普通 admin 只读。
+
+// GET /api/admin/users/:id/entitlements - 列出某用户的全部 entitlement 原始行。
+// 读权限:admin.use("/*") 已 gate admin/superAdmin 角色,足够。
+admin.get("/users/:id/entitlements", async (c) => {
+  const userId = c.req.param("id");
+  const rows = await drizzle(c.env.DATABASE)
+    .select()
+    .from(userEntitlement)
+    .where(eq(userEntitlement.userId, userId))
+    .all();
+  return c.json({ data: rows });
+});
+
+// PUT /api/admin/users/:id/entitlements - 整组替换某用户的 entitlements。
+// body { items: [{subsystem,capability,value}] }。写权限:entitlement:assign(superAdmin)。
+// 写前先校验全部项;校验过再删旧全量、插新(空数组则只删不插)—— 与 oauth scopes 的
+// delete-then-insert 全量替换同模式。
+admin.put("/users/:id/entitlements", async (c) => {
+  const auth = createAuth(c.env, c.req.raw);
+  if (!(await hasEntitlementPermission(c, auth, "assign"))) {
+    return errorResponse(c, "FORBIDDEN", "需要权益写权限", 403);
+  }
+  const userId = c.req.param("id");
+  const body = await c.req
+    .json<{ items?: unknown }>()
+    .catch(() => ({}) as { items?: unknown });
+  const items = body.items as
+    | { subsystem: string; capability: string; value: string }[]
+    | undefined;
+  const invalid = validateEntitlementItems(items as never);
+  if (invalid) return errorResponse(c, "INVALID_ENTITLEMENTS", invalid, 400);
+
+  const db = drizzle(c.env.DATABASE);
+  const del = db
+    .delete(userEntitlement)
+    .where(eq(userEntitlement.userId, userId));
+  // 原子替换:delete + insert 走 D1 batch(单事务),即便 insert 因任何原因失败也不会
+  // 留下「已删全量、未插新值」的半完成态(用户被静默清空)。items 为空时只删不插
+  // (batch 要求非空数组,故空时单跑 delete)。validateEntitlementItems 已拒重复键,
+  // 这里是纵深防御:批内任一语句失败 → 整批回滚。
+  if (items!.length > 0) {
+    const ins = db.insert(userEntitlement).values(
+      items!.map((it) => ({
+        userId,
+        subsystem: it.subsystem,
+        capability: it.capability,
+        value: it.value,
+      }))
+    );
+    await db.batch([del, ins]);
+  } else {
+    await del;
+  }
+  return c.json({ success: true });
+});
+
+// POST /api/admin/users/:id/entitlements/preset - 一键套用命名预设。
+// body { preset: string }。写权限:entitlement:assign(superAdmin)。
+// upsert 语义:仅删该预设涉及的 (subsystem,capability) 行,再插预设项 —— 覆盖预设
+// 包含的能力,但保留用户其它无关 entitlement(契合「套用预设写若干行,仍可逐项加 share」)。
+admin.post("/users/:id/entitlements/preset", async (c) => {
+  const auth = createAuth(c.env, c.req.raw);
+  if (!(await hasEntitlementPermission(c, auth, "assign"))) {
+    return errorResponse(c, "FORBIDDEN", "需要权益写权限", 403);
+  }
+  const userId = c.req.param("id");
+  const body = await c.req
+    .json<{ preset?: string }>()
+    .catch(() => ({}) as { preset?: string });
+  const items = presetToItems(body.preset ?? "");
+  if (!items) return errorResponse(c, "UNKNOWN_PRESET", "未知预设", 400);
+
+  const db = drizzle(c.env.DATABASE);
+  // 仅删预设涵盖的 (subsystem,capability) 对（按 userId 限定），不动用户其它无关行。
+  // 按完整复合键逐对删除，避免不同子系统下同名 capability 被误删；预设很小（数项），
+  // 逐对删除清晰且远低于 D1 的 100 绑定参数上限。
+  //
+  // 原子化:把全部 per-pair delete + 单条 insert 合进一个 db.batch([...])(单 D1 事务),
+  // 即便 insert 因任何原因失败也不会留下「已删旧值、未插预设」的半完成态(用户被静默
+  // 部分清空)。presetToItems 不会产出空数组(真实预设至少一项),但仍守一手:items 为空时
+  // 不走 batch(batch 要求非空数组),按无可应用项返回。
+  if (items.length === 0) {
+    return c.json({ success: true, applied: 0 });
+  }
+  const stmts = items.map((it) =>
+    db
+      .delete(userEntitlement)
+      .where(
+        and(
+          eq(userEntitlement.userId, userId),
+          eq(userEntitlement.subsystem, it.subsystem),
+          eq(userEntitlement.capability, it.capability)
+        )
+      )
+  );
+  const ins = db.insert(userEntitlement).values(
+    items.map((it) => ({
+      userId,
+      subsystem: it.subsystem,
+      capability: it.capability,
+      value: it.value,
+    }))
+  );
+  await db.batch([stmts[0], ...stmts.slice(1), ins]);
+  return c.json({ success: true, applied: items.length });
+});
+
+// DELETE /api/admin/users/:id/entitlements/:subsystem/:capability - 撤销单条能力。
+// 写权限:entitlement:revoke(superAdmin)。按完整复合主键 (userId,subsystem,capability)
+// 删一行;幂等 —— 删不存在的行是安全 no-op。
+admin.delete("/users/:id/entitlements/:subsystem/:capability", async (c) => {
+  const auth = createAuth(c.env, c.req.raw);
+  if (!(await hasEntitlementPermission(c, auth, "revoke"))) {
+    return errorResponse(c, "FORBIDDEN", "需要权益撤销权限", 403);
+  }
+  const userId = c.req.param("id");
+  const subsystem = c.req.param("subsystem");
+  const capability = c.req.param("capability");
+  await drizzle(c.env.DATABASE)
+    .delete(userEntitlement)
+    .where(
+      and(
+        eq(userEntitlement.userId, userId),
+        eq(userEntitlement.subsystem, subsystem),
+        eq(userEntitlement.capability, capability)
+      )
+    );
+  return c.json({ success: true });
 });
 
 // Shape of a row returned by adapter.findMany({ model: "oauthClient" }).
