@@ -9,7 +9,23 @@ export function CopyButton({ value }: { value: string }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      // Clipboard may be unavailable (insecure context); silently ignore.
+      // Clipboard API unavailable (insecure context / old browser) — fall back
+      // to the legacy execCommand approach.
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = value;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      } catch {
+        // execCommand also unavailable — give up silently.
+      }
     }
   };
   return (

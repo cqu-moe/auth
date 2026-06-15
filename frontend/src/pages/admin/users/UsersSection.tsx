@@ -22,8 +22,11 @@ export function UsersSection() {
 
   // 用于存储当前实际生效的搜索词（防止竞态：分页按钮触发 fetchUsers 时读最新词）
   const searchRef = useRef("");
+  // 竞态守卫：每次发起请求时递增，响应到达时对比，旧响应直接丢弃。
+  const reqIdRef = useRef(0);
 
   const fetchUsers = useCallback(async (page = 1, term = searchRef.current) => {
+    const myReqId = ++reqIdRef.current;
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: String(page), limit: "20" });
@@ -31,29 +34,36 @@ export function UsersSection() {
         params.set("search", term.trim());
       }
       const res = await fetch(`/api/admin/users?${params.toString()}`);
+      if (myReqId !== reqIdRef.current) return;
       if (res.ok) {
         const data = await res.json() as UsersResponse;
+        if (myReqId !== reqIdRef.current) return;
         setUsers(data.data);
         setPagination({ page, total: data.pagination.total, totalPages: data.pagination.totalPages });
       } else {
         setError("加载用户列表失败");
       }
     } catch {
+      if (myReqId !== reqIdRef.current) return;
       setError("网络错误，请稍后重试");
     } finally {
-      setLoading(false);
+      // 只有最新请求才清除 loading，防止旧请求覆盖新请求的加载状态。
+      if (myReqId === reqIdRef.current) {
+        setLoading(false);
+      }
     }
   }, []);
 
-  // 初次加载
+  // 搜索防抖：首次挂载立即取，后续输入 300ms 后从第 1 页重新拉取
+  const didMountRef = useRef(false);
   useEffect(() => {
-    void fetchUsers(1, "");
-  }, [fetchUsers]);
-
-  // 搜索防抖：300ms 后从第 1 页重新拉取
-  useEffect(() => {
-    // 跳过初次挂载（search 初始值 "" 已由上方 useEffect 处理）
     searchRef.current = search;
+    if (!didMountRef.current) {
+      // 首次：立即执行，不设定时器
+      didMountRef.current = true;
+      void fetchUsers(1, search);
+      return;
+    }
     const timer = setTimeout(() => {
       void fetchUsers(1, search);
     }, 300);
@@ -169,6 +179,13 @@ export function UsersSection() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
+            {visibleUsers.length === 0 && (
+              <tr>
+                <td colSpan={5} className="py-8 text-center text-sm text-gray-400">
+                  无匹配用户
+                </td>
+              </tr>
+            )}
             {visibleUsers.map((user) => (
               <tr key={user.id} className="hover:bg-gray-50 transition-colors">
                 <td className="py-3 px-4">

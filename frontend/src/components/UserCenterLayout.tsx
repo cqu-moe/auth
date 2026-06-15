@@ -55,7 +55,13 @@ export default function UserCenterLayout({ children }: { children: ReactNode }) 
       <header className="bg-white border-b border-gray-200 sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <button className="md:hidden p-2 -ml-2 text-gray-500" onClick={() => setDrawer((v) => !v)} aria-label="菜单">
+            <button
+              className="md:hidden p-2 -ml-2 text-gray-500"
+              onClick={() => setDrawer((v) => !v)}
+              aria-label="菜单"
+              aria-expanded={drawer}
+              aria-controls="uc-drawer"
+            >
               ☰
             </button>
             <Link to="/dashboard" className="text-lg font-semibold text-blue-600">CQU Auth</Link>
@@ -76,7 +82,7 @@ export default function UserCenterLayout({ children }: { children: ReactNode }) 
         {drawer && (
           <div className="md:hidden fixed inset-0 z-40" onClick={() => setDrawer(false)}>
             <div className="absolute inset-0 bg-black/30" />
-            <div className="absolute left-0 top-16 bottom-0 w-60 bg-white border-r border-gray-200 p-4" onClick={(e) => e.stopPropagation()}>
+            <div id="uc-drawer" role="dialog" aria-modal="true" className="absolute left-0 top-16 bottom-0 w-60 bg-white border-r border-gray-200 p-4" onClick={(e) => e.stopPropagation()}>
               <NavLinks />
             </div>
           </div>

@@ -1051,10 +1051,10 @@ function Step4Done({ studentId }: { studentId: string }) {
       </div>
 
       <Link
-        to="/settings"
+        to="/cqu"
         className="block w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors text-center"
       >
-        返回账户设置
+        返回 CQU 账户
       </Link>
     </div>
   );
@@ -1080,11 +1080,11 @@ export default function CquBindWizard() {
       <div className="max-w-xl mx-auto">
         {/* Page header */}
         <div className="mb-6">
-          <Link to="/settings" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors">
+          <Link to="/cqu" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
             </svg>
-            返回设置
+            返回 CQU 账户
           </Link>
         </div>
 

@@ -1,6 +1,5 @@
-import type { EditorState } from "../types";
+import type { EditorState, ClientConfig } from "../types";
 import { CQU_SCOPE_KEYS } from "../constants";
-import type { ClientConfig } from "../types";
 
 export function emptyEditorState(): EditorState {
   return {

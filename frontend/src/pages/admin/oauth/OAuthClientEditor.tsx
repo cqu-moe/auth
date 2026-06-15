@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import type { ReactNode } from "react";
 import type { ClientConfig, ClientPayload, EditorState } from "../types";
 import {
   ALL_CQU_SCOPES,
@@ -14,7 +15,7 @@ import { Modal, Toggle, FieldLabel, StringListInput, inputClass } from "../../..
 // ---------------------------------------------------------------------------
 // Local helper: a consistent section heading + light top-border divider.
 // ---------------------------------------------------------------------------
-function SectionHeading({ children }: { children: React.ReactNode }) {
+function SectionHeading({ children }: { children: ReactNode }) {
   return (
     <div className="border-t border-gray-100 pt-4 pb-1">
       <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{children}</p>
