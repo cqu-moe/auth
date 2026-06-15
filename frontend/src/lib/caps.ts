@@ -1,4 +1,5 @@
 import { CAPABILITIES, isFlag, type CapDef, type Subsystem } from "../../../src/capabilities";
+import { authClient } from "./auth-client";
 
 export type Caps = Record<string, Record<string, boolean | number | null>>;
 export interface CapView {
@@ -19,4 +20,9 @@ export function capsToView(caps: Caps | undefined, subsystem: Subsystem): CapVie
       : value == null ? "无限" : `${value}${def.unit ? " " + def.unit : ""}`;
     return { key, label: def.label, type: def.type, value, display };
   });
+}
+
+export function useCaps(): Caps | undefined {
+  const { data } = authClient.useSession();
+  return (data as { caps?: Caps } | null | undefined)?.caps;
 }
