@@ -17,7 +17,7 @@ export default function Layout({ children }: LayoutProps) {
   };
 
   const user = session?.user as { role?: string; email?: string; name?: string } | undefined;
-  const isAdmin = user?.role === "admin";
+  const isAdmin = user?.role === "admin" || user?.role === "superAdmin";
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -31,9 +31,9 @@ export default function Layout({ children }: LayoutProps) {
               {session && (
                 <>
                   <Link
-                    to="/settings"
+                    to="/security"
                     className={`text-sm font-medium transition-colors ${
-                      location.pathname === "/settings"
+                      location.pathname === "/security"
                         ? "text-blue-600"
                         : "text-gray-600 hover:text-gray-900"
                     }`}
