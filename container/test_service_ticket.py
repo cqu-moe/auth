@@ -10,7 +10,9 @@
   · 会话过期(TicketError code=SESSION_EXPIRED) → 409 {ok:false}。
   · 其余取票失败(NO_TICKET / 网络层) → 502 {ok:false}。
 
-测试把 server.acquire_qg_proxy 与 server.cqu_ticket.fetch_service_ticket 全 monkeypatch,
+测试把 server.acquire_qg_proxy 与 server.cqu_ticket.fetch_service_ticket_retrying 全 monkeypatch
+(端点 handler 直接调的是带退避重试的 _retrying 版, 它内部才调 fetch_service_ticket;
+直接 mock _retrying 命中 handler 调用层, 不经真重试逻辑——更快更确定, 错误路径不会真 sleep 重试 3 次),
 两条出站(青果提取 + 经青果取票)都不触网。
 
 运行:
@@ -43,12 +45,12 @@ class ServiceTicketTestCase(AioHTTPTestCase):
         super().setUp()
         self._orig_acquire = server.acquire_qg_proxy
         self._orig_should = server.should_use_proxy
-        self._orig_fetch = server.cqu_ticket.fetch_service_ticket
+        self._orig_fetch = server.cqu_ticket.fetch_service_ticket_retrying
 
     def tearDown(self):
         server.acquire_qg_proxy = self._orig_acquire
         server.should_use_proxy = self._orig_should
-        server.cqu_ticket.fetch_service_ticket = self._orig_fetch
+        server.cqu_ticket.fetch_service_ticket_retrying = self._orig_fetch
         super().tearDown()
 
     async def test_qg_extract_failure_returns_502(self):
@@ -63,7 +65,7 @@ class ServiceTicketTestCase(AioHTTPTestCase):
             return "ST-should-not-happen"
 
         server.acquire_qg_proxy = _boom
-        server.cqu_ticket.fetch_service_ticket = _fetch
+        server.cqu_ticket.fetch_service_ticket_retrying = _fetch
 
         resp = await self.client.post("/service-ticket", json=_VALID_BODY)
         assert resp.status == 502, f"expected 502, got {resp.status}"
@@ -88,7 +90,7 @@ class ServiceTicketTestCase(AioHTTPTestCase):
             return "ST-realticket-xyz"
 
         server.acquire_qg_proxy = _ok
-        server.cqu_ticket.fetch_service_ticket = _fetch
+        server.cqu_ticket.fetch_service_ticket_retrying = _fetch
 
         resp = await self.client.post("/service-ticket", json=_VALID_BODY)
         assert resp.status == 200, f"expected 200, got {resp.status}"
@@ -122,7 +124,7 @@ class ServiceTicketTestCase(AioHTTPTestCase):
 
         server.should_use_proxy = _no_proxy
         server.acquire_qg_proxy = _track_acquire
-        server.cqu_ticket.fetch_service_ticket = _fetch
+        server.cqu_ticket.fetch_service_ticket_retrying = _fetch
 
         resp = await self.client.post("/service-ticket", json=_VALID_BODY)
         assert resp.status == 200, f"expected 200, got {resp.status}"
@@ -141,7 +143,7 @@ class ServiceTicketTestCase(AioHTTPTestCase):
             raise TicketError("SESSION_EXPIRED", "fell back to CAS login page")
 
         server.acquire_qg_proxy = _ok
-        server.cqu_ticket.fetch_service_ticket = _fetch
+        server.cqu_ticket.fetch_service_ticket_retrying = _fetch
 
         resp = await self.client.post("/service-ticket", json=_VALID_BODY)
         assert resp.status == 409, f"expected 409, got {resp.status}"
@@ -158,7 +160,7 @@ class ServiceTicketTestCase(AioHTTPTestCase):
             raise TicketError("NO_TICKET", "no ST in redirect chain")
 
         server.acquire_qg_proxy = _ok
-        server.cqu_ticket.fetch_service_ticket = _fetch
+        server.cqu_ticket.fetch_service_ticket_retrying = _fetch
 
         resp = await self.client.post("/service-ticket", json=_VALID_BODY)
         assert resp.status == 502, f"expected 502, got {resp.status}"
@@ -175,7 +177,7 @@ class ServiceTicketTestCase(AioHTTPTestCase):
             raise RuntimeError("connection reset by peer")
 
         server.acquire_qg_proxy = _ok
-        server.cqu_ticket.fetch_service_ticket = _fetch
+        server.cqu_ticket.fetch_service_ticket_retrying = _fetch
 
         resp = await self.client.post("/service-ticket", json=_VALID_BODY)
         assert resp.status == 502, f"expected 502, got {resp.status}"

@@ -41,14 +41,24 @@ def parse_extract_response(body: dict) -> str:
 
 def _select_credentials(profile: str) -> tuple[str, str]:
     """按 profile 选青果套餐的 (Authkey, pwd)。两个套餐各一独立 Authkey, 提取时靠选 key 区分:
-    - "login"(15 分钟包, 给 ~11 分钟的登录): QG_AUTH_KEY_LOGIN/QG_AUTH_PWD_LOGIN,
-      未设(None/空)则回退到 QG_AUTH_KEY/QG_AUTH_PWD(单套餐部署也能跑)。
+    - "login"(15 分钟包, 给 ~11 分钟的登录): QG_AUTH_KEY_LOGIN/QG_AUTH_PWD_LOGIN。
+      **all-or-nothing**: 这对 key/pwd 要么都配(用登录包)、要么都不配(整对回退短效包),
+      绝不混 —— 两个青果套餐是不同账号, key/pwd 跨账号混用会让代理鉴权必失败。只配其一
+      (如只配 KEY_LOGIN 没配 PWD_LOGIN)→ 抛 KeyError fail loud, 不静默拿登录包 key 配短效包 pwd。
+      空串(""/falsy)视为未设, 走回退分支。
     - 其它(含 "short", 1 分钟包, 给高频取票/keepalive): QG_AUTH_KEY/QG_AUTH_PWD。
     缺 QG_AUTH_KEY/QG_AUTH_PWD 是配置错误, 让 KeyError fail loud, 不收口。"""
     if profile == "login":
-        key = os.environ.get("QG_AUTH_KEY_LOGIN") or os.environ["QG_AUTH_KEY"]
-        pwd = os.environ.get("QG_AUTH_PWD_LOGIN") or os.environ["QG_AUTH_PWD"]
-        return key, pwd
+        login_key = os.environ.get("QG_AUTH_KEY_LOGIN")
+        login_pwd = os.environ.get("QG_AUTH_PWD_LOGIN")
+        if login_key and login_pwd:
+            return login_key, login_pwd
+        if login_key or login_pwd:
+            raise KeyError(
+                "QG_AUTH_KEY_LOGIN 与 QG_AUTH_PWD_LOGIN 必须成对配置(或都不配以回退短效包); "
+                "只配其一会拿登录包 key 配短效包 pwd(跨账号), 代理鉴权必失败"
+            )
+        # 都未设(或都为空串)→ 回退短效包整对(不混)
     return os.environ["QG_AUTH_KEY"], os.environ["QG_AUTH_PWD"]
 
 

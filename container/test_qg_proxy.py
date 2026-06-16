@@ -284,3 +284,32 @@ def test_acquire_qg_proxy_login_empty_key_falls_back_to_short(monkeypatch):
     assert result["username"] == "K0"
     assert result["password"] == "P0"
     assert "key=K0" in captured[0]
+
+
+def test_acquire_qg_proxy_login_only_key_set_raises_keyerror(monkeypatch):
+    # all-or-nothing: 只配 QG_AUTH_KEY_LOGIN 没配 QG_AUTH_PWD_LOGIN → 旧逻辑会拿登录包 key
+    # 配短效包 pwd(跨账号混用, 代理鉴权必失败)。现在必须 fail loud 抛 KeyError。
+    import asyncio
+
+    from qg_proxy import acquire_qg_proxy
+
+    monkeypatch.setenv("QG_AUTH_KEY", "K0")
+    monkeypatch.setenv("QG_AUTH_PWD", "P0")
+    monkeypatch.setenv("QG_AUTH_KEY_LOGIN", "K1")
+    monkeypatch.delenv("QG_AUTH_PWD_LOGIN", raising=False)
+    with pytest.raises(KeyError):
+        asyncio.run(acquire_qg_proxy("login"))
+
+
+def test_acquire_qg_proxy_login_only_pwd_set_raises_keyerror(monkeypatch):
+    # all-or-nothing 对称情形: 只配 QG_AUTH_PWD_LOGIN 没配 QG_AUTH_KEY_LOGIN → 同样 KeyError。
+    import asyncio
+
+    from qg_proxy import acquire_qg_proxy
+
+    monkeypatch.setenv("QG_AUTH_KEY", "K0")
+    monkeypatch.setenv("QG_AUTH_PWD", "P0")
+    monkeypatch.delenv("QG_AUTH_KEY_LOGIN", raising=False)
+    monkeypatch.setenv("QG_AUTH_PWD_LOGIN", "P1")
+    with pytest.raises(KeyError):
+        asyncio.run(acquire_qg_proxy("login"))
