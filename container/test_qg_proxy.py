@@ -11,7 +11,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import pytest  # noqa: E402
 
-from qg_proxy import build_extract_url, parse_extract_response, QgExtractError  # noqa: E402
+from qg_proxy import (  # noqa: E402
+    build_extract_url,
+    parse_extract_response,
+    QgExtractError,
+    should_use_proxy,
+)
 
 
 def test_build_extract_url_has_required_params():
@@ -45,12 +50,12 @@ def test_parse_extract_response_malformed_item_raises():
 
 def test_acquire_qg_proxy_network_error_raises(monkeypatch):
     # 网络错误/超时也算"拿不到 IP" → 必须收口成 QgExtractError(让上游 502 退避)
+    # 注: acquire 不再依赖 QG_ENABLED(改由 should_use_proxy 门控), 默认 profile=short。
     import asyncio
     import httpx as _httpx
 
     from qg_proxy import acquire_qg_proxy
 
-    monkeypatch.setenv("QG_ENABLED", "1")
     monkeypatch.setenv("QG_AUTH_KEY", "K")
     monkeypatch.setenv("QG_AUTH_PWD", "P")
 
@@ -70,3 +75,128 @@ def test_acquire_qg_proxy_network_error_raises(monkeypatch):
     monkeypatch.setattr(_httpx, "AsyncClient", _FakeClient)
     with pytest.raises(QgExtractError):
         asyncio.run(acquire_qg_proxy())
+
+
+def _install_fake_client(monkeypatch, server="1.2.3.4:20000"):
+    """monkeypatch httpx.AsyncClient 返回固定 server, 记录收到的 url。返回 captured list。"""
+    import httpx as _httpx
+
+    captured = []
+
+    class _FakeResp:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"code": "SUCCESS", "data": [{"server": server}]}
+
+    class _FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url):
+            captured.append(url)
+            return _FakeResp()
+
+    monkeypatch.setattr(_httpx, "AsyncClient", _FakeClient)
+    return captured
+
+
+def test_acquire_qg_proxy_login_uses_login_key(monkeypatch):
+    # profile="login" 应选 QG_AUTH_KEY_LOGIN/QG_AUTH_PWD_LOGIN, 不取 short 套餐的 K0/P0。
+    import asyncio
+
+    from qg_proxy import acquire_qg_proxy
+
+    monkeypatch.setenv("QG_AUTH_KEY", "K0")
+    monkeypatch.setenv("QG_AUTH_PWD", "P0")
+    monkeypatch.setenv("QG_AUTH_KEY_LOGIN", "K1")
+    monkeypatch.setenv("QG_AUTH_PWD_LOGIN", "P1")
+    captured = _install_fake_client(monkeypatch)
+
+    result = asyncio.run(acquire_qg_proxy("login"))
+    assert result["username"] == "K1"
+    assert result["password"] == "P1"
+    assert result["server"] == "http://1.2.3.4:20000"
+    # 提取 URL 必须用 login key(而非 short key K0)
+    assert "key=K1" in captured[0]
+    assert "key=K0" not in captured[0]
+
+
+def test_acquire_qg_proxy_login_falls_back_to_short_key(monkeypatch):
+    # 只设 short 套餐(未设 LOGIN) → profile="login" 回退到 QG_AUTH_KEY/QG_AUTH_PWD。
+    import asyncio
+
+    from qg_proxy import acquire_qg_proxy
+
+    monkeypatch.setenv("QG_AUTH_KEY", "K0")
+    monkeypatch.setenv("QG_AUTH_PWD", "P0")
+    monkeypatch.delenv("QG_AUTH_KEY_LOGIN", raising=False)
+    monkeypatch.delenv("QG_AUTH_PWD_LOGIN", raising=False)
+    captured = _install_fake_client(monkeypatch)
+
+    result = asyncio.run(acquire_qg_proxy("login"))
+    assert result["username"] == "K0"
+    assert result["password"] == "P0"
+    assert "key=K0" in captured[0]
+
+
+def test_acquire_qg_proxy_short_uses_base_key(monkeypatch):
+    # 默认 profile="short" 用 QG_AUTH_KEY/QG_AUTH_PWD。
+    import asyncio
+
+    from qg_proxy import acquire_qg_proxy
+
+    monkeypatch.setenv("QG_AUTH_KEY", "K0")
+    monkeypatch.setenv("QG_AUTH_PWD", "P0")
+    monkeypatch.setenv("QG_AUTH_KEY_LOGIN", "K1")
+    monkeypatch.setenv("QG_AUTH_PWD_LOGIN", "P1")
+    captured = _install_fake_client(monkeypatch)
+
+    # 显式 "short" 与默认应一致
+    result = asyncio.run(acquire_qg_proxy("short"))
+    assert result["username"] == "K0"
+    assert result["password"] == "P0"
+    assert "key=K0" in captured[0]
+
+    default_result = asyncio.run(acquire_qg_proxy())
+    assert default_result["username"] == "K0"
+
+
+def test_should_use_proxy_default_all_on(monkeypatch):
+    monkeypatch.delenv("QG_ENABLED", raising=False)
+    monkeypatch.delenv("QG_PROXY_LOGIN", raising=False)
+    monkeypatch.delenv("QG_PROXY_SHORT", raising=False)
+    assert should_use_proxy("login") is True
+    assert should_use_proxy("short") is True
+
+
+def test_should_use_proxy_master_switch_off(monkeypatch):
+    monkeypatch.setenv("QG_ENABLED", "0")
+    # 总闸关 → 两路都直连(忽略 per-route)
+    monkeypatch.setenv("QG_PROXY_LOGIN", "1")
+    monkeypatch.setenv("QG_PROXY_SHORT", "1")
+    assert should_use_proxy("login") is False
+    assert should_use_proxy("short") is False
+
+
+def test_should_use_proxy_login_off_short_on(monkeypatch):
+    monkeypatch.delenv("QG_ENABLED", raising=False)
+    monkeypatch.setenv("QG_PROXY_LOGIN", "0")
+    monkeypatch.delenv("QG_PROXY_SHORT", raising=False)
+    assert should_use_proxy("login") is False
+    assert should_use_proxy("short") is True
+
+
+def test_should_use_proxy_short_off_login_on(monkeypatch):
+    monkeypatch.delenv("QG_ENABLED", raising=False)
+    monkeypatch.delenv("QG_PROXY_LOGIN", raising=False)
+    monkeypatch.setenv("QG_PROXY_SHORT", "0")
+    assert should_use_proxy("short") is False
+    assert should_use_proxy("login") is True
