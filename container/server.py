@@ -129,7 +129,8 @@ async def run_handler(request: web.Request) -> web.Response:
             ),
             timeout=RUN_TOTAL_TIMEOUT,
         )
-        log.info("run ok session=%s ticket=%s", session, result.get("ticket", "")[:24])
+        # ticket 是 bearer 凭据, 不入日志(session 不是凭据可留); 对齐 DO 审计「绝不记录 ticket/cookies/密码」。
+        log.info("run ok session=%s", session)
         return web.json_response({"ok": True, **result})
     except CodeWaitTimeout:
         # 内层: 等码超时, 验证码始终没到(邮件未送达 / DO 未推码)。
@@ -223,7 +224,8 @@ async def service_ticket_handler(request: web.Request) -> web.Response:
         # 耗尽后仍抛 TicketError/httpx 错误, 由下面 except 按现有语义映射:
         # NO_TICKET→502 / SESSION_EXPIRED→409 / 网络错→502。
         ticket = await cqu_ticket.fetch_service_ticket_retrying(service_url, cookies, proxy)
-        log.info("service-ticket ok ticket=%s", ticket[:24])
+        # ST 是 bearer 凭据, 绝不打它的值(只记长度供诊断); 对齐 DO 审计「绝不记录 ticket/cookies/密码」。
+        log.info("service-ticket ok (len=%d)", len(ticket))
         return web.json_response({"ok": True, "ticket": ticket})
     except TicketError as e:
         # 会话过期 → 409(客户端态: cookie 失效, 交重登); 其余取票失败 → 502(瞬态, 退避重试)。

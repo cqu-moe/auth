@@ -104,6 +104,30 @@ class ServiceTicketTestCase(AioHTTPTestCase):
         assert captured["service_url"] == _VALID_BODY["serviceUrl"]
         assert captured["cookies"] == _VALID_BODY["cookies"]
 
+    async def test_success_log_does_not_leak_ticket(self):
+        # ST 是 bearer 凭据, 成功日志绝不该打它的值(对齐 DO 审计「绝不记录 ticket/cookies/密码」)。
+        sentinel = "ST-SENSITIVE-xyz-DO-NOT-LOG"
+
+        async def _ok(profile="short"):
+            return _FAKE_PROXY
+
+        async def _fetch(service_url, cookies, proxy):
+            return sentinel
+
+        server.acquire_qg_proxy = _ok
+        server.cqu_ticket.fetch_service_ticket_retrying = _fetch
+
+        with self.assertLogs("cqu-login-server", level="INFO") as cm:
+            resp = await self.client.post("/service-ticket", json=_VALID_BODY)
+        assert resp.status == 200, f"expected 200, got {resp.status}"
+        data = await resp.json()
+        # 返回体仍含 ticket(那是给 DO 的, 不是日志)。
+        assert data["ticket"] == sentinel
+        # 关键: 任何一条日志记录都不得出现 ticket 值(全值或任意前缀片段)。
+        joined = "\n".join(cm.output)
+        assert sentinel not in joined, f"ticket value leaked into logs: {cm.output}"
+        assert sentinel[:24] not in joined, f"ticket prefix leaked into logs: {cm.output}"
+
     async def test_gray_door_off_direct_connect_no_acquire(self):
         # 灰度门关(should_use_proxy("short")=False) → 节点直连: 不调 acquire_qg_proxy,
         # 传给 fetch 的 proxy 必须是 None。

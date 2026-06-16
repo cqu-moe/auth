@@ -37,20 +37,26 @@ def classify_probe(ticket: str | None = None, error: Exception | None = None) ->
 
     返回:
       · "alive":       探测换到了 ST(会话服务端有效)。
-      · "expired":     TicketError(SESSION_EXPIRED) —— 落回 CAS 登录页, TGT 真失效。
-                       仅此一种判过期(对齐 DO: 只有正向认出 cas-login 才算真过期)。
-      · "unreachable": 其余一切 —— NO_TICKET(瑞数误判/未知页)、缺 cookie、网络层/超时、
-                       未知异常。对齐 DO isTransientSsoError 的 transient 语义: 不证明
-                       凭证坏, 让 DO 退避快重试而非误触重登。
+      · "expired":     交 DO 重登的「确定性坏态」, 退避修不好, 只能重铸凭证。含两种:
+                       - SESSION_EXPIRED: 落回 CAS 登录页, TGT 真失效(正向认出 cas-login)。
+                       - MISSING_COOKIE:  3 个 cookie(SOURCEID_TGC/SESSION/rg_objectid)缺任一,
+                         探测无从发起 —— 确定性坏态, 非瞬态。归 unreachable 会让 DO 永远退避、
+                         留着坏 cookie 不重登, 用户卡死在反复 transient 失败; 故交 DO 重登铸
+                         一套新的完整 cookie。
+      · "unreachable": 其余一切 —— NO_TICKET(瑞数误判/未知页)、网络层/超时、未知异常。
+                       对齐 DO isTransientSsoError 的 transient 语义: 不证明凭证坏, 让 DO
+                       退避快重试而非误触重登。
 
-    判定只依赖「已正向验证的 cas-login 信号(SESSION_EXPIRED)」—— 其余保守归 unreachable,
-    因为「误判重登」的代价(触瑞数风控 + 烧容器)远高于「多退避一轮」。
+    判定区分「确定性坏态(SESSION_EXPIRED/MISSING_COOKIE → expired, 重登铸新凭证)」与
+    「瞬态/不确定(其余 → unreachable, 退避重试)」—— 后者保守不重登, 因「误判重登」的代价
+    (触瑞数风控 + 烧容器)远高于「多退避一轮」; 但确定性坏态退避永远修不好, 必须重登。
     """
     if error is None and ticket:
         return "alive"
-    # 只有正向认出 CAS 登录页(SESSION_EXPIRED)才判真过期; 其余 TicketError code 与
-    # 任何非 TicketError 异常(网络层/超时/未知)一律保守归 unreachable。
-    if isinstance(error, TicketError) and error.code == "SESSION_EXPIRED":
+    # 确定性坏态 → expired(交 DO 重登): SESSION_EXPIRED(正向认出 CAS 登录页, TGT 真失效)、
+    # MISSING_COOKIE(cookie 残缺, 探测无从发起, 退避修不好)。其余 TicketError code(NO_TICKET 等)
+    # 与任何非 TicketError 异常(网络层/超时/未知)一律保守归 unreachable(瞬态, 让 DO 退避)。
+    if isinstance(error, TicketError) and error.code in ("SESSION_EXPIRED", "MISSING_COOKIE"):
         return "expired"
     return "unreachable"
 

@@ -43,11 +43,12 @@ def test_classify_no_ticket_is_unreachable():
     assert classify_probe(error=err) == "unreachable"
 
 
-# ── classify_probe: 缺 cookie 也属探不通(unreachable) ──────────────────────
-def test_classify_missing_cookie_is_unreachable():
-    # cookie 不全无法探测 = 探不通; 不证明会话过期, 归 unreachable(让 DO 退避)。
+# ── classify_probe: 缺 cookie 是确定性坏态(expired, 交重登铸新完整 cookie) ─────
+def test_classify_missing_cookie_is_expired():
+    # cookie 残缺(3 个缺任一)是**确定性坏态**, 不是瞬态: 退避永远修不好。
+    # 归 expired 让 DO 重登铸一套新的完整 cookie, 而非无限退避卡死用户。
     err = TicketError("MISSING_COOKIE", "missing CQU SSO cookie(s): SESSION")
-    assert classify_probe(error=err) == "unreachable"
+    assert classify_probe(error=err) == "expired"
 
 
 # ── classify_probe: 网络层/未知异常 → unreachable(保守, 重试胜于误判重登) ────
