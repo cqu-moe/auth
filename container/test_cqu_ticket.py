@@ -256,15 +256,17 @@ class _FakeResponse:
 
 
 class _FakeAsyncClient:
-    """假 httpx.AsyncClient: 捕获构造 kwargs(尤其 proxy), get() 返回脚本化假 response。
+    """假 httpx.AsyncClient: 捕获构造 kwargs(尤其 proxy / trust_env), get() 返回脚本化假 response。
 
-    类属性 seen_proxy 记录最近一次构造收到的 proxy kwarg, 供测试断言。
+    类属性 seen_proxy / seen_trust_env 记录最近一次构造收到的 kwarg, 供测试断言。
     """
 
     seen_proxy = object()  # 哨兵: 未被构造过(区别于真的传了 None)
+    seen_trust_env = object()
 
     def __init__(self, *args, **kwargs):
         type(self).seen_proxy = kwargs.get("proxy")
+        type(self).seen_trust_env = kwargs.get("trust_env")
 
     async def __aenter__(self):
         return self
@@ -279,6 +281,7 @@ class _FakeAsyncClient:
 
 def _patch_client(monkeypatch):
     _FakeAsyncClient.seen_proxy = object()
+    _FakeAsyncClient.seen_trust_env = object()
     monkeypatch.setattr(cqu_ticket.httpx, "AsyncClient", _FakeAsyncClient)
 
 
@@ -290,6 +293,8 @@ def test_fetch_with_none_proxy_passes_none_to_client(monkeypatch):
     )
     assert out == "ST-1-aaa.bbb"
     assert _FakeAsyncClient.seen_proxy is None
+    # trust_env=False: proxy=None 时必须真直连, 不读环境 HTTP(S)_PROXY/ALL_PROXY 悄改出口 IP。
+    assert _FakeAsyncClient.seen_trust_env is False
 
 
 def test_fetch_with_proxy_dict_passes_proxy_url_to_client(monkeypatch):
@@ -302,3 +307,15 @@ def test_fetch_with_proxy_dict_passes_proxy_url_to_client(monkeypatch):
     assert out == "ST-1-aaa.bbb"
     assert _FakeAsyncClient.seen_proxy == cqu_ticket._proxy_url(proxy)
     assert _FakeAsyncClient.seen_proxy == "http://u:p@1.2.3.4:20000"
+    # trust_env=False: 经青果时也只用我们传的代理, 杜绝环境变量另叠一层代理改出口。
+    assert _FakeAsyncClient.seen_trust_env is False
+
+
+def test_fetch_with_empty_proxy_dict_fails_loud(monkeypatch):
+    # 空 dict {} 是残缺入参(无 server/username/password): proxy is not None 让它走 _proxy_url({}),
+    # 取 proxy["server"] 抛 KeyError → fail-loud(而非被当 falsy 静默直连, 那会悄改出口 IP)。
+    _patch_client(monkeypatch)
+    with pytest.raises(KeyError):
+        asyncio.run(
+            cqu_ticket.fetch_service_ticket("https://x.cqu.edu.cn/cb", _FULL_COOKIES, {})
+        )

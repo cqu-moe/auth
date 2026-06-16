@@ -125,10 +125,12 @@ async def fetch_service_ticket(service_url: str, cookies: dict, proxy: dict | No
     cookie_jar = select_cookies(cookies)
     url = build_service_login_url(service_url)
     async with httpx.AsyncClient(
-        proxy=_proxy_url(proxy) if proxy else None,  # proxy=None → httpx 直连, 不挂代理
+        proxy=_proxy_url(proxy) if proxy is not None else None,
         timeout=FETCH_TIMEOUT,
         follow_redirects=True,
         headers={"User-Agent": UA},
+        trust_env=False,  # 不读环境 HTTP(S)_PROXY/ALL_PROXY/.netrc: proxy=None 时确保真直连
+                          # (节点境内 IP), proxy 给定时只用我们传的青果代理, 杜绝环境变量悄改出口 IP。
     ) as client:
         resp = await client.get(url, cookies=cookie_jar)
 

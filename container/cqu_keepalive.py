@@ -6,8 +6,8 @@
 开关 QG_PROXY_*/QG_ENABLED)决定, 本模块只把入参 proxy 透传给 fetch_service_ticket 选路。
 
 职责边界(只返回「探测事实」, 不做「决策」):
-  · 本模块只负责: 拿 DO 给的 3 个 cookie, 经青果去 CQU CAS 做一次探测换票, 把结果归成
-    三态(alive / expired / unreachable)如实返回 DO。
+  · 本模块只负责: 拿 DO 给的 3 个 cookie, 经青果或直连(由 proxy 是否为 None 决定)去 CQU CAS
+    做一次探测换票, 把结果归成三态(alive / expired / unreachable)如实返回 DO。
   · 熔断 / 退避 / 状态机(该重登还是该退避)全留在 Cloudflare DO 侧
     (src/durable-objects/cqu-session.ts 的 alarm/runKeepAlive), 不迁到这里。
 
