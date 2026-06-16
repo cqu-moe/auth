@@ -18,6 +18,7 @@
 - [x] **Cloudflare Tunnel** 已建:**Tunnel ID `35d48aa0-ecd1-402a-b913-932e7a8ec0ac`**(remotely-managed,名 `tencent-cd-cqu-moe`)。connector token 由用户在 VPS `cloudflared service install <token>`(不入仓库)。
 - [ ] **Workers VPC** binding 在 DO 内 `env.LOGIN_NODE.fetch()` 可用性 — 部署验证(beta)。
 - [ ] **青果套餐**：确认提取额度覆盖「登录 + keepalive 均提取」;`QG_AUTH_KEY/PWD` 就绪(上线前轮换对话中出现过的那对)。
+- [ ] **1Password Environment + service account**:建 Environment(放 `QG_*` 运行时 secret)+ service account scope 到它(只读);给我 environment ID;service account token 用户放 VPS(不入仓库)。
 - [ ] 决定 keepalive 频率(现 15min)是否下调省青果提取(设计 §9 风险 4)。
 
 > Phase 1、2 纯 codebase,不依赖 VPS;Phase 3 部署用 `<CN_NODE>`。
@@ -247,11 +248,17 @@ git commit -m "feat(cn-node): /run 经青果出站, 提取失败 502(硬依赖�
 ### Task 3.1：国内节点部署
 ```bash
 # 在 <CN_NODE>:
-# 1. 装系统库(chromium 依赖) + python3.12 + pip
+# 1. 装系统库(chromium 依赖) + python3.12 + pip + 1Password CLI(op)
 # 2. 拷 container/ 目录; cd container
 pip install -r requirements.txt && patchright install chromium
-# 3. 配 /etc/cqu-login.env: QG_AUTH_KEY/QG_AUTH_PWD/QG_AREA=500100/QG_ENABLED=1
-# 4. systemd unit cqu-login.service: ExecStart=python server.py, EnvironmentFile=/etc/cqu-login.env, Restart=always
+```
+**secret 经 1Password 注入,不落盘明文(见设计 §7)**:
+- 1Password 建 **Environment**(放 `QG_AUTH_KEY/QG_AUTH_PWD/QG_AREA=500100/QG_ENABLED=1/QG_EXTRACT_BASE`)+ **service account** scope 到它(只读)。
+- systemd `cqu-login.service`:
+  - service account token 经 `LoadCredential`(或 600-root `EnvironmentFile`)提供 `OP_SERVICE_ACCOUNT_TOKEN`(用户放,不入仓库)
+  - `ExecStart=op run --environment <envID> -- python server.py`
+  - `Restart=always`
+```bash
 systemctl enable --now cqu-login
 curl -s localhost:8080/ping   # 期望 {"ok":true}
 ```

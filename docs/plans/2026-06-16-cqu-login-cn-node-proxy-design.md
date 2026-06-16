@@ -108,7 +108,7 @@ DO 三条「连 CQU」出站全部改经 VPC binding 调国内节点:
 - **失败回退(硬依赖)**:`QG_ENABLED=on` 时青果提取失败 → 端点 5xx → DO 退避,绝不自动直连。
 - **配置/secret**:
   - CF:`wrangler` 的 `vpc_services` binding(`LOGIN_NODE` → `service_id`);现有 secret 不变。**VPC Service 用 `wrangler vpc service create <name> --type http --tunnel-id <id> --http-port 8080 --ipv4 <VPS目标>` 建**(本地 wrangler 4.94 已支持),拿 `service_id` 回填 binding。
-  - 国内节点:`QG_EXTRACT_URL`(含 key + `area=500100`)、`QG_AUTH_KEY/PWD`、`QG_ENABLED`;cloudflared connector token(dashboard 给,**用户**在 VPS `cloudflared service install` 执行,不入仓库)。
+  - 国内节点:运行时 secret(`QG_AUTH_KEY/PWD`、`QG_AREA=500100`、`QG_ENABLED`、`QG_EXTRACT_BASE`)**托管在 1Password Environment**,systemd 用 `op run --environment <id> -- python server.py` 注入(**运行时拉取,不落盘明文**);认证用 **service account**(scope 到该 Environment 只读),其 token 经 systemd `LoadCredential` / 600-root 提供(用户放,不入仓库)。cloudflared connector token 同理由**用户**在 VPS `cloudflared service install` 执行。
 - **安全性质(不退步)**:CQU 账号密码仍只加密存 CF D1,DO 解密后经 Workers VPC 私有通道传 `/run`,**国内节点用完即弃、绝不落地**。
 
 ## 8. 测试 / 上线 / 回滚
@@ -148,4 +148,4 @@ DO 三条「连 CQU」出站全部改经 VPC binding 调国内节点:
 - Workers VPC beta 在「DO 内调用 binding」的可用性需部署验证。
 - tunnel 的 Private Network 路由 → VPS `:8080` 确切配法(loopback vs 内网 IP)+ VPC Service `--ipv4/--hostname` 对齐,装时定。
 - cloudflared 国内稳定性需上线后观测几天。
-- 青果账密(本对话中出现的)上线前轮换,经 secret 注入。
+- 青果账密(本对话中出现的)上线前轮换;运行时 secret 改由 **1Password Environment + service account + `op run`** 注入(用户建 Environment 放 `QG_*` + service account scope 到它,给 environment ID;service account token 不入仓库)。
