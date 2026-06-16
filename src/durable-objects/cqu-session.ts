@@ -34,10 +34,14 @@ import { resolveCaps } from "../services/entitlements";
 import { cquErrorHttpStatus } from "../services/cqu-error-status";
 import type { Env } from "../types";
 
-const KEEPALIVE_INTERVAL_MS = 15 * 60 * 1000;
+// keepalive 每个探针经国内节点提取 1 个青果 IP(连 CQU 出站经青果)。频率直接决定青果消耗:
+// 15min→96 个/天, 60min→24 个/天 —— 取 60min 省青果(单账号够用)。代价: 会话若在两次探针
+// 间意外失效, 最长 ~60min 后才被探到并重登(期间 on-demand 取票会 TGT_EXPIRED)。TGT 绝对
+// 寿命 ~8h 且 7h 处已主动重铸, 故 60min 足以兜住「正常过期」; 仅罕见「定点过期」窗口变长。
+const KEEPALIVE_INTERVAL_MS = 60 * 60 * 1000;
 const RETRY_INTERVAL_MS = 60 * 1000;
 const MAX_FAST_RETRIES = 5;
-// 熔断: transient(瑞数/网络)连续失败时 keepalive 退避封顶(从 15min 指数涨到 6h)。
+// 熔断: transient(瑞数/网络)连续失败时 keepalive 退避封顶(从 KEEPALIVE_INTERVAL_MS 指数涨到 6h)。
 const KEEPALIVE_MAX_BACKOFF_MS = 6 * 60 * 60 * 1000;
 // TGT 绝对寿命 ~8h；在 7h 处主动重铸, 留 ~1h 余量给重登流程(容器点火 + 发码 + 邮件到达 + 提交)。
 const PROACTIVE_RELOGIN_MS = 7 * 60 * 60 * 1000;
