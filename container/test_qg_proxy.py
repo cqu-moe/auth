@@ -41,3 +41,32 @@ def test_parse_extract_response_malformed_item_raises():
     # data[0] 非 dict(畸形响应)也应抛 QgExtractError, 而非 AttributeError
     with pytest.raises(QgExtractError):
         parse_extract_response({"code": "SUCCESS", "data": ["not-a-dict"]})
+
+
+def test_acquire_qg_proxy_network_error_raises(monkeypatch):
+    # 网络错误/超时也算"拿不到 IP" → 必须收口成 QgExtractError(让上游 502 退避)
+    import asyncio
+    import httpx as _httpx
+
+    from qg_proxy import acquire_qg_proxy
+
+    monkeypatch.setenv("QG_ENABLED", "1")
+    monkeypatch.setenv("QG_AUTH_KEY", "K")
+    monkeypatch.setenv("QG_AUTH_PWD", "P")
+
+    class _FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url):
+            raise _httpx.ConnectTimeout("boom")
+
+    monkeypatch.setattr(_httpx, "AsyncClient", _FakeClient)
+    with pytest.raises(QgExtractError):
+        asyncio.run(acquire_qg_proxy())
