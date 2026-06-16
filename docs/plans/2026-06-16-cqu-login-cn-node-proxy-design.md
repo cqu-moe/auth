@@ -107,8 +107,8 @@ DO 三条「连 CQU」出站全部改经 VPC binding 调国内节点:
 - **全局开关 `QG_ENABLED`(国内节点)**:正常 `on`=经青果;青果整体故障/被封时手动 `off` 让国内节点**临时直连 CQU 救急**(接受 IDC 搞黑风险,非常态)。「全部经青果」架构下,全局灰度退化为此应急开关即足够。
 - **失败回退(硬依赖)**:`QG_ENABLED=on` 时青果提取失败 → 端点 5xx → DO 退避,绝不自动直连。
 - **配置/secret**:
-  - CF:`wrangler` 的 `vpc_services` binding;现有 secret 不变。
-  - 国内节点:`QG_EXTRACT_URL`(含 key + `area=500100`)、`QG_AUTH_KEY/PWD`、`QG_ENABLED`、cloudflared Tunnel 凭据。
+  - CF:`wrangler` 的 `vpc_services` binding(`LOGIN_NODE` → `service_id`);现有 secret 不变。**VPC Service 用 `wrangler vpc service create <name> --type http --tunnel-id <id> --http-port 8080 --ipv4 <VPS目标>` 建**(本地 wrangler 4.94 已支持),拿 `service_id` 回填 binding。
+  - 国内节点:`QG_EXTRACT_URL`(含 key + `area=500100`)、`QG_AUTH_KEY/PWD`、`QG_ENABLED`;cloudflared connector token(dashboard 给,**用户**在 VPS `cloudflared service install` 执行,不入仓库)。
 - **安全性质(不退步)**:CQU 账号密码仍只加密存 CF D1,DO 解密后经 Workers VPC 私有通道传 `/run`,**国内节点用完即弃、绝不落地**。
 
 ## 8. 测试 / 上线 / 回滚
@@ -134,10 +134,18 @@ DO 三条「连 CQU」出站全部改经 VPC binding 调国内节点:
 | 国内 IDC 直连 CQU(省青果) | 固定 IDC IP 扛多账号必被 CQU 搞黑(用户指出,采纳) |
 | CF 容器 + 国内节点纯中转(方案 A) | 单点 A/B 都有,A 仅多并发弹性优势;当前用不上,却要写动态上游中转服务,复杂度不值 |
 | 国内节点开公网端口 + 强鉴权(B2) | 走裸公网(用户想避免);Workers VPC 更优,B2 仅作 beta 不稳时的 fallback |
+| Workers VPC **Network**(绑 `tunnel_id`,DO 可达整个 tunnel 后私网) | scope 太宽 + 需 `Connectivity Directory Admin` 角色;改用 VPC **Service**(`service_id` 锁死 `VPS:8080` 单 host+port,**最小 scope**,用户安全考量采纳) |
+| tunnel locally-managed(`cloudflared tunnel login` + cert) | 改用 **remotely-managed**(dashboard 建 + token,`cloudflared service install <token>`),免浏览器 cert 授权,更简单 |
 
-## 11. 待办 / 未决
+## 11. 待办 / 未决 / 已就绪
 
-- 新购 VPS 的访问信息(IP/SSH)待用户提供;设计层用占位「国内登录节点」。
+**已就绪(2026-06-16)**:
+- 国内节点 = `tencent-cd-cqu-moe`(`1.14.106.150`,Ubuntu 22.04,成都腾讯云;腾讯云远控/监控 agent + cloud-init SSH 后门已清)。
+- Cloudflare Tunnel 已建(remotely-managed/dashboard,名 `tencent-cd-cqu-moe`),**Tunnel ID `35d48aa0-ecd1-402a-b913-932e7a8ec0ac`**,类型 cloudflared;connector `cloudflared service install <token>` 由**用户**在 VPS 执行(token 不入对话/仓库)。
+- Phase 1(国内节点 Python 代码)已实现 + 双 review 通过(见 plan)。
+
+**待验 / 待办**:
 - Workers VPC beta 在「DO 内调用 binding」的可用性需部署验证。
+- tunnel 的 Private Network 路由 → VPS `:8080` 确切配法(loopback vs 内网 IP)+ VPC Service `--ipv4/--hostname` 对齐,装时定。
 - cloudflared 国内稳定性需上线后观测几天。
-- 青果账密(本对话中出现的)上线前建议轮换,经 secret 注入。
+- 青果账密(本对话中出现的)上线前轮换,经 secret 注入。

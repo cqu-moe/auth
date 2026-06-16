@@ -12,18 +12,21 @@
 
 ---
 
-## Phase 0：前置依赖(执行前必须就绪)
+## Phase 0：前置依赖
 
-- [ ] **新 VPS**(国内，能直连青果)的 SSH 访问信息 — 用户提供。计划中以 `<CN_NODE>` 占位。
-- [ ] **Workers VPC** 在 CF 账户开通(beta)；确认 `vpc_services` binding 在 DO 内 `env.LOGIN_NODE.fetch()` 可用。
-- [ ] **青果套餐**：确认提取额度覆盖「登录 + keepalive 均提取」的用量；账密 `QG_AUTH_KEY/PWD` 就绪(建议轮换对话中出现过的那对)。
-- [ ] 决定 keepalive 频率(现 15min)是否下调以省青果提取(设计 §9 风险 4)。
+- [x] **国内 VPS** = `tencent-cd-cqu-moe`(`1.14.106.150`,Ubuntu 22.04,成都腾讯云;连青果实测过;腾讯云远控/监控已清)。`<CN_NODE>` = 它。
+- [x] **Cloudflare Tunnel** 已建:**Tunnel ID `35d48aa0-ecd1-402a-b913-932e7a8ec0ac`**(remotely-managed,名 `tencent-cd-cqu-moe`)。connector token 由用户在 VPS `cloudflared service install <token>`(不入仓库)。
+- [ ] **Workers VPC** binding 在 DO 内 `env.LOGIN_NODE.fetch()` 可用性 — 部署验证(beta)。
+- [ ] **青果套餐**：确认提取额度覆盖「登录 + keepalive 均提取」;`QG_AUTH_KEY/PWD` 就绪(上线前轮换对话中出现过的那对)。
+- [ ] 决定 keepalive 频率(现 15min)是否下调省青果提取(设计 §9 风险 4)。
 
-> Phase 1、2 是纯 codebase 改动，**不依赖 VPS**，可立即做并合并；Phase 3 需要 `<CN_NODE>` 就绪。
+> Phase 1、2 纯 codebase,不依赖 VPS;Phase 3 部署用 `<CN_NODE>`。
 
 ---
 
-## Phase 1：国内节点代码(`container/`，Python，TDD)
+## Phase 1：国内节点代码(`container/`，Python，TDD) — ✅ 已完成(2026-06-16)
+
+> **状态**:Task 1.1-1.5 全部实现 + spec/quality 双 review 通过,**55 测试绿**。commit 链 `e975d17 → 54da59c`。下方各 Task 代码片段是初版参考,实现中有微调(`acquire_qg_proxy` 收口网络错误为 `QgExtractError`、`parse_extract_response` isinstance guard、取票端 `follow_redirects` + httpx cookie 域隔离防 TGC 泄露、keepalive 青果失败归 `unreachable` 不 502),**以仓库实际代码为准**。
 
 > 这些文件部署时整目录拷到 `<CN_NODE>`。测试用 pytest（仓库已有 `container/test_classify_send_code.py`）。
 > 运行测试：`cd container && python -m pytest -v`
@@ -253,13 +256,20 @@ systemctl enable --now cqu-login
 curl -s localhost:8080/ping   # 期望 {"ok":true}
 ```
 
-### Task 3.2：cloudflared Tunnel + CF VPC Service
+### Task 3.2：cloudflared Tunnel(remotely-managed)+ VPC Service(wrangler CLI)
+Tunnel 已在 dashboard 建好(Tunnel ID `35d48aa0-ecd1-402a-b913-932e7a8ec0ac`,名 `tencent-cd-cqu-moe`)。
 ```bash
-# <CN_NODE>: 装 cloudflared, 登录, 建 tunnel 指向 http://localhost:8080
-cloudflared tunnel create cqu-login-node
-# 配 ingress → localhost:8080; systemd 跑 cloudflared, Restart=always
+# <CN_NODE>(用户执行, token 不入仓库): 装 cloudflared 后
+cloudflared service install <connector-token>   # connector 连上 CF, systemd 自动常驻
+# dashboard 给该 tunnel 配 Private Network 路由 → VPS 的 :8080 可达目标(loopback 或内网 IP)
 ```
-- CF dashboard：基于该 Tunnel 建 **VPC Service**，拿到 `service_id` 回填 `wrangler.jsonc` Task 2.1 的 `<VPC_SERVICE_ID>`，重新 `npm run deploy`/CI 部署。
+```bash
+# VPC Service 用 wrangler CLI 建(我执行), 拿 service_id:
+npx wrangler vpc service create cqu-login --type http \
+  --tunnel-id 35d48aa0-ecd1-402a-b913-932e7a8ec0ac \
+  --http-port 8080 --ipv4 <VPS目标IP>          # --ipv4/--hostname 跟 tunnel 路由对齐
+# → 返回 service_id, 回填 wrangler.jsonc Task 2.1 的 <VPC_SERVICE_ID>, 部署
+```
 
 ### Task 3.3：上线验证(唯一账号)
 - 触发一次登录（解绑重绑或等会话过期重登）。
