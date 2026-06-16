@@ -5,6 +5,10 @@ export interface Env {
   CQU_SESSION: DurableObjectNamespace;
   CQU_LOGIN: DurableObjectNamespace;
   ASSETS: Fetcher;
+  // Workers VPC binding(beta):DO 里四处「连 CQU」出站(/run /service-ticket /keepalive /code)
+  // 经它私有连到国内登录节点,由节点本地用青果代理连 CQU。运行时不校验 URL host(VPC service 路由),
+  // 调用时用内部占位 host 即可。
+  LOGIN_NODE: Fetcher;
   ENCRYPTION_KEY: string;
   BETTER_AUTH_URL: string;
   BETTER_AUTH_SECRET: string;
