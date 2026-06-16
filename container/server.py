@@ -22,6 +22,10 @@ import time
 from aiohttp import web
 
 import cqu_login  # 改造后的登录器, 暴露 run_login(...)
+import cqu_keepalive  # 国内节点探活(经青果探测 CQU 会话), 暴露 probe_session(...)
+import cqu_ticket  # 国内节点取 ST(经青果换票), 暴露 fetch_service_ticket(...)
+from cqu_ticket import TicketError  # 取 ST 失败语义(SESSION_EXPIRED / NO_TICKET 等)
+from qg_proxy import acquire_qg_proxy, QgExtractError, should_use_proxy  # 青果代理 + 灰度门
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("cqu-login-server")
@@ -79,6 +83,19 @@ async def run_handler(request: web.Request) -> web.Response:
             status=400,
         )
 
+    # 灰度: QG_PROXY_LOGIN/QG_ENABLED 决定 /run 走青果(登录包)还是节点直连。走青果时拿不到 IP
+    # → 502 硬依赖回退(绝不悄悄 fallback 直连); 直连时 proxy=None, 由节点境内 IP 连 CQU。
+    # 放在 Event 注册之前: 早退路径不注册 Event/Value, 无需 finally 清理。
+    proxy = None
+    if should_use_proxy("login"):
+        try:
+            proxy = await acquire_qg_proxy("login")
+        except QgExtractError as e:
+            log.warning("run abort session=%s qg extract failed: %s", session, e)
+            return web.json_response(
+                {"ok": False, "error": f"qg proxy unavailable: {e}"}, status=502
+            )
+
     ev = asyncio.Event()
     CODE_EVENTS[session] = ev
     # I1: /code 可能在本 Event 注册前略早到达; 若码已在, 立即唤醒, 避免错过唤醒永久阻塞。
@@ -108,10 +125,12 @@ async def run_handler(request: web.Request) -> web.Response:
                 service=service,
                 method=method,
                 code_provider=code_waiter,
+                proxy=proxy,
             ),
             timeout=RUN_TOTAL_TIMEOUT,
         )
-        log.info("run ok session=%s ticket=%s", session, result.get("ticket", "")[:24])
+        # ticket 是 bearer 凭据, 不入日志(session 不是凭据可留); 对齐 DO 审计「绝不记录 ticket/cookies/密码」。
+        log.info("run ok session=%s", session)
         return web.json_response({"ok": True, **result})
     except CodeWaitTimeout:
         # 内层: 等码超时, 验证码始终没到(邮件未送达 / DO 未推码)。
@@ -162,6 +181,113 @@ async def code_handler(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "waiting": False})
 
 
+async def service_ticket_handler(request: web.Request) -> web.Response:
+    """POST /service-ticket {serviceUrl, cookies} → 经青果去 CQU 换一张 ST。
+
+    职责: 只负责「换票」这一跳。取票的安全闸(serviceUrl host 校验 / quicklogin
+    opt-in / 限流 / 审计)仍在上游 DO, 这里拿到的 serviceUrl 已被 DO 校验过。
+
+    · 出站灰度: 默认经青果(短效包); QG_PROXY_SHORT/QG_ENABLED 可改节点直连。走青果时
+      acquire_qg_proxy() 失败 → 502(硬依赖回退, 同 /run, 绝不悄悄 fallback 直连)。
+    · 成功: 200 {ok:true, ticket}。
+    · 会话过期(落回 CAS 登录页): 409 {ok:false, error} —— 语义是「该 cookie 的 CAS
+      会话已失效」, 客户端错误而非服务端故障, 交上游 DO/容器重登; 用 409 Conflict
+      让 DO 能据状态码与「瞬态封锁」区分(后者走 502 退避重试)。
+    · 未取到票(疑似瑞数误判/未知页)/ 缺 cookie: 502 {ok:false, error}, 让上游退避重试。
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
+
+    service_url = body.get("serviceUrl")
+    cookies = body.get("cookies")
+    if not service_url or not isinstance(cookies, dict):
+        return web.json_response(
+            {"ok": False, "error": "missing required field: serviceUrl/cookies"},
+            status=400,
+        )
+
+    # 灰度: QG_PROXY_SHORT/QG_ENABLED 决定取票走青果(短效包)还是节点直连。走青果拿不到 IP → 502。
+    proxy = None
+    if should_use_proxy("short"):
+        try:
+            proxy = await acquire_qg_proxy("short")
+        except QgExtractError as e:
+            log.warning("service-ticket abort qg extract failed: %s", e)
+            return web.json_response(
+                {"ok": False, "error": f"qg proxy unavailable: {e}"}, status=502
+            )
+
+    try:
+        # 同青果 IP 瞬态退避重试(瑞数误判/网络抖动自愈; 不重抽青果, 省配额)。
+        # 耗尽后仍抛 TicketError/httpx 错误, 由下面 except 按现有语义映射:
+        # NO_TICKET→502 / SESSION_EXPIRED→409 / 网络错→502。
+        ticket = await cqu_ticket.fetch_service_ticket_retrying(service_url, cookies, proxy)
+        # ST 是 bearer 凭据, 绝不打它的值(只记长度供诊断); 对齐 DO 审计「绝不记录 ticket/cookies/密码」。
+        log.info("service-ticket ok (len=%d)", len(ticket))
+        return web.json_response({"ok": True, "ticket": ticket})
+    except TicketError as e:
+        # 会话过期 → 409(客户端态: cookie 失效, 交重登); 其余取票失败 → 502(瞬态, 退避重试)。
+        status = 409 if e.code == "SESSION_EXPIRED" else 502
+        log.warning("service-ticket fail code=%s status=%d error=%s", e.code, status, e)
+        return web.json_response({"ok": False, "error": str(e)}, status=status)
+    except Exception as e:  # noqa: BLE001 - 网络层/未预期错误也按瞬态上抛, 让上游退避
+        log.warning("service-ticket error %s", e)
+        return web.json_response({"ok": False, "error": str(e)}, status=502)
+
+
+async def keepalive_handler(request: web.Request) -> web.Response:
+    """POST /keepalive {cookies} → 经青果探测 CQU 会话是否还活, 返回三态事实给 DO。
+
+    职责: 只返回「探测事实」(alive/expired/unreachable), 不做决策。熔断/退避/重登的
+    状态机全留在上游 DO(runKeepAlive/alarm), 本端点只如实回报探测结果。
+
+    · 出站灰度: 默认经青果(短效包); QG_PROXY_SHORT/QG_ENABLED 可改节点直连。走青果时青果失败
+      的语义与 /run、/service-ticket 不同 —— 探活拿不到青果 = 「探不通」(并不证明会话过期),
+      故归 **unreachable** 而非 5xx: 返回 200 {ok:true, status:"unreachable"}, 让 DO 按瞬态退避
+      (快重试/指数退避), 绝不让 DO 误判会话过期而触发容器重登(误判重登会触瑞数风控 + 烧容器, 代价远高)。
+    · 探测结果三态恒以 200 {ok:true, status, detail} 返回 —— DO 凭 status 区分:
+      "expired"(该重登) vs "unreachable"(该退避) vs "alive"(健康)。
+    · 缺 cookies / cookies 非 dict → 400(契约破坏, 真客户端错误)。
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
+
+    cookies = body.get("cookies")
+    if not isinstance(cookies, dict):
+        return web.json_response(
+            {"ok": False, "error": "missing required field: cookies (object)"},
+            status=400,
+        )
+
+    # 灰度: QG_PROXY_SHORT/QG_ENABLED 决定探活走青果(短效包)还是节点直连。
+    # 走青果且拿不到 IP = 探不通 → unreachable(让 DO 退避), 绝不 5xx、绝不当会话过期。
+    # 这是 keepalive 与 /run、/service-ticket(青果失败 → 5xx)的关键语义差异。
+    proxy = None
+    if should_use_proxy("short"):
+        try:
+            proxy = await acquire_qg_proxy("short")
+        except QgExtractError as e:
+            log.warning("keepalive qg extract failed (→ unreachable): %s", e)
+            return web.json_response(
+                {"ok": True, "status": "unreachable", "detail": f"qg proxy unavailable: {e}"}
+            )
+
+    # probe_session 内部已把网络层/未知异常收口成 unreachable; 此处再兜底一层,
+    # 确保探活端点对 DO 永远只返回「探测事实」(200), 绝不 500 伪装成服务端崩溃。
+    try:
+        result = await cqu_keepalive.probe_session(cookies, proxy)
+    except Exception as e:  # noqa: BLE001 - 纵深兜底: 任何未预期错误也归 unreachable
+        log.warning("keepalive probe unexpected error (→ unreachable): %s", e)
+        result = {"status": "unreachable", "detail": f"{type(e).__name__}: {e}"}
+
+    log.info("keepalive status=%s detail=%s", result["status"], result.get("detail", "")[:80])
+    return web.json_response({"ok": True, **result})
+
+
 async def health_handler(_request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
@@ -171,6 +297,8 @@ def build_app() -> web.Application:
     app.add_routes([
         web.post("/run", run_handler),
         web.post("/code", code_handler),
+        web.post("/service-ticket", service_ticket_handler),
+        web.post("/keepalive", keepalive_handler),
         # CF Containers 默认探测 /ping 判断实例就绪。
         web.get("/ping", health_handler),
         web.get("/health", health_handler),

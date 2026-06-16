@@ -335,11 +335,15 @@ def read_code(args):
     return input("请输入收到的 6 位验证码: ").strip()
 
 
-async def run_login(student_id, password, service, method="mail", code_provider=None):
+async def run_login(student_id, password, service, method="mail", code_provider=None, proxy=None):
     """容器入口: 跑完整登录流程, 验证码经 code_provider(async, 返回 6 位字符串)推入。
 
     与 CLI run() 同一条流程(form-nav 第一因素 + 原生发码 + form-nav 提交码 + ticket 嗅探),
     唯一区别: read_code() 文件轮询替换为 `await code_provider()`(由 server.py /code 端点 set Event 唤醒)。
+
+    proxy: 可选, 形如 {"server": "http://ip:port", "username": .., "password": ..}(青果住宅代理,
+    由 server.py 经 acquire_qg_proxy() 取得后传入), 让浏览器经国内住宅出站消除 CQU 验证码;
+    None 时透传给 patchright launch 等价于不设代理(playwright 默认 = 无代理), 保持旧行为。
 
     成功返回 {"cookies": {"SOURCEID_TGC":..,"SESSION":..,"rg_objectid":..}, "ticket": "ST-..."}。
     失败(第一因素未过 / 无 ST / 未取到码)抛 RuntimeError, 携带可诊断信息。
@@ -361,6 +365,7 @@ async def run_login(student_id, password, service, method="mail", code_provider=
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
             ],
+            proxy=proxy,
             timeout=30000,
         )
         ctx = await browser.new_context(user_agent=UA, viewport={"width": 1440, "height": 900},

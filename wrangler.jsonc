@@ -54,6 +54,17 @@
     "constraints": { "regions": ["WNAM"] }
   }],
 
+  // Workers VPC Service binding (beta): DO 经此私有连回国内 VPS 登录节点上的
+  // container/server.py(青果住宅代理本地连 CQU, 消除验证码)。「连 CQU」四处出站
+  // (/run /service-ticket /keepalive /code)均走 LOGIN_NODE.fetch 发往该节点。
+  // service_id = VPC service `cqu-login`(type http → 127.0.0.1:8080, tunnel 35d48aa0-...,
+  // 由 `wrangler vpc service create` 创建);改 tunnel/目标需同步重建该 service。
+  "vpc_services": [{
+    "binding": "LOGIN_NODE",
+    "service_id": "019ed036-ce37-7220-a37c-973903853f78",
+    "remote": true
+  }],
+
   "migrations": [
     {
       "tag": "v1",

@@ -2,7 +2,6 @@ import { DurableObject } from "cloudflare:workers";
 import { CquSsoClient, type CasCookies, CquSsoError } from "../services/cqu-sso";
 import { decrypt } from "../services/crypto";
 import { validateCquServiceUrl } from "../services/service-url";
-import { isTransientSsoError } from "../services/sso-error-policy";
 import {
   nextStatus,
   type CquStatus,
@@ -35,14 +34,25 @@ import { resolveCaps } from "../services/entitlements";
 import { cquErrorHttpStatus } from "../services/cqu-error-status";
 import type { Env } from "../types";
 
-const KEEPALIVE_INTERVAL_MS = 15 * 60 * 1000;
+// keepalive 每个探针经国内节点提取 1 个青果 IP(连 CQU 出站经青果)。频率直接决定青果消耗:
+// 15min→96 个/天, 60min→24 个/天 —— 取 60min 省青果(单账号够用)。代价: 会话若在两次探针
+// 间意外失效, 最长 ~60min 后才被探到并重登(期间 on-demand 取票会 TGT_EXPIRED)。TGT 绝对
+// 寿命 ~8h 且 7h 处已主动重铸, 故 60min 足以兜住「正常过期」; 仅罕见「定点过期」窗口变长。
+const KEEPALIVE_INTERVAL_MS = 60 * 60 * 1000;
 const RETRY_INTERVAL_MS = 60 * 1000;
 const MAX_FAST_RETRIES = 5;
-// 熔断: transient(瑞数/网络)连续失败时 keepalive 退避封顶(从 15min 指数涨到 6h)。
+// 熔断: transient(瑞数/网络)连续失败时 keepalive 退避封顶(从 KEEPALIVE_INTERVAL_MS 指数涨到 6h)。
 const KEEPALIVE_MAX_BACKOFF_MS = 6 * 60 * 60 * 1000;
 // TGT 绝对寿命 ~8h；在 7h 处主动重铸, 留 ~1h 余量给重登流程(容器点火 + 发码 + 邮件到达 + 提交)。
 const PROACTIVE_RELOGIN_MS = 7 * 60 * 60 * 1000;
 const DUMMY_SERVICE = "https://my.cqu.edu.cn/authserver/authentication/cas";
+
+// Workers VPC binding(env.LOGIN_NODE)的内部占位 host。运行时由 VPC service 路由到
+// 国内登录节点(container/server.py);host 内容不被校验, 仅作合法 URL 的占位(传输安全
+// 由 VPC service 私有隧道保证, http:// scheme 仅为构造合法 Request 所需)。
+// 「连 CQU」四处出站(/run /service-ticket /keepalive /code)均经此前缀发到国内节点
+// (节点本地用青果代理连 CQU)。Phase 2 四处出站迁移已完成。
+const LOGIN_NODE_BASE = "http://cqu-login.internal";
 
 export const SERVICE_URLS: Record<string, string> = {
   jwxt: "https://my.cqu.edu.cn/authserver/authentication/cas",
@@ -142,6 +152,8 @@ export class CquSessionDO extends DurableObject<Env> {
   // 熔断: containerLogin 把本次失败原因(credential/transient)暂存于此, 供同一
   // relogin 调用链读取。DO 单线程, 仅在一次 alarm→relogin→containerLogin 链内有效。
   private lastLoginFailReason: "credential" | "transient" = "transient";
+  // Phase 2 后已无调用方(登录/取票/keepalive 均改走 LOGIN_NODE 国内节点);仅作回滚窗口
+  // 保留(应急可手改 DO 出站切回此直连路径), 随 CF 容器在 Phase 4 一并移除。
   private ssoClient = new CquSsoClient();
 
   private async loadState(): Promise<void> {
@@ -386,7 +398,8 @@ export class CquSessionDO extends DurableObject<Env> {
   //   ② D6 限频:对所有取票(两模式)做 per-user + per-client 滑动窗口限频(StMintRecord 落 storage);
   //   ③ D6 告警:广路径上若窗口内不同 host 数越阈值则告警(开放重定向探测信号, 只告警不拦);
   //   ④ D6 审计:成功取票后打一条结构化日志(绝不含 ticket/cookies/密码)。
-  // NOTE: keepalive 探针走 this.ssoClient.getServiceTicket(...) 直连, 不经本方法, 故不受这些闸影响。
+  // NOTE: keepalive 探针走国内节点 POST /keepalive(经 Workers VPC binding), 不经本方法(取票闸),
+  // 故不受这四道闸影响 —— 它只探活, 不取票。
   private async getServiceTicket(arg: {
     service?: string;
     serviceUrl?: string;
@@ -482,10 +495,7 @@ export class CquSessionDO extends DurableObject<Env> {
     pruned.push(record);
     await this.ctx.storage.put("stMintLog", pruned);
 
-    const ticket = await this.ssoClient.getServiceTicket(
-      this.state.cookies,
-      target
-    );
+    const ticket = await this.mintServiceTicketViaNode(this.state.cookies, target);
 
     // D6 审计(结构化; CF observability 抓 console)。绝不记录 ticket / cookies / 密码。
     console.log(
@@ -503,18 +513,69 @@ export class CquSessionDO extends DurableObject<Env> {
   }
 
   /**
+   * 闸后那一跳「换票」出站:经 Workers VPC binding 发到国内节点 POST /service-ticket,
+   * 节点本地用青果代理去 CQU CAS 换 ST(并已对同青果 IP 做过瞬态退避重试)。
+   * 取票四道闸仍在 getServiceTicket 上游, 这里只负责出站换票 + 把节点响应映射回
+   * 既有 CquSsoError 语义, 让 route/RPC 调用方无感(与原 ssoClient.getServiceTicket 抛的码一致):
+   *   · 200 {ok,ticket} → 返回 ticket
+   *   · 409            → CquSsoError("TGT_EXPIRED")  真过期, 交重登(不重试)
+   *   · 502 / 其它非 ok → CquSsoError("WAF_CHALLENGE") 瞬态(重试已在节点端做尽)
+   */
+  private async mintServiceTicketViaNode(
+    cookies: CasCookies,
+    serviceUrl: string
+  ): Promise<string> {
+    let res: Response;
+    try {
+      res = await this.env.LOGIN_NODE.fetch(
+        new Request(`${LOGIN_NODE_BASE}/service-ticket`, {
+          method: "POST",
+          body: JSON.stringify({ serviceUrl, cookies }),
+        })
+      );
+    } catch (e) {
+      // VPC/网络层异常 = 瞬态。
+      throw new CquSsoError(
+        "WAF_CHALLENGE",
+        `LOGIN_NODE /service-ticket fetch failed: ${errMsg(e)}`
+      );
+    }
+    // 409 = 节点判会话过期(落回 CAS 登录页)→ 真过期, 交重登。先于 body 解析判, 语义最明确。
+    if (res.status === 409) {
+      throw new CquSsoError("TGT_EXPIRED", "CQU session expired (node /service-ticket 409)");
+    }
+    let body: { ok?: boolean; ticket?: string; error?: string };
+    try {
+      body = await res.json();
+    } catch {
+      throw new CquSsoError(
+        "WAF_CHALLENGE",
+        `LOGIN_NODE /service-ticket non-JSON (status=${res.status})`
+      );
+    }
+    if (!res.ok || !body.ok || !body.ticket) {
+      // 502(青果/NO_TICKET 瞬态)、400(契约)、5xx 等一律按瞬态上抛 —— 重试已在节点端做尽。
+      throw new CquSsoError(
+        "WAF_CHALLENGE",
+        `LOGIN_NODE /service-ticket not ok (status=${res.status} error=${body.error ?? "(none)"})`
+      );
+    }
+    return body.ticket;
+  }
+
+  /**
    * CF Email Routing 提码后投递点(见 src/email-handler.ts POST /deposit-code)。
    * 按 kind 分流:
    *   - login_2fa  : 无条件先把码暴露给用户实时面板(暂存 pendingCode + 广播 login_2fa),
-   *                  再按是否有在途登录决定容器路径——有在途登录则推给容器 /code
+   *                  再按是否有在途登录决定节点路径——有在途登录则推给国内节点 /code
    *                  (凭 loginInFlight.token 作 session 键路由), 无在途登录是用户手动登录的码,
    *                  已送达实时面板, 不再算丢码。
    *   - bind_confirm: 暂存 pendingCode(Phase 6 经 WS 秒推浏览器)。
    *
    * @returns delivered —— 码是否真正送达「容器路径」目标(决定调用方记 accepted 还是 code_dropped):
    *   - login_2fa  : 无在途登录 → true(已送达用户实时面板, 不算丢码);
-   *                  有在途登录但无 session 状态(退化态) → false(码已广播无害, 但容器路径走不通);
-   *                  有在途登录且推容器: 容器 /code 返回 ok → true, !res.ok/异常 → false。
+   *                  有在途登录但无 session 状态(退化态) → false(码已广播无害, 但节点路径走不通);
+   *                  有在途登录且推节点: 节点 /code 返回 ok → true, !res.ok/异常 → false。
    *                  即 code_dropped(false) 现专指「系统自动重登时容器收码失败/退化态」,
    *                  不再表示「码凭空丢弃」(码至少已广播给用户实时面板)。
    *   - bind_confirm: true(已落 pendingCode 兜底, 即便实时 WS 推送零接收方也不算丢)。
@@ -555,30 +616,31 @@ export class CquSessionDO extends DurableObject<Env> {
       }
       const userId = this.state?.userId;
       if (!userId) {
-        // 退化态: 有在途登录锁却无 session 状态, 容器路径走不通。码已广播无害, 但容器收码失败。
+        // 退化态: 有在途登录锁却无 session 状态, 节点路径走不通。码已广播无害, 但节点收码失败。
         console.warn(
           `[CquSession] login_2fa code arrived but no session state, ignoring`
         );
         return false;
       }
       try {
-        const stub = this.getLoginContainer(userId);
-        const res = await stub.fetch(
-          new Request("https://c/code", {
+        // Phase 2: 2FA 码经 Workers VPC binding 推到国内登录节点 POST /code(凭 session=lock.token
+        // 路由到在途 /run, 契约同容器, body 不变)。原 getLoginContainer(userId).fetch("https://c/code") 已弃用。
+        const res = await this.env.LOGIN_NODE.fetch(
+          new Request(`${LOGIN_NODE_BASE}/code`, {
             method: "POST",
             body: JSON.stringify({ session: lock.token, code }),
           })
         );
         if (!res.ok) {
           console.error(
-            `[CquSession] container /code returned non-ok status=${res.status}`
+            `[CquSession] LOGIN_NODE /code returned non-ok status=${res.status}`
           );
           return false;
         }
         return true;
       } catch (e) {
         console.error(
-          `[CquSession] failed to push login_2fa code to container: ${errMsg(e)}`
+          `[CquSession] failed to push login_2fa code to LOGIN_NODE: ${errMsg(e)}`
         );
         return false;
       }
@@ -769,24 +831,52 @@ export class CquSessionDO extends DurableObject<Env> {
    */
   private async runKeepAlive(): Promise<"active" | "expired" | "transient"> {
     const state = this.state!;
+    // 探活经 Workers VPC binding 发到国内节点 POST /keepalive(节点本地经青果探测 CQU 会话)。
+    // 节点恒返回 200 {ok, status: alive|expired|unreachable}, 映射回三态:
+    //   alive→active / expired→expired / unreachable→transient。
+    // 够不到节点本身(VPC/网络抛错、非 JSON、非 ok)或未知 status = 探不通 → transient
+    // (保 cookies/status 不动、退避重试), 绝不误判过期触发容器重登。
+    let res: Response;
     try {
-      await this.ssoClient.getServiceTicket(state.cookies, DUMMY_SERVICE);
-      return "active";
+      res = await this.env.LOGIN_NODE.fetch(
+        new Request(`${LOGIN_NODE_BASE}/keepalive`, {
+          method: "POST",
+          body: JSON.stringify({ cookies: state.cookies }),
+        })
+      );
     } catch (e) {
-      if (isTransientSsoError(e)) {
-        console.warn(
-          `[CquSession] ${state.studentId}: probe unreachable: ${errMsg(e)}`
-        );
-        return "transient";
-      }
-      // 非网络失败(如 TGT_EXPIRED): 会话服务端失效。
-      // 诊断: 落 expired 前记一条 — errMsg 会带上含 status + page 分类的消息,
-      // 用于区分真过期(page=cas-login)与瑞数误判(page=waf-challenge)。
       console.warn(
-        `[CquSession] ${state.studentId}: probe says expired: ${errMsg(e)}`
+        `[CquSession] ${state.studentId}: probe unreachable (node fetch failed): ${errMsg(e)}`
+      );
+      return "transient";
+    }
+    let body: { ok?: boolean; status?: string; detail?: string };
+    try {
+      body = await res.json();
+    } catch {
+      console.warn(
+        `[CquSession] ${state.studentId}: probe unreachable (node non-JSON status=${res.status})`
+      );
+      return "transient";
+    }
+    if (!res.ok || !body.ok) {
+      console.warn(
+        `[CquSession] ${state.studentId}: probe unreachable (node not ok status=${res.status} detail=${body.detail ?? "(none)"})`
+      );
+      return "transient";
+    }
+    if (body.status === "alive") return "active";
+    if (body.status === "expired") {
+      console.warn(
+        `[CquSession] ${state.studentId}: probe says expired: ${body.detail ?? "(none)"}`
       );
       return "expired";
     }
+    // "unreachable" 或未知 status → 保会话退避。
+    console.warn(
+      `[CquSession] ${state.studentId}: probe unreachable: status=${body.status ?? "(none)"} detail=${body.detail ?? "(none)"}`
+    );
+    return "transient";
   }
 
   /**
@@ -928,9 +1018,10 @@ export class CquSessionDO extends DurableObject<Env> {
         creds.iv,
         this.env.ENCRYPTION_KEY
       );
-      const stub = this.getLoginContainer(state.userId);
-      const res = await stub.fetch(
-        new Request("https://c/run", {
+      // Phase 2: 经 Workers VPC binding 发到国内登录节点 POST /run(契约同容器, body 不变 ——
+      // 青果提取在节点本地)。原 getLoginContainer(...).fetch("https://c/run") 已弃用。
+      const res = await this.env.LOGIN_NODE.fetch(
+        new Request(`${LOGIN_NODE_BASE}/run`, {
           method: "POST",
           body: JSON.stringify({
             studentId: state.studentId,
@@ -1005,6 +1096,8 @@ export class CquSessionDO extends DurableObject<Env> {
     await this.ctx.storage.delete("loginInFlight");
   }
 
+  // Phase 2 后已无调用方(2FA 投码已改走 LOGIN_NODE 国内节点 /code);仅作回滚窗口保留 ——
+  // 它是 CQU_LOGIN 容器 binding 的访问器, 随容器在 Phase 4 一并移除。
   /** 取该用户的浏览器登录器容器实例(寻址镜像 CQU_SESSION: idFromName → get)。 */
   private getLoginContainer(userId: string): DurableObjectStub {
     const id = this.env.CQU_LOGIN.idFromName(userId);
