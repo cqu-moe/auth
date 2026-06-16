@@ -490,10 +490,7 @@ export class CquSessionDO extends DurableObject<Env> {
     pruned.push(record);
     await this.ctx.storage.put("stMintLog", pruned);
 
-    const ticket = await this.ssoClient.getServiceTicket(
-      this.state.cookies,
-      target
-    );
+    const ticket = await this.mintServiceTicketViaNode(this.state.cookies, target);
 
     // D6 审计(结构化; CF observability 抓 console)。绝不记录 ticket / cookies / 密码。
     console.log(
@@ -508,6 +505,57 @@ export class CquSessionDO extends DurableObject<Env> {
       })
     );
     return ticket;
+  }
+
+  /**
+   * 闸后那一跳「换票」出站:经 Workers VPC binding 发到国内节点 POST /service-ticket,
+   * 节点本地用青果代理去 CQU CAS 换 ST(并已对同青果 IP 做过瞬态退避重试)。
+   * 取票四道闸仍在 getServiceTicket 上游, 这里只负责出站换票 + 把节点响应映射回
+   * 既有 CquSsoError 语义, 让 route/RPC 调用方无感(与原 ssoClient.getServiceTicket 抛的码一致):
+   *   · 200 {ok,ticket} → 返回 ticket
+   *   · 409            → CquSsoError("TGT_EXPIRED")  真过期, 交重登(不重试)
+   *   · 502 / 其它非 ok → CquSsoError("WAF_CHALLENGE") 瞬态(重试已在节点端做尽)
+   */
+  private async mintServiceTicketViaNode(
+    cookies: CasCookies,
+    serviceUrl: string
+  ): Promise<string> {
+    let res: Response;
+    try {
+      res = await this.env.LOGIN_NODE.fetch(
+        new Request(`${LOGIN_NODE_BASE}/service-ticket`, {
+          method: "POST",
+          body: JSON.stringify({ serviceUrl, cookies }),
+        })
+      );
+    } catch (e) {
+      // VPC/网络层异常 = 瞬态。
+      throw new CquSsoError(
+        "WAF_CHALLENGE",
+        `LOGIN_NODE /service-ticket fetch failed: ${errMsg(e)}`
+      );
+    }
+    // 409 = 节点判会话过期(落回 CAS 登录页)→ 真过期, 交重登。先于 body 解析判, 语义最明确。
+    if (res.status === 409) {
+      throw new CquSsoError("TGT_EXPIRED", "CQU session expired (node /service-ticket 409)");
+    }
+    let body: { ok?: boolean; ticket?: string; error?: string };
+    try {
+      body = await res.json();
+    } catch {
+      throw new CquSsoError(
+        "WAF_CHALLENGE",
+        `LOGIN_NODE /service-ticket non-JSON (status=${res.status})`
+      );
+    }
+    if (!res.ok || !body.ok || !body.ticket) {
+      // 502(青果/NO_TICKET 瞬态)、400(契约)、5xx 等一律按瞬态上抛 —— 重试已在节点端做尽。
+      throw new CquSsoError(
+        "WAF_CHALLENGE",
+        `LOGIN_NODE /service-ticket not ok (status=${res.status} error=${body.error ?? "(none)"})`
+      );
+    }
+    return body.ticket;
   }
 
   /**
