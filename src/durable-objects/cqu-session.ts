@@ -44,6 +44,11 @@ const KEEPALIVE_MAX_BACKOFF_MS = 6 * 60 * 60 * 1000;
 const PROACTIVE_RELOGIN_MS = 7 * 60 * 60 * 1000;
 const DUMMY_SERVICE = "https://my.cqu.edu.cn/authserver/authentication/cas";
 
+// Workers VPC binding(env.LOGIN_NODE)的内部占位 host。运行时由 VPC service 路由到
+// 国内登录节点(container/server.py);host 内容不被校验, 仅作合法 URL 的占位。
+// 四处「连 CQU」出站(/run /service-ticket /keepalive /code)都拼此前缀。
+const LOGIN_NODE_BASE = "http://cqu-login.internal";
+
 export const SERVICE_URLS: Record<string, string> = {
   jwxt: "https://my.cqu.edu.cn/authserver/authentication/cas",
   jxpj: "https://my.cqu.edu.cn/authserver/authentication/cas",
@@ -928,9 +933,10 @@ export class CquSessionDO extends DurableObject<Env> {
         creds.iv,
         this.env.ENCRYPTION_KEY
       );
-      const stub = this.getLoginContainer(state.userId);
-      const res = await stub.fetch(
-        new Request("https://c/run", {
+      // Phase 2: 经 Workers VPC binding 发到国内登录节点 POST /run(契约同容器, body 不变 ——
+      // 青果提取在节点本地)。原 getLoginContainer(...).fetch("https://c/run") 已弃用。
+      const res = await this.env.LOGIN_NODE.fetch(
+        new Request(`${LOGIN_NODE_BASE}/run`, {
           method: "POST",
           body: JSON.stringify({
             studentId: state.studentId,
