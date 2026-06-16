@@ -214,7 +214,10 @@ async def service_ticket_handler(request: web.Request) -> web.Response:
         )
 
     try:
-        ticket = await cqu_ticket.fetch_service_ticket(service_url, cookies, proxy)
+        # 同青果 IP 瞬态退避重试(瑞数误判/网络抖动自愈; 不重抽青果, 省配额)。
+        # 耗尽后仍抛 TicketError/httpx 错误, 由下面 except 按现有语义映射:
+        # NO_TICKET→502 / SESSION_EXPIRED→409 / 网络错→502。
+        ticket = await cqu_ticket.fetch_service_ticket_retrying(service_url, cookies, proxy)
         log.info("service-ticket ok ticket=%s", ticket[:24])
         return web.json_response({"ok": True, "ticket": ticket})
     except TicketError as e:

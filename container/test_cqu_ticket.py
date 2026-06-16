@@ -5,17 +5,20 @@
 运行:
     python3 -m pytest container/test_cqu_ticket.py -v
 """
+import asyncio
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import httpx  # noqa: E402
 import pytest  # noqa: E402
 
 import cqu_ticket  # noqa: E402
 from cqu_ticket import (  # noqa: E402
     TicketError,
     build_service_login_url,
+    fetch_service_ticket_retrying,
     looks_like_cas_login,
     select_cookies,
 )
@@ -115,3 +118,117 @@ def test_proxy_url_url_encodes_credentials():
     proxy = {"server": "http://1.2.3.4:20000", "username": "u@x", "password": "p:w/d"}
     out = cqu_ticket._proxy_url(proxy)
     assert out == "http://u%40x:p%3Aw%2Fd@1.2.3.4:20000"
+
+
+# ── fetch_service_ticket_retrying(同青果 IP 瞬态退避重试) ────────────────────
+# 对齐 cqu-sso.ts getServiceTicket 的重试语义: 只重试网络错误 + 瑞数误判(NO_TICKET),
+# 真过期(SESSION_EXPIRED)与契约错(MISSING_COOKIE)不重试; 同一 proxy 全程复用不重抽青果。
+#
+# 测试策略: monkeypatch cqu_ticket.fetch_service_ticket 为脚本化的假实现(一串返回/抛出),
+# monkeypatch asyncio.sleep 为 no-op 跳过真延时, asyncio.run(...) 驱动协程。
+
+_PROXY = {"server": "http://1.2.3.4:20000", "username": "u", "password": "p"}
+
+
+class _ScriptedFetch:
+    """脚本化的假 fetch_service_ticket: 按 steps 顺序逐次「返回值」或「抛异常」。
+
+    steps 每项: callable 抛异常类实例则 raise, 否则当返回值(ST 字符串)。
+    记录调用次数(calls)与每次入参, 供断言「重试复用同一 proxy / 调用次数」。
+    """
+
+    def __init__(self, steps):
+        self._steps = list(steps)
+        self.calls = 0
+        self.seen_proxies = []
+
+    async def __call__(self, service_url, cookies, proxy):
+        self.calls += 1
+        self.seen_proxies.append(proxy)
+        # 末次之后仍被调用 → 复用最后一步(用于「始终失败」耗尽场景)。
+        step = self._steps[min(self.calls - 1, len(self._steps) - 1)]
+        if isinstance(step, BaseException):
+            raise step
+        return step
+
+
+def _patch(monkeypatch, steps):
+    fake = _ScriptedFetch(steps)
+    monkeypatch.setattr(cqu_ticket, "fetch_service_ticket", fake)
+
+    async def _no_sleep(_s):
+        return None
+
+    monkeypatch.setattr(cqu_ticket.asyncio, "sleep", _no_sleep)
+    return fake
+
+
+def test_retrying_succeeds_on_second_attempt(monkeypatch):
+    # 首次 NO_TICKET(瞬态/瑞数误判), 第二次拿到 ST → 返回 ST, 共调 2 次。
+    fake = _patch(monkeypatch, [TicketError("NO_TICKET", "transient"), "ST-ok"])
+    out = asyncio.run(
+        fetch_service_ticket_retrying("https://x.cqu.edu.cn/cb", _FULL_COOKIES, _PROXY)
+    )
+    assert out == "ST-ok"
+    assert fake.calls == 2
+    # 同青果 IP 全程复用: 两次入参 proxy 是同一对象, 未重抽。
+    assert fake.seen_proxies == [_PROXY, _PROXY]
+
+
+def test_retrying_does_not_retry_session_expired(monkeypatch):
+    # 真过期立即上抛同款 TicketError, 不浪费重试(对齐 isRetryableSsoError 不重试过期)。
+    fake = _patch(monkeypatch, [TicketError("SESSION_EXPIRED", "fell back to login")])
+    with pytest.raises(TicketError) as ei:
+        asyncio.run(
+            fetch_service_ticket_retrying("https://x.cqu.edu.cn/cb", _FULL_COOKIES, _PROXY)
+        )
+    assert ei.value.code == "SESSION_EXPIRED"
+    assert fake.calls == 1
+
+
+def test_retrying_does_not_retry_contract_error(monkeypatch):
+    # 契约错(缺 cookie)立即上抛, 重试无意义。
+    fake = _patch(monkeypatch, [TicketError("MISSING_COOKIE", "missing SESSION")])
+    with pytest.raises(TicketError) as ei:
+        asyncio.run(
+            fetch_service_ticket_retrying("https://x.cqu.edu.cn/cb", _FULL_COOKIES, _PROXY)
+        )
+    assert ei.value.code == "MISSING_COOKIE"
+    assert fake.calls == 1
+
+
+def test_retrying_exhausts_and_raises_last(monkeypatch):
+    # 始终 NO_TICKET → 调满 max_attempts(默认 3)后抛最后一个 TicketError(code 仍 NO_TICKET)。
+    fake = _patch(monkeypatch, [TicketError("NO_TICKET", "always transient")])
+    with pytest.raises(TicketError) as ei:
+        asyncio.run(
+            fetch_service_ticket_retrying("https://x.cqu.edu.cn/cb", _FULL_COOKIES, _PROXY)
+        )
+    assert ei.value.code == "NO_TICKET"
+    assert fake.calls == cqu_ticket.ST_MAX_ATTEMPTS == 3
+
+
+def test_retrying_retries_network_error(monkeypatch):
+    # 网络瞬态(httpx.ConnectTimeout, HTTPError 子类)首次抛, 第二次拿到 ST → 返回 ST, 调 2 次。
+    fake = _patch(monkeypatch, [httpx.ConnectTimeout("boom"), "ST-net"])
+    out = asyncio.run(
+        fetch_service_ticket_retrying("https://x.cqu.edu.cn/cb", _FULL_COOKIES, _PROXY)
+    )
+    assert out == "ST-net"
+    assert fake.calls == 2
+
+
+def test_retrying_honours_custom_max_attempts(monkeypatch):
+    # 自定义小 max_attempts 形参便于快测: 始终失败时调用次数 == max_attempts。
+    fake = _patch(monkeypatch, [TicketError("NO_TICKET", "always")])
+    with pytest.raises(TicketError):
+        asyncio.run(
+            fetch_service_ticket_retrying(
+                "https://x.cqu.edu.cn/cb",
+                _FULL_COOKIES,
+                _PROXY,
+                max_attempts=2,
+                base_backoff_s=0.0,
+            )
+        )
+    assert fake.calls == 2
