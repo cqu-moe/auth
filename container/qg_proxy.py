@@ -84,8 +84,14 @@ async def acquire_qg_proxy(profile: Literal["login", "short"] = "short") -> dict
             r = await c.get(url)
             r.raise_for_status()
             body = r.json()
+    except httpx.HTTPStatusError as e:
+        # 脱敏: 提取 URL 含 key=<QG_AUTH_KEY>(Authkey 密钥), raise_for_status 的 str(e) 会带
+        # 完整 URL, 直接拼 str(e) 会把 Authkey 泄露进日志/上游 DO 响应。只报状态码, 不带 URL/str(e);
+        # from None 断异常链(防 traceback/exc_info 里 __cause__ 那条带 URL 的原始异常再泄露)。
+        raise QgExtractError(f"qg extract HTTP {e.response.status_code}") from None
     except (httpx.HTTPError, ValueError) as e:
-        raise QgExtractError(f"qg extract request failed: {type(e).__name__}: {e}") from e
+        # 网络层/JSON 解析错误: 只报异常类型, 不拼 str(e)(可能含含密钥的 URL); from None 断链。
+        raise QgExtractError(f"qg extract request failed: {type(e).__name__}") from None
     server = parse_extract_response(body)
     return {"server": f"http://{server}",
             "username": key,

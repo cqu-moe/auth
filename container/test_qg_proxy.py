@@ -77,6 +77,52 @@ def test_acquire_qg_proxy_network_error_raises(monkeypatch):
         asyncio.run(acquire_qg_proxy())
 
 
+def test_acquire_qg_proxy_http_status_error_does_not_leak_key(monkeypatch):
+    # 安全(P1): 青果 API 非 2xx → raise_for_status 抛 HTTPStatusError, 其 str(e) 形如
+    # "Client error '403 Forbidden' for url 'https://.../get?key=<Authkey>&...'" 带完整 URL 含密钥。
+    # 锁住: QgExtractError 消息绝不含 Authkey(只报状态码), 否则泄露进日志/上游 DO 响应。
+    import asyncio
+    import httpx as _httpx
+
+    from qg_proxy import acquire_qg_proxy
+
+    monkeypatch.setenv("QG_AUTH_KEY", "SECRETKEY123")
+    monkeypatch.setenv("QG_AUTH_PWD", "P")
+
+    class _FakeResp:
+        def raise_for_status(self):
+            req = _httpx.Request(
+                "GET", "https://share.proxy.qg.net/get?key=SECRETKEY123&num=1")
+            resp = _httpx.Response(403, request=req)
+            raise _httpx.HTTPStatusError(
+                "Client error '403 Forbidden' for url "
+                "'https://share.proxy.qg.net/get?key=SECRETKEY123&num=1'",
+                request=req, response=resp)
+
+        def json(self):  # 不应到达(raise_for_status 先抛)
+            return {}
+
+    class _FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, url):
+            return _FakeResp()
+
+    monkeypatch.setattr(_httpx, "AsyncClient", _FakeClient)
+    with pytest.raises(QgExtractError) as ei:
+        asyncio.run(acquire_qg_proxy("short"))
+    msg = str(ei.value)
+    assert "SECRETKEY123" not in msg  # 密钥绝不出现在错误消息里
+    assert "403" in msg               # 状态码仍报出来(可诊断)
+
+
 def _install_fake_client(monkeypatch, server="1.2.3.4:20000"):
     """monkeypatch httpx.AsyncClient 返回固定 server, 记录收到的 url。返回 captured list。"""
     import httpx as _httpx
