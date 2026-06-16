@@ -22,6 +22,7 @@ import time
 from aiohttp import web
 
 import cqu_login  # 改造后的登录器, 暴露 run_login(...)
+import cqu_keepalive  # 国内节点探活(经青果探测 CQU 会话), 暴露 probe_session(...)
 import cqu_ticket  # 国内节点取 ST(经青果换票), 暴露 fetch_service_ticket(...)
 from cqu_ticket import TicketError  # 取 ST 失败语义(SESSION_EXPIRED / NO_TICKET 等)
 from qg_proxy import acquire_qg_proxy, QgExtractError  # 青果短效代理(连 CQU 出站硬依赖)
@@ -226,6 +227,54 @@ async def service_ticket_handler(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": str(e)}, status=502)
 
 
+async def keepalive_handler(request: web.Request) -> web.Response:
+    """POST /keepalive {cookies} → 经青果探测 CQU 会话是否还活, 返回三态事实给 DO。
+
+    职责: 只返回「探测事实」(alive/expired/unreachable), 不做决策。熔断/退避/重登的
+    状态机全留在上游 DO(runKeepAlive/alarm), 本端点只如实回报探测结果。
+
+    · 铁律: 探活也是「连 CQU」, 必经青果。但青果失败的语义与 /run、/service-ticket 不同 ——
+      探活拿不到青果 = 「探不通」(并不证明会话过期), 故归 **unreachable** 而非 5xx:
+      返回 200 {ok:true, status:"unreachable"}, 让 DO 按瞬态退避(快重试/指数退避),
+      绝不让 DO 误判会话过期而触发容器重登(误判重登会触瑞数风控 + 烧容器, 代价远高)。
+    · 探测结果三态恒以 200 {ok:true, status, detail} 返回 —— DO 凭 status 区分:
+      "expired"(该重登) vs "unreachable"(该退避) vs "alive"(健康)。
+    · 缺 cookies / cookies 非 dict → 400(契约破坏, 真客户端错误)。
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
+
+    cookies = body.get("cookies")
+    if not isinstance(cookies, dict):
+        return web.json_response(
+            {"ok": False, "error": "missing required field: cookies (object)"},
+            status=400,
+        )
+
+    # 探活拿不到青果 = 探不通 → unreachable(让 DO 退避), 绝不 5xx、绝不当会话过期。
+    # 这是 keepalive 与 /run、/service-ticket(青果失败 → 5xx)的关键语义差异。
+    try:
+        proxy = await acquire_qg_proxy()
+    except QgExtractError as e:
+        log.warning("keepalive qg extract failed (→ unreachable): %s", e)
+        return web.json_response(
+            {"ok": True, "status": "unreachable", "detail": f"qg proxy unavailable: {e}"}
+        )
+
+    # probe_session 内部已把网络层/未知异常收口成 unreachable; 此处再兜底一层,
+    # 确保探活端点对 DO 永远只返回「探测事实」(200), 绝不 500 伪装成服务端崩溃。
+    try:
+        result = await cqu_keepalive.probe_session(cookies, proxy)
+    except Exception as e:  # noqa: BLE001 - 纵深兜底: 任何未预期错误也归 unreachable
+        log.warning("keepalive probe unexpected error (→ unreachable): %s", e)
+        result = {"status": "unreachable", "detail": f"{type(e).__name__}: {e}"}
+
+    log.info("keepalive status=%s detail=%s", result["status"], result.get("detail", "")[:80])
+    return web.json_response({"ok": True, **result})
+
+
 async def health_handler(_request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
@@ -236,6 +285,7 @@ def build_app() -> web.Application:
         web.post("/run", run_handler),
         web.post("/code", code_handler),
         web.post("/service-ticket", service_ticket_handler),
+        web.post("/keepalive", keepalive_handler),
         # CF Containers 默认探测 /ping 判断实例就绪。
         web.get("/ping", health_handler),
         web.get("/health", health_handler),
