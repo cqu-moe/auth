@@ -44,18 +44,22 @@ class KeepaliveTestCase(AioHTTPTestCase):
     def setUp(self):
         super().setUp()
         self._orig_acquire = server.acquire_qg_proxy
+        self._orig_should = server.should_use_proxy
         self._orig_probe = server.cqu_keepalive.probe_session
 
     def tearDown(self):
         server.acquire_qg_proxy = self._orig_acquire
+        server.should_use_proxy = self._orig_should
         server.cqu_keepalive.probe_session = self._orig_probe
         super().tearDown()
 
     async def test_alive_maps_to_200_alive(self):
-        # probe 判 alive → 200 {ok:true, status:"alive"}; proxy/cookies 原样透传。
+        # probe 判 alive → 200 {ok:true, status:"alive"}; proxy/cookies 原样透传; 走短效包。
         captured = {}
+        acquired = {"profile": None}
 
-        async def _ok():
+        async def _ok(profile="short"):
+            acquired["profile"] = profile
             return _FAKE_PROXY
 
         async def _probe(cookies, proxy):
@@ -74,10 +78,42 @@ class KeepaliveTestCase(AioHTTPTestCase):
         # 关键: proxy 原样透传, cookies 不被顶替。
         assert captured["proxy"] == _FAKE_PROXY
         assert captured["cookies"] == _VALID_BODY["cookies"]
+        # 默认(走青果)→ 探活用短效包(profile="short")。
+        assert acquired["profile"] == "short"
+
+    async def test_gray_door_off_direct_connect_no_acquire(self):
+        # 灰度门关(should_use_proxy("short")=False) → 节点直连探活: 不调 acquire_qg_proxy,
+        # 传给 probe 的 proxy 必须是 None; 仍正常返回探测三态(此处 alive)。
+        captured = {}
+        called = {"acquire": False}
+
+        def _no_proxy(profile):
+            assert profile == "short"
+            return False
+
+        async def _track_acquire(profile="short"):
+            called["acquire"] = True
+            return _FAKE_PROXY
+
+        async def _probe(cookies, proxy):
+            captured["proxy"] = proxy
+            return {"status": "alive", "detail": "direct-connect probe"}
+
+        server.should_use_proxy = _no_proxy
+        server.acquire_qg_proxy = _track_acquire
+        server.cqu_keepalive.probe_session = _probe
+
+        resp = await self.client.post("/keepalive", json=_VALID_BODY)
+        assert resp.status == 200, f"expected 200, got {resp.status}"
+        data = await resp.json()
+        assert data["ok"] is True
+        assert data["status"] == "alive"
+        assert called["acquire"] is False, "must not acquire qg when gray door is off"
+        assert captured["proxy"] is None, "direct-connect must pass proxy=None"
 
     async def test_expired_maps_to_200_expired(self):
         # probe 判 expired(落回 CAS 登录页) → 200 {ok:true, status:"expired"}。
-        async def _ok():
+        async def _ok(profile="short"):
             return _FAKE_PROXY
 
         async def _probe(*_a, **_k):
@@ -94,7 +130,7 @@ class KeepaliveTestCase(AioHTTPTestCase):
 
     async def test_unreachable_maps_to_200_unreachable(self):
         # probe 判 unreachable(瑞数误判/网络) → 200 {ok:true, status:"unreachable"}。
-        async def _ok():
+        async def _ok(profile="short"):
             return _FAKE_PROXY
 
         async def _probe(*_a, **_k):
@@ -114,7 +150,7 @@ class KeepaliveTestCase(AioHTTPTestCase):
         # 让 DO 按瞬态退避, 而非误判会话过期触发重登。
         called = {"probe": False}
 
-        async def _boom():
+        async def _boom(profile="short"):
             raise QgExtractError("QG_ENABLED=0 (应急开关关闭)")
 
         async def _probe(*_a, **_k):
@@ -135,7 +171,7 @@ class KeepaliveTestCase(AioHTTPTestCase):
     async def test_probe_unexpected_exception_maps_to_200_unreachable(self):
         # probe_session 自身抛未预期异常(理论上它内部已收口, 此为纵深兜底) → 200 unreachable,
         # 绝不 500 —— 探活端点对 DO 永远只返回「探测事实」。
-        async def _ok():
+        async def _ok(profile="short"):
             return _FAKE_PROXY
 
         async def _probe(*_a, **_k):
@@ -154,7 +190,7 @@ class KeepaliveTestCase(AioHTTPTestCase):
         # 缺 cookies 字段 → 400, 仍在 acquire_qg_proxy 之前(不浪费青果提取)。
         called = {"acquire": False}
 
-        async def _track_acquire():
+        async def _track_acquire(profile="short"):
             called["acquire"] = True
             return _FAKE_PROXY
 
@@ -167,7 +203,7 @@ class KeepaliveTestCase(AioHTTPTestCase):
         # cookies 非 dict(类型不对) → 400, 不进青果。
         called = {"acquire": False}
 
-        async def _track_acquire():
+        async def _track_acquire(profile="short"):
             called["acquire"] = True
             return _FAKE_PROXY
 

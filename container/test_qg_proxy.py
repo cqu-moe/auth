@@ -200,3 +200,41 @@ def test_should_use_proxy_short_off_login_on(monkeypatch):
     monkeypatch.setenv("QG_PROXY_SHORT", "0")
     assert should_use_proxy("short") is False
     assert should_use_proxy("login") is True
+
+
+def test_should_use_proxy_unknown_profile_raises(monkeypatch):
+    # 闭集守卫: 未知 profile → ValueError(不静默拼一个不存在的 QG_PROXY_BOGUS env)。
+    monkeypatch.delenv("QG_ENABLED", raising=False)
+    with pytest.raises(ValueError):
+        should_use_proxy("bogus")
+
+
+def test_acquire_qg_proxy_unknown_profile_raises(monkeypatch):
+    # 闭集守卫: 未知 profile → ValueError(不静默当 short 处理)。在触网前就拒。
+    import asyncio
+
+    from qg_proxy import acquire_qg_proxy
+
+    monkeypatch.setenv("QG_AUTH_KEY", "K0")
+    monkeypatch.setenv("QG_AUTH_PWD", "P0")
+    with pytest.raises(ValueError):
+        asyncio.run(acquire_qg_proxy("bogus"))
+
+
+def test_acquire_qg_proxy_login_empty_key_falls_back_to_short(monkeypatch):
+    # QG_AUTH_KEY_LOGIN="" (空串) 也算未配 → profile="login" 回退到 QG_AUTH_KEY。
+    # 锁住 `or` 对空串的回退(空环境变量不应顶替成空 username)。
+    import asyncio
+
+    from qg_proxy import acquire_qg_proxy
+
+    monkeypatch.setenv("QG_AUTH_KEY", "K0")
+    monkeypatch.setenv("QG_AUTH_PWD", "P0")
+    monkeypatch.setenv("QG_AUTH_KEY_LOGIN", "")
+    monkeypatch.setenv("QG_AUTH_PWD_LOGIN", "")
+    captured = _install_fake_client(monkeypatch)
+
+    result = asyncio.run(acquire_qg_proxy("login"))
+    assert result["username"] == "K0"
+    assert result["password"] == "P0"
+    assert "key=K0" in captured[0]

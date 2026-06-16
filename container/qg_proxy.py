@@ -7,8 +7,14 @@
 should_use_proxy(profile) 是灰度门: 控制每路走青果还是节点直连(直连省钱)。"""
 import os
 import urllib.parse
+from typing import Literal
 
 import httpx
+
+# profile 闭集: 仅 "login"(15 分钟登录包) / "short"(1 分钟高频包)。两个被 profile 驱动的
+# 函数(acquire_qg_proxy / should_use_proxy)开头都用它守卫, 消除「_select_credentials 把未知
+# profile 静默当 short, 而 should_use_proxy 用 profile.upper() 读到不存在的 env」这种不一致。
+_VALID_PROFILES = ("login", "short")
 
 
 class QgExtractError(Exception):
@@ -46,24 +52,30 @@ def _select_credentials(profile: str) -> tuple[str, str]:
     return os.environ["QG_AUTH_KEY"], os.environ["QG_AUTH_PWD"]
 
 
-def should_use_proxy(profile: str) -> bool:
+def should_use_proxy(profile: Literal["login", "short"]) -> bool:
     """是否该走青果(返回 False 则节点直连 CQU, 省青果钱; 部署时灰度验证用)。
 
     两路分别由 QG_PROXY_LOGIN / QG_PROXY_SHORT 控制(profile.upper() 拼环境变量名);
     QG_ENABLED 是总开关(0=强制全部直连, 应急降级)。
-    任一开关 == "0" 视为关; 其余值(含未设)默认走青果 → 默认全开。"""
+    任一开关 == "0" 视为关; 其余值(含未设)默认走青果 → 默认全开。
+    profile 必属闭集 _VALID_PROFILES, 否则 ValueError(防拼一个不存在的 QG_PROXY_BOGUS)。"""
+    if profile not in _VALID_PROFILES:
+        raise ValueError(f"unknown profile: {profile!r}")
     if os.environ.get("QG_ENABLED", "1") == "0":
         return False
     return os.environ.get(f"QG_PROXY_{profile.upper()}", "1") != "0"
 
 
-async def acquire_qg_proxy(profile: str = "short") -> dict:
+async def acquire_qg_proxy(profile: Literal["login", "short"] = "short") -> dict:
     """按 profile 取一个青果 IP, 返回 patchright proxy dict: {server, username, password}。
     profile 选套餐 Authkey/pwd(见 _select_credentials)。职责纯粹是「按 profile 取一个青果 IP」:
     任何"拿不到青果 IP"的情形(网络错误/超时 / 非2xx / 畸形响应)都抛 QgExtractError,
     由调用方按硬依赖处理(端点返回 5xx 让上游 DO 退避)。
     走/不走青果的灰度门控见 should_use_proxy, acquire 本身不查 QG_ENABLED。
+    profile 必属闭集 _VALID_PROFILES, 否则 ValueError(在触网前就拒, 不静默当 short)。
     注: 缺 QG_AUTH_KEY/PWD 是配置错误, 故意不收口(让 KeyError fail loud)。"""
+    if profile not in _VALID_PROFILES:
+        raise ValueError(f"unknown profile: {profile!r}")
     key, pwd = _select_credentials(profile)
     base = os.environ.get("QG_EXTRACT_BASE", "https://share.proxy.qg.net/get")
     url = build_extract_url(base, key, os.environ.get("QG_AREA", "500100"))

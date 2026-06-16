@@ -25,7 +25,7 @@ import cqu_login  # 改造后的登录器, 暴露 run_login(...)
 import cqu_keepalive  # 国内节点探活(经青果探测 CQU 会话), 暴露 probe_session(...)
 import cqu_ticket  # 国内节点取 ST(经青果换票), 暴露 fetch_service_ticket(...)
 from cqu_ticket import TicketError  # 取 ST 失败语义(SESSION_EXPIRED / NO_TICKET 等)
-from qg_proxy import acquire_qg_proxy, QgExtractError  # 青果短效代理(连 CQU 出站硬依赖)
+from qg_proxy import acquire_qg_proxy, QgExtractError, should_use_proxy  # 青果代理 + 灰度门
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("cqu-login-server")
@@ -83,15 +83,18 @@ async def run_handler(request: web.Request) -> web.Response:
             status=400,
         )
 
-    # 铁律: 所有连 CQU 出站经青果。拿不到青果 IP 即判失败(硬依赖回退), 返回 502 让上游退避——
-    # 绝不无代理裸连 CQU。放在 Event 注册之前: 502 早退路径不注册 Event/Value, 无需 finally 清理。
-    try:
-        proxy = await acquire_qg_proxy()
-    except QgExtractError as e:
-        log.warning("run abort session=%s qg extract failed: %s", session, e)
-        return web.json_response(
-            {"ok": False, "error": f"qg proxy unavailable: {e}"}, status=502
-        )
+    # 灰度: QG_PROXY_LOGIN/QG_ENABLED 决定 /run 走青果(登录包)还是节点直连。走青果时拿不到 IP
+    # → 502 硬依赖回退(绝不悄悄 fallback 直连); 直连时 proxy=None, 由节点境内 IP 连 CQU。
+    # 放在 Event 注册之前: 早退路径不注册 Event/Value, 无需 finally 清理。
+    proxy = None
+    if should_use_proxy("login"):
+        try:
+            proxy = await acquire_qg_proxy("login")
+        except QgExtractError as e:
+            log.warning("run abort session=%s qg extract failed: %s", session, e)
+            return web.json_response(
+                {"ok": False, "error": f"qg proxy unavailable: {e}"}, status=502
+            )
 
     ev = asyncio.Event()
     CODE_EVENTS[session] = ev
@@ -183,8 +186,8 @@ async def service_ticket_handler(request: web.Request) -> web.Response:
     职责: 只负责「换票」这一跳。取票的安全闸(serviceUrl host 校验 / quicklogin
     opt-in / 限流 / 审计)仍在上游 DO, 这里拿到的 serviceUrl 已被 DO 校验过。
 
-    · 铁律: 连 CQU 出站必经青果。acquire_qg_proxy() 失败 → 502(硬依赖回退, 同 /run),
-      绝不无代理裸连 CQU。
+    · 出站灰度: 默认经青果(短效包); QG_PROXY_SHORT/QG_ENABLED 可改节点直连。走青果时
+      acquire_qg_proxy() 失败 → 502(硬依赖回退, 同 /run, 绝不悄悄 fallback 直连)。
     · 成功: 200 {ok:true, ticket}。
     · 会话过期(落回 CAS 登录页): 409 {ok:false, error} —— 语义是「该 cookie 的 CAS
       会话已失效」, 客户端错误而非服务端故障, 交上游 DO/容器重登; 用 409 Conflict
@@ -204,14 +207,16 @@ async def service_ticket_handler(request: web.Request) -> web.Response:
             status=400,
         )
 
-    # 硬依赖: 拿不到青果即判失败, 502 让上游退避 —— 绝不无代理裸连 CQU。
-    try:
-        proxy = await acquire_qg_proxy()
-    except QgExtractError as e:
-        log.warning("service-ticket abort qg extract failed: %s", e)
-        return web.json_response(
-            {"ok": False, "error": f"qg proxy unavailable: {e}"}, status=502
-        )
+    # 灰度: QG_PROXY_SHORT/QG_ENABLED 决定取票走青果(短效包)还是节点直连。走青果拿不到 IP → 502。
+    proxy = None
+    if should_use_proxy("short"):
+        try:
+            proxy = await acquire_qg_proxy("short")
+        except QgExtractError as e:
+            log.warning("service-ticket abort qg extract failed: %s", e)
+            return web.json_response(
+                {"ok": False, "error": f"qg proxy unavailable: {e}"}, status=502
+            )
 
     try:
         # 同青果 IP 瞬态退避重试(瑞数误判/网络抖动自愈; 不重抽青果, 省配额)。
@@ -236,10 +241,10 @@ async def keepalive_handler(request: web.Request) -> web.Response:
     职责: 只返回「探测事实」(alive/expired/unreachable), 不做决策。熔断/退避/重登的
     状态机全留在上游 DO(runKeepAlive/alarm), 本端点只如实回报探测结果。
 
-    · 铁律: 探活也是「连 CQU」, 必经青果。但青果失败的语义与 /run、/service-ticket 不同 ——
-      探活拿不到青果 = 「探不通」(并不证明会话过期), 故归 **unreachable** 而非 5xx:
-      返回 200 {ok:true, status:"unreachable"}, 让 DO 按瞬态退避(快重试/指数退避),
-      绝不让 DO 误判会话过期而触发容器重登(误判重登会触瑞数风控 + 烧容器, 代价远高)。
+    · 出站灰度: 默认经青果(短效包); QG_PROXY_SHORT/QG_ENABLED 可改节点直连。走青果时青果失败
+      的语义与 /run、/service-ticket 不同 —— 探活拿不到青果 = 「探不通」(并不证明会话过期),
+      故归 **unreachable** 而非 5xx: 返回 200 {ok:true, status:"unreachable"}, 让 DO 按瞬态退避
+      (快重试/指数退避), 绝不让 DO 误判会话过期而触发容器重登(误判重登会触瑞数风控 + 烧容器, 代价远高)。
     · 探测结果三态恒以 200 {ok:true, status, detail} 返回 —— DO 凭 status 区分:
       "expired"(该重登) vs "unreachable"(该退避) vs "alive"(健康)。
     · 缺 cookies / cookies 非 dict → 400(契约破坏, 真客户端错误)。
@@ -256,15 +261,18 @@ async def keepalive_handler(request: web.Request) -> web.Response:
             status=400,
         )
 
-    # 探活拿不到青果 = 探不通 → unreachable(让 DO 退避), 绝不 5xx、绝不当会话过期。
+    # 灰度: QG_PROXY_SHORT/QG_ENABLED 决定探活走青果(短效包)还是节点直连。
+    # 走青果且拿不到 IP = 探不通 → unreachable(让 DO 退避), 绝不 5xx、绝不当会话过期。
     # 这是 keepalive 与 /run、/service-ticket(青果失败 → 5xx)的关键语义差异。
-    try:
-        proxy = await acquire_qg_proxy()
-    except QgExtractError as e:
-        log.warning("keepalive qg extract failed (→ unreachable): %s", e)
-        return web.json_response(
-            {"ok": True, "status": "unreachable", "detail": f"qg proxy unavailable: {e}"}
-        )
+    proxy = None
+    if should_use_proxy("short"):
+        try:
+            proxy = await acquire_qg_proxy("short")
+        except QgExtractError as e:
+            log.warning("keepalive qg extract failed (→ unreachable): %s", e)
+            return web.json_response(
+                {"ok": True, "status": "unreachable", "detail": f"qg proxy unavailable: {e}"}
+            )
 
     # probe_session 内部已把网络层/未知异常收口成 unreachable; 此处再兜底一层,
     # 确保探活端点对 DO 永远只返回「探测事实」(200), 绝不 500 伪装成服务端崩溃。

@@ -42,10 +42,12 @@ class ServiceTicketTestCase(AioHTTPTestCase):
     def setUp(self):
         super().setUp()
         self._orig_acquire = server.acquire_qg_proxy
+        self._orig_should = server.should_use_proxy
         self._orig_fetch = server.cqu_ticket.fetch_service_ticket
 
     def tearDown(self):
         server.acquire_qg_proxy = self._orig_acquire
+        server.should_use_proxy = self._orig_should
         server.cqu_ticket.fetch_service_ticket = self._orig_fetch
         super().tearDown()
 
@@ -53,7 +55,7 @@ class ServiceTicketTestCase(AioHTTPTestCase):
         # 青果提取失败 → 502 早退, 绝不进入 fetch_service_ticket。
         called = {"fetch": False}
 
-        async def _boom():
+        async def _boom(profile="short"):
             raise QgExtractError("QG_ENABLED=0 (应急开关关闭)")
 
         async def _fetch(*_a, **_k):
@@ -71,10 +73,12 @@ class ServiceTicketTestCase(AioHTTPTestCase):
         assert called["fetch"] is False, "fetch must not run when qg fails"
 
     async def test_success_returns_ticket_and_passes_proxy(self):
-        # 青果成功 → proxy 原样透传 fetch; 成功 200 {ok, ticket}。
+        # 青果成功 → proxy 原样透传 fetch; 成功 200 {ok, ticket}; 走短效包(profile="short")。
         captured = {}
+        acquired = {"profile": None}
 
-        async def _ok():
+        async def _ok(profile="short"):
+            acquired["profile"] = profile
             return _FAKE_PROXY
 
         async def _fetch(service_url, cookies, proxy):
@@ -93,12 +97,44 @@ class ServiceTicketTestCase(AioHTTPTestCase):
         assert data["ticket"] == "ST-realticket-xyz"
         # 关键: proxy 原样透传, serviceUrl/cookies 不被顶替。
         assert captured["proxy"] == _FAKE_PROXY
+        # 默认(走青果)→ 用短效包(profile="short")。
+        assert acquired["profile"] == "short"
         assert captured["service_url"] == _VALID_BODY["serviceUrl"]
         assert captured["cookies"] == _VALID_BODY["cookies"]
 
+    async def test_gray_door_off_direct_connect_no_acquire(self):
+        # 灰度门关(should_use_proxy("short")=False) → 节点直连: 不调 acquire_qg_proxy,
+        # 传给 fetch 的 proxy 必须是 None。
+        captured = {}
+        called = {"acquire": False}
+
+        def _no_proxy(profile):
+            assert profile == "short"
+            return False
+
+        async def _track_acquire(profile="short"):
+            called["acquire"] = True
+            return _FAKE_PROXY
+
+        async def _fetch(service_url, cookies, proxy):
+            captured["proxy"] = proxy
+            return "ST-direct-xyz"
+
+        server.should_use_proxy = _no_proxy
+        server.acquire_qg_proxy = _track_acquire
+        server.cqu_ticket.fetch_service_ticket = _fetch
+
+        resp = await self.client.post("/service-ticket", json=_VALID_BODY)
+        assert resp.status == 200, f"expected 200, got {resp.status}"
+        data = await resp.json()
+        assert data["ok"] is True
+        assert data["ticket"] == "ST-direct-xyz"
+        assert called["acquire"] is False, "must not acquire qg when gray door is off"
+        assert captured["proxy"] is None, "direct-connect must pass proxy=None"
+
     async def test_session_expired_returns_409(self):
         # 取票判会话过期(SESSION_EXPIRED) → 409(客户端态: cookie 失效, 交重登)。
-        async def _ok():
+        async def _ok(profile="short"):
             return _FAKE_PROXY
 
         async def _fetch(*_a, **_k):
@@ -115,7 +151,7 @@ class ServiceTicketTestCase(AioHTTPTestCase):
 
     async def test_no_ticket_returns_502(self):
         # 取票未抓到 ST 且非登录页(疑似瑞数误判) → 502(瞬态, 上游退避重试)。
-        async def _ok():
+        async def _ok(profile="short"):
             return _FAKE_PROXY
 
         async def _fetch(*_a, **_k):
@@ -132,7 +168,7 @@ class ServiceTicketTestCase(AioHTTPTestCase):
 
     async def test_network_error_returns_502(self):
         # fetch 抛非 TicketError(网络层等) → 兜底 502(瞬态), 不 500。
-        async def _ok():
+        async def _ok(profile="short"):
             return _FAKE_PROXY
 
         async def _fetch(*_a, **_k):
@@ -150,7 +186,7 @@ class ServiceTicketTestCase(AioHTTPTestCase):
         # 缺字段 400 仍在 acquire_qg_proxy 之前, 不浪费一次青果提取。
         called = {"acquire": False}
 
-        async def _track_acquire():
+        async def _track_acquire(profile="short"):
             called["acquire"] = True
             return _FAKE_PROXY
 
@@ -164,7 +200,7 @@ class ServiceTicketTestCase(AioHTTPTestCase):
         # cookies 非 dict(类型不对) → 400, 不进青果。
         called = {"acquire": False}
 
-        async def _track_acquire():
+        async def _track_acquire(profile="short"):
             called["acquire"] = True
             return _FAKE_PROXY
 
