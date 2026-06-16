@@ -22,6 +22,8 @@ import time
 from aiohttp import web
 
 import cqu_login  # 改造后的登录器, 暴露 run_login(...)
+import cqu_ticket  # 国内节点取 ST(经青果换票), 暴露 fetch_service_ticket(...)
+from cqu_ticket import TicketError  # 取 ST 失败语义(SESSION_EXPIRED / NO_TICKET 等)
 from qg_proxy import acquire_qg_proxy, QgExtractError  # 青果短效代理(连 CQU 出站硬依赖)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -174,6 +176,56 @@ async def code_handler(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "waiting": False})
 
 
+async def service_ticket_handler(request: web.Request) -> web.Response:
+    """POST /service-ticket {serviceUrl, cookies} → 经青果去 CQU 换一张 ST。
+
+    职责: 只负责「换票」这一跳。取票的安全闸(serviceUrl host 校验 / quicklogin
+    opt-in / 限流 / 审计)仍在上游 DO, 这里拿到的 serviceUrl 已被 DO 校验过。
+
+    · 铁律: 连 CQU 出站必经青果。acquire_qg_proxy() 失败 → 502(硬依赖回退, 同 /run),
+      绝不无代理裸连 CQU。
+    · 成功: 200 {ok:true, ticket}。
+    · 会话过期(落回 CAS 登录页): 409 {ok:false, error} —— 语义是「该 cookie 的 CAS
+      会话已失效」, 客户端错误而非服务端故障, 交上游 DO/容器重登; 用 409 Conflict
+      让 DO 能据状态码与「瞬态封锁」区分(后者走 502 退避重试)。
+    · 未取到票(疑似瑞数误判/未知页)/ 缺 cookie: 502 {ok:false, error}, 让上游退避重试。
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
+
+    service_url = body.get("serviceUrl")
+    cookies = body.get("cookies")
+    if not service_url or not isinstance(cookies, dict):
+        return web.json_response(
+            {"ok": False, "error": "missing required field: serviceUrl/cookies"},
+            status=400,
+        )
+
+    # 硬依赖: 拿不到青果即判失败, 502 让上游退避 —— 绝不无代理裸连 CQU。
+    try:
+        proxy = await acquire_qg_proxy()
+    except QgExtractError as e:
+        log.warning("service-ticket abort qg extract failed: %s", e)
+        return web.json_response(
+            {"ok": False, "error": f"qg proxy unavailable: {e}"}, status=502
+        )
+
+    try:
+        ticket = await cqu_ticket.fetch_service_ticket(service_url, cookies, proxy)
+        log.info("service-ticket ok ticket=%s", ticket[:24])
+        return web.json_response({"ok": True, "ticket": ticket})
+    except TicketError as e:
+        # 会话过期 → 409(客户端态: cookie 失效, 交重登); 其余取票失败 → 502(瞬态, 退避重试)。
+        status = 409 if e.code == "SESSION_EXPIRED" else 502
+        log.warning("service-ticket fail code=%s status=%d error=%s", e.code, status, e)
+        return web.json_response({"ok": False, "error": str(e)}, status=status)
+    except Exception as e:  # noqa: BLE001 - 网络层/未预期错误也按瞬态上抛, 让上游退避
+        log.warning("service-ticket error %s", e)
+        return web.json_response({"ok": False, "error": str(e)}, status=502)
+
+
 async def health_handler(_request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
@@ -183,6 +235,7 @@ def build_app() -> web.Application:
     app.add_routes([
         web.post("/run", run_handler),
         web.post("/code", code_handler),
+        web.post("/service-ticket", service_ticket_handler),
         # CF Containers 默认探测 /ping 判断实例就绪。
         web.get("/ping", health_handler),
         web.get("/health", health_handler),
