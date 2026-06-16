@@ -27,7 +27,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && patchright install chromium
 
-COPY server.py cqu_login.py qg_proxy.py ./
+COPY server.py cqu_login.py qg_proxy.py cqu_ticket.py cqu_keepalive.py ./
 
 EXPOSE 8080
 CMD ["python", "server.py"]

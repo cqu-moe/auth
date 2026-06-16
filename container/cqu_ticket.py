@@ -14,9 +14,9 @@
 复刻来源: src/services/cqu-sso.ts 的 `mintServiceTicketOnce`。
   · 请求: GET https://sso.cqu.edu.cn/login?service=<urlencode(serviceUrl)>,
     带浏览器 UA + 3 个 cookie(SOURCEID_TGC / SESSION / rg_objectid)。
-  · TS 用 redirect:"manual" 读 302 的 Location 抓 ticket=ST-...; 这里改用
-    follow_redirects=True, 从重定向历史 + 最终 URL 里抓 ST(更稳: ST 可能出现在
-    任意一跳的 URL 里), 二者等价。
+  · TS 用 redirect:"manual" 读 302 的 Location 抓 ticket=ST-...; 这里同样
+    follow_redirects=False, 只从 302 的 Location 头抓 ST, **绝不跟随**。ST 单次有效,
+    跟随会真的对 serviceUrl 发请求 → 目标服务在那次回调里就把这张票校验/消费掉, 抓到即废票。
   · 会话过期判别: 抓不到 ST 且最终落回 CAS 登录页(login-croypto/login-page-flowkey
     特征) → 判 SESSION_EXPIRED; 否则判 NO_TICKET(疑似瑞数误判/未知页)。
 """
@@ -37,11 +37,10 @@ FETCH_TIMEOUT = 15
 # 重试韧性搬到国内节点, 关键差异: **同一青果 IP 全程复用、不重抽**(省青果配额)。
 ST_MAX_ATTEMPTS = 3
 ST_BASE_BACKOFF_S = 0.4
-# 可重试的 TicketError 码: 只含 NO_TICKET(疑似瑞数误判/未知页/瞬态)。
-# 注: 节点的 NO_TICKET 对应 TS 侧的 WAF_CHALLENGE(都是「非登录页且没票」), 而非 TS 的 NO_TICKET ——
-# 因本模块用 follow_redirects 抓全链路 URL, 不产生 TS 那种「302 但 Location 无 ticket=」的 NO_TICKET;
-# 故重试它与 cqu-sso.ts isRetryableSsoError(重试 NETWORK_ERROR + WAF_CHALLENGE)语义一致。
-# SESSION_EXPIRED(真过期, 重试也是同样过期)与 MISSING_COOKIE(契约错, 重试无意义)不在其列。
+# 可重试的 TicketError 码: 只含 NO_TICKET(疑似瑞数误判/未知页/「302 但 Location 无 ticket=」/瞬态)。
+# 注: 节点的 NO_TICKET 覆盖 TS 侧的 WAF_CHALLENGE(非登录页且没票)+ NO_TICKET(302 但 Location 无 ticket=),
+# 二者皆瞬态(瑞数误判/限流), 都重试; 与 cqu-sso.ts isRetryableSsoError(重试 NETWORK_ERROR + WAF_CHALLENGE)
+# 同向。SESSION_EXPIRED(真过期, 重试也是同样过期)与 MISSING_COOKIE(契约错, 重试无意义)不在其列。
 RETRYABLE_TICKET_CODES = frozenset({"NO_TICKET"})
 
 # 落回 CAS 登录页的特征串(对齐 cqu-sso.ts classifyNon302Body 的 cas-login 判据):
@@ -116,7 +115,8 @@ async def fetch_service_ticket(service_url: str, cookies: dict, proxy: dict | No
       · proxy is None → **节点直连**(不经青果): 成都境内节点 IP 直连 CQU, 省青果配额(成本优化灰度)。
 
     复刻 cqu-sso.ts mintServiceTicketOnce: 浏览器 UA + 3 cookie, GET
-    /login?service=<service_url>, follow redirects, 从重定向历史/最终 URL 抓 ST-...。
+    /login?service=<service_url>, 不跟随 302, 从 Location 头抓 ST(ST 单次有效,
+    跟随会被目标服务消费)。
 
     返回 ST 字符串(形如 "ST-...")。抓不到时:
       · 落回 CAS 登录页(login-croypto 等特征)→ TicketError("SESSION_EXPIRED")。
@@ -127,28 +127,30 @@ async def fetch_service_ticket(service_url: str, cookies: dict, proxy: dict | No
     async with httpx.AsyncClient(
         proxy=_proxy_url(proxy) if proxy is not None else None,
         timeout=FETCH_TIMEOUT,
-        follow_redirects=True,
+        follow_redirects=False,   # ST 单次有效: 绝不跟随 CAS 302 到 serviceUrl(跟随=目标服务消费掉票)
         headers={"User-Agent": UA},
         trust_env=False,  # 不读环境 HTTP(S)_PROXY/ALL_PROXY/.netrc: proxy=None 时确保真直连
                           # (节点境内 IP), proxy 给定时只用我们传的青果代理, 杜绝环境变量悄改出口 IP。
     ) as client:
         resp = await client.get(url, cookies=cookie_jar)
 
-    ticket = extract_ticket(collect_response_urls(resp))
-    if ticket:
-        return ticket
+    # CAS 取票成功 = 302 重定向到 serviceUrl?ticket=ST-...。只从 Location 抓票, 不跟随
+    # (对齐 cqu-sso.ts mintServiceTicketOnce 的 redirect:"manual"; ST 单次有效, 跟随会被目标服务消费)。
+    if resp.status_code in (301, 302, 303, 307, 308):
+        location = resp.headers.get("location", "")
+        ticket = extract_ticket([location])
+        if ticket:
+            return ticket
+        raise TicketError("NO_TICKET", f"redirect without ticket=ST in Location: {location[:80]}")
 
-    # 抓不到 ST: 区分「真过期(落回登录页)」与「未知/疑似误判」。
+    # 非重定向(多为 200 登录页): 落回 CAS 登录页 = 真过期; 否则未知/疑似瑞数误判。
     body = resp.text or ""
     if looks_like_cas_login(body):
         raise TicketError(
             "SESSION_EXPIRED",
-            f"no ST: fell back to CAS login page (session expired), final_url={str(resp.url)[:80]}",
+            f"no ST: fell back to CAS login page (session expired), status={resp.status_code}",
         )
-    raise TicketError(
-        "NO_TICKET",
-        f"no ST in redirect chain (likely WAF/throttle or unknown page), final_url={str(resp.url)[:80]}",
-    )
+    raise TicketError("NO_TICKET", f"no ST, non-redirect status={resp.status_code}")
 
 
 async def fetch_service_ticket_retrying(
@@ -174,9 +176,8 @@ async def fetch_service_ticket_retrying(
         且换 IP 反而可能落到另一个被风控的出口, 瞬态自愈用同 IP 重试即可。
 
     重试判据(对齐 cqu-sso.ts isRetryableSsoError, 它重试 NETWORK_ERROR + WAF_CHALLENGE):
-      · TicketError code=="NO_TICKET": 可重试。节点的 NO_TICKET ≡ TS 的 WAF_CHALLENGE(都是「非登录页
-        且没票 → 疑似瑞数误判/限流」); 因本模块 follow_redirects 抓全链路 URL, 不产生 TS 那种「302 无
-        ticket=」的 NO_TICKET, 故此处可重试的 NO_TICKET 不是 TS 里不重试的那个 NO_TICKET。
+      · TicketError code=="NO_TICKET": 可重试。节点的 NO_TICKET 含两种瞬态: 非登录页且没票(≡ TS 的
+        WAF_CHALLENGE, 疑似瑞数误判/限流), 以及「302 但 Location 无 ticket=」; 均当瞬态自愈重试。
       · httpx.HTTPError 及其子类(超时/连接重置等网络层): 可重试。
       · TicketError("SESSION_EXPIRED"): **不重试** —— 真过期, 重试也是同样过期(徒增青果出站 + 风控
         面)。立即上抛, 让端点映射 409 交 DO/容器重登。

@@ -244,29 +244,41 @@ def test_retrying_honours_custom_max_attempts(monkeypatch):
 
 
 class _FakeResponse:
-    """假 httpx.Response: 给 collect_response_urls / extract_ticket / looks_like_cas_login 喂数据。
+    """假 httpx.Response: 给「从 302 Location 抓 ST」+ 分类逻辑喂数据。
 
-    最终 URL 带 ticket=ST-... → fetch_service_ticket 抓到 ST 正常返回(不抛), 让我们专注断言 proxy。
+    取票成功 = 302 + Location: <service>?ticket=ST-...; fetch_service_ticket 只从 Location 头
+    抓票、不跟随。默认构造一个带 ticket 的 302, 让断言 proxy 的测试专注 proxy 而非分类。
     """
 
-    def __init__(self, final_url: str, text: str = ""):
-        self.url = final_url
-        self.history = []
+    def __init__(
+        self,
+        status_code: int = 302,
+        location: str = "https://x.cqu.edu.cn/cb?ticket=ST-1-aaa.bbb",
+        text: str = "",
+    ):
+        self.status_code = status_code
+        # httpx 的 headers 大小写不敏感; 这里用普通 dict + .get("location") 即可被实现取到。
+        self.headers = {"location": location} if location is not None else {}
         self.text = text
 
 
 class _FakeAsyncClient:
-    """假 httpx.AsyncClient: 捕获构造 kwargs(尤其 proxy / trust_env), get() 返回脚本化假 response。
+    """假 httpx.AsyncClient: 捕获构造 kwargs(proxy / trust_env / follow_redirects)与 get 调用次数。
 
-    类属性 seen_proxy / seen_trust_env 记录最近一次构造收到的 kwarg, 供测试断言。
+    类属性 seen_* 记录最近一次构造收到的 kwarg; get_calls 记录 get 被调用的次数(用于断言
+    「不跟随 302 → 只 get 一次」)。response 由 _next_response 注入, 默认带 ticket 的 302。
     """
 
     seen_proxy = object()  # 哨兵: 未被构造过(区别于真的传了 None)
     seen_trust_env = object()
+    seen_follow_redirects = object()
+    get_calls = 0
+    _next_response = None
 
     def __init__(self, *args, **kwargs):
         type(self).seen_proxy = kwargs.get("proxy")
         type(self).seen_trust_env = kwargs.get("trust_env")
+        type(self).seen_follow_redirects = kwargs.get("follow_redirects")
 
     async def __aenter__(self):
         return self
@@ -275,18 +287,22 @@ class _FakeAsyncClient:
         return False
 
     async def get(self, url, cookies=None):
-        # 最终落到一个带 ticket=ST-... 的 URL → extract_ticket 抓到 → 正常返回 ST。
-        return _FakeResponse("https://x.cqu.edu.cn/cb?ticket=ST-1-aaa.bbb")
+        type(self).get_calls += 1
+        return type(self)._next_response or _FakeResponse()
 
 
-def _patch_client(monkeypatch):
+def _patch_client(monkeypatch, response=None):
     _FakeAsyncClient.seen_proxy = object()
     _FakeAsyncClient.seen_trust_env = object()
+    _FakeAsyncClient.seen_follow_redirects = object()
+    _FakeAsyncClient.get_calls = 0
+    _FakeAsyncClient._next_response = response
     monkeypatch.setattr(cqu_ticket.httpx, "AsyncClient", _FakeAsyncClient)
 
 
 def test_fetch_with_none_proxy_passes_none_to_client(monkeypatch):
     # proxy=None(灰度直连) → httpx.AsyncClient 构造 proxy kwarg 必须是 None(httpx 直连, 不挂代理)。
+    # response: 302 + Location 带 ticket=ST-... → 从 Location 抓 ST 正常返回。
     _patch_client(monkeypatch)
     out = asyncio.run(
         cqu_ticket.fetch_service_ticket("https://x.cqu.edu.cn/cb", _FULL_COOKIES, None)
@@ -309,6 +325,61 @@ def test_fetch_with_proxy_dict_passes_proxy_url_to_client(monkeypatch):
     assert _FakeAsyncClient.seen_proxy == "http://u:p@1.2.3.4:20000"
     # trust_env=False: 经青果时也只用我们传的代理, 杜绝环境变量另叠一层代理改出口。
     assert _FakeAsyncClient.seen_trust_env is False
+
+
+def test_fetch_does_not_follow_redirect_and_gets_once(monkeypatch):
+    # ST 单次有效: 302 → 只从 Location 抓票, 绝不跟随到 serviceUrl(跟随=目标服务消费掉票)。
+    # 断言: follow_redirects=False 构造; 且 get 只被调一次(没跟随发第二次请求)。
+    _patch_client(
+        monkeypatch,
+        _FakeResponse(302, "https://x.cqu.edu.cn/cb?ticket=ST-1-aaa.bbb"),
+    )
+    out = asyncio.run(
+        cqu_ticket.fetch_service_ticket("https://x.cqu.edu.cn/cb", _FULL_COOKIES, None)
+    )
+    assert out == "ST-1-aaa.bbb"
+    assert _FakeAsyncClient.seen_follow_redirects is False
+    assert _FakeAsyncClient.get_calls == 1
+
+
+def test_fetch_redirect_without_ticket_raises_no_ticket(monkeypatch):
+    # 302 但 Location 无 ticket=ST → NO_TICKET(对齐 cqu-sso.ts: 重定向却没票)。
+    _patch_client(
+        monkeypatch,
+        _FakeResponse(302, "https://x.cqu.edu.cn/cb?error=denied"),
+    )
+    with pytest.raises(TicketError) as ei:
+        asyncio.run(
+            cqu_ticket.fetch_service_ticket("https://x.cqu.edu.cn/cb", _FULL_COOKIES, None)
+        )
+    assert ei.value.code == "NO_TICKET"
+    assert _FakeAsyncClient.get_calls == 1
+
+
+def test_fetch_non_redirect_login_page_raises_session_expired(monkeypatch):
+    # 非 302(200 登录页, body 含 login-croypto) → SESSION_EXPIRED(真过期, 落回 CAS 登录页)。
+    _patch_client(
+        monkeypatch,
+        _FakeResponse(200, location=None, text='<input id="login-croypto" value="x">'),
+    )
+    with pytest.raises(TicketError) as ei:
+        asyncio.run(
+            cqu_ticket.fetch_service_ticket("https://x.cqu.edu.cn/cb", _FULL_COOKIES, None)
+        )
+    assert ei.value.code == "SESSION_EXPIRED"
+
+
+def test_fetch_non_redirect_unknown_page_raises_no_ticket(monkeypatch):
+    # 非 302 + body 不含登录页特征(疑似瑞数误判/未知页) → NO_TICKET(可重试)。
+    _patch_client(
+        monkeypatch,
+        _FakeResponse(200, location=None, text="<html>some unknown WAF page</html>"),
+    )
+    with pytest.raises(TicketError) as ei:
+        asyncio.run(
+            cqu_ticket.fetch_service_ticket("https://x.cqu.edu.cn/cb", _FULL_COOKIES, None)
+        )
+    assert ei.value.code == "NO_TICKET"
 
 
 def test_fetch_with_empty_proxy_dict_fails_loud(monkeypatch):
