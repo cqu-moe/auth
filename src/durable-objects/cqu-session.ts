@@ -46,8 +46,8 @@ const DUMMY_SERVICE = "https://my.cqu.edu.cn/authserver/authentication/cas";
 // Workers VPC binding(env.LOGIN_NODE)的内部占位 host。运行时由 VPC service 路由到
 // 国内登录节点(container/server.py);host 内容不被校验, 仅作合法 URL 的占位(传输安全
 // 由 VPC service 私有隧道保证, http:// scheme 仅为构造合法 Request 所需)。
-// 「连 CQU」四处出站(/run /service-ticket /keepalive /code)分阶段迁到此前缀 ——
-// 当前已迁:/run /service-ticket /keepalive;仅 /code 仍走容器 stub(Phase 2.6 迁移)。
+// 「连 CQU」四处出站(/run /service-ticket /keepalive /code)均经此前缀发到国内节点
+// (节点本地用青果代理连 CQU)。Phase 2 四处出站迁移已完成。
 const LOGIN_NODE_BASE = "http://cqu-login.internal";
 
 export const SERVICE_URLS: Record<string, string> = {
@@ -563,15 +563,15 @@ export class CquSessionDO extends DurableObject<Env> {
    * CF Email Routing 提码后投递点(见 src/email-handler.ts POST /deposit-code)。
    * 按 kind 分流:
    *   - login_2fa  : 无条件先把码暴露给用户实时面板(暂存 pendingCode + 广播 login_2fa),
-   *                  再按是否有在途登录决定容器路径——有在途登录则推给容器 /code
+   *                  再按是否有在途登录决定节点路径——有在途登录则推给国内节点 /code
    *                  (凭 loginInFlight.token 作 session 键路由), 无在途登录是用户手动登录的码,
    *                  已送达实时面板, 不再算丢码。
    *   - bind_confirm: 暂存 pendingCode(Phase 6 经 WS 秒推浏览器)。
    *
    * @returns delivered —— 码是否真正送达「容器路径」目标(决定调用方记 accepted 还是 code_dropped):
    *   - login_2fa  : 无在途登录 → true(已送达用户实时面板, 不算丢码);
-   *                  有在途登录但无 session 状态(退化态) → false(码已广播无害, 但容器路径走不通);
-   *                  有在途登录且推容器: 容器 /code 返回 ok → true, !res.ok/异常 → false。
+   *                  有在途登录但无 session 状态(退化态) → false(码已广播无害, 但节点路径走不通);
+   *                  有在途登录且推节点: 节点 /code 返回 ok → true, !res.ok/异常 → false。
    *                  即 code_dropped(false) 现专指「系统自动重登时容器收码失败/退化态」,
    *                  不再表示「码凭空丢弃」(码至少已广播给用户实时面板)。
    *   - bind_confirm: true(已落 pendingCode 兜底, 即便实时 WS 推送零接收方也不算丢)。
@@ -612,30 +612,31 @@ export class CquSessionDO extends DurableObject<Env> {
       }
       const userId = this.state?.userId;
       if (!userId) {
-        // 退化态: 有在途登录锁却无 session 状态, 容器路径走不通。码已广播无害, 但容器收码失败。
+        // 退化态: 有在途登录锁却无 session 状态, 节点路径走不通。码已广播无害, 但节点收码失败。
         console.warn(
           `[CquSession] login_2fa code arrived but no session state, ignoring`
         );
         return false;
       }
       try {
-        const stub = this.getLoginContainer(userId);
-        const res = await stub.fetch(
-          new Request("https://c/code", {
+        // Phase 2: 2FA 码经 Workers VPC binding 推到国内登录节点 POST /code(凭 session=lock.token
+        // 路由到在途 /run, 契约同容器, body 不变)。原 getLoginContainer(userId).fetch("https://c/code") 已弃用。
+        const res = await this.env.LOGIN_NODE.fetch(
+          new Request(`${LOGIN_NODE_BASE}/code`, {
             method: "POST",
             body: JSON.stringify({ session: lock.token, code }),
           })
         );
         if (!res.ok) {
           console.error(
-            `[CquSession] container /code returned non-ok status=${res.status}`
+            `[CquSession] LOGIN_NODE /code returned non-ok status=${res.status}`
           );
           return false;
         }
         return true;
       } catch (e) {
         console.error(
-          `[CquSession] failed to push login_2fa code to container: ${errMsg(e)}`
+          `[CquSession] failed to push login_2fa code to LOGIN_NODE: ${errMsg(e)}`
         );
         return false;
       }
@@ -1091,6 +1092,8 @@ export class CquSessionDO extends DurableObject<Env> {
     await this.ctx.storage.delete("loginInFlight");
   }
 
+  // Phase 2 后已无调用方(2FA 投码已改走 LOGIN_NODE 国内节点 /code);仅作回滚窗口保留 ——
+  // 它是 CQU_LOGIN 容器 binding 的访问器, 随容器在 Phase 4 一并移除。
   /** 取该用户的浏览器登录器容器实例(寻址镜像 CQU_SESSION: idFromName → get)。 */
   private getLoginContainer(userId: string): DurableObjectStub {
     const id = this.env.CQU_LOGIN.idFromName(userId);
