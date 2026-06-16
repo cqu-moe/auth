@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""国内节点取 service ticket(ST) —— httpx 经青果代理换票。
+"""国内节点取 service ticket(ST) —— httpx 换票, 出站默认经青果、灰度可节点直连。
 =============================================================================
-铁律: 所有连 CQU 的出站一律经青果(让 CQU 只看到动态重庆移动 IP)。取 ST 也是
-「连 CQU」, 故这一跳从国内节点发起、经青果出站。
+出站策略: 默认经青果(让 CQU 只看到动态重庆移动 IP); `proxy=None` 时改**节点直连**
+(成都境内节点 IP 直连 CQU, 省青果配额)。走/不走青果由上游灰度门(qg_proxy.should_use_proxy,
+开关 QG_PROXY_*/QG_ENABLED)决定, 本模块只按入参 proxy 是否为真选路, 不自行决策。
 
 职责边界(只做「换票」, 不做「闸」):
   · 本模块只负责: 拿 DO 给的、已校验过的 serviceUrl + 3 个 cookie, 经青果去 CQU
@@ -107,8 +108,12 @@ def _proxy_url(proxy: dict) -> str:
     )
 
 
-async def fetch_service_ticket(service_url: str, cookies: dict, proxy: dict) -> str:
-    """凭 3 个 cookie, 经青果 proxy 去 CQU CAS 换一张 ST。
+async def fetch_service_ticket(service_url: str, cookies: dict, proxy: dict | None) -> str:
+    """凭 3 个 cookie 去 CQU CAS 换一张 ST。
+
+    出站路径由 proxy 决定(灰度门 should_use_proxy 控制, 见 qg_proxy.py):
+      · proxy 为青果 dict({server,username,password}) → 经青果出站(CQU 只看到动态重庆移动 IP)。
+      · proxy is None → **节点直连**(不经青果): 成都境内节点 IP 直连 CQU, 省青果配额(成本优化灰度)。
 
     复刻 cqu-sso.ts mintServiceTicketOnce: 浏览器 UA + 3 cookie, GET
     /login?service=<service_url>, follow redirects, 从重定向历史/最终 URL 抓 ST-...。
@@ -120,7 +125,7 @@ async def fetch_service_ticket(service_url: str, cookies: dict, proxy: dict) -> 
     cookie_jar = select_cookies(cookies)
     url = build_service_login_url(service_url)
     async with httpx.AsyncClient(
-        proxy=_proxy_url(proxy),
+        proxy=_proxy_url(proxy) if proxy else None,  # proxy=None → httpx 直连, 不挂代理
         timeout=FETCH_TIMEOUT,
         follow_redirects=True,
         headers={"User-Agent": UA},
@@ -147,12 +152,15 @@ async def fetch_service_ticket(service_url: str, cookies: dict, proxy: dict) -> 
 async def fetch_service_ticket_retrying(
     service_url: str,
     cookies: dict,
-    proxy: dict,
+    proxy: dict | None,
     *,
     max_attempts: int = ST_MAX_ATTEMPTS,
     base_backoff_s: float = ST_BASE_BACKOFF_S,
 ) -> str:
     """带「同青果 IP 瞬态退避重试」的取 ST —— 把 cqu-sso.ts getServiceTicket 的重试韧性搬到节点端。
+
+    proxy 原样透传给每次 fetch_service_ticket(支持青果 dict 经青果 / None 节点直连): 重试对
+    「直连」即「同节点 IP 重试」, 对「经青果」即「同青果 IP 重试」, 语义自洽(均不换出口 IP)。
 
     背景: 取 ST 这一跳偶发瞬态失败 —— 瑞数 WAF 误判(返回非登录页但也没 ST)、CF→CQU 网络
     抖动(连接重置/超时)。原本 cqu-sso.ts 在 CF 侧用 3 次指数退避(400ms→800ms)兜底; 出站迁到

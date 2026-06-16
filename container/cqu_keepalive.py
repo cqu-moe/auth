@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""国内节点探测 CQU 会话存活 —— httpx 经青果代理探活, 返回三态(alive/expired/unreachable)。
+"""国内节点探测 CQU 会话存活 —— httpx 探活(出站默认经青果、灰度可节点直连), 返回三态(alive/expired/unreachable)。
 =============================================================================
-铁律: 所有连 CQU 的出站一律经青果(让 CQU 只看到动态重庆移动 IP)。探测「会话是否还活」
-也是「连 CQU」, 故这一跳也从国内节点发起、经青果出站。
+出站策略: 默认经青果(让 CQU 只看到动态重庆移动 IP); `proxy=None` 时改**节点直连**
+(成都境内节点 IP 直连 CQU, 省青果配额)。走/不走青果由上游灰度门(qg_proxy.should_use_proxy,
+开关 QG_PROXY_*/QG_ENABLED)决定, 本模块只把入参 proxy 透传给 fetch_service_ticket 选路。
 
 职责边界(只返回「探测事实」, 不做「决策」):
   · 本模块只负责: 拿 DO 给的 3 个 cookie, 经青果去 CQU CAS 做一次探测换票, 把结果归成
@@ -19,9 +20,10 @@
 失败都判 transient —— 即「瑞数误判 / 未知页(NO_TICKET)」属退避语义, **绝不**判过期。
 本模块的三态判定与之逐项对齐。
 
-DRY: 探测换票直接复用 cqu_ticket.fetch_service_ticket(同一条经青果 ST-mint 路径, 复用
-UA / 3-cookie / _proxy_url / looks_like_cas_login), 只是把它的 TicketError 语义重新归成
-探活三态(关键差异: NO_TICKET 在取票端是 502 瞬态, 在探活端归 unreachable 让 DO 退避)。
+DRY: 探测换票直接复用 cqu_ticket.fetch_service_ticket(同一条 ST-mint 路径, 复用
+UA / 3-cookie / _proxy_url / looks_like_cas_login, 同样支持青果或 proxy=None 直连),
+只是把它的 TicketError 语义重新归成探活三态(关键差异: NO_TICKET 在取票端是 502 瞬态,
+在探活端归 unreachable 让 DO 退避)。
 """
 import cqu_ticket
 from cqu_ticket import TicketError
@@ -53,8 +55,10 @@ def classify_probe(ticket: str | None = None, error: Exception | None = None) ->
     return "unreachable"
 
 
-async def probe_session(cookies: dict, proxy: dict) -> dict:
-    """凭 3 个 cookie, 经青果 proxy 去 CQU CAS 做一次探测换票, 返回结构化三态结果。
+async def probe_session(cookies: dict, proxy: dict | None) -> dict:
+    """凭 3 个 cookie 去 CQU CAS 做一次探测换票, 返回结构化三态结果。
+
+    proxy 透传给 fetch_service_ticket(已支持 None): 青果 dict → 经青果; None → 节点直连(灰度省钱)。
 
     复刻 DO runKeepAlive: 试换一张 ST(对齐 DUMMY_SERVICE), 据结果分 alive/expired/unreachable。
     网络层失败 / 超时 / 任何未预期异常都归 "unreachable"(transient 语义, 交 DO 退避)。

@@ -232,3 +232,73 @@ def test_retrying_honours_custom_max_attempts(monkeypatch):
             )
         )
     assert fake.calls == 2
+
+
+# ── fetch_service_ticket 的 proxy=None 直连支持(灰度直连用) ────────────────────
+# 灰度开关(QG_PROXY_*)关时, 上游门(should_use_proxy)给 proxy=None → 节点直连(成都境内 IP,
+# 大概率也能连 CQU 且省青果钱)。这里断言: proxy=None → httpx 客户端构造 proxy kwarg 为 None;
+# 真 proxy dict → proxy kwarg 为 _proxy_url(dict)(经青果)。
+#
+# 测试策略: monkeypatch cqu_ticket.httpx.AsyncClient 为假类, 捕获构造时收到的 proxy kwarg;
+# 假客户端的 get 返回一个假 response(其 history/url 让 extract_ticket 抓到一个 ST-...)。
+
+
+class _FakeResponse:
+    """假 httpx.Response: 给 collect_response_urls / extract_ticket / looks_like_cas_login 喂数据。
+
+    最终 URL 带 ticket=ST-... → fetch_service_ticket 抓到 ST 正常返回(不抛), 让我们专注断言 proxy。
+    """
+
+    def __init__(self, final_url: str, text: str = ""):
+        self.url = final_url
+        self.history = []
+        self.text = text
+
+
+class _FakeAsyncClient:
+    """假 httpx.AsyncClient: 捕获构造 kwargs(尤其 proxy), get() 返回脚本化假 response。
+
+    类属性 seen_proxy 记录最近一次构造收到的 proxy kwarg, 供测试断言。
+    """
+
+    seen_proxy = object()  # 哨兵: 未被构造过(区别于真的传了 None)
+
+    def __init__(self, *args, **kwargs):
+        type(self).seen_proxy = kwargs.get("proxy")
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def get(self, url, cookies=None):
+        # 最终落到一个带 ticket=ST-... 的 URL → extract_ticket 抓到 → 正常返回 ST。
+        return _FakeResponse("https://x.cqu.edu.cn/cb?ticket=ST-1-aaa.bbb")
+
+
+def _patch_client(monkeypatch):
+    _FakeAsyncClient.seen_proxy = object()
+    monkeypatch.setattr(cqu_ticket.httpx, "AsyncClient", _FakeAsyncClient)
+
+
+def test_fetch_with_none_proxy_passes_none_to_client(monkeypatch):
+    # proxy=None(灰度直连) → httpx.AsyncClient 构造 proxy kwarg 必须是 None(httpx 直连, 不挂代理)。
+    _patch_client(monkeypatch)
+    out = asyncio.run(
+        cqu_ticket.fetch_service_ticket("https://x.cqu.edu.cn/cb", _FULL_COOKIES, None)
+    )
+    assert out == "ST-1-aaa.bbb"
+    assert _FakeAsyncClient.seen_proxy is None
+
+
+def test_fetch_with_proxy_dict_passes_proxy_url_to_client(monkeypatch):
+    # 真 proxy dict(经青果) → 构造 proxy kwarg 必须是 _proxy_url(dict) 结果(带账密 URL)。
+    _patch_client(monkeypatch)
+    proxy = {"server": "http://1.2.3.4:20000", "username": "u", "password": "p"}
+    out = asyncio.run(
+        cqu_ticket.fetch_service_ticket("https://x.cqu.edu.cn/cb", _FULL_COOKIES, proxy)
+    )
+    assert out == "ST-1-aaa.bbb"
+    assert _FakeAsyncClient.seen_proxy == cqu_ticket._proxy_url(proxy)
+    assert _FakeAsyncClient.seen_proxy == "http://u:p@1.2.3.4:20000"
