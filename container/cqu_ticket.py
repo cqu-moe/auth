@@ -37,6 +37,9 @@ FETCH_TIMEOUT = 15
 ST_MAX_ATTEMPTS = 3
 ST_BASE_BACKOFF_S = 0.4
 # 可重试的 TicketError 码: 只含 NO_TICKET(疑似瑞数误判/未知页/瞬态)。
+# 注: 节点的 NO_TICKET 对应 TS 侧的 WAF_CHALLENGE(都是「非登录页且没票」), 而非 TS 的 NO_TICKET ——
+# 因本模块用 follow_redirects 抓全链路 URL, 不产生 TS 那种「302 但 Location 无 ticket=」的 NO_TICKET;
+# 故重试它与 cqu-sso.ts isRetryableSsoError(重试 NETWORK_ERROR + WAF_CHALLENGE)语义一致。
 # SESSION_EXPIRED(真过期, 重试也是同样过期)与 MISSING_COOKIE(契约错, 重试无意义)不在其列。
 RETRYABLE_TICKET_CODES = frozenset({"NO_TICKET"})
 
@@ -160,8 +163,10 @@ async def fetch_service_ticket_retrying(
         **绝不调 acquire_qg_proxy() 重新提取青果 IP** —— 重抽会烧青果配额(短效住宅代理按提取计费),
         且换 IP 反而可能落到另一个被风控的出口, 瞬态自愈用同 IP 重试即可。
 
-    重试判据(对齐 cqu-sso.ts isRetryableSsoError, 只重试「网络错 + 瑞数误判」):
-      · TicketError 且 code ∈ RETRYABLE_TICKET_CODES(仅 NO_TICKET): 可重试(瑞数误判/未知页/瞬态)。
+    重试判据(对齐 cqu-sso.ts isRetryableSsoError, 它重试 NETWORK_ERROR + WAF_CHALLENGE):
+      · TicketError code=="NO_TICKET": 可重试。节点的 NO_TICKET ≡ TS 的 WAF_CHALLENGE(都是「非登录页
+        且没票 → 疑似瑞数误判/限流」); 因本模块 follow_redirects 抓全链路 URL, 不产生 TS 那种「302 无
+        ticket=」的 NO_TICKET, 故此处可重试的 NO_TICKET 不是 TS 里不重试的那个 NO_TICKET。
       · httpx.HTTPError 及其子类(超时/连接重置等网络层): 可重试。
       · TicketError("SESSION_EXPIRED"): **不重试** —— 真过期, 重试也是同样过期(徒增青果出站 + 风控
         面)。立即上抛, 让端点映射 409 交 DO/容器重登。
