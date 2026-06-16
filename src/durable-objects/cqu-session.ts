@@ -2,7 +2,6 @@ import { DurableObject } from "cloudflare:workers";
 import { CquSsoClient, type CasCookies, CquSsoError } from "../services/cqu-sso";
 import { decrypt } from "../services/crypto";
 import { validateCquServiceUrl } from "../services/service-url";
-import { isTransientSsoError } from "../services/sso-error-policy";
 import {
   nextStatus,
   type CquStatus,
@@ -48,8 +47,7 @@ const DUMMY_SERVICE = "https://my.cqu.edu.cn/authserver/authentication/cas";
 // 国内登录节点(container/server.py);host 内容不被校验, 仅作合法 URL 的占位(传输安全
 // 由 VPC service 私有隧道保证, http:// scheme 仅为构造合法 Request 所需)。
 // 「连 CQU」四处出站(/run /service-ticket /keepalive /code)分阶段迁到此前缀 ——
-// 当前已迁:/run;其余仍走旧路径(取票/keepalive 经 ssoClient 直连、/code 经容器 stub),
-// Phase 2 后续任务逐一迁移。
+// 当前已迁:/run /service-ticket /keepalive;仅 /code 仍走容器 stub(Phase 2.6 迁移)。
 const LOGIN_NODE_BASE = "http://cqu-login.internal";
 
 export const SERVICE_URLS: Record<string, string> = {
@@ -150,6 +148,8 @@ export class CquSessionDO extends DurableObject<Env> {
   // 熔断: containerLogin 把本次失败原因(credential/transient)暂存于此, 供同一
   // relogin 调用链读取。DO 单线程, 仅在一次 alarm→relogin→containerLogin 链内有效。
   private lastLoginFailReason: "credential" | "transient" = "transient";
+  // Phase 2 后已无调用方(登录/取票/keepalive 均改走 LOGIN_NODE 国内节点);仅作回滚窗口
+  // 保留(应急可手改 DO 出站切回此直连路径), 随 CF 容器在 Phase 4 一并移除。
   private ssoClient = new CquSsoClient();
 
   private async loadState(): Promise<void> {
@@ -394,7 +394,8 @@ export class CquSessionDO extends DurableObject<Env> {
   //   ② D6 限频:对所有取票(两模式)做 per-user + per-client 滑动窗口限频(StMintRecord 落 storage);
   //   ③ D6 告警:广路径上若窗口内不同 host 数越阈值则告警(开放重定向探测信号, 只告警不拦);
   //   ④ D6 审计:成功取票后打一条结构化日志(绝不含 ticket/cookies/密码)。
-  // NOTE: keepalive 探针走 this.ssoClient.getServiceTicket(...) 直连, 不经本方法, 故不受这些闸影响。
+  // NOTE: keepalive 探针走国内节点 POST /keepalive(经 Workers VPC binding), 不经本方法(取票闸),
+  // 故不受这四道闸影响 —— 它只探活, 不取票。
   private async getServiceTicket(arg: {
     service?: string;
     serviceUrl?: string;
@@ -825,24 +826,52 @@ export class CquSessionDO extends DurableObject<Env> {
    */
   private async runKeepAlive(): Promise<"active" | "expired" | "transient"> {
     const state = this.state!;
+    // 探活经 Workers VPC binding 发到国内节点 POST /keepalive(节点本地经青果探测 CQU 会话)。
+    // 节点恒返回 200 {ok, status: alive|expired|unreachable}, 映射回三态:
+    //   alive→active / expired→expired / unreachable→transient。
+    // 够不到节点本身(VPC/网络抛错、非 JSON、非 ok)或未知 status = 探不通 → transient
+    // (保 cookies/status 不动、退避重试), 绝不误判过期触发容器重登。
+    let res: Response;
     try {
-      await this.ssoClient.getServiceTicket(state.cookies, DUMMY_SERVICE);
-      return "active";
+      res = await this.env.LOGIN_NODE.fetch(
+        new Request(`${LOGIN_NODE_BASE}/keepalive`, {
+          method: "POST",
+          body: JSON.stringify({ cookies: state.cookies }),
+        })
+      );
     } catch (e) {
-      if (isTransientSsoError(e)) {
-        console.warn(
-          `[CquSession] ${state.studentId}: probe unreachable: ${errMsg(e)}`
-        );
-        return "transient";
-      }
-      // 非网络失败(如 TGT_EXPIRED): 会话服务端失效。
-      // 诊断: 落 expired 前记一条 — errMsg 会带上含 status + page 分类的消息,
-      // 用于区分真过期(page=cas-login)与瑞数误判(page=waf-challenge)。
       console.warn(
-        `[CquSession] ${state.studentId}: probe says expired: ${errMsg(e)}`
+        `[CquSession] ${state.studentId}: probe unreachable (node fetch failed): ${errMsg(e)}`
+      );
+      return "transient";
+    }
+    let body: { ok?: boolean; status?: string; detail?: string };
+    try {
+      body = await res.json();
+    } catch {
+      console.warn(
+        `[CquSession] ${state.studentId}: probe unreachable (node non-JSON status=${res.status})`
+      );
+      return "transient";
+    }
+    if (!res.ok || !body.ok) {
+      console.warn(
+        `[CquSession] ${state.studentId}: probe unreachable (node not ok status=${res.status} detail=${body.detail ?? "(none)"})`
+      );
+      return "transient";
+    }
+    if (body.status === "alive") return "active";
+    if (body.status === "expired") {
+      console.warn(
+        `[CquSession] ${state.studentId}: probe says expired: ${body.detail ?? "(none)"}`
       );
       return "expired";
     }
+    // "unreachable" 或未知 status → 保会话退避。
+    console.warn(
+      `[CquSession] ${state.studentId}: probe unreachable: status=${body.status ?? "(none)"} detail=${body.detail ?? "(none)"}`
+    );
+    return "transient";
   }
 
   /**
