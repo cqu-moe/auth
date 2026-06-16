@@ -22,6 +22,7 @@ import time
 from aiohttp import web
 
 import cqu_login  # 改造后的登录器, 暴露 run_login(...)
+from qg_proxy import acquire_qg_proxy, QgExtractError  # 青果短效代理(连 CQU 出站硬依赖)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("cqu-login-server")
@@ -79,6 +80,16 @@ async def run_handler(request: web.Request) -> web.Response:
             status=400,
         )
 
+    # 铁律: 所有连 CQU 出站经青果。拿不到青果 IP 即判失败(硬依赖回退), 返回 502 让上游退避——
+    # 绝不无代理裸连 CQU。放在 Event 注册之前: 502 早退路径不注册 Event/Value, 无需 finally 清理。
+    try:
+        proxy = await acquire_qg_proxy()
+    except QgExtractError as e:
+        log.warning("run abort session=%s qg extract failed: %s", session, e)
+        return web.json_response(
+            {"ok": False, "error": f"qg proxy unavailable: {e}"}, status=502
+        )
+
     ev = asyncio.Event()
     CODE_EVENTS[session] = ev
     # I1: /code 可能在本 Event 注册前略早到达; 若码已在, 立即唤醒, 避免错过唤醒永久阻塞。
@@ -108,6 +119,7 @@ async def run_handler(request: web.Request) -> web.Response:
                 service=service,
                 method=method,
                 code_provider=code_waiter,
+                proxy=proxy,
             ),
             timeout=RUN_TOTAL_TIMEOUT,
         )
