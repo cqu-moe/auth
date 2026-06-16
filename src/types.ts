@@ -5,9 +5,10 @@ export interface Env {
   CQU_SESSION: DurableObjectNamespace;
   CQU_LOGIN: DurableObjectNamespace;
   ASSETS: Fetcher;
-  // Workers VPC binding(beta):DO 里四处「连 CQU」出站(/run /service-ticket /keepalive /code)
-  // 经它私有连到国内登录节点,由节点本地用青果代理连 CQU。运行时不校验 URL host(VPC service 路由),
-  // 调用时用内部占位 host 即可。
+  // Workers VPC binding(beta):国内登录节点(container/server.py)的 Fetcher。DO 里「连 CQU」
+  // 四处出站(/run /service-ticket /keepalive /code)分阶段经它私有连到国内节点(节点本地用
+  // 青果代理连 CQU)—— 当前已迁 /run,其余 Phase 2 后续迁移。运行时不校验 URL host
+  // (VPC service 路由),调用统一用内部占位 host。
   LOGIN_NODE: Fetcher;
   ENCRYPTION_KEY: string;
   BETTER_AUTH_URL: string;

@@ -55,9 +55,10 @@
   }],
 
   // Workers VPC Service binding (beta): DO 经此私有连回国内 VPS 登录节点上的
-  // container/server.py(青果住宅代理本地连 CQU, 消除验证码)。「连 CQU」四处
-  // 出站(/run /service-ticket /keepalive /code)走 LOGIN_NODE.fetch 发往该节点。
-  // service_id 为占位符, Phase 3 部署时用 `wrangler vpc service create` 创建后回填。
+  // container/server.py(青果住宅代理本地连 CQU, 消除验证码)。「连 CQU」四处出站
+  // (/run /service-ticket /keepalive /code)分阶段走 LOGIN_NODE.fetch 发往该节点 ——
+  // 当前已迁 /run,其余 Phase 2 后续迁移。service_id 为占位符, Phase 3 部署时用
+  // `wrangler vpc service create` 创建后回填。
   "vpc_services": [{
     "binding": "LOGIN_NODE",
     "service_id": "PLACEHOLDER_VPC_SERVICE_ID",

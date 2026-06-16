@@ -45,8 +45,11 @@ const PROACTIVE_RELOGIN_MS = 7 * 60 * 60 * 1000;
 const DUMMY_SERVICE = "https://my.cqu.edu.cn/authserver/authentication/cas";
 
 // Workers VPC binding(env.LOGIN_NODE)的内部占位 host。运行时由 VPC service 路由到
-// 国内登录节点(container/server.py);host 内容不被校验, 仅作合法 URL 的占位。
-// 四处「连 CQU」出站(/run /service-ticket /keepalive /code)都拼此前缀。
+// 国内登录节点(container/server.py);host 内容不被校验, 仅作合法 URL 的占位(传输安全
+// 由 VPC service 私有隧道保证, http:// scheme 仅为构造合法 Request 所需)。
+// 「连 CQU」四处出站(/run /service-ticket /keepalive /code)分阶段迁到此前缀 ——
+// 当前已迁:/run;其余仍走旧路径(取票/keepalive 经 ssoClient 直连、/code 经容器 stub),
+// Phase 2 后续任务逐一迁移。
 const LOGIN_NODE_BASE = "http://cqu-login.internal";
 
 export const SERVICE_URLS: Record<string, string> = {
