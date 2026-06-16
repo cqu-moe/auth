@@ -35,3 +35,9 @@ def test_parse_extract_response_empty_raises():
 def test_parse_extract_response_error_code_raises():
     with pytest.raises(QgExtractError):
         parse_extract_response({"code": "NO_BALANCE", "data": []})
+
+
+def test_parse_extract_response_malformed_item_raises():
+    # data[0] 非 dict(畸形响应)也应抛 QgExtractError, 而非 AttributeError
+    with pytest.raises(QgExtractError):
+        parse_extract_response({"code": "SUCCESS", "data": ["not-a-dict"]})

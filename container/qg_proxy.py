@@ -22,9 +22,10 @@ def parse_extract_response(body: dict) -> str:
     if body.get("code") != "SUCCESS":
         raise QgExtractError(f"qg extract not SUCCESS: {body.get('code')!r}")
     data = body.get("data") or []
-    if not data or not data[0].get("server"):
+    first = data[0] if data and isinstance(data[0], dict) else {}
+    if not first.get("server"):
         raise QgExtractError("qg extract returned no server")
-    return data[0]["server"]
+    return first["server"]
 
 
 async def acquire_qg_proxy() -> dict:
