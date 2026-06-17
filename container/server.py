@@ -5,7 +5,7 @@ CQU 浏览器登录器 —— aiohttp 服务(CF Containers, 端口 8080)。
 两条路由共存于同一进程, 让 /code 能唤醒在途的 /run:
   POST /run  {studentId, password, service, method, session}
       → 起一个按 session 键控的 asyncio.Event, 调 cqu_login.run_login(...),
-        其 code_provider 阻塞等该 Event; 成功 200 {ok:true, cookies, ticket},
+        其 code_provider 阻塞等该 Event; 成功 200 {ok:true, state, ticket},
         失败 500 {ok:false, error}。finally 清理 Event/Value。
   POST /code {session, code}
       → 存码并 set 对应 session 的 Event, 唤醒在途 /run。返回 {ok:true}。
@@ -24,6 +24,7 @@ from aiohttp import web
 import cqu_login  # 改造后的登录器, 暴露 run_login(...)
 import cqu_keepalive  # 国内节点探活(经青果探测 CQU 会话), 暴露 probe_session(...)
 import cqu_ticket  # 国内节点取 ST(经青果换票), 暴露 fetch_service_ticket(...)
+import cqu_ticket_browser  # 浏览器水化取 ST(过瑞数 JS 挑战), 暴露 fetch_service_ticket_browser(...)
 from cqu_ticket import TicketError  # 取 ST 失败语义(SESSION_EXPIRED / NO_TICKET 等)
 from qg_proxy import acquire_qg_proxy, QgExtractError, should_use_proxy  # 青果代理 + 灰度门
 
@@ -182,18 +183,13 @@ async def code_handler(request: web.Request) -> web.Response:
 
 
 async def service_ticket_handler(request: web.Request) -> web.Response:
-    """POST /service-ticket {serviceUrl, cookies} → 经青果去 CQU 换一张 ST。
+    """POST /service-ticket {serviceUrl, state} → 临时浏览器水化完整 storage_state 换一张 ST。
 
-    职责: 只负责「换票」这一跳。取票的安全闸(serviceUrl host 校验 / quicklogin
-    opt-in / 限流 / 审计)仍在上游 DO, 这里拿到的 serviceUrl 已被 DO 校验过。
-
-    · 出站灰度: 默认经青果(短效包); QG_PROXY_SHORT/QG_ENABLED 可改节点直连。走青果时
-      acquire_qg_proxy() 失败 → 502(硬依赖回退, 同 /run, 绝不悄悄 fallback 直连)。
-    · 成功: 200 {ok:true, ticket}。
-    · 会话过期(落回 CAS 登录页): 409 {ok:false, error} —— 语义是「该 cookie 的 CAS
-      会话已失效」, 客户端错误而非服务端故障, 交上游 DO/容器重登; 用 409 Conflict
-      让 DO 能据状态码与「瞬态封锁」区分(后者走 502 退避重试)。
-    · 未取到票(疑似瑞数误判/未知页)/ 缺 cookie: 502 {ok:false, error}, 让上游退避重试。
+    取票安全闸(serviceUrl host 校验 / quicklogin opt-in / 限流 / 审计)仍在上游 DO,
+    这里只负责"换票"。浏览器水化取票过瑞数 JS 挑战(httpx/青果均挡不过,见设计文档)。
+    · 成功 → 200 {ok:true, ticket}
+    · 会话过期(落回 CAS 登录页, ExpiredError)→ 409,交上游 DO 重登(与旧契约一致)
+    · 未取到票(NO_TICKET/浏览器崩/超时)→ 502,让上游退避重试
     """
     try:
         body = await request.json()
@@ -201,39 +197,24 @@ async def service_ticket_handler(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
 
     service_url = body.get("serviceUrl")
-    cookies = body.get("cookies")
-    if not service_url or not isinstance(cookies, dict):
+    state = body.get("state")
+    if not service_url or not isinstance(state, dict):
         return web.json_response(
-            {"ok": False, "error": "missing required field: serviceUrl/cookies"},
+            {"ok": False, "error": "missing required field: serviceUrl/state (object)"},
             status=400,
         )
 
-    # 灰度: QG_PROXY_SHORT/QG_ENABLED 决定取票走青果(短效包)还是节点直连。走青果拿不到 IP → 502。
-    proxy = None
-    if should_use_proxy("short"):
-        try:
-            proxy = await acquire_qg_proxy("short")
-        except QgExtractError as e:
-            log.warning("service-ticket abort qg extract failed: %s", e)
-            return web.json_response(
-                {"ok": False, "error": f"qg proxy unavailable: {e}"}, status=502
-            )
-
     try:
-        # 同青果 IP 瞬态退避重试(瑞数误判/网络抖动自愈; 不重抽青果, 省配额)。
-        # 耗尽后仍抛 TicketError/httpx 错误, 由下面 except 按现有语义映射:
-        # NO_TICKET→502 / SESSION_EXPIRED→409 / 网络错→502。
-        ticket = await cqu_ticket.fetch_service_ticket_retrying(service_url, cookies, proxy)
-        # ST 是 bearer 凭据, 绝不打它的值(只记长度供诊断); 对齐 DO 审计「绝不记录 ticket/cookies/密码」。
+        ticket = await cqu_ticket_browser.fetch_service_ticket_browser(service_url, state)
+        # ST 是 bearer 凭据, 只记长度供诊断, 绝不打值。
         log.info("service-ticket ok (len=%d)", len(ticket))
         return web.json_response({"ok": True, "ticket": ticket})
-    except TicketError as e:
-        # 会话过期 → 409(客户端态: cookie 失效, 交重登); 其余取票失败 → 502(瞬态, 退避重试)。
-        status = 409 if e.code == "SESSION_EXPIRED" else 502
-        log.warning("service-ticket fail code=%s status=%d error=%s", e.code, status, e)
-        return web.json_response({"ok": False, "error": str(e)}, status=status)
-    except Exception as e:  # noqa: BLE001 - 网络层/未预期错误也按瞬态上抛, 让上游退避
-        log.warning("service-ticket error %s", e)
+    except cqu_ticket_browser.ExpiredError as e:
+        # 落回 CAS 登录页 = 会话过期 → 409(客户端态, 交 DO 重登)。
+        log.warning("service-ticket expired: %s", e)
+        return web.json_response({"ok": False, "error": str(e)}, status=409)
+    except Exception as e:  # noqa: BLE001 - NoTicketError/浏览器崩/超时 → 502 瞬态, 让上游退避
+        log.warning("service-ticket transient: %s", e)
         return web.json_response({"ok": False, "error": str(e)}, status=502)
 
 
