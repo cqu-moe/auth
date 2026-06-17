@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import pytest  # noqa: E402
 
-from cqu_keepalive import classify_probe  # noqa: E402
+from cqu_keepalive import classify_probe, probe_status_from_verdict  # noqa: E402
 from cqu_ticket import TicketError  # noqa: E402
 
 
@@ -65,3 +65,27 @@ def test_classify_unknown_ticket_error_code_is_unreachable():
     # 未来新增的未知 TicketError code 保守归 unreachable(只有 SESSION_EXPIRED 才判 expired)。
     err = TicketError("SOMETHING_NEW", "unexpected")
     assert classify_probe(error=err) == "unreachable"
+
+
+# ── probe_status_from_verdict: 浏览器取票 verdict → 探活三态(纯函数) ──────────
+# 浏览器水化探活路径: classify_browser_result 给出 ok/expired/no_ticket, 此函数把它归三态。
+# 与 classify_probe(httpx 回滚路径)正交, 两条都保留。
+def test_verdict_ok_is_alive():
+    # 浏览器换到票 = 会话有效 → alive。
+    assert probe_status_from_verdict("ok") == "alive"
+
+
+def test_verdict_expired_is_expired():
+    # 落回 CAS 登录页(CAS_LOGIN_MARKERS 命中) = TGT 真失效 → expired(交 DO 重登)。
+    assert probe_status_from_verdict("expired") == "expired"
+
+
+def test_verdict_no_ticket_is_unreachable():
+    # 关键: no_ticket(无票且非登录页) = 未知/瑞数误判 → unreachable(保守退避, 绝不误判过期)。
+    assert probe_status_from_verdict("no_ticket") == "unreachable"
+
+
+def test_verdict_unknown_is_unreachable():
+    # 未来未知 verdict 兜底归 unreachable(绝不误判过期)。
+    assert probe_status_from_verdict("something_else") == "unreachable"
+    assert probe_status_from_verdict("") == "unreachable"

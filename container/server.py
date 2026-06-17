@@ -22,11 +22,9 @@ import time
 from aiohttp import web
 
 import cqu_login  # 改造后的登录器, 暴露 run_login(...)
-import cqu_keepalive  # 国内节点探活(经青果探测 CQU 会话), 暴露 probe_session(...)
-import cqu_ticket  # 国内节点取 ST(经青果换票), 暴露 fetch_service_ticket(...)
+import cqu_keepalive  # 国内节点浏览器水化探活, 暴露 probe_session_browser(...)
 import cqu_ticket_browser  # 浏览器水化取 ST(过瑞数 JS 挑战), 暴露 fetch_service_ticket_browser(...)
-from cqu_ticket import TicketError  # 取 ST 失败语义(SESSION_EXPIRED / NO_TICKET 等)
-from qg_proxy import acquire_qg_proxy, QgExtractError, should_use_proxy  # 青果代理 + 灰度门
+from qg_proxy import acquire_qg_proxy, QgExtractError, should_use_proxy  # 青果代理 + 灰度门(/run 登录仍用)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("cqu-login-server")
@@ -219,53 +217,25 @@ async def service_ticket_handler(request: web.Request) -> web.Response:
 
 
 async def keepalive_handler(request: web.Request) -> web.Response:
-    """POST /keepalive {cookies} → 经青果探测 CQU 会话是否还活, 返回三态事实给 DO。
+    """POST /keepalive {state} → 临时浏览器水化探活, 返回三态 + 刷新后的 storage_state 给 DO。
 
-    职责: 只返回「探测事实」(alive/expired/unreachable), 不做决策。熔断/退避/重登的
-    状态机全留在上游 DO(runKeepAlive/alarm), 本端点只如实回报探测结果。
-
-    · 出站灰度: 默认经青果(短效包); QG_PROXY_SHORT/QG_ENABLED 可改节点直连。走青果时青果失败
-      的语义与 /run、/service-ticket 不同 —— 探活拿不到青果 = 「探不通」(并不证明会话过期),
-      故归 **unreachable** 而非 5xx: 返回 200 {ok:true, status:"unreachable"}, 让 DO 按瞬态退避
-      (快重试/指数退避), 绝不让 DO 误判会话过期而触发容器重登(误判重登会触瑞数风控 + 烧容器, 代价远高)。
-    · 探测结果三态恒以 200 {ok:true, status, detail} 返回 —— DO 凭 status 区分:
-      "expired"(该重登) vs "unreachable"(该退避) vs "alive"(健康)。
-    · 缺 cookies / cookies 非 dict → 400(契约破坏, 真客户端错误)。
+    只返回探测事实(alive/expired/unreachable)+ 刷新 state;熔断/退避/重登的状态机在上游 DO。
+    探不通绝不误判过期(归 unreachable, DO 退避)。三态恒以 200 返回。
     """
     try:
         body = await request.json()
     except Exception:
         return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
-
-    cookies = body.get("cookies")
-    if not isinstance(cookies, dict):
+    state = body.get("state")
+    if not isinstance(state, dict):
         return web.json_response(
-            {"ok": False, "error": "missing required field: cookies (object)"},
-            status=400,
-        )
-
-    # 灰度: QG_PROXY_SHORT/QG_ENABLED 决定探活走青果(短效包)还是节点直连。
-    # 走青果且拿不到 IP = 探不通 → unreachable(让 DO 退避), 绝不 5xx、绝不当会话过期。
-    # 这是 keepalive 与 /run、/service-ticket(青果失败 → 5xx)的关键语义差异。
-    proxy = None
-    if should_use_proxy("short"):
-        try:
-            proxy = await acquire_qg_proxy("short")
-        except QgExtractError as e:
-            log.warning("keepalive qg extract failed (→ unreachable): %s", e)
-            return web.json_response(
-                {"ok": True, "status": "unreachable", "detail": f"qg proxy unavailable: {e}"}
-            )
-
-    # probe_session 内部已把网络层/未知异常收口成 unreachable; 此处再兜底一层,
-    # 确保探活端点对 DO 永远只返回「探测事实」(200), 绝不 500 伪装成服务端崩溃。
+            {"ok": False, "error": "missing required field: state (object)"}, status=400)
     try:
-        result = await cqu_keepalive.probe_session(cookies, proxy)
-    except Exception as e:  # noqa: BLE001 - 纵深兜底: 任何未预期错误也归 unreachable
+        result = await cqu_keepalive.probe_session_browser(state)
+    except Exception as e:  # noqa: BLE001 - 纵深兜底, 探活对 DO 永远只返回探测事实(200)
         log.warning("keepalive probe unexpected error (→ unreachable): %s", e)
-        result = {"status": "unreachable", "detail": f"{type(e).__name__}: {e}"}
-
-    log.info("keepalive status=%s detail=%s", result["status"], result.get("detail", "")[:80])
+        result = {"status": "unreachable", "state": state, "detail": f"{type(e).__name__}: {e}"}
+    log.info("keepalive status=%s detail=%s", result["status"], (result.get("detail", "") or "")[:80])
     return web.json_response({"ok": True, **result})
 
 
