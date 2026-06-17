@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { CquSsoClient, type CasCookies, CquSsoError } from "../services/cqu-sso";
+import { CquSsoClient, type CasCookies, type CquStorageState, CquSsoError } from "../services/cqu-sso";
 import { decrypt } from "../services/crypto";
 import { validateCquServiceUrl } from "../services/service-url";
 import {
@@ -64,7 +64,7 @@ export const SERVICE_URLS: Record<string, string> = {
 interface SessionState {
   userId: string;
   studentId: string;
-  cookies: CasCookies;
+  storageState: CquStorageState | null;
   objectId: string;
   tgt: string;
   // 当前 TGT 的铸造时刻(ms)。alarm 用它判定是否到 +7h 主动重登窗口。
@@ -107,7 +107,7 @@ interface DepositCodePayload {
 // 容器 /run 的返回(见 container/server.py + cqu_login.run_login)。
 interface ContainerRunResult {
   ok: boolean;
-  cookies?: CasCookies;
+  state?: CquStorageState;
   ticket?: string;
   error?: string;
 }
@@ -355,7 +355,7 @@ export class CquSessionDO extends DurableObject<Env> {
       this.state = {
         userId,
         studentId,
-        cookies: { SOURCEID_TGC: "", SESSION: "", rg_objectid: "" },
+        storageState: null,
         objectId: "",
         tgt: "",
         loginAt: 0,
@@ -495,7 +495,7 @@ export class CquSessionDO extends DurableObject<Env> {
     pruned.push(record);
     await this.ctx.storage.put("stMintLog", pruned);
 
-    const ticket = await this.mintServiceTicketViaNode(this.state.cookies, target);
+    const ticket = await this.mintServiceTicketViaNode(this.state.storageState, target);
 
     // D6 审计(结构化; CF observability 抓 console)。绝不记录 ticket / cookies / 密码。
     console.log(
@@ -522,7 +522,7 @@ export class CquSessionDO extends DurableObject<Env> {
    *   · 502 / 其它非 ok → CquSsoError("WAF_CHALLENGE") 瞬态(重试已在节点端做尽)
    */
   private async mintServiceTicketViaNode(
-    cookies: CasCookies,
+    state: CquStorageState | null,
     serviceUrl: string
   ): Promise<string> {
     let res: Response;
@@ -530,7 +530,7 @@ export class CquSessionDO extends DurableObject<Env> {
       res = await this.env.LOGIN_NODE.fetch(
         new Request(`${LOGIN_NODE_BASE}/service-ticket`, {
           method: "POST",
-          body: JSON.stringify({ serviceUrl, cookies }),
+          body: JSON.stringify({ serviceUrl, state }),
         })
       );
     } catch (e) {
@@ -841,7 +841,7 @@ export class CquSessionDO extends DurableObject<Env> {
       res = await this.env.LOGIN_NODE.fetch(
         new Request(`${LOGIN_NODE_BASE}/keepalive`, {
           method: "POST",
-          body: JSON.stringify({ cookies: state.cookies }),
+          body: JSON.stringify({ state: state.storageState }),
         })
       );
     } catch (e) {
@@ -850,7 +850,7 @@ export class CquSessionDO extends DurableObject<Env> {
       );
       return "transient";
     }
-    let body: { ok?: boolean; status?: string; detail?: string };
+    let body: { ok?: boolean; status?: string; detail?: string; state?: CquStorageState };
     try {
       body = await res.json();
     } catch {
@@ -865,7 +865,13 @@ export class CquSessionDO extends DurableObject<Env> {
       );
       return "transient";
     }
-    if (body.status === "alive") return "active";
+    if (body.status === "alive") {
+      // 节点刷新后的 state(滚动 cookie/localStorage)回写到内存。因 state===this.state,
+      // alarm() 的 active 分支会 ctx.storage.put("state", this.state) 把它落盘 ——
+      // 这里不额外 put, 交给 alarm 既有落盘。expired/unreachable 分支不回写(保守)。
+      if (body.state) state.storageState = body.state;
+      return "active";
+    }
     if (body.status === "expired") {
       console.warn(
         `[CquSession] ${state.studentId}: probe says expired: ${body.detail ?? "(none)"}`
@@ -1033,9 +1039,9 @@ export class CquSessionDO extends DurableObject<Env> {
         })
       );
       const result = await res.json<ContainerRunResult>();
-      if (!res.ok || !result.ok || !result.cookies) {
+      if (!res.ok || !result.ok || !result.state) {
         console.warn(
-          `[CquSession] ${state.studentId}: container /run not ok — httpStatus=${res.status} ok=${result.ok} hasCookies=${!!result.cookies} error=${result.error ?? "(none)"}`
+          `[CquSession] ${state.studentId}: container /run not ok — httpStatus=${res.status} ok=${result.ok} hasState=${!!result.state} error=${result.error ?? "(none)"}`
         );
         // 熔断: 把失败归类(凭据真死 vs 瑞数/瞬态)暂存, 供 relogin 决定是否落 needs_reauth。
         this.lastLoginFailReason = classifyLoginFailure(result.error);
@@ -1049,7 +1055,7 @@ export class CquSessionDO extends DurableObject<Env> {
       const fresh =
         (await this.ctx.storage.get<SessionState>("state")) ?? state;
       const now = Date.now();
-      fresh.cookies = result.cookies;
+      fresh.storageState = result.state;
       fresh.loginAt = now;
       fresh.lastKeepAlive = now;
       this.state = fresh;
@@ -1058,7 +1064,7 @@ export class CquSessionDO extends DurableObject<Env> {
       // exp 时刻与剩余分钟数。decodeJwtExp 纯函数不抛, 再用 try/catch 兜底, 确保
       // 诊断绝不影响登录。
       try {
-        const exp = decodeJwtExp(result.cookies.SOURCEID_TGC);
+        const exp = decodeJwtExp(tgtFromState(result.state));
         if (exp !== null) {
           console.warn(
             `[CquSession] ${state.studentId}: new TGT exp=${new Date(exp * 1000).toISOString()} (ageBudget=${Math.round((exp * 1000 - Date.now()) / 60000)}min)`
@@ -1108,4 +1114,8 @@ export class CquSessionDO extends DurableObject<Env> {
 function errMsg(e: unknown): string {
   if (e instanceof CquSsoError) return `${e.code}: ${e.message}`;
   return e instanceof Error ? e.message : String(e);
+}
+
+function tgtFromState(s: CquStorageState | null): string {
+  return s?.cookies.find((c) => c.name === "SOURCEID_TGC")?.value ?? "";
 }

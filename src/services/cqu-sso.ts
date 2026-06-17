@@ -46,6 +46,14 @@ export interface CasCookies {
   rg_objectid: string;
 }
 
+export interface CquStorageState {
+  cookies: Array<{
+    name: string; value: string; domain: string; path: string;
+    expires?: number; httpOnly?: boolean; secure?: boolean; sameSite?: string;
+  }>;
+  origins: Array<{ origin: string; localStorage: Array<{ name: string; value: string }> }>;
+}
+
 export function parseLoginPage(html: string): LoginPageParams {
   const execution = extractValue(html, "login-page-flowkey");
   const croypto = extractValue(html, "login-croypto");
