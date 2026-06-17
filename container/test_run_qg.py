@@ -86,7 +86,8 @@ class RunQgTestCase(AioHTTPTestCase):
 
         async def _run_login(**kwargs):
             captured.update(kwargs)
-            return {"ticket": "ST-fake", "cookies": []}
+            # 新契约: run_login 返回完整 storage_state(顶层含 cookies 列表 + origins/localStorage)。
+            return {"ticket": "ST-fake", "state": {"cookies": [], "origins": []}}
 
         server.acquire_qg_proxy = _ok
         server.cqu_login.run_login = _run_login
@@ -96,6 +97,9 @@ class RunQgTestCase(AioHTTPTestCase):
         data = await resp.json()
         assert data["ok"] is True
         assert data["ticket"] == "ST-fake"
+        # 新契约: run_login 返回 state(完整 storage_state), 经 handler 原样透传; 顶层含 cookies 列表。
+        assert "state" in data
+        assert "cookies" in data["state"]
         # 关键断言: run_login 收到 proxy=<那个假 proxy>。
         assert captured.get("proxy") == _FAKE_PROXY
         # 默认(走青果)→ 用登录包(profile="login")。
@@ -123,7 +127,8 @@ class RunQgTestCase(AioHTTPTestCase):
 
         async def _run_login(**kwargs):
             captured.update(kwargs)
-            return {"ticket": "ST-direct", "cookies": []}
+            # 新契约: run_login 返回完整 storage_state(顶层含 cookies 列表 + origins/localStorage)。
+            return {"ticket": "ST-direct", "state": {"cookies": [], "origins": []}}
 
         server.should_use_proxy = _no_proxy
         server.acquire_qg_proxy = _track_acquire
