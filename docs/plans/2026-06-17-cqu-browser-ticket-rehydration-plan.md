@@ -285,7 +285,15 @@ git commit -m "feat(be): DO 用完整 storageState 取代 3-cookie, 三处出站
 ---
 
 ## 验证清单(完成判据)
-- [ ] 节点 `pytest -q` 全绿(纯函数 + handler mock)。
-- [ ] 节点冒烟:登录拿 state → `/service-ticket` 返回 `ST-`(免青果直连)。
-- [ ] `npm run typecheck` 干净;`npm run test` 全绿。
-- [ ] 灰度:生产 `st_mint` 成功率回升、keepalive `active`、内存平稳。
+
+### 仓内可跑(本地已验)
+- [x] 节点 `pytest -q` 全绿(纯函数 + handler mock)—— **137 passed**。
+- [x] `npm run typecheck` 干净;`npm run test` 全绿 —— **236 passed**。
+- [ ] 节点冒烟:登录拿 state → `/service-ticket` 返回 `ST-`(免青果直连)。**e2e,需真节点,仓内无证据**。
+
+### 上线前冒烟硬验收(e2e,需真节点;审查指出的关键风险,当前仓内零证据)
+- [ ] **ST 未被消费(浏览器 abort 没把一次性 ST 送达核销)**:取票拿到 `ST-…` 后,用同一 `serviceUrl?ticket=<ST>` 直接 GET,断言**目标服务判该票可校验/未被核销**(说明这张 ST 是新鲜未用的);或在节点 `_route` 对目标 host 的 **abort 计数 vs 真实发出计数**(跑一次真取票,打印这两个计数,确认浏览器对目标 host 的导航被 abort、ST 没被浏览器自己送去核销)。
+- [ ] **keepalive 保鲜(设计头号风险 §10,仓内零证据)**:登录拿 state → 触发一次 `/keepalive` → 断言**回吐 state 的瑞数 cookie 值与入参不同**(证明确实刷新、不是原样回吐)→ 再用**刷新后的 state** 调 `/service-ticket` 仍 **200 拿到 ST**(证明刷新后的 state 仍能取票,验证 60min 间隔保鲜链路闭合)。
+
+### 灰度观测
+- [ ] 灰度:生产 `st_mint` 成功率回升、keepalive `active` 比例、节点内存/僵尸平稳。

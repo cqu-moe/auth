@@ -38,7 +38,7 @@
 ```
 用户进教务 → CquSessionDO(CF,每用户一个)
    ① 取票四道闸照旧(host校验/quicklogin opt-in/限流/审计)—— 不动
-   ② 从 D1 取出该用户加密存的【完整 storage_state】
+   ② 从 DO storage 取出该用户的【完整 storage_state】(`ctx.storage.get("state")`,非 D1)
    ▼  env.LOGIN_NODE.fetch(Workers VPC 私有通道,不动)
 成都节点 server.py
    /service-ticket: Semaphore(3) → 临时 chromium → new_context(storage_state)
@@ -64,10 +64,13 @@ CQU sso(瑞数被真浏览器现场算过 → 放行)
 - 入参 `{state}`。临时浏览器 navigate 探活(已登录页),**导出刷新后的 `ctx.storage_state()` 回吐**。
 - 返回 `{status: active|expired|unreachable, state: <refreshed>}`;`proxy=None`。三态语义沿用("探不通"=unreachable 不误判过期)。
 
-### 4.4 DO + D1
-- 存储:`cquCredentials` 里"加密 3 cookie"升级为"**加密完整 `storage_state` JSON**"(仍 KB,AES-GCM 不变)。
-- DO 调 `/service-ticket` 传解密后的 state;调 `/keepalive` 传 state,拿回 refreshed state **写回 D1**(C)。`/run` 回来存完整 state。
+### 4.4 DO 存储(实现已订正:state 存 DO storage,非 D1)
+- 存储位置:完整 `storage_state` 存在 **DO storage**(`ctx.storage.put("state", SessionState)`,`SessionState.storageState` 字段,structured-clone 序列化),**不入 D1**。`cquCredentials` 表自始至终只有 `encryptedPassword`+`iv` 两列,**从无 cookie/state 列**(改造前的 3-cookie、改造后的完整 state 都只活在 DO storage)。
+- 加密层级:state 在**应用层是明文**(未经 `crypto.ts` 的 AES-256-GCM;那套 AES-GCM 只加密 D1 里的 CQU SSO 密码)。落盘前只有一道 #6 体量守卫(`putStateGuarded`:序列化测字节数,超 100KiB 告警,护 DO 单 value 128KiB 上限),不做应用层加密。
+- DO 调 `/service-ticket` 传 `this.state.storageState`;调 `/keepalive` 传 state,拿回 refreshed state(经 `hasValidTgt` 校验后)**写回 DO storage**(C,随 `alarm()` active 分支的 `putStateGuarded` 落盘)。`/run` 回来把完整 state 重建进 `SessionState` 落 DO storage。
 - **取票四道闸完全不动**(调 binding 前过完)。
+
+> **决策记录(明文存 DO storage 是已知接受项)**:state 在应用层不再加密,理由——(1) DO storage 受 CF **平台层静态加密** + 账户级访问控制保护;(2) 同一 Worker 进程**同时**持 `ENCRYPTION_KEY` 与 DO storage 句柄,真要泄露二者一起泄,应用层再加一层 AES-GCM 的边际增益很低;(3) **非本分支引入**——`main` 同样把 TGT/3-cookie **明文**存在 DO storage(`SessionState`),本分支只是把存进 DO storage 的凭据体量从 3-cookie 放大到完整 `storage_state`,**未改变明文存储这一既有事实**。故沿用明文,只加体量守卫。
 
 ## 5. 状态生命周期(C)
 - 登录 → 存完整 state。keepalive 每 60min navigate 刷新 → 回写 → **state 永远 ≤60min 旧**。
@@ -90,8 +93,8 @@ CQU sso(瑞数被真浏览器现场算过 → 放行)
 2. **后删**(稳定后):删 `qg_proxy` 调用、两套青果 key(1Password Environment)、相关测试。回滚窗口内保留。
 
 ## 9. 上线 / 回滚
-- 分阶段:① 节点 `/service-ticket`+`/keepalive` 改临时浏览器 + `QG_ENABLED=0`,DO/D1 改存完整 state、`/run` 返回完整 state;② 灰度观测取票成功率 / 内存 / cloudflared 稳定性;③ 稳定后删青果代码。
-- **回滚**:迁移期保留 httpx 取票/keepalive 路径(开关切回);state 存储向后兼容(读不到完整 state 时可触发重登重建)。
+- 分阶段:① 节点 `/service-ticket`+`/keepalive` 改临时浏览器 + `QG_ENABLED=0`,DO 改存完整 state(DO storage,非 D1)、`/run` 返回完整 state;② 灰度观测取票成功率 / 内存 / cloudflared 稳定性;③ 稳定后删青果代码。
+- **回滚**:迁移期保留 httpx 取票/keepalive 路径(开关切回);DO storage 里旧的 3-cookie 会话向后兼容——`getServiceTicket`/`runKeepAlive` 有迁移守卫,`this.state.storageState` 为 null(旧会话只存过 3 cookie)时不向节点发 null state,而是按需重登重建完整 state(见 `cqu-session.ts` 两处 "legacy session" 守卫)。
 
 ## 10. 风险
 1. **状态保鲜**(主):state 扛 60min 未实测,用户体感判 OK + 日志兜底(§5/§9)。
