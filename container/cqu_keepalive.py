@@ -28,7 +28,6 @@ UA / 3-cookie / _proxy_url / looks_like_cas_login, 同样支持青果或 proxy=N
 import cqu_ticket
 from cqu_ticket import TicketError
 
-import cqu_login
 import cqu_ticket_browser
 
 # 探测用的 service: 对齐 DO 的 DUMMY_SERVICE(runKeepAlive 凭它试换 ST 做探活)。

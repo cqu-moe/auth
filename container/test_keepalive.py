@@ -93,8 +93,11 @@ class KeepaliveTestCase(AioHTTPTestCase):
     async def test_probe_unexpected_exception_maps_to_200_unreachable(self):
         # probe_session_browser 自身抛未预期异常(内部已收口, 此为纵深兜底) → 200 unreachable,
         # 绝不 500, 绝不误判过期 —— 探活端点对 DO 永远只返回「探测事实」。
+        # 外层兜底 detail 只放异常类型名, 绝不回显 str(e)(防 state/cookie 片段经异常 message 漏进 DO 日志)。
+        secret = "SOURCEID_TGC=SUPER-SECRET-TGC-VALUE"
+
         async def _probe(_state):
-            raise RuntimeError("unexpected boom")
+            raise RuntimeError(secret)
 
         server.cqu_keepalive.probe_session_browser = _probe
 
@@ -103,6 +106,9 @@ class KeepaliveTestCase(AioHTTPTestCase):
         data = await resp.json()
         assert data["ok"] is True
         assert data["status"] == "unreachable"
+        # 脱敏红线: detail 恰为类型名, 不含 str(e) 里的敏感子串。
+        assert data["detail"] == "RuntimeError"
+        assert secret not in data["detail"]
 
     async def test_missing_state_returns_400(self):
         # 缺 state 字段 → 400, 不进 probe。

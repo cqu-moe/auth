@@ -296,7 +296,9 @@ async def keepalive_handler(request: web.Request) -> web.Response:
         result = await cqu_keepalive.probe_session_browser(state)
     except Exception as e:  # noqa: BLE001 - 纵深兜底, 探活对 DO 永远只返回探测事实(200)
         log.warning("keepalive probe unexpected error (→ unreachable): %s", e)
-        result = {"status": "unreachable", "state": state, "detail": f"{type(e).__name__}: {e}"}
+        # detail 只回类型名, 不拼 str(e): 异常 message 可能含 state/cookie 片段, 会经 200 body
+        # 回传 DO 并落 CF observability(下游 sanitizeNodeDetail 只截断不脱敏, 救不了)。
+        result = {"status": "unreachable", "state": state, "detail": type(e).__name__}
     log.info("keepalive status=%s detail=%s", result["status"], (result.get("detail", "") or "")[:80])
     return web.json_response({"ok": True, **result})
 
