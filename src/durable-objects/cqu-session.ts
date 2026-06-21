@@ -50,6 +50,10 @@ import type { Env } from "../types";
 const KEEPALIVE_INTERVAL_MS = 60 * 60 * 1000;
 const RETRY_INTERVAL_MS = 60 * 1000;
 const MAX_FAST_RETRIES = 5;
+// keepalive 探活铸票的审计/限流身份: 专属哨兵 clientId 自成桶(不挤占真实 per-client 配额), source 标 keepalive。
+// 限流桶 key 与审计 key 共用同一常量, 杜绝改一处漏一处导致桶/审计错配。
+const KEEPALIVE_CLIENT_ID = "__keepalive__";
+const KEEPALIVE_SOURCE = "keepalive";
 // 熔断: transient(瑞数/网络)连续失败时 keepalive 退避封顶(从 KEEPALIVE_INTERVAL_MS 指数涨到 6h)。
 const KEEPALIVE_MAX_BACKOFF_MS = 6 * 60 * 60 * 1000;
 // TGT 绝对寿命 ~8h；在 7h 处主动重铸, 留 ~1h 余量给重登流程(容器点火 + 发码 + 邮件到达 + 提交)。
@@ -969,17 +973,17 @@ export class CquSessionDO extends DurableObject<Env> {
       (await this.ctx.storage.get<StMintRecord[]>("stMintLog")) ?? [];
     const pruned = pruneStMintLog(stored, now, ST_MINT_RATE_WINDOW_MS);
     // 记账但豁免拒绝: 直接追加, 不调 stMintThrottled。哨兵 clientId 自成桶, 不挤占真实配额。
-    pruned.push({ ts: now, clientId: "__keepalive__", host, broad: false });
+    pruned.push({ ts: now, clientId: KEEPALIVE_CLIENT_ID, host, broad: false });
     await this.ctx.storage.put("stMintLog", pruned);
     // 审计(结构化, 与取票同 schema; source:"keepalive")。绝不含 ticket/cookies/密码。
     console.log(
       JSON.stringify({
         evt: "st_mint",
         userId: st.userId,
-        clientId: "__keepalive__",
+        clientId: KEEPALIVE_CLIENT_ID,
         host,
         broad: false,
-        source: "keepalive",
+        source: KEEPALIVE_SOURCE,
         ts: now,
       })
     );
