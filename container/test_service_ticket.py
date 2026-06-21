@@ -158,3 +158,25 @@ class ServiceTicketTestCase(AioHTTPTestCase):
             "/service-ticket", data="not json", headers={"Content-Type": "application/json"}
         )
         assert resp.status == 400, f"expected 400, got {resp.status}"
+
+    async def test_disallowed_host_returns_400_without_fetch(self):
+        # 纵深第二层: serviceUrl host 非 *.cqu.edu.cn(别域 / 后缀伪装) → 400, 绝不进取票
+        # (防 CVE-2022-39369 式 ST-relay; 红线本只在上游 DO, 此为节点侧纵深防御)。
+        called = {"fetch": False}
+
+        async def _fetch(*_a, **_k):
+            called["fetch"] = True
+            return "ST-should-not-happen"
+
+        server.cqu_ticket_browser.fetch_service_ticket_browser = _fetch
+        for bad_url in (
+            "https://cqu.edu.cn.evil.com/cas",   # 后缀伪装
+            "http://my.cqu.edu.cn/cas",          # 非 https
+            "https://evil.com/cas",              # 别域
+        ):
+            body = {"serviceUrl": bad_url, "state": _VALID_BODY["state"]}
+            resp = await self.client.post("/service-ticket", json=body)
+            assert resp.status == 400, f"{bad_url}: expected 400, got {resp.status}"
+            data = await resp.json()
+            assert data["ok"] is False
+        assert called["fetch"] is False, "fetch must not run for disallowed serviceUrl host"

@@ -30,7 +30,6 @@ from cqu_ticket import TicketError
 
 import cqu_login
 import cqu_ticket_browser
-from patchright.async_api import async_playwright
 
 # 探测用的 service: 对齐 DO 的 DUMMY_SERVICE(runKeepAlive 凭它试换 ST 做探活)。
 PROBE_SERVICE = "https://my.cqu.edu.cn/authserver/authentication/cas"
@@ -111,41 +110,21 @@ async def probe_session_browser(state: dict) -> dict:
     DO 据此保鲜), 探不通时回吐原 state。
 
     返回 {"status": "alive"|"expired"|"unreachable", "state": <刷新后或原>, "detail": "..."}。
-    探不通(浏览器起不来 / 导航全异常 / 未知)→ unreachable + 原 state(绝不误判过期)。
-    与 /service-ticket 共用 cqu_ticket_browser.TICKET_SEMAPHORE 限总并发(护 4G 节点)。
-    detail 只含 verdict / 异常类型, 绝不含 ticket / cookies。
+    探不通(浏览器起不来 / 导航全异常 / 超时 / 未知)→ unreachable + 原 state(绝不误判过期)。
+    复用 cqu_ticket_browser._hydrate_navigate(与 /service-ticket 取票同一条浏览器路径:拦截带
+    ticket= 的回调 abort 不消费单次 ST、整体超时兜底、共用 TICKET_SEMAPHORE 限总并发)。
+    detail 只含 verdict / 异常**类型名**, 绝不拼 str(e) —— patchright.new_context(storage_state=非法)
+    的异常 message 可能把出错的 cookie/value 条目内容拼进去, 而本返回的 detail 经节点 200 回传、
+    DO console.warn 落 CF observability, 故只放类型名以杜绝 state/cookie 明文进日志
+    (对齐 CLAUDE.md「ticket/cookies/state 明文绝不进日志」)。
     """
-    url = cqu_ticket_browser.build_login_url(PROBE_SERVICE)
     try:
-        async with cqu_ticket_browser.TICKET_SEMAPHORE:
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(headless=True, args=[
-                    "--headless=new", "--disable-blink-features=AutomationControlled",
-                    "--no-sandbox", "--disable-dev-shm-usage"], timeout=30000)
-                try:
-                    ctx = await browser.new_context(
-                        storage_state=state, user_agent=cqu_login.UA,
-                        viewport={"width": 1440, "height": 900},
-                        locale="zh-CN", timezone_id="Asia/Shanghai")
-                    page = await ctx.new_page()
-                    tickets = []
-                    cqu_login.install_ticket_sniffer(page, tickets)
-                    try:
-                        await page.goto(url, wait_until="domcontentloaded", timeout=25000)
-                        await page.wait_for_timeout(3500)
-                    except Exception:
-                        pass
-                    ticket = cqu_login.extract_ticket(tickets + [page.url])
-                    body = ""
-                    if not ticket:
-                        try:
-                            body = await page.content()
-                        except Exception:
-                            body = ""
-                    refreshed = await ctx.storage_state()
-                finally:
-                    await browser.close()
-    except Exception as e:  # noqa: BLE001 - 探不通一律 unreachable, 绝不误判过期
-        return {"status": "unreachable", "state": state, "detail": f"{type(e).__name__}: {e}"}
+        ticket, body, refreshed = await cqu_ticket_browser._hydrate_navigate(
+            PROBE_SERVICE, state, capture_state=True)
+    except Exception as e:  # noqa: BLE001 - 探不通(含整体超时)一律 unreachable, 绝不误判过期
+        # detail 只放异常类型名(白名单化): str(e) 可能回显非法 state/cookie 条目 → 泄露明文。
+        return {"status": "unreachable", "state": state, "detail": type(e).__name__}
     verdict, _ = cqu_ticket_browser.classify_browser_result(ticket, body)
-    return {"status": probe_status_from_verdict(verdict), "state": refreshed, "detail": verdict}
+    return {"status": probe_status_from_verdict(verdict),
+            "state": refreshed if isinstance(refreshed, dict) else state,
+            "detail": verdict}
