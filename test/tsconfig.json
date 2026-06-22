@@ -1,0 +1,15 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    // workers-types(运行时 API: DurableObject/Fetcher/DurableObjectState 等, 与 src 一致)+
+    // pool-workers /types 子路径(ambient `declare module "cloudflare:test"`)。只编译 test/ 下文件;
+    // src 由根 tsconfig(npm run typecheck)管。
+    "types": [
+      "@cloudflare/workers-types",
+      "@cloudflare/vitest-pool-workers/types",
+      "node"
+    ],
+    "noEmit": true
+  },
+  "include": ["**/*.ts"]
+}

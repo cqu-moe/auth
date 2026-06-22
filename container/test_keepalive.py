@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
 """/keepalive 端点契约测 —— 经 aiohttp test client 打 build_app()。不触网。
 
-铁律: 探活也是「连 CQU」, 必先 acquire_qg_proxy() 经青果出站。
+新契约(浏览器水化探活, 砍青果):
+  · POST /keepalive {state} → 临时浏览器水化完整 storage_state, navigate 探活,
+    返回三态事实 + 刷新后的 storage_state 给 DO。端点不碰青果。
 
-三态映射(端点恒返回 200 {ok:true, status, detail}, 由 DO 据 status 决策):
-  · probe_session 返回 status=alive       → 200 {ok:true, status:"alive"}。
-  · probe_session 返回 status=expired     → 200 {ok:true, status:"expired"}。
-  · probe_session 返回 status=unreachable → 200 {ok:true, status:"unreachable"}。
+三态映射(端点恒返回 200 {ok:true, status, state, detail}, 由 DO 据 status 决策):
+  · probe_session_browser 返回 status=alive       → 200 {ok:true, status:"alive", state}。
+  · probe_session_browser 返回 status=expired     → 200 {ok:true, status:"expired"}。
+  · probe_session_browser 返回 status=unreachable → 200 {ok:true, status:"unreachable"}。
 
-青果失败语义(关键): 拿不到青果 = 探不通(不证明会话过期) → 200 {ok:true,
-status:"unreachable"}, 让 DO 按瞬态退避而非误触重登。**不** 5xx —— 探活端点只返回
-「探测事实」, DO 凭 status 区分 expired(该重登) vs unreachable(该退避)。
+探不通绝不误判过期(归 unreachable, DO 退避)。probe 自身抛异常 → 纵深兜底归 unreachable(仍 200)。
 
-缺字段 / cookies 非 dict → 400(契约破坏, 真客户端错误)。
+缺 state / state 非 dict → 400(契约破坏, 真客户端错误)。
 
-测试把 server.acquire_qg_proxy 与 server.cqu_keepalive.probe_session 全 monkeypatch,
-两条出站(青果提取 + 经青果探活)都不触网。
+测试 monkeypatch server.cqu_keepalive.probe_session_browser, 不起浏览器、不触网。
 
 运行:
     python3 -m pytest container/test_keepalive.py -v
@@ -28,13 +27,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from aiohttp.test_utils import AioHTTPTestCase  # noqa: E402
 
 import server  # noqa: E402
-from qg_proxy import QgExtractError  # noqa: E402
 
-_VALID_BODY = {
-    "cookies": {"SOURCEID_TGC": "tgc", "SESSION": "sess", "rg_objectid": "rg"},
-}
-
-_FAKE_PROXY = {"server": "http://1.2.3.4:20000", "username": "u", "password": "p"}
+# storage_state 形态(cookies + origins), 探活回吐刷新后的它给 DO 保鲜瑞数 cookie。
+_VALID_BODY = {"state": {"cookies": [], "origins": []}}
+_REFRESHED_STATE = {"cookies": [{"name": "x", "value": "y"}], "origins": []}
 
 
 class KeepaliveTestCase(AioHTTPTestCase):
@@ -43,84 +39,37 @@ class KeepaliveTestCase(AioHTTPTestCase):
 
     def setUp(self):
         super().setUp()
-        self._orig_acquire = server.acquire_qg_proxy
-        self._orig_should = server.should_use_proxy
-        self._orig_probe = server.cqu_keepalive.probe_session
+        self._orig_probe = server.cqu_keepalive.probe_session_browser
 
     def tearDown(self):
-        server.acquire_qg_proxy = self._orig_acquire
-        server.should_use_proxy = self._orig_should
-        server.cqu_keepalive.probe_session = self._orig_probe
+        server.cqu_keepalive.probe_session_browser = self._orig_probe
         super().tearDown()
 
-    async def test_alive_maps_to_200_alive(self):
-        # probe 判 alive → 200 {ok:true, status:"alive"}; proxy/cookies 原样透传; 走短效包。
+    async def test_alive_maps_to_200_alive_with_state(self):
+        # probe 判 alive → 200 {ok:true, status:"alive", state:<刷新后>}; state 原样透传给 probe。
         captured = {}
-        acquired = {"profile": None}
 
-        async def _ok(profile="short"):
-            acquired["profile"] = profile
-            return _FAKE_PROXY
+        async def _probe(state):
+            captured["state"] = state
+            return {"status": "alive", "state": _REFRESHED_STATE, "detail": "ok"}
 
-        async def _probe(cookies, proxy):
-            captured["cookies"] = cookies
-            captured["proxy"] = proxy
-            return {"status": "alive", "detail": "probe minted ST"}
-
-        server.acquire_qg_proxy = _ok
-        server.cqu_keepalive.probe_session = _probe
+        server.cqu_keepalive.probe_session_browser = _probe
 
         resp = await self.client.post("/keepalive", json=_VALID_BODY)
         assert resp.status == 200, f"expected 200, got {resp.status}"
         data = await resp.json()
         assert data["ok"] is True
         assert data["status"] == "alive"
-        # 关键: proxy 原样透传, cookies 不被顶替。
-        assert captured["proxy"] == _FAKE_PROXY
-        assert captured["cookies"] == _VALID_BODY["cookies"]
-        # 默认(走青果)→ 探活用短效包(profile="short")。
-        assert acquired["profile"] == "short"
-
-    async def test_gray_door_off_direct_connect_no_acquire(self):
-        # 灰度门关(should_use_proxy("short")=False) → 节点直连探活: 不调 acquire_qg_proxy,
-        # 传给 probe 的 proxy 必须是 None; 仍正常返回探测三态(此处 alive)。
-        captured = {}
-        called = {"acquire": False}
-
-        def _no_proxy(profile):
-            assert profile == "short"
-            return False
-
-        async def _track_acquire(profile="short"):
-            called["acquire"] = True
-            return _FAKE_PROXY
-
-        async def _probe(cookies, proxy):
-            captured["proxy"] = proxy
-            return {"status": "alive", "detail": "direct-connect probe"}
-
-        server.should_use_proxy = _no_proxy
-        server.acquire_qg_proxy = _track_acquire
-        server.cqu_keepalive.probe_session = _probe
-
-        resp = await self.client.post("/keepalive", json=_VALID_BODY)
-        assert resp.status == 200, f"expected 200, got {resp.status}"
-        data = await resp.json()
-        assert data["ok"] is True
-        assert data["status"] == "alive"
-        assert called["acquire"] is False, "must not acquire qg when gray door is off"
-        assert captured["proxy"] is None, "direct-connect must pass proxy=None"
+        # 关键: 回吐刷新后的 state 给 DO 保鲜; 入参 state 原样透传。
+        assert data["state"] == _REFRESHED_STATE
+        assert captured["state"] == _VALID_BODY["state"]
 
     async def test_expired_maps_to_200_expired(self):
         # probe 判 expired(落回 CAS 登录页) → 200 {ok:true, status:"expired"}。
-        async def _ok(profile="short"):
-            return _FAKE_PROXY
+        async def _probe(_state):
+            return {"status": "expired", "state": _state, "detail": "expired"}
 
-        async def _probe(*_a, **_k):
-            return {"status": "expired", "detail": "SESSION_EXPIRED: fell back to CAS login"}
-
-        server.acquire_qg_proxy = _ok
-        server.cqu_keepalive.probe_session = _probe
+        server.cqu_keepalive.probe_session_browser = _probe
 
         resp = await self.client.post("/keepalive", json=_VALID_BODY)
         assert resp.status == 200, f"expected 200, got {resp.status}"
@@ -129,88 +78,82 @@ class KeepaliveTestCase(AioHTTPTestCase):
         assert data["status"] == "expired"
 
     async def test_unreachable_maps_to_200_unreachable(self):
-        # probe 判 unreachable(瑞数误判/网络) → 200 {ok:true, status:"unreachable"}。
-        async def _ok(profile="short"):
-            return _FAKE_PROXY
+        # probe 判 unreachable(瑞数误判/探不通) → 200 {ok:true, status:"unreachable"}, 回吐原 state。
+        async def _probe(_state):
+            return {"status": "unreachable", "state": _state, "detail": "no_ticket"}
 
-        async def _probe(*_a, **_k):
-            return {"status": "unreachable", "detail": "NO_TICKET: likely WAF/throttle"}
-
-        server.acquire_qg_proxy = _ok
-        server.cqu_keepalive.probe_session = _probe
+        server.cqu_keepalive.probe_session_browser = _probe
 
         resp = await self.client.post("/keepalive", json=_VALID_BODY)
         assert resp.status == 200, f"expected 200, got {resp.status}"
         data = await resp.json()
         assert data["ok"] is True
         assert data["status"] == "unreachable"
-
-    async def test_qg_failure_maps_to_200_unreachable_not_5xx(self):
-        # 关键: 青果失败 = 探不通 → 200 {ok:true, status:"unreachable"}(不 5xx, 不进 probe)。
-        # 让 DO 按瞬态退避, 而非误判会话过期触发重登。
-        called = {"probe": False}
-
-        async def _boom(profile="short"):
-            raise QgExtractError("QG_ENABLED=0 (应急开关关闭)")
-
-        async def _probe(*_a, **_k):
-            called["probe"] = True
-            return {"status": "alive", "detail": "should-not-happen"}
-
-        server.acquire_qg_proxy = _boom
-        server.cqu_keepalive.probe_session = _probe
-
-        resp = await self.client.post("/keepalive", json=_VALID_BODY)
-        assert resp.status == 200, f"expected 200, got {resp.status}"
-        data = await resp.json()
-        assert data["ok"] is True
-        assert data["status"] == "unreachable", "qg failure must map to unreachable, not expired"
-        assert "qg proxy unavailable" in data["detail"]
-        assert called["probe"] is False, "probe must not run when qg fails"
 
     async def test_probe_unexpected_exception_maps_to_200_unreachable(self):
-        # probe_session 自身抛未预期异常(理论上它内部已收口, 此为纵深兜底) → 200 unreachable,
-        # 绝不 500 —— 探活端点对 DO 永远只返回「探测事实」。
-        async def _ok(profile="short"):
-            return _FAKE_PROXY
+        # probe_session_browser 自身抛未预期异常(内部已收口, 此为纵深兜底) → 200 unreachable,
+        # 绝不 500, 绝不误判过期 —— 探活端点对 DO 永远只返回「探测事实」。
+        # 外层兜底 detail 只放异常类型名, 绝不回显 str(e)(防 state/cookie 片段经异常 message 漏进 DO 日志)。
+        secret = "SOURCEID_TGC=SUPER-SECRET-TGC-VALUE"
 
-        async def _probe(*_a, **_k):
-            raise RuntimeError("unexpected boom")
+        async def _probe(_state):
+            raise RuntimeError(secret)
 
-        server.acquire_qg_proxy = _ok
-        server.cqu_keepalive.probe_session = _probe
+        server.cqu_keepalive.probe_session_browser = _probe
 
         resp = await self.client.post("/keepalive", json=_VALID_BODY)
         assert resp.status == 200, f"expected 200, got {resp.status}"
         data = await resp.json()
         assert data["ok"] is True
         assert data["status"] == "unreachable"
+        # 脱敏红线: detail 恰为类型名, 不含 str(e) 里的敏感子串。
+        assert data["detail"] == "RuntimeError"
+        assert secret not in data["detail"]
 
-    async def test_missing_cookies_returns_400_before_qg(self):
-        # 缺 cookies 字段 → 400, 仍在 acquire_qg_proxy 之前(不浪费青果提取)。
-        called = {"acquire": False}
+    async def test_probe_unexpected_exception_log_does_not_leak_state(self):
+        # M9: 外层兜底 catch 的 body 已脱敏(detail=类型名, 见上), 但 log.warning 旧实现仍
+        # `%s, e` 打原始异常对象 —— 异常 message 可能含 state/cookie 片段, 经 CF observability 泄露。
+        # 补齐"body 防了 log 没防"的不一致: 该 log 只记 type(e).__name__。
+        secret = "SOURCEID_TGC=SUPER-SECRET-TGC-VALUE; SESSION=leak789"
 
-        async def _track_acquire(profile="short"):
-            called["acquire"] = True
-            return _FAKE_PROXY
+        async def _probe(_state):
+            raise RuntimeError(secret)
 
-        server.acquire_qg_proxy = _track_acquire
+        server.cqu_keepalive.probe_session_browser = _probe
+
+        with self.assertLogs("cqu-login-server", level="INFO") as cm:
+            resp = await self.client.post("/keepalive", json=_VALID_BODY)
+        assert resp.status == 200, f"expected 200, got {resp.status}"
+        joined = "\n".join(cm.output)
+        assert "SUPER-SECRET-TGC-VALUE" not in joined, f"state leaked into logs: {cm.output}"
+        assert "leak789" not in joined, f"state leaked into logs: {cm.output}"
+        assert "SOURCEID_TGC" not in joined, f"cookie name leaked into logs: {cm.output}"
+
+    async def test_missing_state_returns_400(self):
+        # 缺 state 字段 → 400, 不进 probe。
+        called = {"probe": False}
+
+        async def _probe(_state):
+            called["probe"] = True
+            return {"status": "alive", "state": _state, "detail": "x"}
+
+        server.cqu_keepalive.probe_session_browser = _probe
         resp = await self.client.post("/keepalive", json={})
         assert resp.status == 400
-        assert called["acquire"] is False, "qg must not be acquired for invalid body"
+        assert called["probe"] is False, "probe must not run for invalid body"
 
-    async def test_cookies_not_dict_returns_400(self):
-        # cookies 非 dict(类型不对) → 400, 不进青果。
-        called = {"acquire": False}
+    async def test_state_not_dict_returns_400(self):
+        # state 非 dict(类型不对) → 400, 不进 probe。
+        called = {"probe": False}
 
-        async def _track_acquire(profile="short"):
-            called["acquire"] = True
-            return _FAKE_PROXY
+        async def _probe(_state):
+            called["probe"] = True
+            return {"status": "alive", "state": _state, "detail": "x"}
 
-        server.acquire_qg_proxy = _track_acquire
-        resp = await self.client.post("/keepalive", json={"cookies": "not-a-dict"})
+        server.cqu_keepalive.probe_session_browser = _probe
+        resp = await self.client.post("/keepalive", json={"state": "not-a-dict"})
         assert resp.status == 400
-        assert called["acquire"] is False
+        assert called["probe"] is False
 
     async def test_invalid_json_returns_400(self):
         resp = await self.client.post(

@@ -1,19 +1,14 @@
 #!/usr/bin/env python3
 """/service-ticket 端点契约测 —— 经 aiohttp test client 打 build_app()。不触网。
 
-铁律: 取 ST 也是「连 CQU」, 必先 acquire_qg_proxy() 经青果出站:
-  · 青果提取失败(QgExtractError) → 502 {ok:false}, 不进入 fetch_service_ticket(硬依赖回退)。
-  · 青果成功 → proxy dict 原样透传给 cqu_ticket.fetch_service_ticket(...)。
+新契约(Task 3.1): 端点收完整 storage_state, 走浏览器水化取票(过瑞数 JS 挑战), 砍青果。
+  · 成功(返回 ST) → 200 {ok:true, ticket}。
+  · 会话过期(落回 CAS 登录页, ExpiredError) → 409 {ok:false}。
+  · 未取到票(NoTicketError / 浏览器崩 / 任意异常) → 502 {ok:false}。
+  · 缺 serviceUrl 或 state 非 dict → 400 {ok:false}。
 
-取票结果映射:
-  · 成功 → 200 {ok:true, ticket}。
-  · 会话过期(TicketError code=SESSION_EXPIRED) → 409 {ok:false}。
-  · 其余取票失败(NO_TICKET / 网络层) → 502 {ok:false}。
-
-测试把 server.acquire_qg_proxy 与 server.cqu_ticket.fetch_service_ticket_retrying 全 monkeypatch
-(端点 handler 直接调的是带退避重试的 _retrying 版, 它内部才调 fetch_service_ticket;
-直接 mock _retrying 命中 handler 调用层, 不经真重试逻辑——更快更确定, 错误路径不会真 sleep 重试 3 次),
-两条出站(青果提取 + 经青果取票)都不触网。
+测试把 server.cqu_ticket_browser.fetch_service_ticket_browser monkeypatch(端点 handler 直接调它),
+不触网、不起真浏览器。端点不再碰青果(acquire_qg_proxy/should_use_proxy)。
 
 运行:
     python3 -m pytest container/test_service_ticket.py -v
@@ -26,15 +21,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from aiohttp.test_utils import AioHTTPTestCase  # noqa: E402
 
 import server  # noqa: E402
-from cqu_ticket import TicketError  # noqa: E402
-from qg_proxy import QgExtractError  # noqa: E402
 
 _VALID_BODY = {
     "serviceUrl": "https://my.cqu.edu.cn/authserver/authentication/cas",
-    "cookies": {"SOURCEID_TGC": "tgc", "SESSION": "sess", "rg_objectid": "rg"},
+    "state": {
+        "cookies": [
+            {"name": "SOURCEID_TGC", "value": "tgc", "domain": "sso.cqu.edu.cn", "path": "/"},
+        ],
+        "origins": [],
+    },
 }
-
-_FAKE_PROXY = {"server": "http://1.2.3.4:20000", "username": "u", "password": "p"}
 
 
 class ServiceTicketTestCase(AioHTTPTestCase):
@@ -43,79 +39,59 @@ class ServiceTicketTestCase(AioHTTPTestCase):
 
     def setUp(self):
         super().setUp()
-        self._orig_acquire = server.acquire_qg_proxy
-        self._orig_should = server.should_use_proxy
-        self._orig_fetch = server.cqu_ticket.fetch_service_ticket_retrying
+        self._orig_fetch = server.cqu_ticket_browser.fetch_service_ticket_browser
 
     def tearDown(self):
-        server.acquire_qg_proxy = self._orig_acquire
-        server.should_use_proxy = self._orig_should
-        server.cqu_ticket.fetch_service_ticket_retrying = self._orig_fetch
+        server.cqu_ticket_browser.fetch_service_ticket_browser = self._orig_fetch
         super().tearDown()
 
-    async def test_qg_extract_failure_returns_502(self):
-        # 青果提取失败 → 502 早退, 绝不进入 fetch_service_ticket。
-        called = {"fetch": False}
-
-        async def _boom(profile="short"):
-            raise QgExtractError("QG_ENABLED=0 (应急开关关闭)")
-
-        async def _fetch(*_a, **_k):
-            called["fetch"] = True
-            return "ST-should-not-happen"
-
-        server.acquire_qg_proxy = _boom
-        server.cqu_ticket.fetch_service_ticket_retrying = _fetch
-
-        resp = await self.client.post("/service-ticket", json=_VALID_BODY)
-        assert resp.status == 502, f"expected 502, got {resp.status}"
-        data = await resp.json()
-        assert data["ok"] is False
-        assert "qg proxy unavailable" in data["error"]
-        assert called["fetch"] is False, "fetch must not run when qg fails"
-
-    async def test_success_returns_ticket_and_passes_proxy(self):
-        # 青果成功 → proxy 原样透传 fetch; 成功 200 {ok, ticket}; 走短效包(profile="short")。
+    async def test_success_returns_ticket(self):
+        # 浏览器水化成功 → 200 {ok, ticket}; serviceUrl/state 原样透传给取票函数。
         captured = {}
-        acquired = {"profile": None}
 
-        async def _ok(profile="short"):
-            acquired["profile"] = profile
-            return _FAKE_PROXY
-
-        async def _fetch(service_url, cookies, proxy):
+        async def _fetch(service_url, state):
             captured["service_url"] = service_url
-            captured["cookies"] = cookies
-            captured["proxy"] = proxy
+            captured["state"] = state
             return "ST-realticket-xyz"
 
-        server.acquire_qg_proxy = _ok
-        server.cqu_ticket.fetch_service_ticket_retrying = _fetch
+        server.cqu_ticket_browser.fetch_service_ticket_browser = _fetch
 
         resp = await self.client.post("/service-ticket", json=_VALID_BODY)
         assert resp.status == 200, f"expected 200, got {resp.status}"
         data = await resp.json()
         assert data["ok"] is True
         assert data["ticket"] == "ST-realticket-xyz"
-        # 关键: proxy 原样透传, serviceUrl/cookies 不被顶替。
-        assert captured["proxy"] == _FAKE_PROXY
-        # 默认(走青果)→ 用短效包(profile="short")。
-        assert acquired["profile"] == "short"
+        # 关键: serviceUrl/state 不被顶替, 原样透传。
         assert captured["service_url"] == _VALID_BODY["serviceUrl"]
-        assert captured["cookies"] == _VALID_BODY["cookies"]
+        assert captured["state"] == _VALID_BODY["state"]
+
+    async def test_noncanonical_service_url_is_normalized_before_fetch(self):
+        # M1: handler 把 is_allowed_service_url 的 canonical(小写 host、去默认 :443)传给取票函数,
+        # 使浏览器水化导航 / abort 比对口径单一(否则大写或显式 :443 会让 abort 漏判 → ST 被核销)。
+        captured = {}
+
+        async def _fetch(service_url, state):
+            captured["service_url"] = service_url
+            return "ST-ok"
+
+        server.cqu_ticket_browser.fetch_service_ticket_browser = _fetch
+        body = {
+            "serviceUrl": "https://MY.CQU.EDU.CN:443/authserver/authentication/cas",
+            "state": _VALID_BODY["state"],
+        }
+        resp = await self.client.post("/service-ticket", json=body)
+        assert resp.status == 200, f"expected 200, got {resp.status}"
+        # 传给取票函数的是 canonical, 不是客户端原样的大写 + :443。
+        assert captured["service_url"] == "https://my.cqu.edu.cn/authserver/authentication/cas"
 
     async def test_success_log_does_not_leak_ticket(self):
         # ST 是 bearer 凭据, 成功日志绝不该打它的值(对齐 DO 审计「绝不记录 ticket/cookies/密码」)。
         sentinel = "ST-SENSITIVE-xyz-DO-NOT-LOG"
 
-        async def _ok(profile="short"):
-            return _FAKE_PROXY
-
-        async def _fetch(service_url, cookies, proxy):
+        async def _fetch(service_url, state):
             return sentinel
 
-        server.acquire_qg_proxy = _ok
-        server.cqu_ticket.fetch_service_ticket_retrying = _fetch
+        server.cqu_ticket_browser.fetch_service_ticket_browser = _fetch
 
         with self.assertLogs("cqu-login-server", level="INFO") as cm:
             resp = await self.client.post("/service-ticket", json=_VALID_BODY)
@@ -128,112 +104,148 @@ class ServiceTicketTestCase(AioHTTPTestCase):
         assert sentinel not in joined, f"ticket value leaked into logs: {cm.output}"
         assert sentinel[:24] not in joined, f"ticket prefix leaked into logs: {cm.output}"
 
-    async def test_gray_door_off_direct_connect_no_acquire(self):
-        # 灰度门关(should_use_proxy("short")=False) → 节点直连: 不调 acquire_qg_proxy,
-        # 传给 fetch 的 proxy 必须是 None。
-        captured = {}
-        called = {"acquire": False}
-
-        def _no_proxy(profile):
-            assert profile == "short"
-            return False
-
-        async def _track_acquire(profile="short"):
-            called["acquire"] = True
-            return _FAKE_PROXY
-
-        async def _fetch(service_url, cookies, proxy):
-            captured["proxy"] = proxy
-            return "ST-direct-xyz"
-
-        server.should_use_proxy = _no_proxy
-        server.acquire_qg_proxy = _track_acquire
-        server.cqu_ticket.fetch_service_ticket_retrying = _fetch
-
-        resp = await self.client.post("/service-ticket", json=_VALID_BODY)
-        assert resp.status == 200, f"expected 200, got {resp.status}"
-        data = await resp.json()
-        assert data["ok"] is True
-        assert data["ticket"] == "ST-direct-xyz"
-        assert called["acquire"] is False, "must not acquire qg when gray door is off"
-        assert captured["proxy"] is None, "direct-connect must pass proxy=None"
-
-    async def test_session_expired_returns_409(self):
-        # 取票判会话过期(SESSION_EXPIRED) → 409(客户端态: cookie 失效, 交重登)。
-        async def _ok(profile="short"):
-            return _FAKE_PROXY
-
+    async def test_expired_returns_409(self):
+        # 落回 CAS 登录页(ExpiredError) → 409(客户端态: 会话失效, 交上游 DO 重登)。
+        # H5: 响应体 error 收敛为稳定类型名(不再回 str(e)), DO classifyNodeTicketResponse 据 HTTP
+        # 状态码(409)分类, 不依赖 body.error 文案。
         async def _fetch(*_a, **_k):
-            raise TicketError("SESSION_EXPIRED", "fell back to CAS login page")
+            raise server.cqu_ticket_browser.ExpiredError("fell back to CAS login page")
 
-        server.acquire_qg_proxy = _ok
-        server.cqu_ticket.fetch_service_ticket_retrying = _fetch
+        server.cqu_ticket_browser.fetch_service_ticket_browser = _fetch
 
         resp = await self.client.post("/service-ticket", json=_VALID_BODY)
         assert resp.status == 409, f"expected 409, got {resp.status}"
         data = await resp.json()
         assert data["ok"] is False
-        assert "CAS login page" in data["error"]
+        assert data["error"] == "ExpiredError", f"expected type name, got {data['error']!r}"
 
     async def test_no_ticket_returns_502(self):
-        # 取票未抓到 ST 且非登录页(疑似瑞数误判) → 502(瞬态, 上游退避重试)。
-        async def _ok(profile="short"):
-            return _FAKE_PROXY
-
+        # 未抓到 ST 且非登录页(NoTicketError) → 502(瞬态, 上游退避重试)。
+        # H5: error 收敛为稳定类型名; 502/409 状态码语义不变(DO 据状态码分类)。
         async def _fetch(*_a, **_k):
-            raise TicketError("NO_TICKET", "no ST in redirect chain")
+            raise server.cqu_ticket_browser.NoTicketError("no ST, non-login page")
 
-        server.acquire_qg_proxy = _ok
-        server.cqu_ticket.fetch_service_ticket_retrying = _fetch
+        server.cqu_ticket_browser.fetch_service_ticket_browser = _fetch
 
         resp = await self.client.post("/service-ticket", json=_VALID_BODY)
         assert resp.status == 502, f"expected 502, got {resp.status}"
         data = await resp.json()
         assert data["ok"] is False
-        assert "no ST" in data["error"]
+        assert data["error"] == "NoTicketError", f"expected type name, got {data['error']!r}"
 
-    async def test_network_error_returns_502(self):
-        # fetch 抛非 TicketError(网络层等) → 兜底 502(瞬态), 不 500。
-        async def _ok(profile="short"):
-            return _FAKE_PROXY
-
+    async def test_browser_crash_returns_502(self):
+        # 取票抛任意非 Expired 异常(浏览器崩/超时/网络层) → 兜底 502(瞬态), 不 500。
         async def _fetch(*_a, **_k):
-            raise RuntimeError("connection reset by peer")
+            raise RuntimeError("browser crashed: Target page closed")
 
-        server.acquire_qg_proxy = _ok
-        server.cqu_ticket.fetch_service_ticket_retrying = _fetch
+        server.cqu_ticket_browser.fetch_service_ticket_browser = _fetch
 
         resp = await self.client.post("/service-ticket", json=_VALID_BODY)
         assert resp.status == 502, f"expected 502, got {resp.status}"
         data = await resp.json()
         assert data["ok"] is False
 
-    async def test_missing_field_returns_400_before_qg(self):
-        # 缺字段 400 仍在 acquire_qg_proxy 之前, 不浪费一次青果提取。
-        called = {"acquire": False}
+    async def test_transient_error_response_and_log_do_not_leak_state(self):
+        # H5: 取票抛的异常(patchright.new_context(storage_state=非法) 等)message 可能含 cookie/state
+        # 明文; 502 瞬态分支的响应体经 DO 透传到 route 客户端、日志落 CF observability, 都绝不能含明文。
+        secret = "SOURCEID_TGC=SECRET123; SESSION=xyz-leak"
 
-        async def _track_acquire(profile="short"):
-            called["acquire"] = True
-            return _FAKE_PROXY
+        async def _fetch(*_a, **_k):
+            raise RuntimeError(secret)
 
-        server.acquire_qg_proxy = _track_acquire
-        # 缺 cookies。
-        resp = await self.client.post("/service-ticket", json={"serviceUrl": "https://x.cqu.edu.cn/"})
-        assert resp.status == 400
-        assert called["acquire"] is False, "qg must not be acquired for invalid body"
+        server.cqu_ticket_browser.fetch_service_ticket_browser = _fetch
 
-    async def test_cookies_not_dict_returns_400(self):
-        # cookies 非 dict(类型不对) → 400, 不进青果。
-        called = {"acquire": False}
+        with self.assertLogs("cqu-login-server", level="INFO") as cm:
+            resp = await self.client.post("/service-ticket", json=_VALID_BODY)
+        assert resp.status == 502, f"expected 502, got {resp.status}"
+        data = await resp.json()
+        assert data["ok"] is False
+        # (a) 响应体只含稳定码/类型名, 绝无敏感子串。
+        assert "SECRET123" not in data["error"], f"state leaked into body: {data['error']!r}"
+        assert "SOURCEID_TGC" not in data["error"], f"cookie name leaked into body: {data['error']!r}"
+        assert "SESSION" not in data["error"], f"cookie name leaked into body: {data['error']!r}"
+        assert data["error"] == "RuntimeError", f"expected type name, got {data['error']!r}"
+        # (b) 日志绝无敏感子串。
+        joined = "\n".join(cm.output)
+        assert "SECRET123" not in joined, f"state leaked into logs: {cm.output}"
+        assert "SOURCEID_TGC" not in joined, f"cookie name leaked into logs: {cm.output}"
+        assert "SESSION" not in joined, f"cookie name leaked into logs: {cm.output}"
 
-        async def _track_acquire(profile="short"):
-            called["acquire"] = True
-            return _FAKE_PROXY
+    async def test_expired_error_response_and_log_do_not_leak_state(self):
+        # H5: 409 expired 分支同样脱敏。ExpiredError 当前是项目自定义常量(无 PII), 但任何可能
+        # 携带 patchright 原始 message 的路径都收敛为类型名/稳定码, 杜绝将来 message 变脏时泄露。
+        secret = "SESSION=expired-leak-SECRET456"
 
-        server.acquire_qg_proxy = _track_acquire
+        async def _fetch(*_a, **_k):
+            raise server.cqu_ticket_browser.ExpiredError(secret)
+
+        server.cqu_ticket_browser.fetch_service_ticket_browser = _fetch
+
+        with self.assertLogs("cqu-login-server", level="INFO") as cm:
+            resp = await self.client.post("/service-ticket", json=_VALID_BODY)
+        assert resp.status == 409, f"expected 409, got {resp.status}"
+        data = await resp.json()
+        assert data["ok"] is False
+        assert "SECRET456" not in data["error"], f"state leaked into body: {data['error']!r}"
+        assert "SESSION" not in data["error"], f"cookie name leaked into body: {data['error']!r}"
+        joined = "\n".join(cm.output)
+        assert "SECRET456" not in joined, f"state leaked into logs: {cm.output}"
+        assert "SESSION" not in joined, f"cookie name leaked into logs: {cm.output}"
+
+    async def test_missing_service_url_returns_400(self):
+        # 缺 serviceUrl → 400, 不进取票。
+        called = {"fetch": False}
+
+        async def _fetch(*_a, **_k):
+            called["fetch"] = True
+            return "ST-should-not-happen"
+
+        server.cqu_ticket_browser.fetch_service_ticket_browser = _fetch
+        resp = await self.client.post("/service-ticket", json={"state": _VALID_BODY["state"]})
+        assert resp.status == 400, f"expected 400, got {resp.status}"
+        assert called["fetch"] is False, "fetch must not run for invalid body"
+
+    async def test_state_not_dict_returns_400(self):
+        # state 非 dict(类型不对) → 400, 不进取票。
+        called = {"fetch": False}
+
+        async def _fetch(*_a, **_k):
+            called["fetch"] = True
+            return "ST-should-not-happen"
+
+        server.cqu_ticket_browser.fetch_service_ticket_browser = _fetch
         resp = await self.client.post(
             "/service-ticket",
-            json={"serviceUrl": "https://x.cqu.edu.cn/", "cookies": "not-a-dict"},
+            json={"serviceUrl": "https://x.cqu.edu.cn/", "state": "not-a-dict"},
         )
-        assert resp.status == 400
-        assert called["acquire"] is False
+        assert resp.status == 400, f"expected 400, got {resp.status}"
+        assert called["fetch"] is False
+
+    async def test_invalid_json_returns_400(self):
+        # 请求体不是 JSON → 400。
+        resp = await self.client.post(
+            "/service-ticket", data="not json", headers={"Content-Type": "application/json"}
+        )
+        assert resp.status == 400, f"expected 400, got {resp.status}"
+
+    async def test_disallowed_host_returns_400_without_fetch(self):
+        # 纵深第二层: serviceUrl host 非 *.cqu.edu.cn(别域 / 后缀伪装) → 400, 绝不进取票
+        # (防 CVE-2022-39369 式 ST-relay; 红线本只在上游 DO, 此为节点侧纵深防御)。
+        called = {"fetch": False}
+
+        async def _fetch(*_a, **_k):
+            called["fetch"] = True
+            return "ST-should-not-happen"
+
+        server.cqu_ticket_browser.fetch_service_ticket_browser = _fetch
+        for bad_url in (
+            "https://cqu.edu.cn.evil.com/cas",   # 后缀伪装
+            "http://my.cqu.edu.cn/cas",          # 非 https
+            "https://evil.com/cas",              # 别域
+        ):
+            body = {"serviceUrl": bad_url, "state": _VALID_BODY["state"]}
+            resp = await self.client.post("/service-ticket", json=body)
+            assert resp.status == 400, f"{bad_url}: expected 400, got {resp.status}"
+            data = await resp.json()
+            assert data["ok"] is False
+        assert called["fetch"] is False, "fetch must not run for disallowed serviceUrl host"

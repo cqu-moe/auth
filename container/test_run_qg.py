@@ -86,7 +86,8 @@ class RunQgTestCase(AioHTTPTestCase):
 
         async def _run_login(**kwargs):
             captured.update(kwargs)
-            return {"ticket": "ST-fake", "cookies": []}
+            # 新契约: run_login 返回完整 storage_state(顶层含 cookies 列表 + origins/localStorage)。
+            return {"ticket": "ST-fake", "state": {"cookies": [], "origins": []}}
 
         server.acquire_qg_proxy = _ok
         server.cqu_login.run_login = _run_login
@@ -96,6 +97,9 @@ class RunQgTestCase(AioHTTPTestCase):
         data = await resp.json()
         assert data["ok"] is True
         assert data["ticket"] == "ST-fake"
+        # 新契约: run_login 返回 state(完整 storage_state), 经 handler 原样透传; 顶层含 cookies 列表。
+        assert "state" in data
+        assert "cookies" in data["state"]
         # 关键断言: run_login 收到 proxy=<那个假 proxy>。
         assert captured.get("proxy") == _FAKE_PROXY
         # 默认(走青果)→ 用登录包(profile="login")。
@@ -123,7 +127,8 @@ class RunQgTestCase(AioHTTPTestCase):
 
         async def _run_login(**kwargs):
             captured.update(kwargs)
-            return {"ticket": "ST-direct", "cookies": []}
+            # 新契约: run_login 返回完整 storage_state(顶层含 cookies 列表 + origins/localStorage)。
+            return {"ticket": "ST-direct", "state": {"cookies": [], "origins": []}}
 
         server.should_use_proxy = _no_proxy
         server.acquire_qg_proxy = _track_acquire
@@ -148,3 +153,61 @@ class RunQgTestCase(AioHTTPTestCase):
         resp = await self.client.post("/run", json={"studentId": "x"})
         assert resp.status == 400
         assert called["acquire"] is False, "qg must not be acquired for invalid body"
+
+    async def test_disallowed_service_returns_400_without_run_login(self):
+        # H3: /run 也是 CAS 铸 ST 入口, 与 /service-ticket /keepalive 对称——入参 service host 必须
+        # 是 https 的 *.cqu.edu.cn(纵深第二层, 防 VPC 误配/将来直连绕过红线 → CVE-2022-39369 式
+        # ST-relay)。别域/后缀伪装/非 https → 400, 绝不进 run_login, 也绝不白嫖一次青果提取。
+        called = {"run_login": False, "acquire": False}
+
+        async def _track_acquire(profile="short"):
+            called["acquire"] = True
+            return _FAKE_PROXY
+
+        async def _run_login(**_kwargs):
+            called["run_login"] = True
+            return {"ticket": "ST-should-not-happen", "state": {"cookies": [], "origins": []}}
+
+        server.acquire_qg_proxy = _track_acquire
+        server.cqu_login.run_login = _run_login
+
+        for bad_service in (
+            "https://evil.com/cas",                 # 别域
+            "https://cqu.edu.cn.evil.com/cas",      # 后缀伪装
+            "http://my.cqu.edu.cn/cas",             # 非 https
+        ):
+            body = {**_VALID_BODY, "service": bad_service}
+            resp = await self.client.post("/run", json=body)
+            assert resp.status == 400, f"{bad_service}: expected 400, got {resp.status}"
+            data = await resp.json()
+            assert data["ok"] is False
+        assert called["run_login"] is False, "run_login must not run for disallowed service"
+        assert called["acquire"] is False, "qg must not be acquired for disallowed service"
+        # 拒绝路径不得泄漏已注册的 Event/Value。
+        assert _VALID_BODY["session"] not in server.CODE_EVENTS
+        assert _VALID_BODY["session"] not in server.CODE_VALUES
+
+    async def test_allowed_service_passes_canonical_to_run_login(self):
+        # H3: 合法 *.cqu.edu.cn service 不被该校验拦; 且传给 run_login 的是 canonical(小写 host、
+        # 去默认 :443)——对齐 T1 整链 canonical 口径(is_allowed_service_url 返 canonical 值)。
+        captured = {}
+
+        async def _ok(profile="short"):
+            return _FAKE_PROXY
+
+        async def _run_login(**kwargs):
+            captured.update(kwargs)
+            return {"ticket": "ST-fake", "state": {"cookies": [], "origins": []}}
+
+        server.acquire_qg_proxy = _ok
+        server.cqu_login.run_login = _run_login
+
+        body = {**_VALID_BODY, "service": "https://MY.CQU.EDU.CN:443/authserver/cas"}
+        resp = await self.client.post("/run", json=body)
+        assert resp.status == 200, f"expected 200, got {resp.status}"
+        data = await resp.json()
+        assert data["ok"] is True
+        # 传给 run_login 的 service 是 canonical, 不是客户端原样的大写 + :443。
+        assert captured.get("service") == "https://my.cqu.edu.cn/authserver/cas", (
+            f"expected canonical service, got {captured.get('service')!r}"
+        )

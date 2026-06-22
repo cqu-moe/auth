@@ -28,8 +28,24 @@ UA / 3-cookie / _proxy_url / looks_like_cas_login, 同样支持青果或 proxy=N
 import cqu_ticket
 from cqu_ticket import TicketError
 
+import cqu_ticket_browser
+
 # 探测用的 service: 对齐 DO 的 DUMMY_SERVICE(runKeepAlive 凭它试换 ST 做探活)。
 PROBE_SERVICE = "https://my.cqu.edu.cn/authserver/authentication/cas"
+
+# verdict(cqu_ticket_browser.classify_browser_result)→ 探活三态。
+#   ok       = 浏览器换到票 = 会话活        → alive
+#   expired  = 落回 CAS 登录页(TGT 真失效) → expired(交 DO 重登)
+#   no_ticket= 无票且非登录页(未知/瑞数误判) → unreachable(保守退避, 绝不误判过期)
+_VERDICT_TO_STATUS = {"ok": "alive", "expired": "expired", "no_ticket": "unreachable"}
+
+
+def probe_status_from_verdict(verdict: str) -> str:
+    """把浏览器取票 verdict 归成探活三态。纯函数, 便于单测。
+
+    未知 verdict 一律兜底 unreachable(保守退避, 绝不误判过期)。
+    """
+    return _VERDICT_TO_STATUS.get(verdict, "unreachable")
 
 
 def classify_probe(ticket: str | None = None, error: Exception | None = None) -> str:
@@ -82,3 +98,32 @@ async def probe_session(cookies: dict, proxy: dict | None) -> dict:
     except Exception as e:  # noqa: BLE001 - 网络层(httpx)/超时/未知一律归 unreachable
         # 网络/超时/未知 → unreachable(保守, 让 DO 退避而非误判过期)。
         return {"status": "unreachable", "detail": f"{type(e).__name__}: {e}"}
+
+
+async def probe_session_browser(state: dict) -> dict:
+    """临时浏览器水化完整 storage_state → navigate 探活 → 导出刷新后的 state 回吐。
+
+    瑞数动态 JS 挡无浏览器 httpx(浏览器能过), 故探活改浏览器水化(对齐 /service-ticket 取票路径)。
+    水化 DO 给的完整 storage_state 起临时无头浏览器, navigate CAS /login?service=<PROBE_SERVICE>,
+    凭是否换到票 / 是否落 CAS 登录页判三态; 同时导出刷新后的 storage_state(瑞数 cookie 会轮换,
+    DO 据此保鲜), 探不通时回吐原 state。
+
+    返回 {"status": "alive"|"expired"|"unreachable", "state": <刷新后或原>, "detail": "..."}。
+    探不通(浏览器起不来 / 导航全异常 / 超时 / 未知)→ unreachable + 原 state(绝不误判过期)。
+    复用 cqu_ticket_browser._hydrate_navigate(与 /service-ticket 取票同一条浏览器路径:尽力拦
+    落向目标服务 host 的回调以避免核销单次 ST(非安全闸)、整体超时兜底、共用 TICKET_SEMAPHORE 限总并发)。
+    detail 只含 verdict / 异常**类型名**, 绝不拼 str(e) —— patchright.new_context(storage_state=非法)
+    的异常 message 可能把出错的 cookie/value 条目内容拼进去, 而本返回的 detail 经节点 200 回传、
+    DO console.warn 落 CF observability, 故只放类型名以杜绝 state/cookie 明文进日志
+    (对齐 CLAUDE.md「ticket/cookies/state 明文绝不进日志」)。
+    """
+    try:
+        ticket, body, refreshed = await cqu_ticket_browser._hydrate_navigate(
+            PROBE_SERVICE, state, capture_state=True)
+    except Exception as e:  # noqa: BLE001 - 探不通(含整体超时)一律 unreachable, 绝不误判过期
+        # detail 只放异常类型名(白名单化): str(e) 可能回显非法 state/cookie 条目 → 泄露明文。
+        return {"status": "unreachable", "state": state, "detail": type(e).__name__}
+    verdict, _ = cqu_ticket_browser.classify_browser_result(ticket, body)
+    return {"status": probe_status_from_verdict(verdict),
+            "state": refreshed if isinstance(refreshed, dict) else state,
+            "detail": verdict}

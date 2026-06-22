@@ -42,7 +42,7 @@ CLI 用法(仍可独立运行):
 
 容器入口:
     await run_login(student_id, password, service, method, code_provider) -> dict
-    返回 {"cookies": {"SOURCEID_TGC":..,"SESSION":..,"rg_objectid":..}, "ticket": "ST-..."}
+    返回 {"state": <patchright storage_state 完整对象, 含 cookies + localStorage>, "ticket": "ST-..."}
 """
 import argparse
 import asyncio
@@ -345,7 +345,7 @@ async def run_login(student_id, password, service, method="mail", code_provider=
     由 server.py 经 acquire_qg_proxy() 取得后传入), 让浏览器经国内住宅出站消除 CQU 验证码;
     None 时透传给 patchright launch 等价于不设代理(playwright 默认 = 无代理), 保持旧行为。
 
-    成功返回 {"cookies": {"SOURCEID_TGC":..,"SESSION":..,"rg_objectid":..}, "ticket": "ST-..."}。
+    成功返回 {"state": <patchright storage_state 完整对象, 含 cookies + localStorage>, "ticket": "ST-..."}。
     失败(第一因素未过 / 无 ST / 未取到码)抛 RuntimeError, 携带可诊断信息。
     """
     if method not in METHOD:
@@ -382,10 +382,10 @@ async def run_login(student_id, password, service, method="mail", code_provider=
             if verdict == "success":
                 # 该 service 未开二次验证, 第一因素直出 ticket。
                 tk = extract_ticket(tickets + [page.url])
-                cookies = extract_cookies(await ctx.storage_state())
+                state = await ctx.storage_state()
                 if not tk:
                     raise RuntimeError("first-factor succeeded but no ST ticket captured")
-                return {"cookies": cookies, "ticket": tk}
+                return {"state": state, "ticket": tk}
             if verdict != "2fa":
                 raise RuntimeError(f"first-factor failed: {verdict}")
 
@@ -413,8 +413,8 @@ async def run_login(student_id, password, service, method="mail", code_provider=
             if not tk:
                 raise RuntimeError(f"未捕获 ST ticket(验证码可能错误/过期), final_url={page.url[:80]}")
 
-            cookies = extract_cookies(await ctx.storage_state())
-            return {"cookies": cookies, "ticket": tk}
+            state = await ctx.storage_state()
+            return {"state": state, "ticket": tk}
         finally:
             await browser.close()
 
