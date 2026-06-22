@@ -146,6 +146,17 @@ async def run_handler(request: web.Request) -> web.Response:
             status=400,
         )
 
+    # H3 纵深第二层: /run 也是 CAS 铸 ST 入口, 与 /service-ticket /keepalive 对称——service host
+    # 必须是 https 的 *.cqu.edu.cn(策略对齐 DO 侧 service-url.ts), 杜绝 CVE-2022-39369 式 ST-relay
+    # (红线本只在上游 DO, 此为节点侧纵深防御: VPC 误配 / 将来新增直连本节点的调用方时仍兜得住)。
+    # 放在 qg acquire / Event 注册之前: 拒绝路径不白嫖一次青果提取、不注册 Event/Value(无需 finally 清理)。
+    # 通过 → canonical(小写 host、去 :443)传给 run_login, 对齐取票整链 canonical 口径单一。
+    canonical_service = is_allowed_service_url(service)
+    if canonical_service is None:
+        log.warning("run rejected serviceUrl (host not allowed) session=%s", session)
+        return web.json_response({"ok": False, "error": "service not allowed"}, status=400)
+    service = canonical_service
+
     # 灰度: QG_PROXY_LOGIN/QG_ENABLED 决定 /run 走青果(登录包)还是节点直连。走青果时拿不到 IP
     # → 502 硬依赖回退(绝不悄悄 fallback 直连); 直连时 proxy=None, 由节点境内 IP 连 CQU。
     # 放在 Event 注册之前: 早退路径不注册 Event/Value, 无需 finally 清理。
@@ -280,12 +291,17 @@ async def service_ticket_handler(request: web.Request) -> web.Response:
         log.info("service-ticket ok (len=%d)", len(ticket))
         return web.json_response({"ok": True, "ticket": ticket})
     except cqu_ticket_browser.ExpiredError as e:
-        # 落回 CAS 登录页 = 会话过期 → 409(客户端态, 交 DO 重登)。
-        log.warning("service-ticket expired: %s", e)
-        return web.json_response({"ok": False, "error": str(e)}, status=409)
+        # 落回 CAS 登录页 = 会话过期 → 409(客户端态, 交 DO 重登)。HTTP 状态码(409)是 DO
+        # classifyNodeTicketResponse 分类的唯一依据, body.error 不参与分类——故 error 只回稳定
+        # 类型名, 不回 str(e): patchright 抛的异常 message 可能含 cookie/state 明文, 经 200/409/502
+        # body 透传到 route 客户端 + log 落 CF observability(下游只截断不脱敏, 救不了)。日志同理只记类型名。
+        log.warning("service-ticket expired: %s", type(e).__name__)
+        return web.json_response({"ok": False, "error": type(e).__name__}, status=409)
     except Exception as e:  # noqa: BLE001 - NoTicketError/浏览器崩/超时 → 502 瞬态, 让上游退避
-        log.warning("service-ticket transient: %s", e)
-        return web.json_response({"ok": False, "error": str(e)}, status=502)
+        # 同上脱敏: error/log 只记 type(e).__name__, 不拼 str(e)(防 cookie/state 明文外泄)。
+        # 状态码语义(502)不变 → DO 据状态码分类, 不依赖 body 文案。
+        log.warning("service-ticket transient: %s", type(e).__name__)
+        return web.json_response({"ok": False, "error": type(e).__name__}, status=502)
 
 
 async def keepalive_handler(request: web.Request) -> web.Response:
@@ -305,9 +321,10 @@ async def keepalive_handler(request: web.Request) -> web.Response:
     try:
         result = await cqu_keepalive.probe_session_browser(state)
     except Exception as e:  # noqa: BLE001 - 纵深兜底, 探活对 DO 永远只返回探测事实(200)
-        log.warning("keepalive probe unexpected error (→ unreachable): %s", e)
-        # detail 只回类型名, 不拼 str(e): 异常 message 可能含 state/cookie 片段, 会经 200 body
-        # 回传 DO 并落 CF observability(下游 sanitizeNodeDetail 只截断不脱敏, 救不了)。
+        # M9: detail(body)与 log 都只记 type(e).__name__, 不拼 str(e): 异常 message 可能含
+        # state/cookie 片段, 经 200 body 回传 DO 并落 CF observability(下游 sanitizeNodeDetail
+        # 只截断不脱敏, 救不了)。补齐"body 防了 log 没防"的不一致。
+        log.warning("keepalive probe unexpected error (→ unreachable): %s", type(e).__name__)
         result = {"status": "unreachable", "state": state, "detail": type(e).__name__}
     log.info("keepalive status=%s detail=%s", result["status"], (result.get("detail", "") or "")[:80])
     return web.json_response({"ok": True, **result})

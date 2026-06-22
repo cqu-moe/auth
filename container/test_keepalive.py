@@ -110,6 +110,25 @@ class KeepaliveTestCase(AioHTTPTestCase):
         assert data["detail"] == "RuntimeError"
         assert secret not in data["detail"]
 
+    async def test_probe_unexpected_exception_log_does_not_leak_state(self):
+        # M9: 外层兜底 catch 的 body 已脱敏(detail=类型名, 见上), 但 log.warning 旧实现仍
+        # `%s, e` 打原始异常对象 —— 异常 message 可能含 state/cookie 片段, 经 CF observability 泄露。
+        # 补齐"body 防了 log 没防"的不一致: 该 log 只记 type(e).__name__。
+        secret = "SOURCEID_TGC=SUPER-SECRET-TGC-VALUE; SESSION=leak789"
+
+        async def _probe(_state):
+            raise RuntimeError(secret)
+
+        server.cqu_keepalive.probe_session_browser = _probe
+
+        with self.assertLogs("cqu-login-server", level="INFO") as cm:
+            resp = await self.client.post("/keepalive", json=_VALID_BODY)
+        assert resp.status == 200, f"expected 200, got {resp.status}"
+        joined = "\n".join(cm.output)
+        assert "SUPER-SECRET-TGC-VALUE" not in joined, f"state leaked into logs: {cm.output}"
+        assert "leak789" not in joined, f"state leaked into logs: {cm.output}"
+        assert "SOURCEID_TGC" not in joined, f"cookie name leaked into logs: {cm.output}"
+
     async def test_missing_state_returns_400(self):
         # 缺 state 字段 → 400, 不进 probe。
         called = {"probe": False}

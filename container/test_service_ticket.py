@@ -106,6 +106,8 @@ class ServiceTicketTestCase(AioHTTPTestCase):
 
     async def test_expired_returns_409(self):
         # 落回 CAS 登录页(ExpiredError) → 409(客户端态: 会话失效, 交上游 DO 重登)。
+        # H5: 响应体 error 收敛为稳定类型名(不再回 str(e)), DO classifyNodeTicketResponse 据 HTTP
+        # 状态码(409)分类, 不依赖 body.error 文案。
         async def _fetch(*_a, **_k):
             raise server.cqu_ticket_browser.ExpiredError("fell back to CAS login page")
 
@@ -115,10 +117,11 @@ class ServiceTicketTestCase(AioHTTPTestCase):
         assert resp.status == 409, f"expected 409, got {resp.status}"
         data = await resp.json()
         assert data["ok"] is False
-        assert "CAS login page" in data["error"]
+        assert data["error"] == "ExpiredError", f"expected type name, got {data['error']!r}"
 
     async def test_no_ticket_returns_502(self):
         # 未抓到 ST 且非登录页(NoTicketError) → 502(瞬态, 上游退避重试)。
+        # H5: error 收敛为稳定类型名; 502/409 状态码语义不变(DO 据状态码分类)。
         async def _fetch(*_a, **_k):
             raise server.cqu_ticket_browser.NoTicketError("no ST, non-login page")
 
@@ -128,7 +131,7 @@ class ServiceTicketTestCase(AioHTTPTestCase):
         assert resp.status == 502, f"expected 502, got {resp.status}"
         data = await resp.json()
         assert data["ok"] is False
-        assert "no ST" in data["error"]
+        assert data["error"] == "NoTicketError", f"expected type name, got {data['error']!r}"
 
     async def test_browser_crash_returns_502(self):
         # 取票抛任意非 Expired 异常(浏览器崩/超时/网络层) → 兜底 502(瞬态), 不 500。
@@ -141,6 +144,53 @@ class ServiceTicketTestCase(AioHTTPTestCase):
         assert resp.status == 502, f"expected 502, got {resp.status}"
         data = await resp.json()
         assert data["ok"] is False
+
+    async def test_transient_error_response_and_log_do_not_leak_state(self):
+        # H5: 取票抛的异常(patchright.new_context(storage_state=非法) 等)message 可能含 cookie/state
+        # 明文; 502 瞬态分支的响应体经 DO 透传到 route 客户端、日志落 CF observability, 都绝不能含明文。
+        secret = "SOURCEID_TGC=SECRET123; SESSION=xyz-leak"
+
+        async def _fetch(*_a, **_k):
+            raise RuntimeError(secret)
+
+        server.cqu_ticket_browser.fetch_service_ticket_browser = _fetch
+
+        with self.assertLogs("cqu-login-server", level="INFO") as cm:
+            resp = await self.client.post("/service-ticket", json=_VALID_BODY)
+        assert resp.status == 502, f"expected 502, got {resp.status}"
+        data = await resp.json()
+        assert data["ok"] is False
+        # (a) 响应体只含稳定码/类型名, 绝无敏感子串。
+        assert "SECRET123" not in data["error"], f"state leaked into body: {data['error']!r}"
+        assert "SOURCEID_TGC" not in data["error"], f"cookie name leaked into body: {data['error']!r}"
+        assert "SESSION" not in data["error"], f"cookie name leaked into body: {data['error']!r}"
+        assert data["error"] == "RuntimeError", f"expected type name, got {data['error']!r}"
+        # (b) 日志绝无敏感子串。
+        joined = "\n".join(cm.output)
+        assert "SECRET123" not in joined, f"state leaked into logs: {cm.output}"
+        assert "SOURCEID_TGC" not in joined, f"cookie name leaked into logs: {cm.output}"
+        assert "SESSION" not in joined, f"cookie name leaked into logs: {cm.output}"
+
+    async def test_expired_error_response_and_log_do_not_leak_state(self):
+        # H5: 409 expired 分支同样脱敏。ExpiredError 当前是项目自定义常量(无 PII), 但任何可能
+        # 携带 patchright 原始 message 的路径都收敛为类型名/稳定码, 杜绝将来 message 变脏时泄露。
+        secret = "SESSION=expired-leak-SECRET456"
+
+        async def _fetch(*_a, **_k):
+            raise server.cqu_ticket_browser.ExpiredError(secret)
+
+        server.cqu_ticket_browser.fetch_service_ticket_browser = _fetch
+
+        with self.assertLogs("cqu-login-server", level="INFO") as cm:
+            resp = await self.client.post("/service-ticket", json=_VALID_BODY)
+        assert resp.status == 409, f"expected 409, got {resp.status}"
+        data = await resp.json()
+        assert data["ok"] is False
+        assert "SECRET456" not in data["error"], f"state leaked into body: {data['error']!r}"
+        assert "SESSION" not in data["error"], f"cookie name leaked into body: {data['error']!r}"
+        joined = "\n".join(cm.output)
+        assert "SECRET456" not in joined, f"state leaked into logs: {cm.output}"
+        assert "SESSION" not in joined, f"cookie name leaked into logs: {cm.output}"
 
     async def test_missing_service_url_returns_400(self):
         # 缺 serviceUrl → 400, 不进取票。
