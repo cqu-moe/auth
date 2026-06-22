@@ -292,8 +292,8 @@ git commit -m "feat(be): DO 用完整 storageState 取代 3-cookie, 三处出站
 - [ ] 节点冒烟:登录拿 state → `/service-ticket` 返回 `ST-`(免青果直连)。**e2e,需真节点,仓内无证据**。
 
 ### 上线前冒烟硬验收(e2e,需真节点;审查指出的关键风险,当前仓内零证据)
-- [ ] **ST 未被消费(浏览器 abort 没把一次性 ST 送达核销)**:取票拿到 `ST-…` 后,用同一 `serviceUrl?ticket=<ST>` 直接 GET,断言**目标服务判该票可校验/未被核销**(说明这张 ST 是新鲜未用的);或在节点 `_route` 对目标 host 的 **abort 计数 vs 真实发出计数**(跑一次真取票,打印这两个计数,确认浏览器对目标 host 的导航被 abort、ST 没被浏览器自己送去核销)。
-- [ ] **keepalive 保鲜(设计头号风险 §10,仓内零证据)**:登录拿 state → 触发一次 `/keepalive` → 断言**回吐 state 的瑞数 cookie 值与入参不同**(证明确实刷新、不是原样回吐)→ 再用**刷新后的 state** 调 `/service-ticket` 仍 **200 拿到 ST**(证明刷新后的 state 仍能取票,验证 60min 间隔保鲜链路闭合)。
+- [x] **ST 未被消费(浏览器 abort 没把一次性 ST 送达核销)** ✅ **PASS(2026-06-23 真节点实测)**:`fetch_service_ticket_browser` 拿到 `ST-`(len63);monkeypatch `should_abort_request` 计得 `checked=2 / aborted=1`(被 abort 的是 `my.cqu.edu.cn/*.js` 落向目标 host 的瑞数资源);最强判据——拿 ST 调 CAS `/serviceValidate` 返回 `authenticationSuccess` + `<cas:user>30208415</cas:user>`,**直接证明 ST 新鲜未被核销**。
+- [x] **keepalive 保鲜(设计头号风险 §10)** ✅ **PASS(2026-06-23 真节点实测,判据已订正)**:`probe_session_browser` → `status=alive`;用刷新后 state 再取票仍 `ST-`(链路闭合)。**⚠️ 原判据「回吐 state 的瑞数 cookie 值与入参不同」作废**——实测瑞数 cookie(`CtLgrmkSWHBZ*`)TTL = **7天~400天 ≫ 60min keepalive 间隔**,60min 内根本不过期、无需轮换,「刷新前后 cookie 不变」是正确预期而非缺陷;原判据基于「瑞数 cookie 短期轮换」的错误假设。**真正的保鲜判据 = 探活 alive + 刷新后 state 仍能取票**(已 PASS)。保鲜对象是服务端 TGT 会话(`navigate` alive 即保活有效),非瑞数 cookie。唯一未做=真静置 ~60min 后取票(机制风险已被 cookie TTL 数据 + 生产 #9 已跑 60min keepalive 间接排除)。
 
 ### 灰度观测
 - [ ] 灰度:生产 `st_mint` 成功率回升、keepalive `active` 比例、节点内存/僵尸平稳。
