@@ -36,9 +36,13 @@ log = logging.getLogger("cqu-login-server")
 # 的调用方, 红线即失效, 任意 serviceUrl 都会被 build_login_url navigate → CVE-2022-39369 式
 # ST-relay(把一次性 ST 中继到别域)。这里加一层节点侧 host 校验作纵深防御, 策略与 DO 侧
 # src/services/service-url.ts(validateCquServiceUrl)逐项对齐: 仅放行 https 的 *.cqu.edu.cn。
-# 纯函数, 便于单测; 不抛异常, 返回 bool(handler 据此决定 400)。
-def is_allowed_service_url(url: str) -> bool:
+# 纯函数, 便于单测; 不抛异常。
+def is_allowed_service_url(url: str) -> str | None:
     """serviceUrl 是否允许换票: 仅 https 的 *.cqu.edu.cn(host == cqu.edu.cn 或以 .cqu.edu.cn 结尾)。
+
+    通过 → 返回 **canonical URL 字符串**(host 转小写、去默认 :443, path/query/fragment 原样保留);
+    不通过 → 返回 None。返回 canonical 而非 bool, 使取票整链口径单一: handler 把 canonical 传给
+    浏览器水化导航(service_host_of / should_abort_request 的规范化比对口径与之一致, 不漏 abort)。
 
     对齐 service-url.ts 的纵深红线(任一不满足即拒, 绝不放行):
       · 反斜杠 → 跨解析器陷阱(\\→/), 拒。
@@ -51,31 +55,34 @@ def is_allowed_service_url(url: str) -> bool:
         含子串但 NOT 属于 *.cqu.edu.cn, 必须判拒)。
     """
     if not url or "\\" in url:
-        return False
+        return None
     if any(ord(ch) < 0x20 or ord(ch) > 0x7e for ch in url):  # 非 ASCII / 控制符
-        return False
+        return None
     try:
         u = urllib.parse.urlparse(url)
     except Exception:
-        return False
+        return None
     if u.scheme != "https":
-        return False
+        return None
     if u.username or u.password:
-        return False
+        return None
     try:
         port = u.port  # 解析失败(非法端口)抛 ValueError
     except ValueError:
-        return False
+        return None
     if port is not None and port != 443:
-        return False
+        return None
     host = (u.hostname or "").lower()
     if not host:
-        return False
+        return None
     if any(ch not in "abcdefghijklmnopqrstuvwxyz0123456789.-" for ch in host):
-        return False
+        return None
     if host.startswith(".") or host.endswith(".") or ".." in host:
-        return False
-    return host == "cqu.edu.cn" or host.endswith(".cqu.edu.cn")
+        return None
+    if not (host == "cqu.edu.cn" or host.endswith(".cqu.edu.cn")):
+        return None
+    # 通过 → 重建 canonical: 小写 host、去默认 :443(端口已校验仅 None/443), netloc 不带 userinfo。
+    return urllib.parse.urlunparse((u.scheme, host, u.path, u.params, u.query, u.fragment))
 
 # ── 超时链路标定(CQU 邮件慢, 把等码上限抬到 ~10min) ─────────────────────────────
 # CQU 2FA 验证码自「点发码」起有效 600s。围绕这条硬上限标定两级超时:
@@ -94,6 +101,7 @@ RUN_TOTAL_TIMEOUT = 660
 # keepalive 的硬编码探测 URL(my.cqu.edu.cn)必须自身在白名单内 —— 防未来把它改坏后
 # /keepalive 仍 navigate 一个不该放行的 host。keepalive 不收外部 serviceUrl, 故无需对入参
 # 校验, 只在此处对硬编码常量做一次启动期 sanity(单测亦锁此 invariant)。
+# 通过 → canonical URL 字符串(真值); 不通过 → None(下方 assert 触发, 启动期即暴露)。
 PROBE_SERVICE_HOST_OK = is_allowed_service_url(cqu_keepalive.PROBE_SERVICE)
 assert PROBE_SERVICE_HOST_OK, (
     f"PROBE_SERVICE not in host allowlist: {cqu_keepalive.PROBE_SERVICE!r}"
@@ -260,12 +268,14 @@ async def service_ticket_handler(request: web.Request) -> web.Response:
 
     # 纵深第二层: serviceUrl host 必须是 https 的 *.cqu.edu.cn(策略对齐 DO 侧 service-url.ts),
     # 杜绝 CVE-2022-39369 式 ST-relay。不通过 → 400(客户端契约错), error 不泄露具体红线细节。
-    if not is_allowed_service_url(service_url):
+    # 通过返回 canonical URL(小写 host、去 :443), 后续浏览器水化导航 / abort 比对全用 canonical 口径单一。
+    canonical_url = is_allowed_service_url(service_url)
+    if canonical_url is None:
         log.warning("service-ticket rejected serviceUrl (host not allowed)")
         return web.json_response({"ok": False, "error": "serviceUrl not allowed"}, status=400)
 
     try:
-        ticket = await cqu_ticket_browser.fetch_service_ticket_browser(service_url, state)
+        ticket = await cqu_ticket_browser.fetch_service_ticket_browser(canonical_url, state)
         # ST 是 bearer 凭据, 只记长度供诊断, 绝不打值。
         log.info("service-ticket ok (len=%d)", len(ticket))
         return web.json_response({"ok": True, "ticket": ticket})

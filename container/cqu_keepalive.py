@@ -110,8 +110,8 @@ async def probe_session_browser(state: dict) -> dict:
 
     返回 {"status": "alive"|"expired"|"unreachable", "state": <刷新后或原>, "detail": "..."}。
     探不通(浏览器起不来 / 导航全异常 / 超时 / 未知)→ unreachable + 原 state(绝不误判过期)。
-    复用 cqu_ticket_browser._hydrate_navigate(与 /service-ticket 取票同一条浏览器路径:拦截带
-    ticket= 的回调 abort 不消费单次 ST、整体超时兜底、共用 TICKET_SEMAPHORE 限总并发)。
+    复用 cqu_ticket_browser._hydrate_navigate(与 /service-ticket 取票同一条浏览器路径:尽力拦
+    落向目标服务 host 的回调以避免核销单次 ST(非安全闸)、整体超时兜底、共用 TICKET_SEMAPHORE 限总并发)。
     detail 只含 verdict / 异常**类型名**, 绝不拼 str(e) —— patchright.new_context(storage_state=非法)
     的异常 message 可能把出错的 cookie/value 条目内容拼进去, 而本返回的 detail 经节点 200 回传、
     DO console.warn 落 CF observability, 故只放类型名以杜绝 state/cookie 明文进日志

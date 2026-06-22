@@ -65,6 +65,25 @@ class ServiceTicketTestCase(AioHTTPTestCase):
         assert captured["service_url"] == _VALID_BODY["serviceUrl"]
         assert captured["state"] == _VALID_BODY["state"]
 
+    async def test_noncanonical_service_url_is_normalized_before_fetch(self):
+        # M1: handler 把 is_allowed_service_url 的 canonical(小写 host、去默认 :443)传给取票函数,
+        # 使浏览器水化导航 / abort 比对口径单一(否则大写或显式 :443 会让 abort 漏判 → ST 被核销)。
+        captured = {}
+
+        async def _fetch(service_url, state):
+            captured["service_url"] = service_url
+            return "ST-ok"
+
+        server.cqu_ticket_browser.fetch_service_ticket_browser = _fetch
+        body = {
+            "serviceUrl": "https://MY.CQU.EDU.CN:443/authserver/authentication/cas",
+            "state": _VALID_BODY["state"],
+        }
+        resp = await self.client.post("/service-ticket", json=body)
+        assert resp.status == 200, f"expected 200, got {resp.status}"
+        # 传给取票函数的是 canonical, 不是客户端原样的大写 + :443。
+        assert captured["service_url"] == "https://my.cqu.edu.cn/authserver/authentication/cas"
+
     async def test_success_log_does_not_leak_ticket(self):
         # ST 是 bearer 凭据, 成功日志绝不该打它的值(对齐 DO 审计「绝不记录 ticket/cookies/密码」)。
         sentinel = "ST-SENSITIVE-xyz-DO-NOT-LOG"
