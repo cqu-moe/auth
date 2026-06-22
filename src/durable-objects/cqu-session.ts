@@ -585,6 +585,8 @@ export class CquSessionDO extends DurableObject<Env> {
     // catch 它顺手 setAlarm(now) 把下轮 keepalive/relogin 提前(复用 relogin single-flight,
     // **绝不在热路径同步重登** —— 同步重登走容器含 2FA 邮件往返数分钟会阻塞 DO 单线程),
     // 然后 re-throw 让外层把 409(TGT_EXPIRED)原样回给调用方(语义不变, 只顺手排了快自愈)。
+    // 刻意**不**在此 setStatus("expired"): 节点 409 是服务端权威过期, 异步 relogin 会翻 status;
+    // 与 M8 legacy(本地 storageState===null 的已知坏态)主动标 expired 不同 —— 别为"对称"补 setStatus。
     let ticket: string;
     try {
       ticket = await this.mintServiceTicketViaNode(this.state.storageState, target);
@@ -859,6 +861,8 @@ export class CquSessionDO extends DurableObject<Env> {
         return;
       }
       // relogin 内部已更新状态; 重新排 alarm 继续保活循环。
+      // 此处刻意不再 putStateGuarded: containerLogin 成功时内部已落 fresh state; proactive 跑在
+      // 健康 active 会话上(consecutiveFailures 本就 0), 无需像 expired 分支那样为清零失败计数而重 put。
       await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
       return;
     }
