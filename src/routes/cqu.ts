@@ -98,8 +98,14 @@ cqu.get(
     const resp = await stub.fetch(new Request(c.get("stDoUrl")));
 
     if (!resp.ok) {
-      const err = await resp.json<{ error: string; code: string }>();
-      return errorResponse(c, err.code ?? "ST_FAILED", err.error, resp.status);
+      // H5 纵深脱敏: 只回稳定 code(对齐 rpc.ts 的 { error: code } 做法), **绝不**回显 DO 派生的
+      // err.error/message —— 它是 CquSsoError.message, 可能含节点回传的 detail 片段。前端靠 code
+      // 区分错误即可(取票失败的 UX 不依赖原始 message)。
+      const err = await resp
+        .json<{ error?: string; code?: string }>()
+        .catch(() => ({}) as { error?: string; code?: string });
+      const code = err.code ?? "ST_FAILED";
+      return errorResponse(c, code, "取票失败", resp.status);
     }
 
     return c.json(await resp.json());

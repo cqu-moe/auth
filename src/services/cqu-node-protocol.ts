@@ -2,7 +2,7 @@
 // 只 import 类型, 故可在 vitest 的 Node pool 直接 import 单测(DO 本体因 `cloudflare:workers`
 // import 在 Node pool 测不了, 把可判定逻辑下沉到此)。镜像 cqu-2fa/relogin-policy 的分工:
 // 纯判定集中在本文件, DO 只负责 storage 读写 + 出站 fetch + 调用这些纯函数。
-import { CquSsoError, type CquStorageState } from "./cqu-sso";
+import { CquSsoError, type CquStorageState, type CasCookies } from "./cqu-sso";
 
 // DO 侧 LOGIN_NODE.fetch 的出站 deadline。节点单请求最坏总时长 ≈ QUEUE_WAIT(排队 35s)+
 // overall_timeout(持槽 45s)≈ 80s(见 container/cqu_ticket_browser.py 顶部注释)。取 90s 略大于
@@ -19,14 +19,29 @@ export function tgtFromState(state: CquStorageState | null): string {
   return state?.cookies.find((c) => c.name === "SOURCEID_TGC")?.value ?? "";
 }
 
+// CAS 会话关键 cookie 三件套(对齐 cqu-sso.ts 的 CasCookies/formatCasCookies 契约)。
+// 取票热路径必须同时凭这三个 cookie 才能换 ST; 缺任一 state 即半残。
+const REQUIRED_CAS_COOKIES = [
+  "SOURCEID_TGC",
+  "SESSION",
+  "rg_objectid",
+] as const satisfies readonly (keyof CasCookies)[];
+
 /**
- * 回写完整性校验: state 的 cookies 里是否存在非空 SOURCEID_TGC(TGT)。
+ * 回写完整性校验: state 的 cookies 里 CAS 三件套(SOURCEID_TGC + SESSION + rg_objectid)
+ * 是否都存在且非空。
  * keepalive 回写「节点刷新后的 state」前用它把关 —— 节点导出的 refreshed state 可能半截/退化
- * (如 {cookies:[],origins:[]} 空但 truthy), 无 TGT 的 state 顶替好 state 会让下轮取票
- * storageState 非 null 却无 TGT → 落登录页 409 → 误判过期重登。仅当此函数为 true 才允许覆盖。
+ * (如 {cookies:[],origins:[]} 空但 truthy), 半残 state 顶替好 state 会让下轮取票
+ * storageState 非 null 却缺关键 cookie → 落登录页 409 → 误判过期重登。仅当此函数为 true 才允许覆盖。
+ *
+ * M5 纵深加固: 由「仅 SOURCEID_TGC 非空」升级为「三件套齐」, 对齐既有 3-cookie 契约。
+ * 不强制 origins/localStorage 非空(哪些 localStorage load-bearing 需真节点实测, 不在静态层硬编码)。
  */
 export function hasValidTgt(state: CquStorageState | null): boolean {
-  return tgtFromState(state).length > 0;
+  if (!state) return false;
+  return REQUIRED_CAS_COOKIES.every((name) =>
+    state.cookies.some((c) => c.name === name && c.value.length > 0)
+  );
 }
 
 // 节点 /service-ticket 响应分类结果。DO 据此映射回既有 CquSsoError 语义(对调用方无感):
@@ -53,6 +68,10 @@ export interface NodeTicketBody {
  * 把节点 /service-ticket 的 (status, body) 映射为 {kind, ticket?, detail?}。
  * body 传 null 表示「响应非 JSON / 解析失败」—— 归 transient。
  * 判定顺序: 409 优先(语义最明确) → 非 JSON(null body) → ok+ticket → 其余 transient。
+ *
+ * H5 纵深脱敏: detail 会经 CquSsoError.message 透传 route → 客户端/日志, 故**绝不**把节点回的
+ * raw `body.error` 原样拼进 detail(节点回的字符串可能含 cookie/state 片段)。detail 只保留
+ * 由我方控制的稳定锚点(status / 路径名), 节点 raw 串一律不入。
  */
 export function classifyNodeTicketResponse(
   status: number,
@@ -68,9 +87,10 @@ export function classifyNodeTicketResponse(
   if (httpOk && body.ok && body.ticket) {
     return { kind: "ok", ticket: body.ticket };
   }
+  // body.error 刻意不回显(见上 H5 注释): 只记 status 作诊断锚点。
   return {
     kind: "transient",
-    detail: `not ok (status=${status} error=${body.error ?? "(none)"})`,
+    detail: `not ok (status=${status})`,
   };
 }
 

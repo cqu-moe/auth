@@ -18,6 +18,10 @@ describe("cquErrorHttpStatus", () => {
     expect(cquErrorHttpStatus("SESSION_INACTIVE")).toBe(409);
   });
 
+  it("maps NEEDS_REAUTH → 409", () => {
+    expect(cquErrorHttpStatus("NEEDS_REAUTH")).toBe(409);
+  });
+
   it("maps RATE_LIMITED → 429", () => {
     expect(cquErrorHttpStatus("RATE_LIMITED")).toBe(429);
   });
@@ -26,8 +30,10 @@ describe("cquErrorHttpStatus", () => {
     expect(cquErrorHttpStatus("INTERNAL_ERROR")).toBe(500);
   });
 
-  it("maps TGT_EXPIRED → 500 (non-policy server-side error)", () => {
-    expect(cquErrorHttpStatus("TGT_EXPIRED")).toBe(500);
+  // H4: TGT 过期是「可行动态」的会话失效(交重登/会自愈), 同 SESSION_INACTIVE/NEEDS_REAUTH
+  // 一类回 409, 而非 500(伪装成服务器崩溃, 调用方无法区分该重试/会自愈)。
+  it("maps TGT_EXPIRED → 409 (actionable session expiry, like NEEDS_REAUTH)", () => {
+    expect(cquErrorHttpStatus("TGT_EXPIRED")).toBe(409);
   });
 
   it("maps NO_TICKET → 500", () => {
