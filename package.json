@@ -10,7 +10,9 @@
     "dev": "wrangler dev",
     "deploy": "npm run build:frontend && wrangler deploy",
     "typecheck": "tsc --noEmit",
+    "typecheck:do": "tsc --noEmit -p test/tsconfig.json",
     "test": "vitest run",
+    "test:do": "vitest run -c vitest.workers.config.mts",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply auth-cqu-moe-db --local",
     "build:frontend": "cd frontend && npm install && npm run build"
