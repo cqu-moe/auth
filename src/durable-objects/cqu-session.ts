@@ -39,6 +39,12 @@ import {
   ticketFromClassification,
   sanitizeNodeDetail,
   NODE_DEADLINE_MS,
+  serializedStateBytes,
+  stateExceedsHardLimit,
+  STORAGE_STATE_WARN_BYTES,
+  STATE_HARD_LIMIT_BYTES,
+  shouldAbandonKeepaliveWriteback,
+  buildStMintAudit,
   type NodeTicketBody,
 } from "../services/cqu-node-protocol";
 import type { Env } from "../types";
@@ -176,24 +182,44 @@ export class CquSessionDO extends DurableObject<Env> {
   }
 
   /**
-   * #6 体量守卫后落 state。DO 单个 storage value 硬上限 128KiB; 完整 storageState 的 localStorage
-   * 体量不受控, 越过上限 → ctx.storage.put 抛 → 会话静默卡死。put 前序列化测字节数, 超阈值
-   * (STORAGE_STATE_WARN_BYTES=100KiB)打一条告警(只记字节数/studentId/cookie 数, **绝不含 state 内容**),
-   * 让 observability 能在真撞墙前预警。仍照常 put(不裁剪 —— 裁剪非必需 origin 的 localStorage 复杂,
-   * 留作后续; 当前最小实现只加告警, 见 PR 说明)。
+   * H2 真守卫: 体量校验后落 state, **绝不抛穿调用方**(尤其 alarm —— 抛 → CF 自动重试 →
+   * 重走 active 分支 → keepalive 又真铸 ST + 又记账 → 重复铸票环 + state 永远写不进)。
+   *
+   * 告警阈值(STORAGE_STATE_WARN_BYTES=100KiB)与硬上限(STATE_HARD_LIMIT_BYTES=120KiB, <DO
+   * 物理 128KiB)分离, 日志级别也随之分级:
+   *   · 超告警阈值但未超硬上限 → 照常 put 成功, 仅打 **console.warn** approaching-limit 预警
+   *     (可恢复, 不含 state 内容), 与下面真超限/抛错的 error 级区分;
+   *   · 超硬上限(或不可序列化)→ **拒 put**(put 必抛), 打 **console.error** ALERT 并返回 false 让调用方降级
+   *     (keepalive/relogin 回写: 丢弃刷新态、保留旧 state; 热路径取票: 不 500, 已 mint 的票照返);
+   *   · put 本身意外抛(理论上不应)→ **console.error** + catch 吞掉 + 返回 false, 同样不冒泡。
+   *
+   * @returns true = state 已落盘; false = 因超限/异常未落盘(调用方应保留旧态并排下次 alarm)。
    */
-  private async putStateGuarded(state: SessionState): Promise<void> {
-    try {
-      const bytes = new TextEncoder().encode(JSON.stringify(state)).length;
-      if (bytes > STORAGE_STATE_WARN_BYTES) {
-        console.error(
-          `[CquSession] ${state.studentId}: ALERT storageState size ${bytes}B > ${STORAGE_STATE_WARN_BYTES}B (approaching DO 128KiB value limit; cookies=${state.storageState?.cookies.length ?? 0} origins=${state.storageState?.origins.length ?? 0})`
-        );
-      }
-    } catch {
-      // 体量探测失败绝不影响落盘主流程。
+  private async putStateGuarded(state: SessionState): Promise<boolean> {
+    const bytes = serializedStateBytes(state);
+    if (stateExceedsHardLimit(bytes)) {
+      console.error(
+        `[CquSession] ${state.studentId}: ALERT storageState size ${bytes}B exceeds DO hard limit (${STATE_HARD_LIMIT_BYTES}B); SKIPPING put, keeping previous on-disk state (cookies=${state.storageState?.cookies.length ?? 0} origins=${state.storageState?.origins.length ?? 0})`
+      );
+      return false;
     }
-    await this.ctx.storage.put("state", state);
+    if (bytes > STORAGE_STATE_WARN_BYTES) {
+      // 预警级(WARN): 接近阈值但仍 ≤ 硬上限, 本次照常 put 成功 —— 用 console.warn 与真超限/抛错
+      // (console.error/ALERT)区分日志级别, 避免可恢复的预警淹没在 error 流里。
+      console.warn(
+        `[CquSession] ${state.studentId}: WARN storageState size ${bytes}B > ${STORAGE_STATE_WARN_BYTES}B (approaching DO 128KiB value limit; cookies=${state.storageState?.cookies.length ?? 0} origins=${state.storageState?.origins.length ?? 0})`
+      );
+    }
+    try {
+      await this.ctx.storage.put("state", state);
+      return true;
+    } catch (e) {
+      // put 仍抛(超出我方硬上限估算的平台限制/瞬态)→ 绝不冒泡到 alarm。降级保旧态。
+      console.error(
+        `[CquSession] ${state.studentId}: storage.put(state) failed, keeping previous on-disk state: ${errMsg(e)}`
+      );
+      return false;
+    }
   }
 
   private async getStatus(): Promise<CquStatus> {
@@ -455,8 +481,13 @@ export class CquSessionDO extends DurableObject<Env> {
 
     // 旧会话迁移守卫:改造前只存 3 cookie(无完整 storageState)。部署后这类 active 会话若
     // 直接取票会把 null state 发给节点 → 400 → 退避(不重登)。在此当作需重登而拒发,
-    // 绝不向节点 POST null/undefined state;实际重登由 keepalive 的同款守卫驱动(见 runKeepAlive)。
+    // 绝不向节点 POST null/undefined state(本就没发, 保持)。
+    // M8 加速自愈: 抛 SESSION_INACTIVE 前顺手 setStatus("expired") + setAlarm(now)(复刻
+    // unrevoke 的现成模式), 把退化窗口从「最坏 ≤1 keepalive 周期/退避 ~6h」压到下次 alarm tick
+    // 立即触发容器重登铸完整 storageState。仍绝不把旧 3-cookie 当 storageState 发节点。
     if (!this.state.storageState) {
+      await this.setStatus("expired");
+      await this.ctx.storage.setAlarm(Date.now());
       throw new CquSsoError(
         "SESSION_INACTIVE",
         "CQU session needs re-login (no storage state)"
@@ -536,25 +567,47 @@ export class CquSessionDO extends DurableObject<Env> {
 
     // ⑤ 记录本次尝试 + 铸票 + 审计。先把尝试落 storage(镜像 relogin() 的「铸前记录」),
     // 让限频对「铸票失败死循环」也鲁棒(失败也算一次尝试, 不会绕过窗口闸)。
+    // H2 热路径降级: putStateGuarded 超限/抛错只返回 false(不 500); stMintLog put 失败也只
+    // 告警吞掉(限频记账尽力而为, 失败不阻断本次取票)。两者都不让取票热路径因落盘失败而 500。
     this.state.lastRequestedAt = now;
     await this.putStateGuarded(this.state);
     const record: StMintRecord = { ts: now, clientId, host, broad };
     pruned.push(record);
-    await this.ctx.storage.put("stMintLog", pruned);
+    try {
+      await this.ctx.storage.put("stMintLog", pruned);
+    } catch (e) {
+      console.error(
+        `[CquSession] ${this.state.studentId}: stMintLog put failed (rate-limit accounting degraded, ticket still served): ${errMsg(e)}`
+      );
+    }
 
-    const ticket = await this.mintServiceTicketViaNode(this.state.storageState, target);
+    // H4 快自愈: 铸票遇节点 409 → mintServiceTicketViaNode 抛 CquSsoError("TGT_EXPIRED")。
+    // catch 它顺手 setAlarm(now) 把下轮 keepalive/relogin 提前(复用 relogin single-flight,
+    // **绝不在热路径同步重登** —— 同步重登走容器含 2FA 邮件往返数分钟会阻塞 DO 单线程),
+    // 然后 re-throw 让外层把 409(TGT_EXPIRED)原样回给调用方(语义不变, 只顺手排了快自愈)。
+    let ticket: string;
+    try {
+      ticket = await this.mintServiceTicketViaNode(this.state.storageState, target);
+    } catch (e) {
+      if (e instanceof CquSsoError && e.code === "TGT_EXPIRED") {
+        await this.ctx.storage.setAlarm(Date.now());
+      }
+      throw e;
+    }
 
     // D6 审计(结构化; CF observability 抓 console)。绝不记录 ticket / cookies / 密码。
+    // 审计行经 buildStMintAudit 构造(三处共用, 杜绝 schema 漂移, 见 cqu-node-protocol.ts)。
     console.log(
-      JSON.stringify({
-        evt: "st_mint",
-        userId: this.state.userId,
-        clientId,
-        host,
-        broad,
-        source: arg.source ?? "route",
-        ts: now,
-      })
+      JSON.stringify(
+        buildStMintAudit({
+          userId: this.state.userId,
+          clientId,
+          host,
+          broad,
+          source: arg.source ?? "route",
+          ts: now,
+        })
+      )
     );
     return ticket;
   }
@@ -796,10 +849,12 @@ export class CquSessionDO extends DurableObject<Env> {
         `[CquSession] ${this.state.studentId}: TGT age >= 7h, proactive relogin`
       );
       await this.relogin();
-      // 熔断: relogin 若落 needs_reauth(连续凭据失败), 停止保活、不再重排(等用户重绑)。
-      if ((await this.getStatus()) === "needs_reauth") {
-        console.error(
-          `[CquSession] ${this.state.studentId}: keepalive halted — needs_reauth`
+      // M7 防复活 + 熔断早退: relogin 容器登录 await 期间 input gate 开, admin 可能 revoke/unbind;
+      // relogin 也可能落 needs_reauth(连续凭据失败)。两者都收敛到 shouldAbandonKeepaliveWriteback
+      // (revoked/unbound/needs_reauth)→ 放弃重排, 停止保活循环(撤销不复活 / 终态等用户重绑)。
+      if (shouldAbandonKeepaliveWriteback(await this.getStatus())) {
+        console.warn(
+          `[CquSession] ${this.state.studentId}: status revoked/halted during proactive relogin, not re-arming alarm`
         );
         return;
       }
@@ -811,10 +866,21 @@ export class CquSessionDO extends DurableObject<Env> {
     const outcome = await this.runKeepAlive();
 
     if (outcome === "active") {
+      // M7 防复活: runKeepAlive 的 LOGIN_NODE.fetch(最长 90s)await 期间 input gate 打开,
+      // 期间 admin revoke/unbind 可能把 status 改成撤销/解绑/需重登。此处写回 active 前重查
+      // status, 命中撤销/终态即放弃本轮(不 setStatus active / 不 putState / 不 setAlarm),
+      // 否则会把已撤销会话复活。
+      if (shouldAbandonKeepaliveWriteback(await this.getStatus())) {
+        console.warn(
+          `[CquSession] ${this.state.studentId}: status changed during keepalive probe, abandoning active writeback (anti-resurrection)`
+        );
+        return;
+      }
       await this.setStatus("active");
       this.state.lastKeepAlive = Date.now();
       this.state.consecutiveFailures = 0;
-      // #6 落盘前体量守卫(此处可能携 keepalive 刚回写的刷新 state, localStorage 体量不受控)。
+      // H2 落盘前体量守卫(此处可能携 keepalive 刚回写的刷新 state, localStorage 体量不受控);
+      // putStateGuarded 超限/抛错均降级返回 false 而非抛穿 alarm。
       await this.putStateGuarded(this.state);
       // 探针自愈回 active 也打断「连续重登失败」链, 避免遗留的 reloginFailures
       // 误触告警; 同时清零熔断的「连续凭据失败」计数(会话已证实健康)。
@@ -831,15 +897,18 @@ export class CquSessionDO extends DurableObject<Env> {
         `[CquSession] ${this.state.studentId}: session expired server-side, triggering container relogin`
       );
       await this.relogin();
-      this.state.consecutiveFailures = 0;
-      await this.putStateGuarded(this.state);
-      // 熔断: relogin 若落 needs_reauth(连续凭据失败), 停止保活、不再重排(等用户重绑)。
-      if ((await this.getStatus()) === "needs_reauth") {
-        console.error(
-          `[CquSession] ${this.state.studentId}: keepalive halted — needs_reauth`
+      // M7 防复活: runKeepAlive 探活 + relogin 容器登录的 await 期间 input gate 都开过,
+      // admin 可能已 revoke/unbind。relogin 经状态机推进(nextStatus 对 revoked 无 RELOGIN_OK
+      // 转移, 不会复活 status), 但本分支仍可能重排 alarm 重启保活循环。写回前重查 status,
+      // 命中撤销/终态(含 needs_reauth)即放弃: 不 putState、不 setAlarm。
+      if (shouldAbandonKeepaliveWriteback(await this.getStatus())) {
+        console.warn(
+          `[CquSession] ${this.state.studentId}: status changed during expired-relogin, abandoning writeback (anti-resurrection / halt)`
         );
         return;
       }
+      this.state.consecutiveFailures = 0;
+      await this.putStateGuarded(this.state);
       await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
       return;
     }
@@ -922,18 +991,31 @@ export class CquSessionDO extends DurableObject<Env> {
       // 记入 st_mint 审计 + 限流窗口(记账但豁免拒绝, 见 recordKeepaliveMint)。await 落盘后才回写,
       // 顺序无关(两者各写不同 storage key)。
       await this.recordKeepaliveMint();
-      // #2 回写校验: 仅当节点刷新后的 state 含非空 SOURCEID_TGC(TGT)才覆盖, 否则保留旧 state。
+      // #2 回写校验: 仅当节点刷新后的 state 含 CAS 三件套(hasValidTgt) **且** 并入后不超 DO
+      // 硬上限时才覆盖, 否则保留旧 state。
       // 节点导出的 refreshed state 可能半截/退化(如 {cookies:[],origins:[]} 空但 truthy), 无 TGT
       // 顶替好 state 会让下轮取票 storageState 非 null 却无 TGT → 落登录页 409 → 误判过期重登。
-      // 因 state===this.state, alarm() 的 active 分支会 ctx.storage.put("state", this.state) 落盘
-      // (落盘前由 putStateGuarded 做 128KiB 体量守卫, 见 alarm)。
+      // H2 体量守卫: 刷新后的 state(含不受控的 localStorage)若超硬上限, 直接丢弃刷新态、保留旧
+      // state —— 旧 state 已能取票, 刷新只续期, 不值得为续期而把 state 撑到落不下盘。因 state===
+      // this.state, alarm() 的 active 分支随后 putStateGuarded(this.state) 落盘; 这里先剔掉超限的
+      // 刷新态, 让那次 put 写的是仍在限内的旧 state(否则 putStateGuarded 会拒 put 整条 state)。
       if (body.state) {
-        if (hasValidTgt(body.state)) {
-          state.storageState = body.state;
-        } else {
+        if (!hasValidTgt(body.state)) {
           console.warn(
-            `[CquSession] ${state.studentId}: probe alive but refreshed state lacks SOURCEID_TGC, keeping old storageState`
+            `[CquSession] ${state.studentId}: probe alive but refreshed state lacks required CAS cookies, keeping old storageState`
           );
+        } else {
+          const candidate: SessionState = {
+            ...state,
+            storageState: body.state,
+          };
+          if (stateExceedsHardLimit(serializedStateBytes(candidate))) {
+            console.error(
+              `[CquSession] ${state.studentId}: ALERT refreshed state exceeds DO hard limit, discarding refresh and keeping old storageState (session stays mintable)`
+            );
+          } else {
+            state.storageState = body.state;
+          }
         }
       }
       return "active";
@@ -969,24 +1051,39 @@ export class CquSessionDO extends DurableObject<Env> {
     if (!st) return;
     const now = Date.now();
     const host = new URL(DUMMY_SERVICE).hostname;
-    const stored =
-      (await this.ctx.storage.get<StMintRecord[]>("stMintLog")) ?? [];
-    const pruned = pruneStMintLog(stored, now, ST_MINT_RATE_WINDOW_MS);
-    // 记账但豁免拒绝: 直接追加, 不调 stMintThrottled。哨兵 clientId 自成桶, 不挤占真实配额。
-    pruned.push({ ts: now, clientId: KEEPALIVE_CLIENT_ID, host, broad: false });
-    await this.ctx.storage.put("stMintLog", pruned);
-    // 审计(结构化, 与取票同 schema; source:"keepalive")。绝不含 ticket/cookies/密码。
-    console.log(
-      JSON.stringify({
-        evt: "st_mint",
-        userId: st.userId,
-        clientId: KEEPALIVE_CLIENT_ID,
-        host,
-        broad: false,
-        source: KEEPALIVE_SOURCE,
-        ts: now,
-      })
-    );
+    // M6 审计与记账解耦: ST 已在节点侧铸出(既成事实), **先无条件打审计**, 绝不让后面的
+    // 记账(storage.put)失败连带丢掉审计。审计(结构化, 与取票同 schema; source:"keepalive")
+    // 绝不含 ticket/cookies/密码。
+    const auditFields = {
+      userId: st.userId,
+      clientId: KEEPALIVE_CLIENT_ID,
+      host,
+      broad: false,
+      source: KEEPALIVE_SOURCE,
+      ts: now,
+    };
+    console.log(JSON.stringify(buildStMintAudit(auditFields)));
+    // 记账(计入 per-user 限流窗口): 记账但豁免拒绝 —— 直接追加, 不调 stMintThrottled。
+    // 哨兵 clientId 自成桶, 不挤占真实配额。put 失败只补一条 recorded:false 告警**并吞掉异常**
+    // (catch 后 return), 绝不向 runKeepAlive/alarm 冒泡(否则 alarm 抛 → CF 自动重试 → 再铸票)。
+    // catch 只罩自身这一处 put, 不影响 runKeepAlive 其它需冒泡的异常。
+    try {
+      const stored =
+        (await this.ctx.storage.get<StMintRecord[]>("stMintLog")) ?? [];
+      const pruned = pruneStMintLog(stored, now, ST_MINT_RATE_WINDOW_MS);
+      pruned.push({ ts: now, clientId: KEEPALIVE_CLIENT_ID, host, broad: false });
+      await this.ctx.storage.put("stMintLog", pruned);
+    } catch (e) {
+      // catch 行 = 正常审计行 + 末尾追加 recorded:false + err(运行时副作用, 留 DO 侧 spread 后置)。
+      // spread 在 buildStMintAudit 输出之后, 追加键序列化在末尾 → 与历史手写 catch 行逐字节等价。
+      console.error(
+        JSON.stringify({
+          ...buildStMintAudit(auditFields),
+          recorded: false,
+          err: errMsg(e),
+        })
+      );
+    }
   }
 
   /**
@@ -1143,12 +1240,21 @@ export class CquSessionDO extends DurableObject<Env> {
         })
       );
       const result = await res.json<ContainerRunResult>();
-      if (!res.ok || !result.ok || !result.state) {
+      // M5 回写完整性校验: 除 res.ok/result.ok/result.state 兜空外, 再套 hasValidTgt(升级后的
+      // CAS 三件套校验)。容器可能返回 ok 但 state 半残(缺 SESSION/rg_objectid 等), 这种半残态
+      // 落盘后下轮取票 storageState 非 null 却缺关键 cookie → 落登录页 409 → 误判过期重登; 故按
+      // 失败处理(不顶替旧态)。归类为 transient(半残多是瑞数/网络抖动致导出不全, 非凭据真死),
+      // 交 keepalive 退避自愈, 绝不误累计熔断。
+      if (!res.ok || !result.ok || !result.state || !hasValidTgt(result.state)) {
+        const invalidState = !!result.state && !hasValidTgt(result.state);
         console.warn(
-          `[CquSession] ${state.studentId}: container /run not ok — httpStatus=${res.status} ok=${result.ok} hasState=${!!result.state} error=${result.error ?? "(none)"}`
+          `[CquSession] ${state.studentId}: container /run not ok — httpStatus=${res.status} ok=${result.ok} hasState=${!!result.state} validTgt=${!invalidState && !!result.state} error=${result.error ?? "(none)"}`
         );
         // 熔断: 把失败归类(凭据真死 vs 瑞数/瞬态)暂存, 供 relogin 决定是否落 needs_reauth。
-        this.lastLoginFailReason = classifyLoginFailure(result.error);
+        // 半残 state(invalidState)归 transient: 不是凭据问题, 不累计凭据熔断。
+        this.lastLoginFailReason = invalidState
+          ? "transient"
+          : classifyLoginFailure(result.error);
         await this.failLogin(failEvent);
         return "failed";
       }
@@ -1230,8 +1336,3 @@ function errMsg(e: unknown): string {
   if (e instanceof CquSsoError) return `${e.code}: ${e.message}`;
   return e instanceof Error ? e.message : String(e);
 }
-
-// storageState 落盘体量守卫阈值。DO 单个 storage value 硬上限 128KiB; 完整 storageState
-// (12 cookie + 2 origin localStorage)体量不受控, localStorage 膨胀越过上限 → ctx.storage.put
-// 抛 → 会话静默卡死。100KiB 留 ~28KiB 余量, 超阈值打告警(不含 state 内容)。
-const STORAGE_STATE_WARN_BYTES = 100 * 1024;

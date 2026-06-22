@@ -52,7 +52,7 @@ src/routes/admin.ts   → 用户管理、OAuth 客户端 scope 配置、per-user
 src/rpc.ts            → AuthService extends WorkerEntrypoint：verifySession + getCaps(离线权益,schedule cron 用) + getCquTicket(拓扑① Service Binding RPC)；getCquTicket/getCaps 共用 authenticateClient(M-6 client_secret 闸)
 src/services/cqu-sso.ts → CAS 登录流程、ticket 获取、会话保活(哑层,不做 URL 校验)
 src/services/crypto.ts  → AES-256-GCM (凭证加密) + AES-ECB (CQU SSO 密码加密)
-src/durable-objects/cqu-session.ts → CQU 会话状态机，15 分钟 alarm keepalive；getServiceTicket 是取票万能闸(host 校验+quicklogin opt-in+限流+审计)
+src/durable-objects/cqu-session.ts → CQU 会话状态机，60 分钟 alarm keepalive(KEEPALIVE_INTERVAL_MS)；getServiceTicket 是取票万能闸(host 校验+quicklogin opt-in+限流+审计)
 src/middleware/scope.ts → OAuth scope 校验中间件 (JWT 验证 + CQU scope 双重检查；无 Bearer 拒发票)
 ```
 

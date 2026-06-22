@@ -3,6 +3,7 @@
 // import 在 Node pool 测不了, 把可判定逻辑下沉到此)。镜像 cqu-2fa/relogin-policy 的分工:
 // 纯判定集中在本文件, DO 只负责 storage 读写 + 出站 fetch + 调用这些纯函数。
 import { CquSsoError, type CquStorageState, type CasCookies } from "./cqu-sso";
+import type { CquStatus } from "./cqu-2fa/state-machine";
 
 // DO 侧 LOGIN_NODE.fetch 的出站 deadline。节点单请求最坏总时长 ≈ QUEUE_WAIT(排队 35s)+
 // overall_timeout(持槽 45s)≈ 80s(见 container/cqu_ticket_browser.py 顶部注释)。取 90s 略大于
@@ -132,4 +133,108 @@ export function sanitizeNodeDetail(detail: unknown): string {
   return firstLine.length > MAX_DETAIL_LEN
     ? `${firstLine.slice(0, MAX_DETAIL_LEN)}…`
     : firstLine;
+}
+
+// ── H2: state 落盘体量守卫(告警阈值 / 硬上限分离) ──────────────────────────
+// DO 单个 storage value 物理硬上限 128KiB。完整 storageState(cookie + 2 origin
+// localStorage)体量不受控, 越过上限 → ctx.storage.put 抛 → 若发生在 alarm 内会被 CF
+// 自动重试 → 重走 active 分支(keepalive 又真铸 ST + 又记账)→ 重复铸票环 + state 永远
+// 写不进。故把判定下沉为纯函数, DO put 前据此分流:
+//   · > WARN(100KiB) 且 ≤ HARD       → 照常 put, 仅告警(approaching limit)
+//   · > HARD(120KiB, 留 ~8KiB 余量) → 不 put(超限会抛), 降级保留旧 state, alarm 永不抛穿
+//
+// 度量说明: serializedStateBytes 用 JSON.stringify 的 UTF-8 字节数, 这是 DO structured-clone
+// 实际落盘体量的**保守近似代理**(两者不是同一度量: structured-clone 可能更省也可能更费 —— 字符串
+// 用 UTF-16/紧凑表示、布尔/数字非文本化, 但带类型标签/对齐开销)。故余量不能贴着物理上限取, 按经验
+// 放宽到 ~8KiB, 吸收 structured-clone 偏大时的差额。DO value 物理上限 128KiB。
+
+// 告警阈值: 留 ~28KiB 余量预警。
+export const STORAGE_STATE_WARN_BYTES = 100 * 1024;
+// 硬上限: 取 120KiB(< DO 物理 128KiB, 留 ~8KiB 余量吸收 structured-clone 与 JSON 字节的度量差额
+// + storage 框架开销/键名), 超此即拒 put。
+export const STATE_HARD_LIMIT_BYTES = 120 * 1024;
+
+/**
+ * 序列化任意值并返回其 UTF-8 字节数。**不抛** —— 不可序列化(循环引用等)返回 Infinity,
+ * 由 stateExceedsHardLimit 据此按「超限」处理(降级保旧态), 绝不让序列化异常冒泡到 alarm。
+ */
+export function serializedStateBytes(value: unknown): number {
+  try {
+    return new TextEncoder().encode(JSON.stringify(value)).length;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+/** state 序列化字节数是否越过 DO put 的硬上限(超此 put 必抛, 应降级不落盘)。 */
+export function stateExceedsHardLimit(bytes: number): boolean {
+  return bytes > STATE_HARD_LIMIT_BYTES;
+}
+
+// ── M7: keepalive/relogin 写回 active 前的防复活守卫 ───────────────────────
+// runKeepAlive 的 LOGIN_NODE.fetch(最长 90s)await 期间 input gate 打开, admin
+// revoke/unbind 可能把 status 改成撤销/解绑/需重登。fetch 返回 active 后若无条件
+// setStatus("active")+putState+setAlarm 会**复活已撤销会话**。所有写回 active 的分支
+// (alarm active / expired→relogin / proactive-relogin)在写回前重查 status, 命中下列
+// 终态/撤销态即放弃本轮。
+const ABANDON_WRITEBACK_STATUSES: ReadonlySet<CquStatus> = new Set<CquStatus>([
+  "revoked",
+  "unbound",
+  "needs_reauth",
+]);
+
+/**
+ * 写回前据当前 status 判定是否放弃本轮 keepalive/relogin 写回。
+ * 返回 true(放弃)当 status ∈ {revoked, unbound, needs_reauth} —— 这些是 alarm 进入后
+ * 被 admin/熔断改写的撤销/解绑/终态, 此时绝不能 setStatus("active") 把会话复活。
+ */
+export function shouldAbandonKeepaliveWriteback(
+  currentStatus: CquStatus
+): boolean {
+  return ABANDON_WRITEBACK_STATUSES.has(currentStatus);
+}
+
+// ── I-1: st_mint 审计行构造(DRY, 杜绝三处手写导致 schema 漂移) ────────────────
+// st_mint 审计 JSON 行原在三处手写: getServiceTicket 取票成功、recordKeepaliveMint 正常分支、
+// recordKeepaliveMint 记账 put 失败的 catch 分支(后者多 recorded:false + err)。三处字段集合/顺序
+// 必须一致, 改 schema 漏改一处会让审计字段错配。故下沉为本纯构造函数, 三处共用。
+// 与既有 KEEPALIVE_CLIENT_ID/SOURCE 提常量「杜绝漏改」同一意图。
+//
+// 关键: 返回对象的字段插入顺序固定为 {evt,userId,clientId,host,broad,source,ts}, 与历史手写完全一致
+// (JSON.stringify 按插入序序列化)。catch 分支需追加的 recorded/err 由调用方 spread 后置(留在 DO 侧,
+// 因 err=errMsg(e) 是运行时副作用), 追加键序列化在末尾 → 与历史 catch 行逐字节等价。
+// 绝不含 ticket / cookies / 密码 / state 原文。
+
+/** st_mint 审计行字段(全部由我方控制的稳定锚点, 无敏感原文)。 */
+export interface StMintAuditFields {
+  userId: string;
+  // route 路径 clientId 可空(自成限频桶); keepalive 用专属哨兵常量, 故 string | null。
+  clientId: string | null;
+  host: string;
+  // broad = serviceUrl 广路径模式; 符号 key / keepalive 探针为 false。
+  broad: boolean;
+  // 取票入口标记: "route" / "keepalive" 等。
+  source: string;
+  ts: number;
+}
+
+/** st_mint 审计行(`evt:"st_mint"`)。字段顺序固定, 三处 emit 共用以杜绝 schema 漂移。 */
+export function buildStMintAudit(fields: StMintAuditFields): {
+  evt: "st_mint";
+  userId: string;
+  clientId: string | null;
+  host: string;
+  broad: boolean;
+  source: string;
+  ts: number;
+} {
+  return {
+    evt: "st_mint",
+    userId: fields.userId,
+    clientId: fields.clientId,
+    host: fields.host,
+    broad: fields.broad,
+    source: fields.source,
+    ts: fields.ts,
+  };
 }
