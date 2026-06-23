@@ -365,6 +365,12 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
         log.info("data-harvest ok (captures=%d fetches=%d)",
                  len(result.get("captures", [])), len(result.get("fetches", [])))
         return web.json_response({"ok": True, **result})
+    except cqu_data_harvest.HarvestExpiredError:
+        # 会话过期: navUrl 落回 CAS 登录页, 无 capture 命中 → 409 {"error":"TGT_EXPIRED"}
+        # (镜像 /service-ticket 的 ExpiredError→409)。DO classifyNodeHarvestResponse 据 409 判
+        # TGT_EXPIRED → setAlarm 触发重登; 否则 harvest 静默返回空数据, 会话永不自愈。
+        log.warning("data-harvest expired (session redirected to CAS login) → 409")
+        return web.json_response({"ok": False, "error": "TGT_EXPIRED"}, status=409)
     except Exception as e:  # noqa: BLE001 - 浏览器崩/超时 → 502 瞬态, 让上游退避
         log.warning("data-harvest transient: %s", type(e).__name__)
         return web.json_response({"ok": False, "error": type(e).__name__}, status=502)

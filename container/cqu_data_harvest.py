@@ -119,6 +119,36 @@ def all_captures_present(collected: set[str], expected: list[str]) -> bool:
     return all(p in collected for p in expected)
 
 
+# SSO/CAS 服务器自身 host(规范化小写)。storage_state 过期时 navUrl 会被重定向到这里的登录页。
+_SSO_HOST = (urllib.parse.urlparse(cqu_login.SSO).hostname or "").lower()
+
+
+class HarvestExpiredError(Exception):
+    """会话(storage_state)过期 —— navUrl 落回 CAS 登录页, 无 capture 命中、fetch 401/空。
+
+    server.py 据此回 409 {"error":"TGT_EXPIRED"}(对齐 /service-ticket 的 ExpiredError→409),
+    让 DO 的 classifyNodeHarvestResponse 映射 TGT_EXPIRED → setAlarm 触发重登; 否则 harvest
+    照常 ok:true 返回空数据, 重登路径永不触发, 会话静默失效。
+    """
+
+
+def is_expired_harvest(captures: dict, page_content: str, page_url: str) -> bool:
+    """无任何 capture 命中 **且** 页面看起来是 CAS 登录页 → 判会话过期(纯函数, 便于单测)。
+
+    判据(任一即视为登录页):
+      · page_content 含 cqu_ticket_browser.CAS_LOGIN_MARKERS 任一标记(与取票过期判定同口径); 或
+      · page_url 的 host 精确等于 SSO host(cqu_login.SSO) —— 被重定向到登录入口。
+    captures 非空(真过墙拿到数据)一律返回 False, 绝不误判。正常 my.cqu 页(无标记、非 SSO host)
+    也返回 False —— 归瞬态由上游退避, 不当过期触发重登。
+    """
+    if captures:
+        return False
+    if any(mk in (page_content or "") for mk in cqu_ticket_browser.CAS_LOGIN_MARKERS):
+        return True
+    host = (urllib.parse.urlparse(page_url or "").hostname or "").lower()
+    return host == _SSO_HOST
+
+
 # 导航后等页面有机 fire 完 capture 的盲等上限(ms):课表 POST(my-table-detail)+ 学期
 # 由 /workspace/curriculum 自动 fire,实测百毫秒级到齐;给足 8s 容瑞数当场重算/重定向。
 CAPTURE_WAIT_MS = 8000
@@ -185,6 +215,12 @@ async def harvest(state: dict, recipe: dict) -> dict:
         while waited < CAPTURE_WAIT_MS and not all_captures_present(set(captured), patterns):
             await page.wait_for_timeout(CAPTURE_POLL_MS)
             waited += CAPTURE_POLL_MS
+
+        # 会话过期闸: 无任何 capture 命中且页面落回 CAS 登录页 → 抛 HarvestExpiredError(server 回 409
+        # → DO TGT_EXPIRED → 触发重登)。否则 harvest 会照常 ok:true 返回空数据, 重登路径永不触发,
+        # 会话静默失效。仅在 captured 为空时才 await page.content()(避免 happy path 拉整页开销)。
+        if is_expired_harvest(captured, await page.content() if not captured else "", page.url):
+            raise HarvestExpiredError("navUrl redirected to CAS login (session expired)")
 
         # fetch[] 逐个 in-page GET(同源、带活 P、读豁免)。在页面上下文里 fetch,拿 VM 令牌豁免。
         fetches: list[dict] = []

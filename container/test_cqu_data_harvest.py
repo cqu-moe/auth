@@ -170,6 +170,46 @@ def test_capture_match_empty_patterns_none():
     assert m.capture_match("https://my.cqu.edu.cn/a", []) is None
 
 
+# --- is_expired_harvest: 无 capture 命中 + 页面落回 CAS 登录页 → 会话过期(交 DO 重登) ---
+# storage_state 过期时 navUrl 会被重定向到 SSO/CAS 登录页, 无 capture fire、fetch 返 401/空,
+# 但 harvest 若照常 ok:true 上层就永远不触发重登。此纯函数判 expired, 让 harvest 抛错 → 409。
+
+import cqu_login
+import cqu_ticket_browser
+
+
+def test_is_expired_false_when_captures_present():
+    # 有 capture 命中 = 真过墙拿到数据, 一律非过期(即便 page_content/url 像登录页也不误判)。
+    captures = {"student/my-table-detail": {"status": 200, "body": "{}"}}
+    assert m.is_expired_harvest(
+        captures, "login-page-flowkey login-croypto", "https://sso.cqu.edu.cn/login"
+    ) is False
+
+
+def test_is_expired_true_when_empty_and_login_markers():
+    # 无 capture + 页面含 CAS 登录页标记 → 过期。
+    assert m.is_expired_harvest({}, "...login-page-flowkey...", "https://my.cqu.edu.cn/workspace/curriculum") is True
+    assert m.is_expired_harvest({}, "x login-croypto y", "https://my.cqu.edu.cn/x") is True
+
+
+def test_is_expired_true_when_empty_and_sso_host():
+    # 无 capture + 落到 SSO host(被重定向到登录) → 过期(即便 page_content 抓不到/为空)。
+    assert m.is_expired_harvest({}, "", "https://sso.cqu.edu.cn/login?service=x") is True
+
+
+def test_is_expired_false_when_empty_and_normal_page():
+    # 无 capture 但页面是正常 my.cqu 页(无登录标记、非 SSO host)→ 非过期(归瞬态, 不触发重登)。
+    assert m.is_expired_harvest({}, "<html>normal page no markers</html>", "https://my.cqu.edu.cn/workspace/curriculum") is False
+
+
+def test_is_expired_uses_shared_cas_markers_and_sso():
+    # 锁住「复用既有常量」不变式: 标记取自 cqu_ticket_browser.CAS_LOGIN_MARKERS、SSO host 取自 cqu_login.SSO。
+    for marker in cqu_ticket_browser.CAS_LOGIN_MARKERS:
+        assert m.is_expired_harvest({}, f"prefix {marker} suffix", "https://my.cqu.edu.cn/x") is True
+    sso_host = cqu_login.SSO  # https://sso.cqu.edu.cn
+    assert m.is_expired_harvest({}, "", f"{sso_host}/login") is True
+
+
 # --- all_captures_present: 已收集的 capture pattern 集是否覆盖期望集(等齐判定) ---
 
 def test_all_captures_present_true_when_covered():
