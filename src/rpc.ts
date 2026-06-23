@@ -12,6 +12,7 @@ import { scopeSatisfies } from "./middleware/scope";
 import { hashOAuthClientSecret } from "./utils/oauth-secret";
 import { oauthClientCquScopes } from "./db/schema";
 import { requiredScopeForTarget } from "./services/required-scope";
+import type { HarvestCapture, HarvestFetch } from "./services/cqu-node-protocol";
 import type { Env } from "./types";
 
 // 纯 scope 映射在 services/required-scope.ts(单独成模块以便 Node-pool 单测);此处再导出。
@@ -189,5 +190,63 @@ export class AuthService extends WorkerEntrypoint<Env> {
     }
     const body = await resp.json<{ ticket: string }>();
     return { ticket: body.ticket };
+  }
+
+  /**
+   * organic harvest 取数(取数第二入口,SECURITY-CRITICAL)。auth 提供的**业务无关批量取数原语**:
+   * 在用户已登录 + 已过瑞数的临时浏览器里导航 navUrl(页面有机 fire 课表/学期)+ 截获 capture
+   * 模式响应 + 跑 fetch[] in-page GET,一把返回。schedule 等子系统填自己的 navUrl/配方。
+   *
+   * 锁死顺序(对齐 getCquTicket):
+   *   ① authenticateClient(M-6 client_secret constant-time):RPC 调用方自报 clientId 不可信,
+   *      失败 → { error: "INVALID_CLIENT" }(opaque)。
+   *   ② 经 DO data-harvest chokepoint 出数(绝不在此直起浏览器):寻址 idFromName(userId),
+   *      DO 做 host 白名单(仅 my.cqu.edu.cn)/ 限流 / 审计 / needs_reauth 熔断。
+   *   ③ DO 非 ok → 回传其 code(NEEDS_REAUTH | SESSION_INACTIVE | RATE_LIMITED |
+   *      INVALID_HARVEST_URL | WAF_CHALLENGE | TGT_EXPIRED);成功 → { captures, fetches }。
+   *
+   * ⚠️ host 红线收紧为精确 my.cqu.edu.cn(比取票 *.cqu.edu.cn 更紧):harvest 只打这一个 host,
+   *    防 auth 变开放代理(SSRF)。不做 client-scope 检查(通用原语, 取数授权 = M-6 机器信任 +
+   *    用户 CQU 会话 active + host 白名单;业务级权益门禁在调用方 schedule 侧)。
+   */
+  async cquHarvest(args: {
+    clientId: string;
+    clientSecret: string;
+    userId: string;
+    navUrl: string;
+    capture?: string[];
+    fetch?: { method?: string; url: string }[];
+  }): Promise<
+    | { captures: HarvestCapture[]; fetches: HarvestFetch[] }
+    | { error: string }
+  > {
+    if (!args.userId) return { error: "INVALID_CLIENT" };
+    if (!(await this.authenticateClient(args.clientId, args.clientSecret))) {
+      return { error: "INVALID_CLIENT" };
+    }
+
+    const doId = this.env.CQU_SESSION.idFromName(args.userId);
+    const stub = this.env.CQU_SESSION.get(doId);
+    const doUrl = new URL("https://do/data-harvest");
+    doUrl.searchParams.set("clientId", args.clientId);
+    doUrl.searchParams.set("source", "rpc");
+
+    const resp = await stub.fetch(
+      new Request(doUrl.toString(), {
+        method: "POST",
+        body: JSON.stringify({
+          navUrl: args.navUrl,
+          capture: args.capture ?? [],
+          fetch: args.fetch ?? [],
+        }),
+      })
+    );
+    if (!resp.ok) {
+      const err = await resp
+        .json<{ error?: string; code?: string }>()
+        .catch(() => ({}) as { error?: string; code?: string });
+      return { error: err.code ?? "HARVEST_FAILED" };
+    }
+    return resp.json<{ captures: HarvestCapture[]; fetches: HarvestFetch[] }>();
   }
 }
