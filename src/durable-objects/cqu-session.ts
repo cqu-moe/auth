@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { CquSsoClient, type CasCookies, type CquStorageState, CquSsoError } from "../services/cqu-sso";
 import { decrypt } from "../services/crypto";
 import { validateCquServiceUrl } from "../services/service-url";
+import { validateCquHarvestUrl } from "../services/harvest-url";
 import {
   nextStatus,
   type CquStatus,
@@ -45,7 +46,11 @@ import {
   STATE_HARD_LIMIT_BYTES,
   shouldAbandonKeepaliveWriteback,
   buildStMintAudit,
+  classifyNodeHarvestResponse,
   type NodeTicketBody,
+  type NodeHarvestBody,
+  type HarvestCapture,
+  type HarvestFetch,
 } from "../services/cqu-node-protocol";
 import type { Env } from "../types";
 
@@ -324,6 +329,19 @@ export class CquSessionDO extends DurableObject<Env> {
             source,
           });
           return Response.json({ ticket });
+        }
+        case "data-harvest": {
+          const clientId = url.searchParams.get("clientId") || null;
+          const rawSource = url.searchParams.get("source");
+          const source =
+            rawSource === "route" || rawSource === "rpc" ? rawSource : "unknown";
+          const recipe = await request.json<{
+            navUrl: string;
+            capture: string[];
+            fetch: { method?: string; url: string }[];
+          }>();
+          const result = await this.dataHarvest({ recipe, clientId, source });
+          return Response.json(result);
         }
         case "deposit-code": {
           const body = await request.json<DepositCodePayload>();
@@ -656,6 +674,125 @@ export class CquSessionDO extends DurableObject<Env> {
     return ticketFromClassification(
       classifyNodeTicketResponse(res.status, body)
     );
+  }
+
+  private async dataHarvest(arg: {
+    recipe: { navUrl: string; capture: string[]; fetch: { method?: string; url: string }[] };
+    clientId: string | null;
+    source: string;
+  }): Promise<{ captures: HarvestCapture[]; fetches: HarvestFetch[] }> {
+    await this.loadState();
+    const status = await this.getStatus();
+    if (!this.state || status !== "active") {
+      if (status === "needs_reauth") {
+        throw new CquSsoError("NEEDS_REAUTH", "CQU session needs re-auth (请重新绑定)");
+      }
+      throw new CquSsoError("SESSION_INACTIVE", "CQU session not active");
+    }
+    if (!this.state.storageState) {
+      await this.setStatus("expired");
+      await this.ctx.storage.setAlarm(Date.now());
+      throw new CquSsoError("SESSION_INACTIVE", "CQU session needs re-login (no storage state)");
+    }
+
+    // ① host 红线(纵深): navUrl + 每个 fetch.url 必须精确 my.cqu.edu.cn(capture 是响应过滤
+    // 模式、不出站, 不构成 SSRF 面, 不校验)。任一不过 → INVALID_HARVEST_URL。
+    let navUrl: string;
+    try {
+      navUrl = validateCquHarvestUrl(arg.recipe.navUrl);
+    } catch {
+      throw new CquSsoError("INVALID_HARVEST_URL", "非法的 navUrl");
+    }
+    for (const f of arg.recipe.fetch ?? []) {
+      try {
+        validateCquHarvestUrl(f.url);
+      } catch {
+        throw new CquSsoError("INVALID_HARVEST_URL", "非法的 fetch url");
+      }
+    }
+
+    // ② D6 限频(同取票, per-user + per-client; harvest 是真出数动作, 计入同一窗口)。
+    const now = Date.now();
+    const clientId = arg.clientId ?? null;
+    const stored = (await this.ctx.storage.get<StMintRecord[]>("stMintLog")) ?? [];
+    const pruned = pruneStMintLog(stored, now, ST_MINT_RATE_WINDOW_MS);
+    if (stMintThrottled(pruned, clientId, MAX_ST_MINTS_PER_USER, MAX_ST_MINTS_PER_CLIENT)) {
+      console.error(
+        `[CquSession] ${this.state.studentId}: ALERT harvest rate-limited (clientId=${clientId ?? "?"})`
+      );
+      throw new CquSsoError("RATE_LIMITED", "取数过于频繁,请稍后再试");
+    }
+
+    // ③ 记账(镜像取票: 铸前记录, 对失败死循环也鲁棒)。host 取 navUrl host, broad=false。
+    const host = new URL(navUrl).hostname;
+    this.state.lastRequestedAt = now;
+    await this.putStateGuarded(this.state);
+    pruned.push({ ts: now, clientId, host, broad: false });
+    try {
+      await this.ctx.storage.put("stMintLog", pruned);
+    } catch (e) {
+      console.error(
+        `[CquSession] ${this.state.studentId}: stMintLog put failed (harvest accounting degraded): ${errMsg(e)}`
+      );
+    }
+
+    // ④ 出站节点 /data-harvest(套 NODE_DEADLINE_MS)。409→TGT_EXPIRED 顺手 setAlarm 快自愈。
+    let result: { captures: HarvestCapture[]; fetches: HarvestFetch[] };
+    try {
+      result = await this.harvestViaNode(this.state.storageState, arg.recipe);
+    } catch (e) {
+      if (e instanceof CquSsoError && e.code === "TGT_EXPIRED") {
+        await this.ctx.storage.setAlarm(Date.now());
+      }
+      throw e;
+    }
+
+    // ⑤ 审计(与取票同 schema; source 入白名单)。绝不记录 captures/fetches 内容。
+    console.log(
+      JSON.stringify(
+        buildStMintAudit({
+          userId: this.state.userId,
+          clientId,
+          host,
+          broad: false,
+          source: arg.source ?? "rpc",
+          ts: now,
+        })
+      )
+    );
+    return result;
+  }
+
+  private async harvestViaNode(
+    state: CquStorageState | null,
+    recipe: { navUrl: string; capture: string[]; fetch: { method?: string; url: string }[] }
+  ): Promise<{ captures: HarvestCapture[]; fetches: HarvestFetch[] }> {
+    let res: Response;
+    try {
+      res = await this.env.LOGIN_NODE.fetch(
+        new Request(`${LOGIN_NODE_BASE}/data-harvest`, {
+          method: "POST",
+          body: JSON.stringify({ state, ...recipe }),
+          signal: AbortSignal.timeout(NODE_DEADLINE_MS),
+        })
+      );
+    } catch (e) {
+      throw new CquSsoError("WAF_CHALLENGE", `LOGIN_NODE /data-harvest fetch failed: ${errMsg(e)}`);
+    }
+    let body: NodeHarvestBody | null;
+    try {
+      body = await res.json<NodeHarvestBody>();
+    } catch {
+      body = null;
+    }
+    const c = classifyNodeHarvestResponse(res.status, body);
+    if (c.kind === "expired") {
+      throw new CquSsoError("TGT_EXPIRED", `CQU session expired (${c.detail ?? "node /data-harvest"})`);
+    }
+    if (c.kind === "transient") {
+      throw new CquSsoError("WAF_CHALLENGE", `LOGIN_NODE /data-harvest ${c.detail ?? "transient"}`);
+    }
+    return { captures: c.captures ?? [], fetches: c.fetches ?? [] };
   }
 
   /**

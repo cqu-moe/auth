@@ -288,3 +288,119 @@ describe("H2 oversized refreshed state on keepalive", () => {
     ).toBe("tgt-value");
   });
 });
+
+// ── 5. data-harvest action: 四闸复用 + 节点出站映射 ──────────────────────────
+describe("data-harvest action", () => {
+  const recipe = {
+    navUrl: "https://my.cqu.edu.cn/workspace/curriculum",
+    capture: ["student/my-table-detail"],
+    fetch: [{ method: "GET", url: "https://my.cqu.edu.cn/api/exam/x" }],
+  };
+
+  async function postHarvest(stub: DurableObjectStub) {
+    return stub.fetch("http://do/data-harvest?clientId=calendar&source=rpc", {
+      method: "POST",
+      body: JSON.stringify(recipe),
+    });
+  }
+
+  it("active session + node 200 → returns captures/fetches, records 1 ST mint, audits", async () => {
+    const stub = freshStub("harvest-ok");
+    await seedSession(stub, { status: "active" });
+
+    spyLoginNode({
+      "/data-harvest": async () =>
+        Response.json(
+          {
+            ok: true,
+            captures: [{ url: "u", status: 200, contentType: "application/json", body: "{}" }],
+            fetches: [{ url: "https://my.cqu.edu.cn/api/exam/x", status: 200, body: "[]" }],
+          },
+          { status: 200 }
+        ),
+    });
+
+    const res = await postHarvest(stub);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { captures: unknown[]; fetches: unknown[] };
+    expect(body.captures).toHaveLength(1);
+    expect(body.fetches).toHaveLength(1);
+    // 真出数动作 → 记一条限流账(harvest source, broad=false)。
+    const log = await readStMintLog(stub);
+    expect(log).toHaveLength(1);
+    expect(log[0].clientId).toBe("calendar");
+  });
+
+  it("status not active (needs_reauth) → NEEDS_REAUTH error, no node call", async () => {
+    const stub = freshStub("harvest-reauth");
+    await seedSession(stub, { status: "needs_reauth" });
+    const spy = spyLoginNode({ "/data-harvest": async () => Response.json({}) });
+
+    const res = await postHarvest(stub);
+    expect(res.status).toBe(409); // cquErrorHttpStatus(NEEDS_REAUTH)
+    const body = (await res.json()) as { code?: string };
+    expect(body.code).toBe("NEEDS_REAUTH");
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("disallowed navUrl host → INVALID_HARVEST_URL, no node call", async () => {
+    const stub = freshStub("harvest-badhost");
+    await seedSession(stub, { status: "active" });
+    const spy = spyLoginNode({ "/data-harvest": async () => Response.json({}) });
+
+    const res = await stub.fetch("http://do/data-harvest?clientId=calendar&source=rpc", {
+      method: "POST",
+      body: JSON.stringify({ ...recipe, navUrl: "https://lib.cqu.edu.cn/x" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: string };
+    expect(body.code).toBe("INVALID_HARVEST_URL");
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("node 409 → TGT_EXPIRED (409), arms immediate alarm, no sync relogin", async () => {
+    const stub = freshStub("harvest-409");
+    await seedSession(stub, { status: "active" });
+    const setAlarmCalls = await captureSetAlarm(stub);
+    const spy = spyLoginNode({
+      "/data-harvest": async () => Response.json({ ok: false }, { status: 409 }),
+      "/keepalive": async () => Response.json({ ok: true, status: "alive" }, { status: 200 }),
+    });
+
+    const res = await postHarvest(stub);
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code?: string }).code).toBe("TGT_EXPIRED");
+    expect(setAlarmCalls.length).toBeGreaterThanOrEqual(1);
+    expect(
+      spy.mock.calls.map((c) => new URL((c[0] as Request).url).pathname)
+    ).not.toContain("/run");
+  });
+
+  it("node 502 → WAF_CHALLENGE (500), status unchanged", async () => {
+    const stub = freshStub("harvest-502");
+    await seedSession(stub, { status: "active" });
+    spyLoginNode({
+      "/data-harvest": async () => Response.json({ ok: false }, { status: 502 }),
+    });
+    const res = await postHarvest(stub);
+    expect(res.status).toBe(500);
+    expect(((await res.json()) as { code?: string }).code).toBe("WAF_CHALLENGE");
+    expect(await readStatus(stub)).toBe("active");
+  });
+
+  it("per-user rate limit exhausted → RATE_LIMITED", async () => {
+    const stub = freshStub("harvest-throttle");
+    const now = Date.now();
+    // 灌满 per-user 窗口(MAX_ST_MINTS_PER_USER=60)。
+    const full = Array.from({ length: 60 }, () => ({
+      ts: now, clientId: "calendar", host: "my.cqu.edu.cn", broad: false,
+    }));
+    await seedSession(stub, { status: "active", extra: { stMintLog: full } });
+    const spy = spyLoginNode({ "/data-harvest": async () => Response.json({}) });
+
+    const res = await postHarvest(stub);
+    expect(res.status).toBe(429);
+    expect(((await res.json()) as { code?: string }).code).toBe("RATE_LIMITED");
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
