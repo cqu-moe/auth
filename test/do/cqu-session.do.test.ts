@@ -358,6 +358,28 @@ describe("data-harvest action", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
+  it("non-GET fetch method → INVALID_HARVEST_URL (400) before rate-limit accounting, no node call, no ST mint", async () => {
+    const stub = freshStub("harvest-nonget");
+    await seedSession(stub, { status: "active" });
+    const spy = spyLoginNode({ "/data-harvest": async () => Response.json({}) });
+
+    const res = await stub.fetch("http://do/data-harvest?clientId=calendar&source=rpc", {
+      method: "POST",
+      body: JSON.stringify({
+        ...recipe,
+        fetch: [{ method: "POST", url: "https://my.cqu.edu.cn/api/exam/x" }],
+      }),
+    });
+
+    // 非 GET 是客户端契约错 → 400(在限流记账之前抛, 不消耗限流槽)。
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: string };
+    expect(body.code).toBe("INVALID_HARVEST_URL");
+    // 没出站节点; 没记一条限流账(校验早于记账)。
+    expect(spy).not.toHaveBeenCalled();
+    expect(await readStMintLog(stub)).toHaveLength(0);
+  });
+
   it("node 409 → TGT_EXPIRED (409), arms immediate alarm, no sync relogin", async () => {
     const stub = freshStub("harvest-409");
     await seedSession(stub, { status: "active" });

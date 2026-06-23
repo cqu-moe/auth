@@ -704,6 +704,13 @@ export class CquSessionDO extends DurableObject<Env> {
       throw new CquSsoError("INVALID_HARVEST_URL", "非法的 navUrl");
     }
     for (const f of arg.recipe.fetch ?? []) {
+      // method 红线(纵深, 对齐节点侧 parse_harvest_recipe): in-page fetch 公开契约只许 GET。
+      // 非 GET 在此早抛 400(客户端契约错), **先于**下面的限流记账 —— 否则非 GET 会白嫖一个
+      // 限流槽, 再被节点拒成 400 → harvestViaNode 把 4xx(非 409)归 transient(WAF_CHALLENGE/500)
+      // 让调用方误以为是瞬态而重试。GET-only 在入口直拒, 语义稳定且不消耗配额。
+      if ((f.method ?? "GET").toUpperCase() !== "GET") {
+        throw new CquSsoError("INVALID_HARVEST_URL", "fetch method must be GET");
+      }
       try {
         validateCquHarvestUrl(f.url);
       } catch {
