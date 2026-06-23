@@ -25,6 +25,7 @@ from aiohttp import web
 import cqu_login  # 改造后的登录器, 暴露 run_login(...)
 import cqu_keepalive  # 国内节点浏览器水化探活, 暴露 probe_session_browser(...)
 import cqu_ticket_browser  # 浏览器水化取 ST(过瑞数 JS 挑战), 暴露 fetch_service_ticket_browser(...)
+import cqu_data_harvest  # 浏览器 organic harvest(navigate+capture+in-page fetch), 暴露 harvest(...)
 from qg_proxy import acquire_qg_proxy, QgExtractError, should_use_proxy  # 青果代理 + 灰度门(/run 登录仍用)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -330,6 +331,45 @@ async def keepalive_handler(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, **result})
 
 
+async def data_harvest_handler(request: web.Request) -> web.Response:
+    """POST /data-harvest {state, navUrl, capture[], fetch[]} → 临时浏览器水化 organic harvest。
+
+    安全闸(navUrl/capture/fetch host 白名单 / 限流 / 审计 / needs_reauth)仍在上游 DO,
+    这里负责:① recipe 二次校验(纵深,对齐 service-ticket 的 host 双层防御)② 起浏览器取数。
+    · recipe 非法(host 越界 / method 非 GET / 缺字段)→ 400(客户端契约错)
+    · 取数成功 → 200 {ok:true, captures, fetches}
+    · 浏览器崩/超时/异常 → 502(瞬态, 让上游退避);error 只回 type(e).__name__(脱敏,
+      绝不拼 str(e) —— 异常 message 可能含 state/cookie 明文, 经 body 透传 + 落 CF observability)
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
+
+    state = body.get("state")
+    if not isinstance(state, dict):
+        return web.json_response(
+            {"ok": False, "error": "missing required field: state (object)"}, status=400)
+
+    # 纵深第二层: recipe(navUrl/capture/fetch)host 全过白名单, 仅 https my.cqu.edu.cn。
+    # 不通过 → 400, error 不泄露具体红线细节(只回类型名)。
+    try:
+        recipe = cqu_data_harvest.parse_harvest_recipe(body)
+    except cqu_data_harvest.HarvestRecipeError:
+        log.warning("data-harvest rejected recipe (host/shape not allowed)")
+        return web.json_response({"ok": False, "error": "recipe not allowed"}, status=400)
+
+    try:
+        result = await cqu_data_harvest.harvest(state, recipe)
+        # captures/fetches 不记日志(可能含课表/学籍数据); 只记计数供诊断。
+        log.info("data-harvest ok (captures=%d fetches=%d)",
+                 len(result.get("captures", [])), len(result.get("fetches", [])))
+        return web.json_response({"ok": True, **result})
+    except Exception as e:  # noqa: BLE001 - 浏览器崩/超时 → 502 瞬态, 让上游退避
+        log.warning("data-harvest transient: %s", type(e).__name__)
+        return web.json_response({"ok": False, "error": type(e).__name__}, status=502)
+
+
 async def health_handler(_request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
@@ -341,6 +381,7 @@ def build_app() -> web.Application:
         web.post("/code", code_handler),
         web.post("/service-ticket", service_ticket_handler),
         web.post("/keepalive", keepalive_handler),
+        web.post("/data-harvest", data_harvest_handler),
         # CF Containers 默认探测 /ping 判断实例就绪。
         web.get("/ping", health_handler),
         web.get("/health", health_handler),
