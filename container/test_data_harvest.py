@@ -91,3 +91,29 @@ class DataHarvestTestCase(AioHTTPTestCase):
         # 脱敏:只回类型名,绝不回 str(e)(可能含 state/cookie 明文)。
         assert body["error"] == "RuntimeError"
         assert "SECRET" not in body["error"]
+
+    async def test_data_harvest_expired_is_409(self):
+        # 会话过期(navUrl 落回 CAS 登录页)→ 409 {"error":"TGT_EXPIRED"} → DO 触发重登。
+        async def expired(state, recipe):
+            raise server.cqu_data_harvest.HarvestExpiredError("redirected to CAS login")
+        server.cqu_data_harvest.harvest = expired
+
+        resp = await self.client.post("/data-harvest", json=_payload())
+        assert resp.status == 409
+        body = await resp.json()
+        assert body["error"] == "TGT_EXPIRED"
+        # 脱敏:绝不回 str(e)。
+        assert "redirected" not in body["error"]
+
+    async def test_data_harvest_transient_is_502_distinct_from_expired(self):
+        # 期望 capture 没到齐且页面非登录页 → 502 {"error":"HARVEST_TRANSIENT"}(瞬态退避),
+        # 与 409(过期)严格区分, 绝不当 ok 空成功返回。
+        async def transient(state, recipe):
+            raise server.cqu_data_harvest.HarvestTransientError("expected captures missing")
+        server.cqu_data_harvest.harvest = transient
+
+        resp = await self.client.post("/data-harvest", json=_payload())
+        assert resp.status == 502
+        body = await resp.json()
+        assert body["error"] == "HARVEST_TRANSIENT"
+        assert body["ok"] is False

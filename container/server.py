@@ -371,6 +371,12 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
         # TGT_EXPIRED → setAlarm 触发重登; 否则 harvest 静默返回空数据, 会话永不自愈。
         log.warning("data-harvest expired (session redirected to CAS login) → 409")
         return web.json_response({"ok": False, "error": "TGT_EXPIRED"}, status=409)
+    except cqu_data_harvest.HarvestTransientError:
+        # 期望 capture 没到齐且页面非登录页(goto 超时/网络/非 CAS 瑞数挑战页)→ 502 瞬态。
+        # 与 409(过期重登)严格区分: classifyNodeHarvestResponse 把 502 归 WAF_CHALLENGE(瞬态退避),
+        # 绝不当 ok 空 harvest 让调用方误以为"今天没课"。error 不回显细节(只回固定锚点)。
+        log.warning("data-harvest transient (expected captures missing) → 502")
+        return web.json_response({"ok": False, "error": "HARVEST_TRANSIENT"}, status=502)
     except Exception as e:  # noqa: BLE001 - 浏览器崩/超时 → 502 瞬态, 让上游退避
         log.warning("data-harvest transient: %s", type(e).__name__)
         return web.json_response({"ok": False, "error": type(e).__name__}, status=502)

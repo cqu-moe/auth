@@ -149,6 +149,36 @@ def is_expired_harvest(captures: dict, page_content: str, page_url: str) -> bool
     return host == _SSO_HOST
 
 
+class HarvestTransientError(Exception):
+    """navigate/WAF/网络瞬态 —— 期望 capture 没到齐, 但页面**不是** CAS 登录页(非干净过期)。
+
+    成因: goto 超时 / 网络抖动 / 非 CAS 的瑞数挑战页(无登录标记)。此时绝不能当 ok 空 harvest
+    返回(经 DO/RPC 报 200 假成功, 调用方误以为"今天没课"); server.py 据此回 502, 让上游退避重试
+    下个周期, 与 409(过期重登)/400(配方错)三态严格区分。
+    """
+
+
+def classify_harvest_outcome(
+    captured_keys: set[str], patterns: list[str], page_content: str, page_url: str
+) -> str:
+    """capture-wait 循环后的三态判定(纯函数, 便于单测): "ok" / "expired" / "transient"。
+
+    · 期望 capture 全齐(all_captures_present)→ "ok"(照常返回 captures/fetches); 涵盖
+      patterns 为空(fetch-only 配方)→ 立即 ok, 不看页面。
+    · 期望缺 + 页面像 CAS 登录页(is_expired_harvest)→ "expired"(主体抛 HarvestExpiredError → 409)。
+    · 期望缺 + 页面非登录页 → "transient"(主体抛 HarvestTransientError → 502 退避)。
+
+    is_expired_harvest 已对 captured 非空一律返回 False; 这里在"全齐"分支先短路, 故只在
+    "缺 capture"时才查页面, 传入的 captured 仅用作过期判定(全齐时不会走到)。
+    """
+    if all_captures_present(captured_keys, patterns):
+        return "ok"
+    captured = {k: True for k in captured_keys}  # is_expired_harvest 只看 truthy/empty
+    if is_expired_harvest(captured, page_content, page_url):
+        return "expired"
+    return "transient"
+
+
 # 导航后等页面有机 fire 完 capture 的盲等上限(ms):课表 POST(my-table-detail)+ 学期
 # 由 /workspace/curriculum 自动 fire,实测百毫秒级到齐;给足 8s 容瑞数当场重算/重定向。
 CAPTURE_WAIT_MS = 8000
@@ -216,11 +246,20 @@ async def harvest(state: dict, recipe: dict) -> dict:
             await page.wait_for_timeout(CAPTURE_POLL_MS)
             waited += CAPTURE_POLL_MS
 
-        # 会话过期闸: 无任何 capture 命中且页面落回 CAS 登录页 → 抛 HarvestExpiredError(server 回 409
-        # → DO TGT_EXPIRED → 触发重登)。否则 harvest 会照常 ok:true 返回空数据, 重登路径永不触发,
-        # 会话静默失效。仅在 captured 为空时才 await page.content()(避免 happy path 拉整页开销)。
-        if is_expired_harvest(captured, await page.content() if not captured else "", page.url):
-            raise HarvestExpiredError("navUrl redirected to CAS login (session expired)")
+        # capture-wait 后三态闸(classify_harvest_outcome): 期望 capture 没到齐时绝不能当 ok 空
+        # harvest 返回(经 DO/RPC 报 200 假成功)。仅在期望缺时才 await page.content() 判页面(避免
+        # happy path 拉整页开销):
+        #   · 全齐(或 capture 期望为空)→ "ok", 照常落 fetch[] 并返回。
+        #   · 缺 + 落回 CAS 登录页 → "expired" → HarvestExpiredError(server 回 409 → DO TGT_EXPIRED → 重登)。
+        #   · 缺 + 非登录页(goto 超时/网络/非 CAS 瑞数挑战页)→ "transient" → HarvestTransientError
+        #     (server 回 502 → 上游退避重试), 而非伪装成 ok 空成功让会话静默失效。
+        if not all_captures_present(set(captured), patterns):
+            outcome = classify_harvest_outcome(
+                set(captured), patterns, await page.content(), page.url)
+            if outcome == "expired":
+                raise HarvestExpiredError("navUrl redirected to CAS login (session expired)")
+            raise HarvestTransientError(
+                "expected captures missing (navigation/WAF/network transient)")
 
         # fetch[] 逐个 in-page GET(同源、带活 P、读豁免)。在页面上下文里 fetch,拿 VM 令牌豁免。
         fetches: list[dict] = []

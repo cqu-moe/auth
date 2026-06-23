@@ -224,3 +224,53 @@ def test_all_captures_present_false_when_missing():
 def test_all_captures_present_true_for_empty_expected():
     # 无 capture 期望 → 立即"齐"(只跑 fetch[])。
     assert m.all_captures_present(set(), []) is True
+
+
+# --- classify_harvest_outcome: capture-wait 后的三态判定(ok / expired / transient) ---
+# navigate 失败(goto 超时/网络/非 CAS 的瑞数挑战页)会让期望 capture 收不齐, 此时绝不能当
+# "ok 空 harvest"返回(经 DO/RPC 报 200 假成功)。纯函数, 让 harvest 主体据此 raise:
+#   · 期望 capture 全齐(或 capture 期望为空)→ "ok"(照常返回)
+#   · 期望 capture 缺 + 页面像 CAS 登录页 → "expired"(→ HarvestExpiredError → 409 重登)
+#   · 期望 capture 缺 + 页面非登录页 → "transient"(→ HarvestTransientError → 502 退避)
+
+def test_classify_outcome_ok_when_all_captures_present():
+    # 期望全齐 → ok(即便 page_content 像登录页也不误判, 真过墙拿到数据为准)。
+    assert m.classify_harvest_outcome(
+        {"a/b", "c/d"}, ["a/b", "c/d"],
+        "...login-page-flowkey...", "https://sso.cqu.edu.cn/login"
+    ) == "ok"
+
+
+def test_classify_outcome_ok_when_empty_capture_list():
+    # capture 期望为空(fetch-only 配方)→ 立即 ok, 不看页面。
+    assert m.classify_harvest_outcome(
+        set(), [], "<html>anything</html>", "https://my.cqu.edu.cn/x"
+    ) == "ok"
+
+
+def test_classify_outcome_expired_when_missing_and_login_markers():
+    # 期望缺 + 页面含 CAS 登录页标记 → expired(交 DO 重登)。
+    assert m.classify_harvest_outcome(
+        set(), ["a/b"], "x login-page-flowkey y", "https://my.cqu.edu.cn/workspace/curriculum"
+    ) == "expired"
+
+
+def test_classify_outcome_expired_when_missing_and_sso_host():
+    # 期望缺 + 落到 SSO host(被重定向到登录)→ expired(即便 page_content 抓不到)。
+    assert m.classify_harvest_outcome(
+        set(), ["a/b"], "", "https://sso.cqu.edu.cn/login?service=x"
+    ) == "expired"
+
+
+def test_classify_outcome_transient_when_missing_and_normal_page():
+    # 期望缺 + 页面是正常 my.cqu 页(无登录标记、非 SSO host)→ transient(瑞数/网络瞬态, 退避)。
+    assert m.classify_harvest_outcome(
+        set(), ["a/b"], "<html>normal page no markers</html>", "https://my.cqu.edu.cn/workspace/curriculum"
+    ) == "transient"
+
+
+def test_classify_outcome_transient_when_partial_captures():
+    # 期望部分到齐(缺一)+ 非登录页 → transient(不是干净过期, 也不是 ok 空成功)。
+    assert m.classify_harvest_outcome(
+        {"a/b"}, ["a/b", "c/d"], "<html>normal</html>", "https://my.cqu.edu.cn/x"
+    ) == "transient"
