@@ -425,6 +425,69 @@ describe("data-harvest action", () => {
     expect(await readStMintLog(stub)).toHaveLength(0);
   });
 
+  it("non-canonical-but-valid navUrl/fetch url → succeeds with CANONICAL urls forwarded to node (no WAF_CHALLENGE)", async () => {
+    // Finding 1: Workers URL parser canonicalizes (e.g. percent-encoded host / scheme-relative)
+    // 但 Python urlparse 不会 —— 若 DO 转发原文, 节点 parse_harvest_recipe 再拒成 400 → WAF_CHALLENGE。
+    // 此处断言 DO 把 validateCquHarvestUrl 的 canonical 返回值转给节点(节点收到的是规范化 url)。
+    const stub = freshStub("harvest-canonical");
+    await seedSession(stub, { status: "active" });
+
+    let received: { navUrl?: string; fetch?: { url?: string }[] } | null = null;
+    const spy = spyLoginNode({
+      "/data-harvest": async (req) => {
+        received = (await req.json()) as { navUrl?: string; fetch?: { url?: string }[] };
+        return Response.json(
+          { ok: true, captures: [], fetches: [] },
+          { status: 200 }
+        );
+      },
+    });
+
+    const res = await stub.fetch("http://do/data-harvest?clientId=calendar&source=rpc", {
+      method: "POST",
+      body: JSON.stringify({
+        // 百分号编码 host(%6d%79 = "my") + scheme-relative fetch url —— 两者 Workers 规范化, Python 拒。
+        navUrl: "https://%6d%79.cqu.edu.cn/workspace/curriculum",
+        capture: ["student/my-table-detail"],
+        fetch: [{ method: "GET", url: "https:my.cqu.edu.cn/api/exam/x" }],
+      }),
+    });
+
+    // 规范化后 host 合法 → 200 成功(不是 WAF_CHALLENGE/500)。
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { code?: string }).code).toBeUndefined();
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    // 节点收到的是 CANONICAL url(Python urlparse 能直接放行), 而非客户端原文。
+    expect(received).not.toBeNull();
+    expect(received!.navUrl).toBe("https://my.cqu.edu.cn/workspace/curriculum");
+    expect(received!.fetch?.[0]?.url).toBe("https://my.cqu.edu.cn/api/exam/x");
+    // 校验通过 → 记一条限流账。
+    expect(await readStMintLog(stub)).toHaveLength(1);
+  });
+
+  it("non-string fetch method (number) → INVALID_HARVEST_URL (400) before accounting, no node call, no ST mint", async () => {
+    // Finding 2: (f.method ?? "GET").toUpperCase() 对非字符串 method 抛 TypeError → 500 INTERNAL_ERROR。
+    // 应是文档化的 400 客户端契约错(GET-only), 且在记账之前抛。
+    const stub = freshStub("harvest-method-nonstring");
+    await seedSession(stub, { status: "active" });
+    const spy = spyLoginNode({ "/data-harvest": async () => Response.json({}) });
+
+    const res = await stub.fetch("http://do/data-harvest?clientId=calendar&source=rpc", {
+      method: "POST",
+      body: JSON.stringify({
+        ...recipe,
+        fetch: [{ method: 42, url: "https://my.cqu.edu.cn/api/exam/x" }],
+      }),
+    });
+
+    // 非字符串 method 是客户端契约错 → 400(非 500 TypeError), 在记账之前。
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code?: string }).code).toBe("INVALID_HARVEST_URL");
+    expect(spy).not.toHaveBeenCalled();
+    expect(await readStMintLog(stub)).toHaveLength(0);
+  });
+
   it("node 409 → TGT_EXPIRED (409), arms immediate alarm, no sync relogin", async () => {
     const stub = freshStub("harvest-409");
     await seedSession(stub, { status: "active" });

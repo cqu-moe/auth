@@ -715,26 +715,46 @@ export class CquSessionDO extends DurableObject<Env> {
 
     // ② host 红线(纵深): navUrl + 每个 fetch.url 必须精确 my.cqu.edu.cn(capture 是响应过滤
     // 模式、不出站, 不构成 SSRF 面, 不校验)。任一不过 → INVALID_HARVEST_URL。
+    // ★ validateCquHarvestUrl 返回 **canonical**(Workers URL parser 规范化, 见 harvest-url.ts
+    //   "下游只用此返回值")。节点侧 parse_harvest_recipe 用 Python urlparse, 对百分号编码 host
+    //   (`%6d%79.cqu.edu.cn`)/scheme-relative(`https:my.cqu.edu.cn/x`)等不做同等规范化 →
+    //   若转发**原文**, 节点会把这些「Workers 判合法、Python 判越界」的 url 再拒成 400 →
+    //   harvestViaNode 归 transient WAF_CHALLENGE(且已在记账之后, 白嫖一个槽)。故这里捕获每个
+    //   canonical 返回值, 用 canonical navUrl + canonical fetch url 重建配方喂给节点 —— 节点收到的
+    //   正是 DO 已校验放行的精确字符串, TS/Python 解析分歧被消弭。
     let navUrl: string;
     try {
       navUrl = validateCquHarvestUrl(arg.recipe.navUrl);
     } catch {
       throw new CquSsoError("INVALID_HARVEST_URL", "非法的 navUrl");
     }
+    const canonicalFetch: { method: string; url: string }[] = [];
     for (const f of fetchList) {
       // method 红线(纵深, 对齐节点侧 parse_harvest_recipe): in-page fetch 公开契约只许 GET。
+      // 缺省(undefined/null)→ GET; 出现则必须是 string —— 非字符串 method(JSON/RPC 传 42/true)
+      // 会让 (f.method ?? "GET").toUpperCase() 抛 TypeError → 500 INTERNAL_ERROR(伪装成服务器崩)。
+      // 这是客户端契约错, 先于 toUpperCase 直拒 → 400。
+      if (f.method != null && typeof f.method !== "string") {
+        throw new CquSsoError("INVALID_HARVEST_URL", "fetch method must be GET");
+      }
       // 非 GET 在此早抛 400(客户端契约错), **先于**下面的限流记账 —— 否则非 GET 会白嫖一个
       // 限流槽, 再被节点拒成 400 → harvestViaNode 把 4xx(非 409)归 transient(WAF_CHALLENGE/500)
       // 让调用方误以为是瞬态而重试。GET-only 在入口直拒, 语义稳定且不消耗配额。
       if ((f.method ?? "GET").toUpperCase() !== "GET") {
         throw new CquSsoError("INVALID_HARVEST_URL", "fetch method must be GET");
       }
+      let canonicalUrl: string;
       try {
-        validateCquHarvestUrl(f.url);
+        canonicalUrl = validateCquHarvestUrl(f.url);
       } catch {
         throw new CquSsoError("INVALID_HARVEST_URL", "非法的 fetch url");
       }
+      canonicalFetch.push({ method: "GET", url: canonicalUrl });
     }
+
+    // canonical 配方: navUrl/fetch.url 用 DO 已校验放行的规范化字符串, capture 原样(子串模式,
+    // 不出站、不构成 SSRF 面, 节点侧也只做非空 string 校验)。仅此配方转发给节点, 不再转发 arg.recipe。
+    const canonicalRecipe = { navUrl, capture, fetch: canonicalFetch };
 
     // ③ D6 限频(同取票, per-user + per-client; harvest 是真出数动作, 计入同一窗口)。
     const now = Date.now();
@@ -764,7 +784,7 @@ export class CquSessionDO extends DurableObject<Env> {
     // ⑤ 出站节点 /data-harvest(套 NODE_DEADLINE_MS)。409→TGT_EXPIRED 顺手 setAlarm 快自愈。
     let result: { captures: HarvestCapture[]; fetches: HarvestFetch[] };
     try {
-      result = await this.harvestViaNode(this.state.storageState, arg.recipe);
+      result = await this.harvestViaNode(this.state.storageState, canonicalRecipe);
     } catch (e) {
       if (e instanceof CquSsoError && e.code === "TGT_EXPIRED") {
         await this.ctx.storage.setAlarm(Date.now());
