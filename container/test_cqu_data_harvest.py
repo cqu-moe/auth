@@ -146,3 +146,41 @@ def test_parse_recipe_fetch_method_defaults_to_get():
     r = m.parse_harvest_recipe(
         _good() | {"fetch": [{"url": "https://my.cqu.edu.cn/x"}]})
     assert r["fetch"][0]["method"] == "GET"
+
+
+# --- capture_match: resp.url 命中哪个 capture pattern(子串匹配,返回首个命中或 None) ---
+
+def test_capture_match_hits_substring():
+    pats = ["student/my-table-detail", "session/info-detail"]
+    assert m.capture_match(
+        "https://my.cqu.edu.cn/timetable/class/timetable/student/my-table-detail?CAqWHAeT=x",
+        pats) == "student/my-table-detail"
+
+
+def test_capture_match_returns_first_on_overlap():
+    # 多 pattern 都命中时返回列表里靠前的(确定性)。
+    assert m.capture_match("https://my.cqu.edu.cn/a/b/c", ["a/b", "b/c"]) == "a/b"
+
+
+def test_capture_match_no_hit_returns_none():
+    assert m.capture_match("https://my.cqu.edu.cn/other", ["x/y"]) is None
+
+
+def test_capture_match_empty_patterns_none():
+    assert m.capture_match("https://my.cqu.edu.cn/a", []) is None
+
+
+# --- all_captures_present: 已收集的 capture pattern 集是否覆盖期望集(等齐判定) ---
+
+def test_all_captures_present_true_when_covered():
+    collected = {"a/b", "c/d"}
+    assert m.all_captures_present(collected, ["a/b", "c/d"]) is True
+
+
+def test_all_captures_present_false_when_missing():
+    assert m.all_captures_present({"a/b"}, ["a/b", "c/d"]) is False
+
+
+def test_all_captures_present_true_for_empty_expected():
+    # 无 capture 期望 → 立即"齐"(只跑 fetch[])。
+    assert m.all_captures_present(set(), []) is True

@@ -94,3 +94,22 @@ def parse_harvest_recipe(body: dict) -> dict:
         fetch.append({"method": "GET", "url": url})
 
     return {"navUrl": nav_url, "capture": list(capture), "fetch": fetch}
+
+
+def capture_match(resp_url: str, patterns: list[str]) -> str | None:
+    """resp_url 命中的第一个 capture pattern(子串 in 匹配),无命中返回 None。
+
+    对齐 spike:CAqWHAeT 令牌作 URL 参数注入,故按"端点路径子串"匹配而非全等。
+    返回命中的 pattern 本身(作 captures dict 的去重 key)。纯函数。
+    """
+    if not resp_url:
+        return None
+    for pat in patterns:
+        if pat in resp_url:
+            return pat
+    return None
+
+
+def all_captures_present(collected: set[str], expected: list[str]) -> bool:
+    """已收集的 pattern 集是否覆盖全部期望 pattern(等齐判定,供主体决定提前结束盲等)。"""
+    return all(p in collected for p in expected)
