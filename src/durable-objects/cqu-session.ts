@@ -695,7 +695,25 @@ export class CquSessionDO extends DurableObject<Env> {
       throw new CquSsoError("SESSION_INACTIVE", "CQU session needs re-login (no storage state)");
     }
 
-    // ① host 红线(纵深): navUrl + 每个 fetch.url 必须精确 my.cqu.edu.cn(capture 是响应过滤
+    // ① recipe SHAPE 红线(纵深, 镜像节点侧 parse_harvest_recipe): TS 类型只在编译期管用,
+    // JS/RPC 调用方可绕过传入畸形 capture/fetch。畸形若漏到下面的记账块 → 白嫖限流槽 + 节点回
+    // 400(→ harvestViaNode 归 transient WAF_CHALLENGE, 误导调用方重试)或抛 TypeError(→ 500
+    // INTERNAL_ERROR, 伪装成服务器崩)。这些都是客户端契约错, 须在记账**之前**直拒 → 400, 不耗配额。
+    //   · capture: 必须是 list[非空 string](URL 子串模式; 允许空 list)。
+    //   · fetch:   必须是 list[object{ url:string, method?:string }](允许空 list; host/method 见下)。
+    const capture = arg.recipe.capture;
+    if (!Array.isArray(capture) || capture.some((p) => typeof p !== "string" || p.length === 0)) {
+      throw new CquSsoError("INVALID_HARVEST_URL", "capture must be an array of non-empty strings");
+    }
+    const fetchList = arg.recipe.fetch;
+    if (
+      !Array.isArray(fetchList) ||
+      fetchList.some((f) => typeof f !== "object" || f === null || typeof f.url !== "string")
+    ) {
+      throw new CquSsoError("INVALID_HARVEST_URL", "fetch must be an array of objects with a string url");
+    }
+
+    // ② host 红线(纵深): navUrl + 每个 fetch.url 必须精确 my.cqu.edu.cn(capture 是响应过滤
     // 模式、不出站, 不构成 SSRF 面, 不校验)。任一不过 → INVALID_HARVEST_URL。
     let navUrl: string;
     try {
@@ -703,7 +721,7 @@ export class CquSessionDO extends DurableObject<Env> {
     } catch {
       throw new CquSsoError("INVALID_HARVEST_URL", "非法的 navUrl");
     }
-    for (const f of arg.recipe.fetch ?? []) {
+    for (const f of fetchList) {
       // method 红线(纵深, 对齐节点侧 parse_harvest_recipe): in-page fetch 公开契约只许 GET。
       // 非 GET 在此早抛 400(客户端契约错), **先于**下面的限流记账 —— 否则非 GET 会白嫖一个
       // 限流槽, 再被节点拒成 400 → harvestViaNode 把 4xx(非 409)归 transient(WAF_CHALLENGE/500)
@@ -718,7 +736,7 @@ export class CquSessionDO extends DurableObject<Env> {
       }
     }
 
-    // ② D6 限频(同取票, per-user + per-client; harvest 是真出数动作, 计入同一窗口)。
+    // ③ D6 限频(同取票, per-user + per-client; harvest 是真出数动作, 计入同一窗口)。
     const now = Date.now();
     const clientId = arg.clientId ?? null;
     const stored = (await this.ctx.storage.get<StMintRecord[]>("stMintLog")) ?? [];
@@ -730,7 +748,7 @@ export class CquSessionDO extends DurableObject<Env> {
       throw new CquSsoError("RATE_LIMITED", "取数过于频繁,请稍后再试");
     }
 
-    // ③ 记账(镜像取票: 铸前记录, 对失败死循环也鲁棒)。host 取 navUrl host, broad=false。
+    // ④ 记账(镜像取票: 铸前记录, 对失败死循环也鲁棒)。host 取 navUrl host, broad=false。
     const host = new URL(navUrl).hostname;
     this.state.lastRequestedAt = now;
     await this.putStateGuarded(this.state);
@@ -743,7 +761,7 @@ export class CquSessionDO extends DurableObject<Env> {
       );
     }
 
-    // ④ 出站节点 /data-harvest(套 NODE_DEADLINE_MS)。409→TGT_EXPIRED 顺手 setAlarm 快自愈。
+    // ⑤ 出站节点 /data-harvest(套 NODE_DEADLINE_MS)。409→TGT_EXPIRED 顺手 setAlarm 快自愈。
     let result: { captures: HarvestCapture[]; fetches: HarvestFetch[] };
     try {
       result = await this.harvestViaNode(this.state.storageState, arg.recipe);
@@ -754,7 +772,7 @@ export class CquSessionDO extends DurableObject<Env> {
       throw e;
     }
 
-    // ⑤ 审计(与取票同 schema; source 入白名单)。绝不记录 captures/fetches 内容。
+    // ⑥ 审计(与取票同 schema; source 入白名单)。绝不记录 captures/fetches 内容。
     console.log(
       JSON.stringify(
         buildStMintAudit({

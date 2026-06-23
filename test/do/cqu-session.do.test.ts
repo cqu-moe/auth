@@ -380,6 +380,51 @@ describe("data-harvest action", () => {
     expect(await readStMintLog(stub)).toHaveLength(0);
   });
 
+  it("capture not an array → INVALID_HARVEST_URL (400) before accounting, no node call, no ST mint", async () => {
+    const stub = freshStub("harvest-capture-notarray");
+    await seedSession(stub, { status: "active" });
+    const spy = spyLoginNode({ "/data-harvest": async () => Response.json({}) });
+
+    const res = await stub.fetch("http://do/data-harvest?clientId=calendar&source=rpc", {
+      method: "POST",
+      body: JSON.stringify({ ...recipe, capture: "not-a-list" }),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code?: string }).code).toBe("INVALID_HARVEST_URL");
+    expect(spy).not.toHaveBeenCalled();
+    expect(await readStMintLog(stub)).toHaveLength(0);
+  });
+
+  it("capture with a non-string entry → INVALID_HARVEST_URL (400), no node call, no ST mint", async () => {
+    const stub = freshStub("harvest-capture-nonstring");
+    await seedSession(stub, { status: "active" });
+    const spy = spyLoginNode({ "/data-harvest": async () => Response.json({}) });
+
+    const res = await stub.fetch("http://do/data-harvest?clientId=calendar&source=rpc", {
+      method: "POST",
+      body: JSON.stringify({ ...recipe, capture: ["ok/pat", 123] }),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code?: string }).code).toBe("INVALID_HARVEST_URL");
+    expect(spy).not.toHaveBeenCalled();
+    expect(await readStMintLog(stub)).toHaveLength(0);
+  });
+
+  it("fetch entry missing url → INVALID_HARVEST_URL (400) before accounting, no node call, no ST mint", async () => {
+    const stub = freshStub("harvest-fetch-nourl");
+    await seedSession(stub, { status: "active" });
+    const spy = spyLoginNode({ "/data-harvest": async () => Response.json({}) });
+
+    const res = await stub.fetch("http://do/data-harvest?clientId=calendar&source=rpc", {
+      method: "POST",
+      body: JSON.stringify({ ...recipe, fetch: [{ method: "GET" }] }),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code?: string }).code).toBe("INVALID_HARVEST_URL");
+    expect(spy).not.toHaveBeenCalled();
+    expect(await readStMintLog(stub)).toHaveLength(0);
+  });
+
   it("node 409 → TGT_EXPIRED (409), arms immediate alarm, no sync relogin", async () => {
     const stub = freshStub("harvest-409");
     await seedSession(stub, { status: "active" });
