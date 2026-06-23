@@ -57,3 +57,92 @@ def test_host_rejects_non_ascii():
 def test_host_rejects_empty_and_garbage():
     assert m.is_harvest_host_allowed("") is False
     assert m.is_harvest_host_allowed("@@bad@@") is False
+
+
+import pytest
+
+
+# --- parse_harvest_recipe: 校验 + 规范化 {navUrl, capture[], fetch[]} ---
+# navUrl + 每个 fetch[].url 必须过 host 白名单;fetch[].method 仅 GET;capture[] 是非空
+# URL 子串模式(对齐 page.on('response') 的 `pattern in resp.url` 匹配,见 harvest 主体)。
+
+def _good():
+    return {
+        "navUrl": "https://my.cqu.edu.cn/workspace/curriculum",
+        "capture": [
+            "timetable/class/timetable/student/my-table-detail",
+            "resourceapi/session/info-detail",
+        ],
+        "fetch": [
+            {"method": "GET",
+             "url": "https://my.cqu.edu.cn/api/exam/examTask/get-student-exam-list"},
+        ],
+    }
+
+
+def test_parse_recipe_ok_returns_normalized():
+    r = m.parse_harvest_recipe(_good())
+    assert r["navUrl"] == "https://my.cqu.edu.cn/workspace/curriculum"
+    assert r["capture"] == [
+        "timetable/class/timetable/student/my-table-detail",
+        "resourceapi/session/info-detail",
+    ]
+    assert r["fetch"] == [
+        {"method": "GET",
+         "url": "https://my.cqu.edu.cn/api/exam/examTask/get-student-exam-list"},
+    ]
+
+
+def test_parse_recipe_allows_empty_capture_and_fetch():
+    r = m.parse_harvest_recipe({"navUrl": _good()["navUrl"], "capture": [], "fetch": []})
+    assert r["capture"] == [] and r["fetch"] == []
+
+
+def test_parse_recipe_missing_navurl_raises():
+    with pytest.raises(m.HarvestRecipeError):
+        m.parse_harvest_recipe({"capture": [], "fetch": []})
+
+
+def test_parse_recipe_navurl_host_not_allowed_raises():
+    bad = _good() | {"navUrl": "https://lib.cqu.edu.cn/x"}
+    with pytest.raises(m.HarvestRecipeError):
+        m.parse_harvest_recipe(bad)
+
+
+def test_parse_recipe_fetch_url_host_not_allowed_raises():
+    bad = _good() | {"fetch": [{"method": "GET", "url": "https://evil.com/x"}]}
+    with pytest.raises(m.HarvestRecipeError):
+        m.parse_harvest_recipe(bad)
+
+
+def test_parse_recipe_fetch_non_get_raises():
+    # POST in-page fetch 注入式拿不到 VM 令牌(412/400),且写专守 —— 一律拒,只允许 GET。
+    bad = _good() | {"fetch": [{"method": "POST",
+                                "url": "https://my.cqu.edu.cn/x"}]}
+    with pytest.raises(m.HarvestRecipeError):
+        m.parse_harvest_recipe(bad)
+
+
+def test_parse_recipe_fetch_missing_url_raises():
+    bad = _good() | {"fetch": [{"method": "GET"}]}
+    with pytest.raises(m.HarvestRecipeError):
+        m.parse_harvest_recipe(bad)
+
+
+def test_parse_recipe_capture_must_be_nonempty_string():
+    with pytest.raises(m.HarvestRecipeError):
+        m.parse_harvest_recipe(_good() | {"capture": [""]})
+    with pytest.raises(m.HarvestRecipeError):
+        m.parse_harvest_recipe(_good() | {"capture": [123]})
+
+
+def test_parse_recipe_capture_not_list_raises():
+    with pytest.raises(m.HarvestRecipeError):
+        m.parse_harvest_recipe(_good() | {"capture": "not-a-list"})
+
+
+def test_parse_recipe_fetch_method_defaults_to_get():
+    # method 省略默认 GET(便于调用方少写)。
+    r = m.parse_harvest_recipe(
+        _good() | {"fetch": [{"url": "https://my.cqu.edu.cn/x"}]})
+    assert r["fetch"][0]["method"] == "GET"

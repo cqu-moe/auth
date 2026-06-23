@@ -45,3 +45,52 @@ def is_harvest_host_allowed(url: str) -> bool:
     if any(ch not in "abcdefghijklmnopqrstuvwxyz0123456789.-" for ch in host):
         return False
     return host == HARVEST_HOST
+
+
+class HarvestRecipeError(Exception):
+    """harvest 配方(navUrl/capture/fetch)非法 —— host 越界 / 缺字段 / method 非 GET。
+
+    server.py 据此回 400(客户端契约错);message 只含红线类型,不回显入参原文。
+    """
+
+
+def parse_harvest_recipe(body: dict) -> dict:
+    """校验 + 规范化 {navUrl, capture[], fetch[]}。非法抛 HarvestRecipeError。
+
+    · navUrl: 必填,host 必须过 is_harvest_host_allowed。
+    · capture: list[str],每项非空字符串(URL 子串模式,page.on('response') 用 `in` 匹配);
+               允许空 list。
+    · fetch: list[{method?:"GET", url:str}],method 省略默认 GET、仅允许 GET;url 必须过
+             host 白名单;允许空 list。
+    纯函数,便于单测。返回的 dict 字段均已规范化,可直接喂给 harvest 主体。
+    """
+    if not isinstance(body, dict):
+        raise HarvestRecipeError("recipe must be an object")
+
+    nav_url = body.get("navUrl")
+    if not isinstance(nav_url, str) or not is_harvest_host_allowed(nav_url):
+        raise HarvestRecipeError("navUrl missing or host not allowed")
+
+    capture = body.get("capture", [])
+    if not isinstance(capture, list):
+        raise HarvestRecipeError("capture must be a list")
+    for pat in capture:
+        if not isinstance(pat, str) or not pat:
+            raise HarvestRecipeError("capture entries must be non-empty strings")
+
+    raw_fetch = body.get("fetch", [])
+    if not isinstance(raw_fetch, list):
+        raise HarvestRecipeError("fetch must be a list")
+    fetch: list[dict] = []
+    for f in raw_fetch:
+        if not isinstance(f, dict):
+            raise HarvestRecipeError("fetch entries must be objects")
+        method = (f.get("method") or "GET").upper()
+        if method != "GET":
+            raise HarvestRecipeError("fetch method must be GET")
+        url = f.get("url")
+        if not isinstance(url, str) or not is_harvest_host_allowed(url):
+            raise HarvestRecipeError("fetch url missing or host not allowed")
+        fetch.append({"method": "GET", "url": url})
+
+    return {"navUrl": nav_url, "capture": list(capture), "fetch": fetch}
