@@ -89,8 +89,17 @@ def parse_harvest_recipe(body: dict) -> dict:
     for f in raw_fetch:
         if not isinstance(f, dict):
             raise HarvestRecipeError("fetch entries must be objects")
-        method = (f.get("method") or "GET").upper()
-        if method != "GET":
+        raw_method = f.get("method")
+        # method 缺省/None → 默认 GET;给定值必须是 str(防非字符串走到 .upper() 抛
+        # AttributeError → server.py 回 500 而非契约错的 400)。bool 是 int 子类,
+        # isinstance(True, str) 已为 False,会一并落入此 400 分支。
+        if raw_method is None:
+            method = "GET"
+        elif isinstance(raw_method, str):
+            method = raw_method.upper()
+        else:
+            raise HarvestRecipeError("fetch method must be GET")
+        if method != "GET":  # 含 "" / "post" 等:非 GET 一律拒(不再被 `or` 静默吞成 GET)
             raise HarvestRecipeError("fetch method must be GET")
         url = f.get("url")
         if not isinstance(url, str) or not is_harvest_host_allowed(url):

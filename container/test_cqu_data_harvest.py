@@ -148,6 +148,37 @@ def test_parse_recipe_fetch_method_defaults_to_get():
     assert r["fetch"][0]["method"] == "GET"
 
 
+def test_parse_recipe_fetch_method_none_defaults_to_get():
+    # method 显式 None 也默认 GET(与省略同义)。
+    r = m.parse_harvest_recipe(
+        _good() | {"fetch": [{"method": None, "url": "https://my.cqu.edu.cn/x"}]})
+    assert r["fetch"][0]["method"] == "GET"
+
+
+def test_parse_recipe_fetch_method_lowercase_get_ok():
+    # "get" 大小写不敏感,uppercase 后等于 GET。
+    r = m.parse_harvest_recipe(
+        _good() | {"fetch": [{"method": "get", "url": "https://my.cqu.edu.cn/x"}]})
+    assert r["fetch"][0]["method"] == "GET"
+
+
+@pytest.mark.parametrize("bad_method", [42, True, ["GET"], {"m": "GET"}])
+def test_parse_recipe_fetch_non_string_method_raises(bad_method):
+    # 非字符串 method(数字/布尔/list/dict)绝不能走到 .upper() 抛 AttributeError(→ 500);
+    # 必须在 shape 校验阶段抛 HarvestRecipeError(让 server.py 回 400)。
+    bad = _good() | {"fetch": [{"method": bad_method,
+                                "url": "https://my.cqu.edu.cn/x"}]}
+    with pytest.raises(m.HarvestRecipeError):
+        m.parse_harvest_recipe(bad)
+
+
+def test_parse_recipe_fetch_empty_string_method_raises():
+    # "" 不是合法 method,旧代码用 `or "GET"` 会静默吞成 GET;现应判非 GET → 拒。
+    bad = _good() | {"fetch": [{"method": "", "url": "https://my.cqu.edu.cn/x"}]}
+    with pytest.raises(m.HarvestRecipeError):
+        m.parse_harvest_recipe(bad)
+
+
 # --- capture_match: resp.url 命中哪个 capture pattern(子串匹配,返回首个命中或 None) ---
 
 def test_capture_match_hits_substring():
