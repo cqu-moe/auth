@@ -167,25 +167,40 @@ class HarvestTransientError(Exception):
     """
 
 
+def _has_2xx(statuses: list[int]) -> bool:
+    """fetch_statuses 里是否有任一 2xx(in-page GET 真拿到数据)。失败 fetch 记 status 0, 非 2xx。"""
+    return any(200 <= s < 300 for s in statuses)
+
+
 def classify_harvest_outcome(
-    captured_keys: set[str], patterns: list[str], page_content: str, page_url: str
+    captured_keys: set[str],
+    patterns: list[str],
+    page_content: str,
+    page_url: str,
+    fetch_statuses: list[int] | None = None,
 ) -> str:
-    """capture-wait 循环后的三态判定(纯函数, 便于单测): "ok" / "expired" / "transient"。
+    """navigate + capture-wait + fetch[] 后的三态判定(纯函数, 便于单测): "ok"/"expired"/"transient"。
 
-    · 期望 capture 全齐(all_captures_present)→ "ok"(照常返回 captures/fetches); 涵盖
-      patterns 为空(fetch-only 配方)→ 立即 ok, 不看页面。
-    · 期望缺 + 页面像 CAS 登录页(is_expired_harvest)→ "expired"(主体抛 HarvestExpiredError → 409)。
-    · 期望缺 + 页面非登录页 → "transient"(主体抛 HarvestTransientError → 502 退避)。
+    对 capture 配方与 **fetch-only 配方(patterns 为空)** 都鲁棒(P2 修复):fetch-only 时旧逻辑
+    "patterns 空即 ok" 会把"goto 超时/会话过期(重定向 CAS)/fetch 全 401"也当 ok 空成功返回,
+    DO 永不触发重登、调用方误以为"今天没课"。现按以下顺序判:
 
-    is_expired_harvest 已对 captured 非空一律返回 False; 这里在"全齐"分支先短路, 故只在
-    "缺 capture"时才查页面, 传入的 captured 仅用作过期判定(全齐时不会走到)。
+    1. **永远先判过期**: is_expired_harvest(captured, page_content, page_url) 为真 → "expired"
+       (落回 CAS 登录页/SSO host 一律过期, 不论是否期望 capture; captured 非空时该函数恒 False)。
+    2. **capture 配方**(patterns 非空): 全齐 → "ok"; 否则 → "transient"(瞬态退避)。
+    3. **fetch-only 配方**(patterns 为空): 至少一个 fetch 返 2xx → "ok"(真拿到数据);
+       否则(空列表/全部非 2xx/全失败)→ "transient"(没拿到任何可用数据, 退避而非假成功)。
+
+    fetch_statuses 为各 in-page fetch 的 HTTP status(失败记 0); 仅 fetch-only 分支用到,
+    capture 配方传 None/省略即可(保持既有调用与单测不变)。
     """
-    if all_captures_present(captured_keys, patterns):
-        return "ok"
     captured = {k: True for k in captured_keys}  # is_expired_harvest 只看 truthy/empty
     if is_expired_harvest(captured, page_content, page_url):
         return "expired"
-    return "transient"
+    if patterns:
+        return "ok" if all_captures_present(captured_keys, patterns) else "transient"
+    # fetch-only: 只有至少一个 2xx 才算真成功, 否则瞬态退避。
+    return "ok" if _has_2xx(fetch_statuses or []) else "transient"
 
 
 # 导航后等页面有机 fire 完 capture 的盲等上限(ms):课表 POST(my-table-detail)+ 学期
@@ -255,22 +270,9 @@ async def harvest(state: dict, recipe: dict) -> dict:
             await page.wait_for_timeout(CAPTURE_POLL_MS)
             waited += CAPTURE_POLL_MS
 
-        # capture-wait 后三态闸(classify_harvest_outcome): 期望 capture 没到齐时绝不能当 ok 空
-        # harvest 返回(经 DO/RPC 报 200 假成功)。仅在期望缺时才 await page.content() 判页面(避免
-        # happy path 拉整页开销):
-        #   · 全齐(或 capture 期望为空)→ "ok", 照常落 fetch[] 并返回。
-        #   · 缺 + 落回 CAS 登录页 → "expired" → HarvestExpiredError(server 回 409 → DO TGT_EXPIRED → 重登)。
-        #   · 缺 + 非登录页(goto 超时/网络/非 CAS 瑞数挑战页)→ "transient" → HarvestTransientError
-        #     (server 回 502 → 上游退避重试), 而非伪装成 ok 空成功让会话静默失效。
-        if not all_captures_present(set(captured), patterns):
-            outcome = classify_harvest_outcome(
-                set(captured), patterns, await page.content(), page.url)
-            if outcome == "expired":
-                raise HarvestExpiredError("navUrl redirected to CAS login (session expired)")
-            raise HarvestTransientError(
-                "expected captures missing (navigation/WAF/network transient)")
-
         # fetch[] 逐个 in-page GET(同源、带活 P、读豁免)。在页面上下文里 fetch,拿 VM 令牌豁免。
+        # fetch-only 配方靠这些 fetch 的 status 判 ok/transient(见下 classify_harvest_outcome),
+        # 故必须在三态闸前先跑完(失败/超时记 status 0)。
         fetches: list[dict] = []
         for f in fetch_list:
             url = f["url"]
@@ -292,6 +294,24 @@ async def harvest(state: dict, recipe: dict) -> dict:
                 fetches.append({"url": url, "status": result["status"], "body": result["body"]})
             except Exception:
                 fetches.append({"url": url, "status": 0, "body": ""})
+
+        # navigate + capture-wait + fetch[] 后三态闸(classify_harvest_outcome): 绝不能把会话过期/
+        # 导航失败/fetch 全 401 当 ok 空 harvest 返回(经 DO/RPC 报 200 假成功)。对 capture 配方
+        # **和 fetch-only 配方(capture 期望为空)都鲁棒** —— 后者旧逻辑"patterns 空即 ok"会让会话
+        # 静默失效(P2)。仅在无成功 capture 时才 await page.content()(避免 happy path 拉整页开销):
+        #   · capture 全齐 / fetch-only 有 2xx → "ok", 照常返回 captures+fetches。
+        #   · 落回 CAS 登录页/SSO host(永远先判)→ "expired" → HarvestExpiredError(server 409 → DO 重登)。
+        #   · 其余没拿到可用数据(capture 缺且非登录页 / fetch-only 全非 2xx)→ "transient"
+        #     → HarvestTransientError(server 502 → 上游退避), 而非伪装成 ok 空成功。
+        fetch_statuses = [f["status"] for f in fetches]
+        page_content = "" if captured else await page.content()
+        outcome = classify_harvest_outcome(
+            set(captured), patterns, page_content, page.url, fetch_statuses)
+        if outcome == "expired":
+            raise HarvestExpiredError("navUrl redirected to CAS login (session expired)")
+        if outcome == "transient":
+            raise HarvestTransientError(
+                "no usable harvest data (navigation/WAF/network/session transient)")
 
         captures = [captured[p] for p in patterns if p in captured]
         return {"captures": captures, "fetches": fetches}

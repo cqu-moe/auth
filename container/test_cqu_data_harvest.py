@@ -272,11 +272,53 @@ def test_classify_outcome_ok_when_all_captures_present():
     ) == "ok"
 
 
-def test_classify_outcome_ok_when_empty_capture_list():
-    # capture 期望为空(fetch-only 配方)→ 立即 ok, 不看页面。
+def test_classify_outcome_ok_when_fetch_only_has_2xx():
+    # fetch-only 配方(capture 期望为空): 至少一个 fetch 返 2xx → 合法 ok(真拿到数据)。
     assert m.classify_harvest_outcome(
-        set(), [], "<html>anything</html>", "https://my.cqu.edu.cn/x"
+        set(), [], "<html>anything</html>", "https://my.cqu.edu.cn/x",
+        fetch_statuses=[200],
     ) == "ok"
+
+
+def test_classify_outcome_ok_when_fetch_only_mixed_with_one_2xx():
+    # fetch-only: 部分 fetch 非 2xx 但只要有一个 2xx → ok(部分端点失败不否定整体成功)。
+    assert m.classify_harvest_outcome(
+        set(), [], "<html>anything</html>", "https://my.cqu.edu.cn/x",
+        fetch_statuses=[401, 200, 0],
+    ) == "ok"
+
+
+def test_classify_outcome_transient_when_fetch_only_all_non_2xx_normal_page():
+    # fetch-only + 全部 fetch 非 2xx(401/0/...) + 正常页(非登录) → transient(瞬态退避, 502),
+    # 绝不当 ok 空成功(旧代码 patterns 空即 ok 会让会话静默失效)。
+    assert m.classify_harvest_outcome(
+        set(), [], "<html>normal page no markers</html>", "https://my.cqu.edu.cn/x",
+        fetch_statuses=[401, 0],
+    ) == "transient"
+
+
+def test_classify_outcome_transient_when_fetch_only_no_fetches_normal_page():
+    # fetch-only + 没有任何成功 fetch(空列表/全失败) + 正常页 → transient(没拿到任何可用数据)。
+    assert m.classify_harvest_outcome(
+        set(), [], "<html>normal page no markers</html>", "https://my.cqu.edu.cn/x",
+        fetch_statuses=[],
+    ) == "transient"
+
+
+def test_classify_outcome_expired_when_fetch_only_all_non_2xx_login_page():
+    # fetch-only + 全部 fetch 非 2xx + 落回 CAS 登录页 → expired(409 重登), 先于 transient 判过期。
+    assert m.classify_harvest_outcome(
+        set(), [], "x login-page-flowkey y", "https://my.cqu.edu.cn/workspace/curriculum",
+        fetch_statuses=[401, 0],
+    ) == "expired"
+
+
+def test_classify_outcome_expired_when_fetch_only_sso_host():
+    # fetch-only + 落到 SSO host(被重定向到登录) → expired(即便有 fetch 也按过期处理)。
+    assert m.classify_harvest_outcome(
+        set(), [], "", "https://sso.cqu.edu.cn/login?service=x",
+        fetch_statuses=[401],
+    ) == "expired"
 
 
 def test_classify_outcome_expired_when_missing_and_login_markers():
