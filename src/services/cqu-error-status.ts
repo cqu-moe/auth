@@ -11,6 +11,9 @@
 
 const CODE_TO_STATUS: Record<string, number> = {
   INVALID_SERVICE_URL: 400,
+  // organic harvest 的 host 越界(navUrl/fetch.url 非精确 my.cqu.edu.cn): 同 INVALID_SERVICE_URL
+  // 一类客户端输入错误 → 400, 而非 fallback 500(伪装成服务器崩溃)。
+  INVALID_HARVEST_URL: 400,
   UNKNOWN_SERVICE: 400,
   QUICKLOGIN_NOT_ENABLED: 403,
   SESSION_INACTIVE: 409,

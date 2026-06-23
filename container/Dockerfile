@@ -32,7 +32,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && patchright install chromium
 
-COPY server.py cqu_login.py qg_proxy.py cqu_ticket.py cqu_ticket_browser.py cqu_keepalive.py ./
+COPY server.py cqu_login.py qg_proxy.py cqu_ticket.py cqu_ticket_browser.py cqu_keepalive.py cqu_data_harvest.py ./
 
 EXPOSE 8080
 # tini 作 PID 1(-- 后接真实命令): 转发信号 + reap 临时 chromium 的孤儿/僵尸进程。
