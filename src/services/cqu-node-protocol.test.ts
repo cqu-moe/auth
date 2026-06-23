@@ -13,6 +13,8 @@ import {
   STORAGE_STATE_WARN_BYTES,
   shouldAbandonKeepaliveWriteback,
   buildStMintAudit,
+  classifyNodeHarvestResponse,
+  type NodeHarvestBody,
 } from "./cqu-node-protocol";
 
 function state(
@@ -437,5 +439,41 @@ describe("buildStMintAudit", () => {
       err: errStr,
     };
     expect(JSON.stringify(built)).toBe(JSON.stringify(legacy));
+  });
+});
+
+describe("classifyNodeHarvestResponse", () => {
+  const okBody: NodeHarvestBody = {
+    ok: true,
+    captures: [{ url: "u", status: 200, contentType: "application/json", body: "{}" }],
+    fetches: [{ url: "f", status: 200, body: "[]" }],
+  };
+
+  it("200 + ok → ok with captures/fetches", () => {
+    const c = classifyNodeHarvestResponse(200, okBody);
+    expect(c.kind).toBe("ok");
+    expect(c.captures?.[0].status).toBe(200);
+    expect(c.fetches?.[0].body).toBe("[]");
+  });
+
+  it("409 → expired (session needs reauth)", () => {
+    expect(classifyNodeHarvestResponse(409, { ok: false }).kind).toBe("expired");
+  });
+
+  it("502 → transient", () => {
+    expect(classifyNodeHarvestResponse(502, { ok: false }).kind).toBe("transient");
+  });
+
+  it("non-JSON (null body) → transient", () => {
+    expect(classifyNodeHarvestResponse(200, null).kind).toBe("transient");
+  });
+
+  it("200 but ok=false → transient", () => {
+    expect(classifyNodeHarvestResponse(200, { ok: false }).kind).toBe("transient");
+  });
+
+  it("detail never echoes raw node error", () => {
+    const c = classifyNodeHarvestResponse(502, { ok: false, error: "cookie=SECRET" } as NodeHarvestBody);
+    expect(JSON.stringify(c)).not.toContain("SECRET");
   });
 });

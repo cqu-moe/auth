@@ -95,6 +95,61 @@ export function classifyNodeTicketResponse(
   };
 }
 
+// ── data-harvest 节点出站协议(organic harvest) ─────────────────────────────
+// 单条 capture/fetch 结果(对齐 container/cqu_data_harvest.harvest 返回结构)。
+export interface HarvestCapture {
+  url: string;
+  status: number;
+  contentType: string;
+  body: string;
+}
+export interface HarvestFetch {
+  url: string;
+  status: number;
+  body: string;
+}
+
+// 节点 /data-harvest 的 JSON body 契约(字段全可选, 防御性解析)。
+export interface NodeHarvestBody {
+  ok?: boolean;
+  captures?: HarvestCapture[];
+  fetches?: HarvestFetch[];
+  error?: string;
+}
+
+export interface NodeHarvestClassification {
+  kind: NodeTicketKind; // 复用 "ok" | "expired" | "transient"
+  captures?: HarvestCapture[];
+  fetches?: HarvestFetch[];
+  detail?: string;
+}
+
+/**
+ * 把节点 /data-harvest 的 (status, body) 映射为 {kind, captures?, fetches?, detail?}。
+ * 判定顺序: 409 优先(会话失效, 交 needs_reauth/重登) → 非 JSON(null body)→ ok → 其余 transient。
+ * 脱敏: detail 只保留 status 锚点, 绝不回显节点 raw error(可能含 state/cookie 片段)。
+ */
+export function classifyNodeHarvestResponse(
+  status: number,
+  body: NodeHarvestBody | null
+): NodeHarvestClassification {
+  if (status === 409) {
+    return { kind: "expired", detail: "node /data-harvest 409" };
+  }
+  if (body === null) {
+    return { kind: "transient", detail: `non-JSON (status=${status})` };
+  }
+  const httpOk = status >= 200 && status < 300;
+  if (httpOk && body.ok) {
+    return {
+      kind: "ok",
+      captures: body.captures ?? [],
+      fetches: body.fetches ?? [],
+    };
+  }
+  return { kind: "transient", detail: `not ok (status=${status})` };
+}
+
 /**
  * 把分类结果落成 DO 既有语义: ok → 返回 ticket; expired → CquSsoError("TGT_EXPIRED");
  * transient → CquSsoError("WAF_CHALLENGE")。统一在此抛, 让 mintServiceTicketViaNode 只调一处。
