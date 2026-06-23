@@ -77,6 +77,23 @@ else { const st = r.ticket /* ST-... */ }
 > - `getCaps({ clientId, clientSecret, userId }) → null | { calendar }`(**离线**读权益:无 cookie/session,直查 entitlements 表,只返回你这片 caps;须验 `client_secret`,见 §1.3)。
 > - `getCquTicket({ clientId, clientSecret, service?, serviceUrl?, userId }) → { ticket } | { error }`。
 >   取票全程经 auth 的 DO 万能闸:host 校验 + 用户 `cqu.quicklogin` opt-in(仅 serviceUrl 广域路径)+ 限流 + 审计。
+> - `cquHarvest({ clientId, clientSecret, userId, navUrl, capture?, fetch? }) → { captures, fetches } | { error }`。
+>   **organic harvest 批量取数原语**(my.cqu.edu.cn 全站瑞数化后,后端纯 HTTP POST 取课表被
+>   412 专守;唯一过墙 = 让真前端在 auth 已登录浏览器里有机 fire 请求、auth 截获响应)。
+>   auth 在用户已登录 + 已过瑞数的临时浏览器里 `navigate navUrl`(页面自动 fire 课表/学期等
+>   有机请求)+ 截获 url 命中 `capture[]` 子串模式的响应 + 对 `fetch[]`(仅 GET)跑同源 in-page
+>   fetch,一把返回。
+>   - 入参:`navUrl`(必填)/`fetch[].url` 的 host **必须精确为 `my.cqu.edu.cn`**(比取票
+>     `*.cqu.edu.cn` 更紧,防开放代理 SSRF);`fetch[].method` 仅 `GET`;`capture[]` 是 URL 子串
+>     模式(`pattern in resp.url`)。
+>   - 出参:`captures: [{ url, status, contentType, body }]`(按 `capture[]` 顺序);
+>     `fetches: [{ url, status, body }]`(按 `fetch[]` 顺序);`body` 是文本,JSON 由调用方解析。
+>   - 鉴权:同 `getCquTicket` —— M-6 `client_secret` 校验 + 用户 CQU 会话 `active`(经 DO 万能闸:
+>     host 白名单 + 同款 per-user/per-client 限流 + 审计 + `needs_reauth` 熔断);**不做 client-scope
+>     检查**(通用原语,业务级权益门禁在调用方侧)。
+>   - 错误码(`{ error }`):`INVALID_CLIENT`(secret 错/client 禁用)| `NEEDS_REAUTH`(会话需重绑)
+>     | `SESSION_INACTIVE` | `RATE_LIMITED` | `INVALID_HARVEST_URL`(host 越界)| `TGT_EXPIRED`
+>     (会话失效,已排即时重登)| `WAF_CHALLENGE`(瑞数挑战/容器超时,瞬态,调用方退避)。
 
 ### 1.3 离线 / 后台任务
 
@@ -98,6 +115,26 @@ if (!caps?.calendar?.sync) { /* 无权益/未开通 → 停同步(fail-closed) *
 - `null` = 用户不存在 / 无任何权益行 → 调用方按**无权益 fail-closed**(硬撤销 = 删光权益行即天然停同步、停公开链接)。
 - 同样**须验 `client_secret`(M-6)**:`getCaps` 是按任意 `userId` 枚举的原语,无 per-user 凭证(不同于 `verifySession` 以用户 cookie 为凭证、只能查持有者),不验则任一被绑定 Worker 可扫全员权益画像。
 - ⚠️ **认证失败也返回 `null`**(clientId 不存在 / secret 错 / client 被禁用,opaque 刻意不可区分于"无权益")。传错凭证 → **全员被判无权益、无显式报错**。接入时务必确认 clientId/secret 正确(可用同套凭证调 `getCquTicket` 联调验证)。
+
+### 1.4 organic harvest 取数(my.cqu.edu.cn 全站瑞数化后)
+
+`my.cqu.edu.cn` 全站上瑞数 WAF 后,后端纯 HTTP POST 取课表一律被 412 专守 —— **唯一过墙路径 = 让真前端在 auth 已登录浏览器里有机 fire 请求、auth 截获响应**。schedule 等子系统不再自己直打教务 API,改调 `cquHarvest`(签名/host 约束/限流/错误码见 §1.2):auth 在用户已登录 + 已过瑞数的临时浏览器里 `navigate navUrl`,页面自动 fire 课表/学期等有机请求,auth 截获命中 `capture[]` 子串模式的响应、并对 `fetch[]`(仅 GET、同 host)跑 in-page fetch,一把把原始响应文本回给调用方(JSON 由调用方解析)。
+
+```ts
+const r = await env.AUTH.cquHarvest({
+  clientId: "calendar",
+  clientSecret: env.CQU_AUTH_CLIENT_SECRET,
+  userId,
+  navUrl: "https://my.cqu.edu.cn/workspace/curriculum", // host 须精确 my.cqu.edu.cn
+  capture: ["student/my-table-detail"],                  // URL 子串模式
+  fetch: [{ method: "GET", url: "https://my.cqu.edu.cn/api/exam/x" }],
+})
+//  → { captures: [{ url, status, contentType, body }], fetches: [{ url, status, body }] } | { error }
+if ("error" in r) { /* WAF_CHALLENGE/TGT_EXPIRED 瞬态退避;NEEDS_REAUTH 提示用户重绑;其余 fail-closed */ }
+```
+
+- 鉴权与 `getCquTicket` 同(M-6 `client_secret` + 用户 CQU 会话 `active`),但 host 红线收紧为**精确 `my.cqu.edu.cn`**(防 auth 变开放代理 SSRF),且**不做 client-scope 检查**(通用取数原语,业务级权益门禁在调用方 schedule 侧)。
+- 错误码语义见 §1.2;`WAF_CHALLENGE` / `TGT_EXPIRED` 为瞬态(已排即时重登),调用方应退避重试而非当硬失败。
 
 ---
 
