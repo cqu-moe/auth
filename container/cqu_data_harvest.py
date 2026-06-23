@@ -191,12 +191,19 @@ async def harvest(state: dict, recipe: dict) -> dict:
         for f in fetch_list:
             url = f["url"]
             try:
+                # 数据 API 是 Bearer-JWT 鉴权(非 cookie),credentials:'include' 不够;
+                # 须从 localStorage 读 personal-prod token 加 Authorization 头(实测裸 GET 返 401/空)。
+                # token 带首尾双引号(前端存储格式),strip 掉。AbortSignal 用 INPAGE_FETCH_TIMEOUT_MS 防挂。
                 result = await page.evaluate(
-                    """async (u) => {
-                        const r = await fetch(u, { credentials: 'include' });
+                    """async ({ u, t }) => {
+                        let tok = '';
+                        try { tok = (localStorage.getItem('cqu_edu_ACCESS_TOKEN') || '').replace(/^"|"$/g, ''); } catch (e) {}
+                        const headers = { 'Accept': 'application/json' };
+                        if (tok) headers['Authorization'] = 'Bearer ' + tok;
+                        const r = await fetch(u, { credentials: 'include', headers, signal: AbortSignal.timeout(t) });
                         return { status: r.status, body: await r.text() };
                     }""",
-                    url,
+                    {"u": url, "t": INPAGE_FETCH_TIMEOUT_MS},
                 )
                 fetches.append({"url": url, "status": result["status"], "body": result["body"]})
             except Exception:
