@@ -83,17 +83,23 @@ else { const st = r.ticket /* ST-... */ }
 >   auth 在用户已登录 + 已过瑞数的临时浏览器里 `navigate navUrl`(页面自动 fire 课表/学期等
 >   有机请求)+ 截获 url 命中 `capture[]` 子串模式的响应 + 对 `fetch[]`(仅 GET)跑同源 in-page
 >   fetch,一把返回。
->   - 入参:`navUrl`(必填)/`fetch[].url` 的 host **必须精确为 `my.cqu.edu.cn`**(比取票
->     `*.cqu.edu.cn` 更紧,防开放代理 SSRF);`fetch[].method` 仅 `GET`;`capture[]` 是 URL 子串
->     模式(`pattern in resp.url`)。
+>   - 入参:`navUrl`(必填)/`fetch[].url` 的 host 只能是精确的 `my.cqu.edu.cn` 或
+>     `my-cqu-edu-cn-s.atrust.cqu.edu.cn`(比取票 `*.cqu.edu.cn` 更紧,防开放代理
+>     SSRF),且一份 recipe 内所有 URL 必须同 host;`fetch[].method` 仅 `GET`;
+>     `capture[]` 是 URL 子串模式(`pattern in resp.url`)。
 >   - 出参:`captures: [{ url, status, contentType, body }]`(按 `capture[]` 顺序);
 >     `fetches: [{ url, status, body }]`(按 `fetch[]` 顺序);`body` 是文本,JSON 由调用方解析。
->   - 鉴权:同 `getCquTicket` —— M-6 `client_secret` 校验 + 用户 CQU 会话 `active`(经 DO 万能闸:
->     host 白名单 + 同款 per-user/per-client 限流 + 审计 + `needs_reauth` 熔断);**不做 client-scope
->     检查**(通用原语,业务级权益门禁在调用方侧)。
->   - 错误码(`{ error }`):`INVALID_CLIENT`(secret 错/client 禁用)| `NEEDS_REAUTH`(会话需重绑)
->     | `SESSION_INACTIVE` | `RATE_LIMITED` | `INVALID_HARVEST_URL`(host 越界)| `TGT_EXPIRED`
->     (会话失效,已排即时重登)| `WAF_CHALLENGE`(瑞数挑战/容器超时,瞬态,调用方退避)。
+>   - 鉴权:同 `getCquTicket` —— M-6 `client_secret` 校验。直连 host 使用原 CAS
+>     `state.storageState` 且要求直连会话 `active`;aTrust host 使用独立
+>     `atrustSession`,首次调用按需登录,不被直连 CAS 的过期/重登状态干扰。
+>     两路共用同一账号的邮件验证码后端,仅「请求+消费验证码」阶段由 FIFO
+>     租约串行化。**不做 client-scope 检查**(通用原语,业务级权益门禁在调用方侧)。
+>   - 错误码(`{ error }`):`INVALID_CLIENT`(secret 错/client 禁用)| `NEEDS_REAUTH`(直连
+>     CAS 需重绑)| `SESSION_INACTIVE` | `RATE_LIMITED` | `INVALID_HARVEST_URL`(host 越界/混用)
+>     | `TGT_EXPIRED`(直连 CAS 失效,已排即时重登)| `WAF_CHALLENGE`(瑞数挑战/容器
+>     超时)| `ATRUST_SESSION_EXPIRED`(已自动重登并重试一次后仍失效)|
+>     `ATRUST_NEEDS_REAUTH`(连续 3 次明确密码拒绝)| `ATRUST_LOGIN_IN_FLIGHT`(同类登录
+>     已在途)| `ATRUST_TRANSIENT`(网关/节点/浏览器瞬态,调用方退避)。
 
 ### 1.3 离线 / 后台任务
 
@@ -116,25 +122,32 @@ if (!caps?.calendar?.sync) { /* 无权益/未开通 → 停同步(fail-closed) *
 - 同样**须验 `client_secret`(M-6)**:`getCaps` 是按任意 `userId` 枚举的原语,无 per-user 凭证(不同于 `verifySession` 以用户 cookie 为凭证、只能查持有者),不验则任一被绑定 Worker 可扫全员权益画像。
 - ⚠️ **认证失败也返回 `null`**(clientId 不存在 / secret 错 / client 被禁用,opaque 刻意不可区分于"无权益")。传错凭证 → **全员被判无权益、无显式报错**。接入时务必确认 clientId/secret 正确(可用同套凭证调 `getCquTicket` 联调验证)。
 
-### 1.4 organic harvest 取数(my.cqu.edu.cn 全站瑞数化后)
+### 1.4 organic harvest 取数（直连 + aTrust 独立会话）
 
-`my.cqu.edu.cn` 全站上瑞数 WAF 后,后端纯 HTTP POST 取课表一律被 412 专守 —— **唯一过墙路径 = 让真前端在 auth 已登录浏览器里有机 fire 请求、auth 截获响应**。schedule 等子系统不再自己直打教务 API,改调 `cquHarvest`(签名/host 约束/限流/错误码见 §1.2):auth 在用户已登录 + 已过瑞数的临时浏览器里 `navigate navUrl`,页面自动 fire 课表/学期等有机请求,auth 截获命中 `capture[]` 子串模式的响应、并对 `fetch[]`(仅 GET、同 host)跑 in-page fetch,一把把原始响应文本回给调用方(JSON 由调用方解析)。
+`my.cqu.edu.cn` 全站上瑞数 WAF 后,后端纯 HTTP POST 取课表一律被 412 专守。
+课表生产调用使用 aTrust 改写应用主机,auth 首次按需建立一份与普通 CAS
+完全独立的浏览器状态。每次 `cquHarvest` 仍是让真前端有机 fire 课表 POST、auth 截获响应；
+会话过期时只清 aTrust 状态、自动重登一次并最多重试 harvest 一次，不修改普通
+CAS 的 cookie、保活计数或绑定状态。
 
 ```ts
 const r = await env.AUTH.cquHarvest({
   clientId: "calendar",
   clientSecret: env.CQU_AUTH_CLIENT_SECRET,
   userId,
-  navUrl: "https://my.cqu.edu.cn/workspace/curriculum", // host 须精确 my.cqu.edu.cn
+  navUrl: "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/workspace/curriculum",
   capture: ["student/my-table-detail"],                  // URL 子串模式
-  fetch: [{ method: "GET", url: "https://my.cqu.edu.cn/api/exam/x" }],
+  fetch: [{ method: "GET", url: "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/api/exam/x" }],
 })
 //  → { captures: [{ url, status, contentType, body }], fetches: [{ url, status, body }] } | { error }
-if ("error" in r) { /* WAF_CHALLENGE/TGT_EXPIRED 瞬态退避;NEEDS_REAUTH 提示用户重绑;其余 fail-closed */ }
+if ("error" in r) { /* ATRUST_TRANSIENT/IN_FLIGHT 退避;NEEDS_REAUTH 提示用户重绑;其余 fail-closed */ }
 ```
 
-- 鉴权与 `getCquTicket` 同(M-6 `client_secret` + 用户 CQU 会话 `active`),但 host 红线收紧为**精确 `my.cqu.edu.cn`**(防 auth 变开放代理 SSRF),且**不做 client-scope 检查**(通用取数原语,业务级权益门禁在调用方 schedule 侧)。
-- 错误码语义见 §1.2;`WAF_CHALLENGE` / `TGT_EXPIRED` 为瞬态(已排即时重登),调用方应退避重试而非当硬失败。
+- host 红线只允许精确 `my.cqu.edu.cn` 或 `my-cqu-edu-cn-s.atrust.cqu.edu.cn`,
+  且 nav/fetch 必须同 host;**不做 client-scope 检查**(通用取数原语,业务级权益门禁
+  在调用方 schedule 侧)。
+- aTrust 路径的一次自动恢复属于同一逻辑调用，只消耗一个 harvest 限额。
+- 错误码语义见 §1.2;所有失败都应 fail-closed，不得把缺失响应当成空课表写回。
 
 ---
 
