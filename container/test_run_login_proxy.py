@@ -82,3 +82,107 @@ def test_proxy_dict_passed_through(monkeypatch):
     proxy = {"server": "http://1.2.3.4:20000", "username": "u", "password": "p"}
     captured = _run_login_capture_launch_kwargs(monkeypatch, proxy=proxy)
     assert captured["proxy"] is proxy
+
+
+class _FlowPage:
+    def __init__(self):
+        self.url = "https://sso.cqu.edu.cn/login"
+
+    def set_default_timeout(self, _timeout):
+        return None
+
+
+class _FlowContext:
+    def __init__(self):
+        self.page = _FlowPage()
+
+    async def new_page(self):
+        return self.page
+
+    async def storage_state(self):
+        return {"cookies": [], "origins": []}
+
+
+class _FlowBrowser:
+    def __init__(self):
+        self.context = _FlowContext()
+
+    async def new_context(self, **_kwargs):
+        return self.context
+
+    async def close(self):
+        return None
+
+
+class _FlowChromium:
+    def __init__(self):
+        self.browser = _FlowBrowser()
+
+    async def launch(self, **_kwargs):
+        return self.browser
+
+
+class _FlowPlaywright:
+    def __init__(self):
+        self.chromium = _FlowChromium()
+
+
+class _FlowAsyncPlaywrightCM:
+    def __init__(self):
+        self.playwright = _FlowPlaywright()
+
+    async def __aenter__(self):
+        return self.playwright
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+def test_run_login_waits_for_permit_before_requesting_code(monkeypatch):
+    """缺少 permit await 会让 CAS/aTrust 同时点击发码，竞争消费共享验证码。"""
+    events = []
+    cm = _FlowAsyncPlaywrightCM()
+    monkeypatch.setattr(cqu_login, "async_playwright", lambda: cm)
+    monkeypatch.setattr(cqu_login, "install_ticket_sniffer", lambda *_: None)
+    monkeypatch.setattr(cqu_login, "install_send_code_sniffer", lambda *_: None)
+
+    async def first_factor(*_args, **_kwargs):
+        return "2fa"
+
+    async def switch(*_args):
+        events.append("switch")
+
+    async def request(*_args):
+        events.append("request")
+        return True
+
+    async def submit(page, *_args):
+        events.append("submit")
+        page.url = "https://my.cqu.edu.cn/workspace/cas?ticket=ST-test"
+
+    async def permit_provider():
+        events.append("permit")
+
+    async def code_provider():
+        events.append("code")
+        return "123456"
+
+    monkeypatch.setattr(cqu_login, "do_first_factor", first_factor)
+    monkeypatch.setattr(cqu_login, "switch_2fa_tab", switch)
+    monkeypatch.setattr(cqu_login, "request_code", request)
+    monkeypatch.setattr(cqu_login, "classify_send_code", lambda *_: "sent")
+    monkeypatch.setattr(cqu_login, "submit_code", submit)
+
+    result = asyncio.run(
+        cqu_login.run_login(
+            "20201234",
+            "pw",
+            cqu_login.DEFAULT_SERVICE,
+            method="mail",
+            code_provider=code_provider,
+            permit_provider=permit_provider,
+        )
+    )
+
+    assert result["ticket"] == "ST-test"
+    assert events == ["switch", "permit", "request", "code", "submit"]

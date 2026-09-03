@@ -335,7 +335,15 @@ def read_code(args):
     return input("请输入收到的 6 位验证码: ").strip()
 
 
-async def run_login(student_id, password, service, method="mail", code_provider=None, proxy=None):
+async def run_login(
+    student_id,
+    password,
+    service,
+    method="mail",
+    code_provider=None,
+    permit_provider=None,
+    proxy=None,
+):
     """容器入口: 跑完整登录流程, 验证码经 code_provider(async, 返回 6 位字符串)推入。
 
     与 CLI run() 同一条流程(form-nav 第一因素 + 原生发码 + form-nav 提交码 + ticket 嗅探),
@@ -390,6 +398,10 @@ async def run_login(student_id, password, service, method="mail", code_provider=
                 raise RuntimeError(f"first-factor failed: {verdict}")
 
             await switch_2fa_tab(page, method)
+            # 普通 CAS 与 aTrust 可并行完成第一因素，但共享的账号级验证码只能由租约
+            # owner 请求/消费。旧 CLI/调用方未提供 permit_provider 时维持立即发码。
+            if permit_provider is not None:
+                await permit_provider()
             if not await request_code(page, sms_state):
                 raise RuntimeError("未找到「获取验证码」按钮(页面结构可能变化)")
             # 发码响应分类: "sent"(发出新码) / "already_valid"(旧码仍有效, 端点拒重发) 都应继续等码;

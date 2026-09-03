@@ -65,7 +65,8 @@ class RunQgTestCase(AioHTTPTestCase):
         server.acquire_qg_proxy = _boom
         server.cqu_login.run_login = _run_login
 
-        resp = await self.client.post("/run", json=_VALID_BODY)
+        with self.assertLogs("cqu-login-server", level="INFO") as logs:
+            resp = await self.client.post("/run", json=_VALID_BODY)
         assert resp.status == 502, f"expected 502, got {resp.status}"
         data = await resp.json()
         assert data["ok"] is False
@@ -74,6 +75,7 @@ class RunQgTestCase(AioHTTPTestCase):
         # 502 早退不得泄漏已注册的 Event/Value。
         assert _VALID_BODY["session"] not in server.CODE_EVENTS
         assert _VALID_BODY["session"] not in server.CODE_VALUES
+        assert _VALID_BODY["session"] not in "\n".join(logs.output)
 
     async def test_qg_success_passes_proxy_to_run_login(self):
         # 青果成功 → proxy dict 原样透传给 run_login; 走 login 包(profile="login")。
@@ -107,6 +109,7 @@ class RunQgTestCase(AioHTTPTestCase):
         # 透传基本参数也对(确保没把 proxy 顶替掉别的参数)。
         assert captured.get("student_id") == _VALID_BODY["studentId"]
         assert captured.get("service") == _VALID_BODY["service"]
+        assert callable(captured.get("permit_provider"))
         # 成功路径 finally 清理。
         assert _VALID_BODY["session"] not in server.CODE_EVENTS
         assert _VALID_BODY["session"] not in server.CODE_VALUES

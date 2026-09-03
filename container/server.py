@@ -23,6 +23,7 @@ import urllib.parse
 from aiohttp import web
 
 import cqu_login  # 改造后的登录器, 暴露 run_login(...)
+import cqu_atrust  # 独立 aTrust 登录器, 只返回 storage_state
 import cqu_keepalive  # 国内节点浏览器水化探活, 暴露 probe_session_browser(...)
 import cqu_ticket_browser  # 浏览器水化取 ST(过瑞数 JS 挑战), 暴露 fetch_service_ticket_browser(...)
 import cqu_data_harvest  # 浏览器 organic harvest(navigate+capture+in-page fetch), 暴露 harvest(...)
@@ -112,6 +113,10 @@ assert PROBE_SERVICE_HOST_OK, (
 CODE_EVENTS: dict[str, asyncio.Event] = {}
 # session -> (验证码字符串, 存入时刻 time.time())。存入时刻用于清理过期(孤儿)码, 避免明文码长期驻留。
 CODE_VALUES: dict[str, tuple[str, float]] = {}
+# session -> Event(被 /code-permit set 唤醒)。permit 不含凭据，仅控制何时允许点击发码。
+PERMIT_EVENTS: dict[str, asyncio.Event] = {}
+# session -> permit 到达时刻；允许 permit 比浏览器注册 Event 更早到。
+PERMIT_VALUES: dict[str, float] = {}
 
 
 class CodeWaitTimeout(Exception):
@@ -121,12 +126,25 @@ class CodeWaitTimeout(Exception):
     """
 
 
+class PermitWaitTimeout(Exception):
+    """等待 DO 发放验证码租约 permit 超时。"""
+
+
 def _sweep_stale_codes() -> None:
     """删除早于 CODE_WAIT_TIMEOUT 的孤儿 /code 存码(及其 Event), 防止明文码无界堆积/长期驻留。"""
     now = time.time()
     for sess in [s for s, (_, ts) in CODE_VALUES.items() if now - ts > CODE_WAIT_TIMEOUT]:
         CODE_VALUES.pop(sess, None)
         CODE_EVENTS.pop(sess, None)
+
+
+def _sweep_stale_permits() -> None:
+    now = time.time()
+    for sess in [
+        s for s, ts in PERMIT_VALUES.items() if now - ts > CODE_WAIT_TIMEOUT
+    ]:
+        PERMIT_VALUES.pop(sess, None)
+        PERMIT_EVENTS.pop(sess, None)
 
 
 async def run_handler(request: web.Request) -> web.Response:
@@ -154,7 +172,7 @@ async def run_handler(request: web.Request) -> web.Response:
     # 通过 → canonical(小写 host、去 :443)传给 run_login, 对齐取票整链 canonical 口径单一。
     canonical_service = is_allowed_service_url(service)
     if canonical_service is None:
-        log.warning("run rejected serviceUrl (host not allowed) session=%s", session)
+        log.warning("run rejected serviceUrl (host not allowed)")
         return web.json_response({"ok": False, "error": "service not allowed"}, status=400)
     service = canonical_service
 
@@ -166,7 +184,7 @@ async def run_handler(request: web.Request) -> web.Response:
         try:
             proxy = await acquire_qg_proxy("login")
         except QgExtractError as e:
-            log.warning("run abort session=%s qg extract failed: %s", session, e)
+            log.warning("run abort qg extract failed: %s", e)
             return web.json_response(
                 {"ok": False, "error": f"qg proxy unavailable: {e}"}, status=502
             )
@@ -176,6 +194,10 @@ async def run_handler(request: web.Request) -> web.Response:
     # I1: /code 可能在本 Event 注册前略早到达; 若码已在, 立即唤醒, 避免错过唤醒永久阻塞。
     if session in CODE_VALUES:
         ev.set()
+    permit_ev = asyncio.Event()
+    PERMIT_EVENTS[session] = permit_ev
+    if session in PERMIT_VALUES:
+        permit_ev.set()
 
     async def code_waiter() -> str:
         # run_login 在发码后 await 它: 阻塞到 /code 推入并 set Event, 上限 CODE_WAIT_TIMEOUT。
@@ -191,7 +213,18 @@ async def run_handler(request: web.Request) -> web.Response:
         entry = CODE_VALUES.pop(session, None)
         return entry[0] if entry else ""
 
-    log.info("run start session=%s student=%s method=%s", session, student_id, method)
+    async def permit_waiter() -> None:
+        try:
+            await asyncio.wait_for(
+                permit_ev.wait(), timeout=CODE_WAIT_TIMEOUT
+            )
+        except asyncio.TimeoutError as e:
+            raise PermitWaitTimeout(
+                f"code permit timed out (>{CODE_WAIT_TIMEOUT}s)"
+            ) from e
+        PERMIT_VALUES.pop(session, None)
+
+    log.info("run start method=%s", method)
     try:
         result = await asyncio.wait_for(
             cqu_login.run_login(
@@ -200,36 +233,135 @@ async def run_handler(request: web.Request) -> web.Response:
                 service=service,
                 method=method,
                 code_provider=code_waiter,
+                permit_provider=permit_waiter,
                 proxy=proxy,
             ),
             timeout=RUN_TOTAL_TIMEOUT,
         )
         # ticket 是 bearer 凭据, 不入日志(session 不是凭据可留); 对齐 DO 审计「绝不记录 ticket/cookies/密码」。
-        log.info("run ok session=%s", session)
+        log.info("run ok")
         return web.json_response({"ok": True, **result})
     except CodeWaitTimeout:
         # 内层: 等码超时, 验证码始终没到(邮件未送达 / DO 未推码)。
         log.warning(
-            "run timeout session=%s (code-wait >%ds, code never arrived)",
-            session, CODE_WAIT_TIMEOUT,
+            "run timeout (code-wait >%ds, code never arrived)",
+            CODE_WAIT_TIMEOUT,
         )
         return web.json_response(
             {"ok": False, "error": f"code wait timed out (>{CODE_WAIT_TIMEOUT}s, code never arrived)"},
             status=504,
         )
+    except PermitWaitTimeout:
+        log.warning("run timeout (code permit never arrived)")
+        return web.json_response(
+            {"ok": False, "error": "code permit timed out"}, status=504
+        )
     except asyncio.TimeoutError:
         # 外层: 单次 /run 整体超时(第一因素/发码/提交某段太慢, 非单纯等码)。
-        log.warning("run timeout session=%s (total >%ds)", session, RUN_TOTAL_TIMEOUT)
+        log.warning("run timeout (total >%ds)", RUN_TOTAL_TIMEOUT)
         return web.json_response(
             {"ok": False, "error": f"login timed out (>{RUN_TOTAL_TIMEOUT}s)"},
             status=504,
         )
     except Exception as e:  # noqa: BLE001 - surface any login failure to the caller
-        log.warning("run fail session=%s error=%s", session, e)
+        log.warning("run fail error=%s", type(e).__name__)
         return web.json_response({"ok": False, "error": str(e)}, status=500)
     finally:
         CODE_EVENTS.pop(session, None)
         CODE_VALUES.pop(session, None)
+        PERMIT_EVENTS.pop(session, None)
+        PERMIT_VALUES.pop(session, None)
+
+
+async def atrust_login_handler(request: web.Request) -> web.Response:
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response(
+            {"ok": False, "error": "invalid JSON body"}, status=400
+        )
+
+    student_id = body.get("studentId")
+    password = body.get("password")
+    method = body.get("method", "mail")
+    session = body.get("session") or "default"
+    if not (student_id and password):
+        return web.json_response(
+            {"ok": False, "error": "missing required field: studentId/password"},
+            status=400,
+        )
+
+    proxy = None
+    if should_use_proxy("login"):
+        try:
+            proxy = await acquire_qg_proxy("login")
+        except QgExtractError:
+            log.warning("atrust-login qg proxy unavailable")
+            return web.json_response(
+                {"ok": False, "error": "ATRUST_TRANSIENT"}, status=502
+            )
+
+    code_event = asyncio.Event()
+    permit_event = asyncio.Event()
+    CODE_EVENTS[session] = code_event
+    PERMIT_EVENTS[session] = permit_event
+    if session in CODE_VALUES:
+        code_event.set()
+    if session in PERMIT_VALUES:
+        permit_event.set()
+
+    async def code_waiter() -> str:
+        try:
+            await asyncio.wait_for(code_event.wait(), timeout=CODE_WAIT_TIMEOUT)
+        except asyncio.TimeoutError as e:
+            raise CodeWaitTimeout("aTrust code wait timed out") from e
+        entry = CODE_VALUES.pop(session, None)
+        return entry[0] if entry else ""
+
+    async def permit_waiter() -> None:
+        try:
+            await asyncio.wait_for(
+                permit_event.wait(), timeout=CODE_WAIT_TIMEOUT
+            )
+        except asyncio.TimeoutError as e:
+            raise PermitWaitTimeout("aTrust code permit timed out") from e
+        PERMIT_VALUES.pop(session, None)
+
+    log.info("atrust-login start method=%s", method)
+    try:
+        result = await asyncio.wait_for(
+            cqu_atrust.run_atrust_login(
+                student_id=student_id,
+                password=password,
+                method=method,
+                code_provider=code_waiter,
+                permit_provider=permit_waiter,
+                proxy=proxy,
+            ),
+            timeout=RUN_TOTAL_TIMEOUT,
+        )
+        log.info("atrust-login ok")
+        return web.json_response({"ok": True, **result})
+    except cqu_atrust.AtrustPasswordRejectedError:
+        log.warning("atrust-login password rejected")
+        return web.json_response(
+            {"ok": False, "error": "PASSWORD_REJECTED"}, status=401
+        )
+    except (CodeWaitTimeout, PermitWaitTimeout, asyncio.TimeoutError):
+        log.warning("atrust-login timeout")
+        return web.json_response(
+            {"ok": False, "error": "ATRUST_TRANSIENT"}, status=504
+        )
+    except Exception as error:  # noqa: BLE001 - map browser/network failures to stable transient
+        log.warning("atrust-login transient error=%s", type(error).__name__)
+        return web.json_response(
+            {"ok": False, "error": "ATRUST_TRANSIENT"}, status=502
+        )
+    finally:
+        CODE_EVENTS.pop(session, None)
+        CODE_VALUES.pop(session, None)
+        PERMIT_EVENTS.pop(session, None)
+        PERMIT_VALUES.pop(session, None)
 
 
 async def code_handler(request: web.Request) -> web.Response:
@@ -249,10 +381,34 @@ async def code_handler(request: web.Request) -> web.Response:
     ev = CODE_EVENTS.get(session)
     if ev is not None:
         ev.set()
-        log.info("code deposited session=%s (woke in-flight run)", session)
+        log.info("code deposited (woke in-flight run)")
         return web.json_response({"ok": True})
     # 没有在途 /run: 仍存码(竞态: /code 先到), 但提示无等待者。
-    log.info("code deposited session=%s (no in-flight run yet)", session)
+    log.info("code deposited (no in-flight run yet)")
+    return web.json_response({"ok": True, "waiting": False})
+
+
+async def code_permit_handler(request: web.Request) -> web.Response:
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response(
+            {"ok": False, "error": "invalid JSON body"}, status=400
+        )
+    session = body.get("session")
+    if not session:
+        return web.json_response(
+            {"ok": False, "error": "missing session"}, status=400
+        )
+
+    _sweep_stale_permits()
+    PERMIT_VALUES[str(session)] = time.time()
+    event = PERMIT_EVENTS.get(str(session))
+    if event is not None:
+        event.set()
+        log.info("code permit deposited (woke in-flight login)")
+        return web.json_response({"ok": True})
+    log.info("code permit deposited (no in-flight login yet)")
     return web.json_response({"ok": True, "waiting": False})
 
 
@@ -396,7 +552,9 @@ def build_app() -> web.Application:
     app = web.Application()
     app.add_routes([
         web.post("/run", run_handler),
+        web.post("/atrust-login", atrust_login_handler),
         web.post("/code", code_handler),
+        web.post("/code-permit", code_permit_handler),
         web.post("/service-ticket", service_ticket_handler),
         web.post("/keepalive", keepalive_handler),
         web.post("/data-harvest", data_harvest_handler),
