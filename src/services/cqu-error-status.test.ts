@@ -36,6 +36,18 @@ describe("cquErrorHttpStatus", () => {
     expect(cquErrorHttpStatus("TGT_EXPIRED")).toBe(409);
   });
 
+  it.each([
+    "ATRUST_SESSION_EXPIRED",
+    "ATRUST_NEEDS_REAUTH",
+    "ATRUST_LOGIN_IN_FLIGHT",
+  ])("maps %s → 409", (code) => {
+    expect(cquErrorHttpStatus(code)).toBe(409);
+  });
+
+  it("maps ATRUST_TRANSIENT → 503", () => {
+    expect(cquErrorHttpStatus("ATRUST_TRANSIENT")).toBe(503);
+  });
+
   it("maps NO_TICKET → 500", () => {
     expect(cquErrorHttpStatus("NO_TICKET")).toBe(500);
   });

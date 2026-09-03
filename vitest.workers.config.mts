@@ -32,7 +32,7 @@ export default defineConfig({
         // 本批用例都不走真解密/查库分支, 仅作兜底避免缺键。
         bindings: {
           ENCRYPTION_KEY:
-            "0000000000000000000000000000000000000000000000000000000000000000",
+            "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
           BETTER_AUTH_URL: "http://localhost:8787",
           BETTER_AUTH_SECRET: "dev-secret-for-local-testing-only",
           RESEND_API_KEY: "re_dev_placeholder",

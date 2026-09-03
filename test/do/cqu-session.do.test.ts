@@ -23,7 +23,9 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   freshStub,
   validStorageState,
+  validAtrustStorageState,
   seedSession,
+  seedCredentials,
   driveAlarm,
   driveAlarmWith,
   readStatus,
@@ -109,6 +111,46 @@ describe("verification-code lease orchestration", () => {
       ownerKind: "atrust",
       queue: [],
     });
+  });
+
+  it("resetting aTrust removes only aTrust lease entries and preserves direct CAS", async () => {
+    const stub = freshStub("code-lease-reset-atrust");
+    await seedSession(stub, {
+      extra: {
+        atrustSession: {
+          status: "active",
+          storageState: validAtrustStorageState(),
+          loginAt: Date.now(),
+          lastUsedAt: 0,
+          consecutiveFailures: 0,
+        },
+        atrustLoginInFlight: { token: "atrust-1", startedAt: Date.now() },
+        codeLease: {
+          ownerToken: "cas-1",
+          ownerKind: "cas",
+          acquiredAt: Date.now(),
+          queue: [
+            { token: "atrust-1", kind: "atrust", queuedAt: Date.now() },
+          ],
+        },
+      },
+    });
+    const spy = spyLoginNode({});
+
+    await runInDurableObject(stub, async (instance) => {
+      await (instance as unknown as {
+        resetAtrustAuthState: () => Promise<void>;
+      }).resetAtrustAuthState();
+    });
+
+    expect(await readStorage(stub, "atrustSession")).toBeUndefined();
+    expect(await readStorage(stub, "atrustLoginInFlight")).toBeUndefined();
+    expect(await readStorage(stub, "codeLease")).toMatchObject({
+      ownerToken: "cas-1",
+      ownerKind: "cas",
+      queue: [],
+    });
+    expect(spy).not.toHaveBeenCalled();
   });
 });
 
@@ -378,6 +420,25 @@ describe("data-harvest action", () => {
     });
   }
 
+  const atrustRecipe = {
+    navUrl:
+      "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/workspace/curriculum",
+    capture: ["student/my-table-detail"],
+    fetch: [
+      {
+        method: "GET",
+        url: "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/api/exam/x",
+      },
+    ],
+  };
+
+  async function postAtrustHarvest(stub: DurableObjectStub) {
+    return stub.fetch("http://do/data-harvest?clientId=calendar&source=rpc", {
+      method: "POST",
+      body: JSON.stringify(atrustRecipe),
+    });
+  }
+
   it("active session + node 200 → returns captures/fetches, records 1 ST mint, audits", async () => {
     const stub = freshStub("harvest-ok");
     await seedSession(stub, { status: "active" });
@@ -403,6 +464,212 @@ describe("data-harvest action", () => {
     const log = await readStMintLog(stub);
     expect(log).toHaveLength(1);
     expect(log[0].clientId).toBe("calendar");
+  });
+
+  it("aTrust harvest reuses its independent state even while direct CAS is expired", async () => {
+    const stub = freshStub("atrust-reuse");
+    const atrustState = validAtrustStorageState("saved");
+    await seedSession(stub, {
+      status: "expired",
+      extra: {
+        atrustSession: {
+          status: "active",
+          storageState: atrustState,
+          loginAt: Date.now() - 60_000,
+          lastUsedAt: 0,
+          consecutiveFailures: 0,
+        },
+      },
+    });
+
+    let receivedState: unknown;
+    const spy = spyLoginNode({
+      "/data-harvest": async (request) => {
+        receivedState = ((await request.json()) as { state?: unknown }).state;
+        return Response.json({ ok: true, captures: [], fetches: [] });
+      },
+    });
+
+    const response = await postAtrustHarvest(stub);
+    expect(response.status).toBe(200);
+    expect(receivedState).toEqual(atrustState);
+    expect(pathsOf(spy)).toEqual(["/data-harvest"]);
+    expect(await readStatus(stub)).toBe("expired");
+    expect((await readState(stub))?.storageState).toEqual(validStorageState());
+    expect(
+      (await readStorage<{ lastUsedAt: number }>(stub, "atrustSession"))
+        ?.lastUsedAt
+    ).toBeGreaterThan(0);
+  });
+
+  it("missing aTrust state logs in on demand without disturbing a live direct-CAS login lock", async () => {
+    const stub = freshStub("atrust-on-demand");
+    const directLock = { token: "direct-login", startedAt: Date.now() };
+    const atrustState = validAtrustStorageState("fresh");
+    await seedSession(stub, {
+      status: "active",
+      extra: {
+        loginInFlight: directLock,
+        pendingCode: {
+          code: "000000",
+          kind: "login_2fa",
+          ts: Date.now(),
+          expiresAt: Date.now() + 60_000,
+        },
+      },
+    });
+    await seedCredentials(stub);
+
+    const spy = spyLoginNode({
+      "/atrust-login": async () =>
+        Response.json({ ok: true, state: atrustState }),
+      "/code-permit": async () => Response.json({ ok: true }),
+      "/data-harvest": async (request) => {
+        expect(((await request.json()) as { state?: unknown }).state).toEqual(
+          atrustState
+        );
+        return Response.json({ ok: true, captures: [], fetches: [] });
+      },
+    });
+
+    const response = await postAtrustHarvest(stub);
+    expect(response.status).toBe(200);
+    expect(pathsOf(spy)).toEqual([
+      "/atrust-login",
+      "/code-permit",
+      "/data-harvest",
+    ]);
+    expect(await readStorage(stub, "loginInFlight")).toEqual(directLock);
+    expect(await readStorage(stub, "atrustLoginInFlight")).toBeUndefined();
+    expect(await readStorage(stub, "codeLease")).toBeUndefined();
+    expect(await readStorage(stub, "pendingCode")).toBeUndefined();
+    expect((await readState(stub))?.storageState).toEqual(validStorageState());
+  });
+
+  it("expired aTrust state relogs once, retries once, and consumes one rate-limit slot", async () => {
+    const stub = freshStub("atrust-recover");
+    const oldState = validAtrustStorageState("old");
+    const freshState = validAtrustStorageState("fresh");
+    await seedSession(stub, {
+      status: "active",
+      extra: {
+        atrustSession: {
+          status: "active",
+          storageState: oldState,
+          loginAt: Date.now() - 60_000,
+          lastUsedAt: 0,
+          consecutiveFailures: 0,
+        },
+      },
+    });
+    await seedCredentials(stub);
+
+    let harvestAttempt = 0;
+    const spy = spyLoginNode({
+      "/data-harvest": async (request) => {
+        harvestAttempt += 1;
+        const state = ((await request.json()) as { state?: unknown }).state;
+        if (harvestAttempt === 1) {
+          expect(state).toEqual(oldState);
+          return Response.json(
+            { ok: false, error: "ATRUST_SESSION_EXPIRED" },
+            { status: 409 }
+          );
+        }
+        expect(state).toEqual(freshState);
+        return Response.json({ ok: true, captures: [], fetches: [] });
+      },
+      "/atrust-login": async () =>
+        Response.json({ ok: true, state: freshState }),
+      "/code-permit": async () => Response.json({ ok: true }),
+    });
+
+    const response = await postAtrustHarvest(stub);
+    expect(response.status).toBe(200);
+    expect(pathsOf(spy).filter((path) => path === "/data-harvest")).toHaveLength(2);
+    expect(pathsOf(spy).filter((path) => path === "/atrust-login")).toHaveLength(1);
+    expect(await readStMintLog(stub)).toHaveLength(1);
+    expect(
+      (await readStorage<{ storageState: unknown }>(stub, "atrustSession"))
+        ?.storageState
+    ).toEqual(freshState);
+    expect((await readState(stub))?.storageState).toEqual(validStorageState());
+  });
+
+  it("aTrust recovery never makes a third harvest attempt", async () => {
+    const stub = freshStub("atrust-one-retry");
+    await seedSession(stub, {
+      status: "active",
+      extra: {
+        atrustSession: {
+          status: "active",
+          storageState: validAtrustStorageState("old"),
+          loginAt: Date.now() - 60_000,
+          lastUsedAt: 0,
+          consecutiveFailures: 0,
+        },
+      },
+    });
+    await seedCredentials(stub);
+
+    const spy = spyLoginNode({
+      "/data-harvest": async () =>
+        Response.json(
+          { ok: false, error: "ATRUST_SESSION_EXPIRED" },
+          { status: 409 }
+        ),
+      "/atrust-login": async () =>
+        Response.json({ ok: true, state: validAtrustStorageState("fresh") }),
+      "/code-permit": async () => Response.json({ ok: true }),
+    });
+
+    const response = await postAtrustHarvest(stub);
+    expect(response.status).toBe(409);
+    expect(((await response.json()) as { code?: string }).code).toBe(
+      "ATRUST_SESSION_EXPIRED"
+    );
+    expect(pathsOf(spy).filter((path) => path === "/data-harvest")).toHaveLength(2);
+    expect(pathsOf(spy).filter((path) => path === "/atrust-login")).toHaveLength(1);
+    expect(await readStMintLog(stub)).toHaveLength(1);
+    expect(await readStorage(stub, "atrustSession")).toBeUndefined();
+    expect((await readState(stub))?.storageState).toEqual(validStorageState());
+  });
+
+  it("three explicit aTrust password rejections trip only the aTrust reauth breaker", async () => {
+    const stub = freshStub("atrust-password-breaker");
+    await seedSession(stub, { status: "active" });
+    await seedCredentials(stub);
+    const spy = spyLoginNode({
+      "/atrust-login": async () =>
+        Response.json(
+          { ok: false, error: "PASSWORD_REJECTED" },
+          { status: 401 }
+        ),
+      "/code-permit": async () => Response.json({ ok: true }),
+    });
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const response = await postAtrustHarvest(stub);
+      expect(response.status).toBe(attempt === 3 ? 409 : 503);
+      expect(((await response.json()) as { code?: string }).code).toBe(
+        attempt === 3 ? "ATRUST_NEEDS_REAUTH" : "ATRUST_TRANSIENT"
+      );
+    }
+    const callsBeforeBlockedRetry = spy.mock.calls.length;
+    const blocked = await postAtrustHarvest(stub);
+    expect(blocked.status).toBe(409);
+    expect(((await blocked.json()) as { code?: string }).code).toBe(
+      "ATRUST_NEEDS_REAUTH"
+    );
+    expect(spy.mock.calls).toHaveLength(callsBeforeBlockedRetry);
+    expect(await readStatus(stub)).toBe("active");
+    expect((await readState(stub))?.storageState).toEqual(validStorageState());
+    expect(
+      (await readStorage<{ consecutiveFailures: number }>(
+        stub,
+        "atrustSession"
+      ))?.consecutiveFailures
+    ).toBe(3);
   });
 
   it("status not active (needs_reauth) → NEEDS_REAUTH error, no node call", async () => {

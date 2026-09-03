@@ -2,7 +2,11 @@ import { DurableObject } from "cloudflare:workers";
 import { CquSsoClient, type CasCookies, type CquStorageState, CquSsoError } from "../services/cqu-sso";
 import { decrypt } from "../services/crypto";
 import { validateCquServiceUrl } from "../services/service-url";
-import { validateCquHarvestUrl } from "../services/harvest-url";
+import {
+  validateCquHarvestRecipeHosts,
+  validateCquHarvestUrl,
+  type CquHarvestHost,
+} from "../services/harvest-url";
 import {
   nextStatus,
   type CquStatus,
@@ -143,6 +147,20 @@ interface ContainerRunResult {
   error?: string;
 }
 
+interface AtrustSessionRecord {
+  status: "missing" | "active" | "needs_reauth";
+  storageState: CquStorageState | null;
+  loginAt: number;
+  lastUsedAt: number;
+  consecutiveFailures: number;
+}
+
+function isStorageState(value: unknown): value is CquStorageState {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as { cookies?: unknown; origins?: unknown };
+  return Array.isArray(candidate.cookies) && Array.isArray(candidate.origins);
+}
+
 // 暂存的绑定码 TTL: 绑定确认码实测后端有效期约 10min(邮件正文写的"2分钟"不准),
 // 暂存兜底必须比它活得更久, 否则迟到/重连的浏览器回放到的是已被后端作废的码;
 // 取 12min 留 ~2min 余量覆盖时钟漂移与 WS 重连窗口。
@@ -154,6 +172,7 @@ const PENDING_CODE_TTL_MS = 12 * 60 * 1000;
 //   - PENDING_CODE_TTL_MS(12min) = pendingCode 在 DO 里的暂存窗口, 比有效期多留 ~2min 余量
 //     覆盖时钟漂移与 WS 重连。10min < 12min 是有意为之: 暂存还在但已超有效期的码不再回放。
 const CODE_VALIDITY_MS = 10 * 60 * 1000;
+const MAX_ATRUST_PASSWORD_FAILURES = 3;
 
 // 服务端→客户端的码消息(live 广播 + 回放统一用此契约, 前端按此解析)。
 // kind 映射: bind_confirm → "bind_code", login_2fa → "login_2fa"。
@@ -234,6 +253,33 @@ export class CquSessionDO extends DurableObject<Env> {
     }
   }
 
+  /** aTrust 状态单独成值落盘，避免与直连 CAS state 合并后撞 128KiB 上限。 */
+  private async putAtrustSessionGuarded(
+    session: AtrustSessionRecord
+  ): Promise<boolean> {
+    const bytes = serializedStateBytes(session);
+    if (stateExceedsHardLimit(bytes)) {
+      console.error(
+        `[CquSession] ALERT aTrust state size ${bytes}B exceeds DO hard limit (${STATE_HARD_LIMIT_BYTES}B); SKIPPING put`
+      );
+      return false;
+    }
+    if (bytes > STORAGE_STATE_WARN_BYTES) {
+      console.warn(
+        `[CquSession] WARN aTrust state size ${bytes}B > ${STORAGE_STATE_WARN_BYTES}B (cookies=${session.storageState?.cookies.length ?? 0} origins=${session.storageState?.origins.length ?? 0})`
+      );
+    }
+    try {
+      await this.ctx.storage.put("atrustSession", session);
+      return true;
+    } catch (error) {
+      console.error(
+        `[CquSession] storage.put(atrustSession) failed (${error instanceof Error ? error.name : "unknown"})`
+      );
+      return false;
+    }
+  }
+
   private async getStatus(): Promise<CquStatus> {
     return (
       (await this.ctx.storage.get<CquStatus>("status")) ?? "unbound"
@@ -302,6 +348,8 @@ export class CquSessionDO extends DurableObject<Env> {
             encryptedPassword: string;
             iv: string;
           }>();
+          // 凭据更新后旧 aTrust 会话与在途登录不再可信，只清理 aTrust 轨道。
+          await this.resetAtrustAuthState();
           await this.ctx.storage.put<StoredCredentials>("credentials", {
             encryptedPassword: body.encryptedPassword,
             iv: body.iv,
@@ -690,17 +738,10 @@ export class CquSessionDO extends DurableObject<Env> {
   }): Promise<{ captures: HarvestCapture[]; fetches: HarvestFetch[] }> {
     await this.loadState();
     const status = await this.getStatus();
-    if (!this.state || status !== "active") {
-      if (status === "needs_reauth") {
-        throw new CquSsoError("NEEDS_REAUTH", "CQU session needs re-auth (请重新绑定)");
-      }
+    if (!this.state) {
       throw new CquSsoError("SESSION_INACTIVE", "CQU session not active");
     }
-    if (!this.state.storageState) {
-      await this.setStatus("expired");
-      await this.ctx.storage.setAlarm(Date.now());
-      throw new CquSsoError("SESSION_INACTIVE", "CQU session needs re-login (no storage state)");
-    }
+    const sessionState = this.state;
 
     // ① recipe SHAPE 红线(纵深, 镜像节点侧 parse_harvest_recipe): TS 类型只在编译期管用,
     // JS/RPC 调用方可绕过传入畸形 capture/fetch。畸形若漏到下面的记账块 → 白嫖限流槽 + 节点回
@@ -720,7 +761,7 @@ export class CquSessionDO extends DurableObject<Env> {
       throw new CquSsoError("INVALID_HARVEST_URL", "fetch must be an array of objects with a string url");
     }
 
-    // ② host 红线(纵深): navUrl + 每个 fetch.url 必须精确 my.cqu.edu.cn(capture 是响应过滤
+    // ② host 红线(纵深): navUrl + 每个 fetch.url 必须属于同一个允许主机(capture 是响应过滤
     // 模式、不出站, 不构成 SSRF 面, 不校验)。任一不过 → INVALID_HARVEST_URL。
     // ★ validateCquHarvestUrl 返回 **canonical**(Workers URL parser 规范化, 见 harvest-url.ts
     //   "下游只用此返回值")。节点侧 parse_harvest_recipe 用 Python urlparse, 对百分号编码 host
@@ -762,6 +803,54 @@ export class CquSessionDO extends DurableObject<Env> {
     // canonical 配方: navUrl/fetch.url 用 DO 已校验放行的规范化字符串, capture 原样(子串模式,
     // 不出站、不构成 SSRF 面, 节点侧也只做非空 string 校验)。仅此配方转发给节点, 不再转发 arg.recipe。
     const canonicalRecipe = { navUrl, capture, fetch: canonicalFetch };
+    let hostKind: CquHarvestHost;
+    try {
+      hostKind = validateCquHarvestRecipeHosts(
+        navUrl,
+        canonicalFetch.map((entry) => entry.url)
+      );
+    } catch {
+      throw new CquSsoError(
+        "INVALID_HARVEST_URL",
+        "harvest recipe URLs must use the same host"
+      );
+    }
+
+    // 直连 CAS 沿用全局绑定状态机；aTrust 只在全局已撤销/解绑时拒绝，
+    // 不被直连 CAS 的 expired/relogging/needs_reauth 状态阻断。
+    let atrustSession: AtrustSessionRecord | null = null;
+    if (hostKind === "direct") {
+      if (status !== "active") {
+        if (status === "needs_reauth") {
+          throw new CquSsoError(
+            "NEEDS_REAUTH",
+            "CQU session needs re-auth (请重新绑定)"
+          );
+        }
+        throw new CquSsoError("SESSION_INACTIVE", "CQU session not active");
+      }
+      if (!sessionState.storageState) {
+        await this.setStatus("expired");
+        await this.ctx.storage.setAlarm(Date.now());
+        throw new CquSsoError(
+          "SESSION_INACTIVE",
+          "CQU session needs re-login (no storage state)"
+        );
+      }
+    } else {
+      if (status === "revoked" || status === "unbound") {
+        throw new CquSsoError("SESSION_INACTIVE", "CQU binding not active");
+      }
+      atrustSession =
+        (await this.ctx.storage.get<AtrustSessionRecord>("atrustSession")) ??
+        null;
+      if (atrustSession?.status === "needs_reauth") {
+        throw new CquSsoError(
+          "ATRUST_NEEDS_REAUTH",
+          "aTrust session needs re-auth"
+        );
+      }
+    }
 
     // ③ D6 限频(同取票, per-user + per-client; harvest 是真出数动作, 计入同一窗口)。
     const now = Date.now();
@@ -770,46 +859,102 @@ export class CquSessionDO extends DurableObject<Env> {
     const pruned = pruneStMintLog(stored, now, ST_MINT_RATE_WINDOW_MS);
     if (stMintThrottled(pruned, clientId, MAX_ST_MINTS_PER_USER, MAX_ST_MINTS_PER_CLIENT)) {
       console.error(
-        `[CquSession] ${this.state.studentId}: ALERT harvest rate-limited (clientId=${clientId ?? "?"})`
+        `[CquSession] ${sessionState.studentId}: ALERT harvest rate-limited (clientId=${clientId ?? "?"})`
       );
       throw new CquSsoError("RATE_LIMITED", "取数过于频繁,请稍后再试");
     }
 
     // ④ 记账(镜像取票: 铸前记录, 对失败死循环也鲁棒)。host 取 navUrl host, broad=false。
     const host = new URL(navUrl).hostname;
-    this.state.lastRequestedAt = now;
-    await this.putStateGuarded(this.state);
+    if (hostKind === "direct") {
+      sessionState.lastRequestedAt = now;
+      await this.putStateGuarded(sessionState);
+    }
     pruned.push({ ts: now, clientId, host, broad: false });
     try {
       await this.ctx.storage.put("stMintLog", pruned);
     } catch (e) {
       console.error(
-        `[CquSession] ${this.state.studentId}: stMintLog put failed (harvest accounting degraded): ${errMsg(e)}`
+        `[CquSession] ${sessionState.studentId}: stMintLog put failed (harvest accounting degraded): ${errMsg(e)}`
       );
     }
 
-    // ⑤ 出站节点 /data-harvest(套 NODE_DEADLINE_MS)。409→TGT_EXPIRED 顺手 setAlarm 快自愈。
+    // ⑤ 出站节点 /data-harvest(套 NODE_DEADLINE_MS)。直连 409 只排 alarm；
+    // aTrust 409 只清理 aTrust state，按需重登后最多重试一次。
     let result: { captures: HarvestCapture[]; fetches: HarvestFetch[] };
-    try {
-      result = await this.harvestViaNode(this.state.storageState, canonicalRecipe);
-    } catch (e) {
-      if (e instanceof CquSsoError && e.code === "TGT_EXPIRED") {
-        await this.ctx.storage.setAlarm(Date.now());
+    let attempts = 1;
+    let recovered = false;
+    if (hostKind === "direct") {
+      try {
+        result = await this.harvestViaNode(
+          sessionState.storageState,
+          canonicalRecipe
+        );
+      } catch (error) {
+        if (
+          error instanceof CquSsoError &&
+          error.code === "TGT_EXPIRED"
+        ) {
+          await this.ctx.storage.setAlarm(Date.now());
+        }
+        throw error;
       }
-      throw e;
+    } else {
+      let activeAtrust =
+        atrustSession?.status === "active" && atrustSession.storageState
+          ? atrustSession
+          : await this.getAtrustSessionForHarvest();
+      try {
+        result = await this.harvestViaNode(
+          activeAtrust.storageState,
+          canonicalRecipe
+        );
+      } catch (error) {
+        if (
+          !(error instanceof CquSsoError) ||
+          error.code !== "ATRUST_SESSION_EXPIRED"
+        ) {
+          throw error;
+        }
+        await this.ctx.storage.delete("atrustSession");
+        activeAtrust = await this.containerAtrustLogin();
+        attempts = 2;
+        try {
+          result = await this.harvestViaNode(
+            activeAtrust.storageState,
+            canonicalRecipe
+          );
+          recovered = true;
+        } catch (retryError) {
+          if (
+            retryError instanceof CquSsoError &&
+            retryError.code === "ATRUST_SESSION_EXPIRED"
+          ) {
+            await this.ctx.storage.delete("atrustSession");
+          }
+          throw retryError;
+        }
+      }
+      await this.putAtrustSessionGuarded({
+        ...activeAtrust,
+        lastUsedAt: Date.now(),
+      });
     }
 
     // ⑥ 审计(与取票同 schema; source 入白名单)。绝不记录 captures/fetches 内容。
     console.log(
       JSON.stringify(
-        buildStMintAudit({
-          userId: this.state.userId,
-          clientId,
-          host,
-          broad: false,
-          source: arg.source ?? "rpc",
-          ts: now,
-        })
+        {
+          ...buildStMintAudit({
+            userId: sessionState.userId,
+            clientId,
+            host,
+            broad: false,
+            source: arg.source ?? "rpc",
+            ts: now,
+          }),
+          ...(hostKind === "atrust" ? { attempts, recovered } : {}),
+        }
       )
     );
     return result;
@@ -840,6 +985,12 @@ export class CquSessionDO extends DurableObject<Env> {
     const c = classifyNodeHarvestResponse(res.status, body);
     if (c.kind === "expired") {
       throw new CquSsoError("TGT_EXPIRED", `CQU session expired (${c.detail ?? "node /data-harvest"})`);
+    }
+    if (c.kind === "atrust_expired") {
+      throw new CquSsoError(
+        "ATRUST_SESSION_EXPIRED",
+        "aTrust session expired"
+      );
     }
     if (c.kind === "transient") {
       throw new CquSsoError("WAF_CHALLENGE", `LOGIN_NODE /data-harvest ${c.detail ?? "transient"}`);
@@ -966,14 +1117,38 @@ export class CquSessionDO extends DurableObject<Env> {
   private async getStatusResponse(): Promise<Record<string, unknown>> {
     await this.loadState();
     const status = await this.getStatus();
-    if (!this.state) return { status };
+    const atrust =
+      (await this.ctx.storage.get<AtrustSessionRecord>("atrustSession")) ??
+      null;
+    if (!this.state) {
+      return { status, atrustStatus: atrust?.status ?? "missing" };
+    }
     return {
       status,
       studentId: this.state.studentId,
       loginAt: this.state.loginAt,
       lastKeepAlive: this.state.lastKeepAlive,
       lastRequestedAt: this.state.lastRequestedAt,
+      atrustStatus: atrust?.status ?? "missing",
+      atrustLoginAt: atrust?.loginAt ?? 0,
+      atrustLastUsedAt: atrust?.lastUsedAt ?? 0,
     };
+  }
+
+  /**
+   * 凭据更新/撤销时清理 aTrust 专有轨道。先删 lock，使在途响应回来后的
+   * token 复核失败、不会复活会话；再释放验证码租约。
+   */
+  private async resetAtrustAuthState(): Promise<void> {
+    await this.ctx.storage.delete("atrustLoginInFlight");
+    await this.ctx.storage.delete("atrustSession");
+    try {
+      await this.clearVerificationCodeLeasesByKind("atrust");
+    } catch (error) {
+      console.error(
+        `[CquSession] failed to release aTrust verification-code lease during reset (${error instanceof Error ? error.name : "unknown"})`
+      );
+    }
   }
 
   private async destroy(): Promise<void> {
@@ -1000,6 +1175,9 @@ export class CquSessionDO extends DurableObject<Env> {
     await this.setStatus("revoked");
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.delete("loginInFlight");
+    await this.ctx.storage.delete("atrustLoginInFlight");
+    await this.ctx.storage.delete("atrustSession");
+    await this.ctx.storage.delete("codeLease");
   }
 
   /**
@@ -1388,6 +1566,42 @@ export class CquSessionDO extends DurableObject<Env> {
     }
   }
 
+  private async clearConsumedLoginCode(): Promise<void> {
+    const pending =
+      (await this.ctx.storage.get<PendingCode>("pendingCode")) ?? null;
+    if (pending?.kind === "login_2fa") {
+      await this.ctx.storage.delete("pendingCode");
+    }
+  }
+
+  /** 清理某类登录在 owner/队列中的所有租约，保留另一类登录的顺序。 */
+  private async clearVerificationCodeLeasesByKind(
+    kind: LoginKind
+  ): Promise<void> {
+    const now = Date.now();
+    const current =
+      (await this.ctx.storage.get<CodeLease>("codeLease")) ?? null;
+    if (!current) return;
+
+    const filtered: CodeLease = {
+      ...current,
+      queue: current.queue.filter((entry) => entry.kind !== kind),
+    };
+    const next =
+      current.ownerKind === kind
+        ? releaseCodeLease(filtered, current.ownerToken, now)
+        : pruneCodeLease(filtered, now);
+    const ownerChanged = current.ownerToken !== next?.ownerToken;
+    if (next) {
+      await this.ctx.storage.put("codeLease", next);
+    } else {
+      await this.ctx.storage.delete("codeLease");
+    }
+    if (ownerChanged && next) {
+      await this.grantVerificationCodePermit(next.ownerToken);
+    }
+  }
+
   /**
    * 按 FIFO 获取共享验证码通道。CAS 与 aTrust 的浏览器登录可以并行，
    * 但只有 owner 会被允许点击「获取验证码」。
@@ -1427,6 +1641,208 @@ export class CquSessionDO extends DurableObject<Env> {
 
     if (ownerChanged && next) {
       await this.grantVerificationCodePermit(next.ownerToken);
+    }
+  }
+
+  private async getAtrustSessionForHarvest(): Promise<AtrustSessionRecord> {
+    const existing =
+      (await this.ctx.storage.get<AtrustSessionRecord>("atrustSession")) ??
+      null;
+    if (existing?.status === "needs_reauth") {
+      throw new CquSsoError(
+        "ATRUST_NEEDS_REAUTH",
+        "aTrust session needs re-auth"
+      );
+    }
+    if (existing?.status === "active" && existing.storageState) {
+      return existing;
+    }
+    return this.containerAtrustLogin();
+  }
+
+  private async recordAtrustPasswordRejection(): Promise<never> {
+    const previous =
+      (await this.ctx.storage.get<AtrustSessionRecord>("atrustSession")) ??
+      null;
+    const consecutiveFailures =
+      (previous?.consecutiveFailures ?? 0) + 1;
+    const needsReauth =
+      consecutiveFailures >= MAX_ATRUST_PASSWORD_FAILURES;
+    const next: AtrustSessionRecord = {
+      status: needsReauth ? "needs_reauth" : "missing",
+      storageState: null,
+      loginAt: previous?.loginAt ?? 0,
+      lastUsedAt: previous?.lastUsedAt ?? 0,
+      consecutiveFailures,
+    };
+    const persisted = await this.putAtrustSessionGuarded(next);
+    if (!persisted) {
+      throw new CquSsoError(
+        "ATRUST_TRANSIENT",
+        "aTrust password failure state could not be persisted"
+      );
+    }
+    if (needsReauth) {
+      throw new CquSsoError(
+        "ATRUST_NEEDS_REAUTH",
+        "aTrust login needs re-auth"
+      );
+    }
+    throw new CquSsoError(
+      "ATRUST_TRANSIENT",
+      "aTrust login rejected credentials"
+    );
+  }
+
+  /**
+   * 按需建立独立 aTrust 浏览器状态。与直连 CAS 使用不同 lock/state，
+   * 仅在验证码阶段通过 codeLease 与其他登录互斥。
+   */
+  private async containerAtrustLogin(): Promise<AtrustSessionRecord> {
+    const currentSession =
+      (await this.ctx.storage.get<AtrustSessionRecord>("atrustSession")) ??
+      null;
+    if (currentSession?.status === "needs_reauth") {
+      throw new CquSsoError(
+        "ATRUST_NEEDS_REAUTH",
+        "aTrust session needs re-auth"
+      );
+    }
+
+    const existingLock =
+      (await this.ctx.storage.get<LoginInFlight>("atrustLoginInFlight")) ??
+      null;
+    if (!shouldStartLogin(existingLock, Date.now())) {
+      throw new CquSsoError(
+        "ATRUST_LOGIN_IN_FLIGHT",
+        "aTrust login already in flight"
+      );
+    }
+    if (existingLock) {
+      try {
+        await this.releaseVerificationCodeLease(existingLock.token);
+      } catch (error) {
+        console.error(
+          `[CquSession] failed to release stale aTrust code lease (${error instanceof Error ? error.name : "unknown"})`
+        );
+      }
+    }
+
+    const credentials =
+      (await this.ctx.storage.get<StoredCredentials>("credentials")) ?? null;
+    if (!credentials) {
+      throw new CquSsoError(
+        "ATRUST_NEEDS_REAUTH",
+        "aTrust login has no stored credentials"
+      );
+    }
+
+    const token = crypto.randomUUID();
+    await this.ctx.storage.put("atrustLoginInFlight", {
+      token,
+      startedAt: Date.now(),
+    } satisfies LoginInFlight);
+
+    let runAbort: AbortController | null = null;
+    try {
+      const password = await decrypt(
+        credentials.encryptedPassword,
+        credentials.iv,
+        this.env.ENCRYPTION_KEY
+      );
+      runAbort = new AbortController();
+      const runRequest = this.env.LOGIN_NODE.fetch(
+        new Request(`${LOGIN_NODE_BASE}/atrust-login`, {
+          method: "POST",
+          signal: runAbort.signal,
+          body: JSON.stringify({
+            studentId: this.state?.studentId ?? "",
+            password,
+            method: "mail",
+            session: token,
+          }),
+        })
+      );
+      try {
+        await this.acquireVerificationCodeLease(token, "atrust");
+      } catch (error) {
+        runAbort.abort();
+        await runRequest.catch(() => undefined);
+        throw error;
+      }
+
+      const response = await runRequest;
+      let result: ContainerRunResult | null;
+      try {
+        result = await response.json<ContainerRunResult>();
+      } catch {
+        result = null;
+      }
+
+      const latestLock =
+        (await this.ctx.storage.get<LoginInFlight>("atrustLoginInFlight")) ??
+        null;
+      if (latestLock?.token !== token) {
+        throw new CquSsoError(
+          "ATRUST_TRANSIENT",
+          "aTrust login was superseded"
+        );
+      }
+
+      if (result?.error === "PASSWORD_REJECTED") {
+        return await this.recordAtrustPasswordRejection();
+      }
+      if (
+        !response.ok ||
+        !result?.ok ||
+        !isStorageState(result.state)
+      ) {
+        throw new CquSsoError(
+          "ATRUST_TRANSIENT",
+          "aTrust login node returned a transient failure"
+        );
+      }
+
+      const now = Date.now();
+      const fresh: AtrustSessionRecord = {
+        status: "active",
+        storageState: result.state,
+        loginAt: now,
+        lastUsedAt: 0,
+        consecutiveFailures: 0,
+      };
+      if (!(await this.putAtrustSessionGuarded(fresh))) {
+        throw new CquSsoError(
+          "ATRUST_TRANSIENT",
+          "aTrust session state could not be persisted"
+        );
+      }
+      await this.clearConsumedLoginCode();
+      return fresh;
+    } catch (error) {
+      if (error instanceof CquSsoError) throw error;
+      console.error(
+        `[CquSession] aTrust login transient (${error instanceof Error ? error.name : "unknown"})`
+      );
+      throw new CquSsoError(
+        "ATRUST_TRANSIENT",
+        "aTrust login failed transiently"
+      );
+    } finally {
+      runAbort?.abort();
+      try {
+        await this.releaseVerificationCodeLease(token);
+      } catch (error) {
+        console.error(
+          `[CquSession] failed to rotate aTrust verification-code permit (${error instanceof Error ? error.name : "unknown"})`
+        );
+      }
+      const latestLock =
+        (await this.ctx.storage.get<LoginInFlight>("atrustLoginInFlight")) ??
+        null;
+      if (latestLock?.token === token) {
+        await this.ctx.storage.delete("atrustLoginInFlight");
+      }
     }
   }
 
@@ -1572,6 +1988,7 @@ export class CquSessionDO extends DurableObject<Env> {
       await this.putStateGuarded(fresh);
       const status = await this.getStatus();
       await this.setStatus(nextStatus(status, okEvent));
+      await this.clearConsumedLoginCode();
       return "ok";
     } catch (e) {
       console.error(

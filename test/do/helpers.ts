@@ -10,6 +10,7 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { vi, type MockInstance } from "vitest";
 import type { CquStorageState } from "../../src/services/cqu-sso";
+import { encrypt } from "../../src/services/crypto";
 
 let seq = 0;
 /** 每次调用返回唯一 DO stub(隔离命名, 避免用例间 storage 串扰)。 */
@@ -28,6 +29,28 @@ export function validStorageState(): CquStorageState {
       { name: "rg_objectid", value: "obj-value", domain: "sso.cqu.edu.cn", path: "/" },
     ],
     origins: [],
+  };
+}
+
+/** aTrust 改写应用的独立浏览器状态（仅用假值）。 */
+export function validAtrustStorageState(
+  marker = "atrust-session"
+): CquStorageState {
+  return {
+    cookies: [
+      {
+        name: "atrust_session",
+        value: marker,
+        domain: "my-cqu-edu-cn-s.atrust.cqu.edu.cn",
+        path: "/",
+      },
+    ],
+    origins: [
+      {
+        origin: "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn",
+        localStorage: [{ name: "access", value: marker }],
+      },
+    ],
   };
 }
 
@@ -61,6 +84,20 @@ export async function seedSession(
         consecutiveFailures: 0,
       },
       ...(opts.extra ?? {}),
+    });
+  });
+}
+
+/** 用测试环境 AES 密钥写入可解密的假密码，不使用真实凭据。 */
+export async function seedCredentials(
+  stub: DurableObjectStub,
+  password = "test-password"
+): Promise<void> {
+  const encrypted = await encrypt(password, env.ENCRYPTION_KEY);
+  await runInDurableObject(stub, async (_inst, state) => {
+    await state.storage.put("credentials", {
+      encryptedPassword: encrypted.ciphertext,
+      iv: encrypted.iv,
     });
   });
 }
