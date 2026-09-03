@@ -117,8 +117,14 @@ export interface NodeHarvestBody {
   error?: string;
 }
 
+export type NodeHarvestKind =
+  | "ok"
+  | "expired"
+  | "atrust_expired"
+  | "transient";
+
 export interface NodeHarvestClassification {
-  kind: NodeTicketKind; // 复用 "ok" | "expired" | "transient"
+  kind: NodeHarvestKind;
   captures?: HarvestCapture[];
   fetches?: HarvestFetch[];
   detail?: string;
@@ -134,6 +140,12 @@ export function classifyNodeHarvestResponse(
   body: NodeHarvestBody | null
 ): NodeHarvestClassification {
   if (status === 409) {
+    if (body?.error === "ATRUST_SESSION_EXPIRED") {
+      return {
+        kind: "atrust_expired",
+        detail: "node /data-harvest aTrust session expired",
+      };
+    }
     return { kind: "expired", detail: "node /data-harvest 409" };
   }
   if (body === null) {

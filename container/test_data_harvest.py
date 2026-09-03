@@ -105,6 +105,25 @@ class DataHarvestTestCase(AioHTTPTestCase):
         # 脱敏:绝不回 str(e)。
         assert "redirected" not in body["error"]
 
+    async def test_data_harvest_atrust_expired_is_distinct_409(self):
+        async def expired(state, recipe):
+            raise server.cqu_data_harvest.AtrustHarvestExpiredError(
+                "redirected to aTrust login"
+            )
+        server.cqu_data_harvest.harvest = expired
+
+        payload = _payload() | {
+            "navUrl": "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/workspace/curriculum",
+            "fetch": [{
+                "method": "GET",
+                "url": "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/api/exam/x",
+            }],
+        }
+        resp = await self.client.post("/data-harvest", json=payload)
+        assert resp.status == 409
+        body = await resp.json()
+        assert body == {"ok": False, "error": "ATRUST_SESSION_EXPIRED"}
+
     async def test_data_harvest_transient_is_502_distinct_from_expired(self):
         # 期望 capture 没到齐且页面非登录页 → 502 {"error":"HARVEST_TRANSIENT"}(瞬态退避),
         # 与 409(过期)严格区分, 绝不当 ok 空成功返回。

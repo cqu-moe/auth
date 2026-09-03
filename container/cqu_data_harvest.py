@@ -4,9 +4,9 @@ my.cqu.edu.cn 全站瑞数化后,后端纯 HTTP POST 课表被 412 专守;唯一
 auth 已登录浏览器里导航 navUrl(页面自动 fire 课表/学期)+ 截获 capture 模式响应 +
 对 fetch[] 跑 in-page GET(同源、读豁免)。本模块是 schedule 取数的通用原语,业务无关。
 
-host 红线:navUrl/capture(同源相对或绝对)/fetch[].url 解析出的 host 必须精确为
-my.cqu.edu.cn —— 比取票的 *.cqu.edu.cn 收得更紧(harvest 只打这一个 host),防 auth 变
-开放代理(SSRF)。纯函数(host 校验 / recipe 解析 / capture 匹配)抽出便于单测。
+host 红线:navUrl/fetch[].url 解析出的 host 必须精确为直连应用或 aTrust 改写应用，且
+一份 recipe 内必须同 host，防 auth 变开放代理(SSRF)。纯函数(host 校验 / recipe 解析 /
+capture 匹配)抽出便于单测。
 """
 import asyncio
 import urllib.parse
@@ -14,41 +14,44 @@ from patchright.async_api import async_playwright
 import cqu_login  # UA / locale 等浏览器对抗参数,与取票统一
 import cqu_ticket_browser  # 复用 _close_browser_driver / TICKET_SEMAPHORE / 超时常量
 
-# harvest 唯一允许的目标 host(精确等于,绝不 endswith/in)。
-HARVEST_HOST = "my.cqu.edu.cn"
+# harvest 只允许这两个目标 host(精确等于,绝不 endswith/in)。
+HARVEST_HOSTS = {
+    "my.cqu.edu.cn": "direct",
+    "my-cqu-edu-cn-s.atrust.cqu.edu.cn": "atrust",
+}
+ATRUST_PORTAL_HOST = "atrust.cqu.edu.cn"
+ATRUST_SSO_HOST = "sso-cqu-edu-cn-s.atrust.cqu.edu.cn"
 
 
-def is_harvest_host_allowed(url: str) -> bool:
-    """url 的 host 是否精确为 my.cqu.edu.cn(https、无 userinfo、端口省略或 443)。
-
-    策略对齐 server.is_allowed_service_url 的红线(反斜杠/非ASCII/scheme/userinfo/端口/
-    host 字符),但 host 判定收紧为 **精确等于 HARVEST_HOST**(不放行其它 *.cqu.edu.cn)。
-    纯函数,不抛。
-    """
+def classify_harvest_host(url: str) -> str | None:
+    """合法 harvest URL 返回 ``direct``/``atrust``，非法返回 None。"""
     if not url or "\\" in url:
-        return False
-    if any(ord(ch) < 0x20 or ord(ch) > 0x7e for ch in url):  # 非 ASCII / 控制符
-        return False
+        return None
+    if any(ord(ch) < 0x20 or ord(ch) > 0x7e for ch in url):
+        return None
     try:
         u = urllib.parse.urlparse(url)
     except Exception:
-        return False
-    if u.scheme != "https":
-        return False
-    if u.username or u.password:
-        return False
+        return None
+    if u.scheme != "https" or u.username or u.password:
+        return None
     try:
-        port = u.port  # 非法端口抛 ValueError
+        port = u.port
     except ValueError:
-        return False
+        return None
     if port is not None and port != 443:
-        return False
+        return None
     host = (u.hostname or "").lower()
-    if not host:
-        return False
-    if any(ch not in "abcdefghijklmnopqrstuvwxyz0123456789.-" for ch in host):
-        return False
-    return host == HARVEST_HOST
+    if not host or any(
+        ch not in "abcdefghijklmnopqrstuvwxyz0123456789.-" for ch in host
+    ):
+        return None
+    return HARVEST_HOSTS.get(host)
+
+
+def is_harvest_host_allowed(url: str) -> bool:
+    """非抛谓词：URL 是否属于两个精确允许 host 之一。"""
+    return classify_harvest_host(url) is not None
 
 
 class HarvestRecipeError(Exception):
@@ -72,8 +75,10 @@ def parse_harvest_recipe(body: dict) -> dict:
         raise HarvestRecipeError("recipe must be an object")
 
     nav_url = body.get("navUrl")
-    if not isinstance(nav_url, str) or not is_harvest_host_allowed(nav_url):
+    nav_kind = classify_harvest_host(nav_url) if isinstance(nav_url, str) else None
+    if nav_kind is None:
         raise HarvestRecipeError("navUrl missing or host not allowed")
+    nav_host = (urllib.parse.urlparse(nav_url).hostname or "").lower()
 
     capture = body.get("capture", [])
     if not isinstance(capture, list):
@@ -102,11 +107,20 @@ def parse_harvest_recipe(body: dict) -> dict:
         if method != "GET":  # 含 "" / "post" 等:非 GET 一律拒(不再被 `or` 静默吞成 GET)
             raise HarvestRecipeError("fetch method must be GET")
         url = f.get("url")
-        if not isinstance(url, str) or not is_harvest_host_allowed(url):
+        fetch_kind = classify_harvest_host(url) if isinstance(url, str) else None
+        if fetch_kind is None:
             raise HarvestRecipeError("fetch url missing or host not allowed")
+        fetch_host = (urllib.parse.urlparse(url).hostname or "").lower()
+        if fetch_host != nav_host:
+            raise HarvestRecipeError("recipe URLs must use the same host")
         fetch.append({"method": "GET", "url": url})
 
-    return {"navUrl": nav_url, "capture": list(capture), "fetch": fetch}
+    return {
+        "navUrl": nav_url,
+        "capture": list(capture),
+        "fetch": fetch,
+        "hostKind": nav_kind,
+    }
 
 
 def capture_match(resp_url: str, patterns: list[str]) -> str | None:
@@ -141,6 +155,10 @@ class HarvestExpiredError(Exception):
     """
 
 
+class AtrustHarvestExpiredError(Exception):
+    """aTrust 独立会话落回门户或改写 SSO；只允许清理/重登 aTrust 状态。"""
+
+
 def is_expired_harvest(captures: dict, page_content: str, page_url: str) -> bool:
     """无任何 capture 命中 **且** 页面看起来是 CAS 登录页 → 判会话过期(纯函数, 便于单测)。
 
@@ -156,6 +174,23 @@ def is_expired_harvest(captures: dict, page_content: str, page_url: str) -> bool
         return True
     host = (urllib.parse.urlparse(page_url or "").hostname or "").lower()
     return host == _SSO_HOST
+
+
+def classify_expired_harvest(
+    captures: dict,
+    page_content: str,
+    page_url: str,
+    host_kind: str,
+) -> str | None:
+    """按 recipe 的状态域区分直连 CAS 过期与 aTrust 独立会话过期。"""
+    if captures:
+        return None
+    host = (urllib.parse.urlparse(page_url or "").hostname or "").lower()
+    if host_kind == "atrust":
+        if host in {ATRUST_PORTAL_HOST, ATRUST_SSO_HOST}:
+            return "atrust_expired"
+        return None
+    return "expired" if is_expired_harvest(captures, page_content, page_url) else None
 
 
 class HarvestTransientError(Exception):
@@ -178,6 +213,7 @@ def classify_harvest_outcome(
     page_content: str,
     page_url: str,
     fetch_statuses: list[int] | None = None,
+    host_kind: str = "direct",
 ) -> str:
     """navigate + capture-wait + fetch[] 后的三态判定(纯函数, 便于单测): "ok"/"expired"/"transient"。
 
@@ -195,8 +231,11 @@ def classify_harvest_outcome(
     capture 配方传 None/省略即可(保持既有调用与单测不变)。
     """
     captured = {k: True for k in captured_keys}  # is_expired_harvest 只看 truthy/empty
-    if is_expired_harvest(captured, page_content, page_url):
-        return "expired"
+    expired = classify_expired_harvest(
+        captured, page_content, page_url, host_kind
+    )
+    if expired is not None:
+        return expired
     if patterns:
         return "ok" if all_captures_present(captured_keys, patterns) else "transient"
     # fetch-only: 只有至少一个 2xx 才算真成功, 否则瞬态退避。
@@ -306,7 +345,13 @@ async def harvest(state: dict, recipe: dict) -> dict:
         fetch_statuses = [f["status"] for f in fetches]
         page_content = "" if captured else await page.content()
         outcome = classify_harvest_outcome(
-            set(captured), patterns, page_content, page.url, fetch_statuses)
+            set(captured), patterns, page_content, page.url, fetch_statuses,
+            host_kind=recipe.get("hostKind", "direct"),
+        )
+        if outcome == "atrust_expired":
+            raise AtrustHarvestExpiredError(
+                "navUrl redirected to aTrust login (session expired)"
+            )
         if outcome == "expired":
             raise HarvestExpiredError("navUrl redirected to CAS login (session expired)")
         if outcome == "transient":

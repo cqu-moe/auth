@@ -365,6 +365,12 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
         log.info("data-harvest ok (captures=%d fetches=%d)",
                  len(result.get("captures", [])), len(result.get("fetches", [])))
         return web.json_response({"ok": True, **result})
+    except cqu_data_harvest.AtrustHarvestExpiredError:
+        # aTrust 状态与普通 CAS 独立；用受控 marker 让 DO 只清理并恢复 aTrust。
+        log.warning("data-harvest expired (aTrust session) → 409")
+        return web.json_response(
+            {"ok": False, "error": "ATRUST_SESSION_EXPIRED"}, status=409
+        )
     except cqu_data_harvest.HarvestExpiredError:
         # 会话过期: navUrl 落回 CAS 登录页, 无 capture 命中 → 409 {"error":"TGT_EXPIRED"}
         # (镜像 /service-ticket 的 ExpiredError→409)。DO classifyNodeHarvestResponse 据 409 判
