@@ -29,6 +29,7 @@ import {
   readStatus,
   readAlarm,
   readState,
+  readStorage,
   readStMintLog,
   captureSetAlarm,
   spyLoginNode,
@@ -36,6 +37,79 @@ import {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+describe("verification-code lease orchestration", () => {
+  it("deposit-code sends the code only to the lease owner token", async () => {
+    const stub = freshStub("code-lease-owner");
+    await seedSession(stub, {
+      status: "active",
+      extra: {
+        loginInFlight: { token: "cas-1", startedAt: Date.now() },
+        atrustLoginInFlight: { token: "atrust-1", startedAt: Date.now() },
+        codeLease: {
+          ownerToken: "atrust-1",
+          ownerKind: "atrust",
+          acquiredAt: Date.now(),
+          queue: [],
+        },
+      },
+    });
+
+    const delivered: Array<{ session: string; code: string }> = [];
+    spyLoginNode({
+      "/code": async (request) => {
+        delivered.push(await request.json());
+        return Response.json({ ok: true });
+      },
+    });
+
+    const response = await stub.fetch("http://do/deposit-code", {
+      method: "POST",
+      body: JSON.stringify({ code: "123456", kind: "login_2fa" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(delivered).toEqual([{ session: "atrust-1", code: "123456" }]);
+  });
+
+  it("releasing the owner promotes FIFO head and grants only it a fresh permit", async () => {
+    const stub = freshStub("code-lease-promote");
+    await seedSession(stub, {
+      status: "active",
+      extra: {
+        codeLease: {
+          ownerToken: "cas-1",
+          ownerKind: "cas",
+          acquiredAt: Date.now(),
+          queue: [
+            { token: "atrust-1", kind: "atrust", queuedAt: Date.now() },
+          ],
+        },
+      },
+    });
+
+    const permits: Array<{ session: string }> = [];
+    spyLoginNode({
+      "/code-permit": async (request) => {
+        permits.push(await request.json());
+        return Response.json({ ok: true });
+      },
+    });
+
+    await runInDurableObject(stub, async (instance) => {
+      await (instance as unknown as {
+        releaseVerificationCodeLease: (token: string) => Promise<void>;
+      }).releaseVerificationCodeLease("cas-1");
+    });
+
+    expect(permits).toEqual([{ session: "atrust-1" }]);
+    expect(await readStorage(stub, "codeLease")).toMatchObject({
+      ownerToken: "atrust-1",
+      ownerKind: "atrust",
+      queue: [],
+    });
+  });
 });
 
 function pathsOf(spy: ReturnType<typeof spyLoginNode>): string[] {

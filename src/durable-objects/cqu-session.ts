@@ -9,6 +9,13 @@ import {
   type CquEvent,
 } from "../services/cqu-2fa/state-machine";
 import { shouldStartLogin } from "../services/cqu-2fa/single-flight";
+import {
+  acquireCodeLease,
+  pruneCodeLease,
+  releaseCodeLease,
+  type CodeLease,
+  type LoginKind,
+} from "../services/cqu-2fa/code-lease";
 import { decodeJwtExp } from "../services/cqu-2fa/jwt-exp";
 import {
   shouldProactiveRelogin,
@@ -883,14 +890,20 @@ export class CquSessionDO extends DurableObject<Env> {
         }
       }
 
-      const lock = await this.ctx.storage.get<LoginInFlight>("loginInFlight");
-      if (!lock) {
+      const storedLease =
+        (await this.ctx.storage.get<CodeLease>("codeLease")) ?? null;
+      const lease = pruneCodeLease(storedLease, Date.now());
+      if (!lease) {
+        if (storedLease) {
+          await this.ctx.storage.delete("codeLease");
+        }
         // 无在途登录 = 用户手动登录触发的码, 已送达上方实时面板。不再算丢码。
         console.info(
           `[CquSession] login_2fa code arrived with no login in flight → broadcast to user live panel`
         );
         return true;
       }
+      await this.ctx.storage.put("codeLease", lease);
       const userId = this.state?.userId;
       if (!userId) {
         // 退化态: 有在途登录锁却无 session 状态, 节点路径走不通。码已广播无害, 但节点收码失败。
@@ -900,12 +913,12 @@ export class CquSessionDO extends DurableObject<Env> {
         return false;
       }
       try {
-        // Phase 2: 2FA 码经 Workers VPC binding 推到国内登录节点 POST /code(凭 session=lock.token
+        // Phase 2: 2FA 码经 Workers VPC binding 推到国内登录节点 POST /code(凭 session=lease.ownerToken
         // 路由到在途 /run, 契约同容器, body 不变)。原 getLoginContainer(userId).fetch("https://c/code") 已弃用。
         const res = await this.env.LOGIN_NODE.fetch(
           new Request(`${LOGIN_NODE_BASE}/code`, {
             method: "POST",
-            body: JSON.stringify({ session: lock.token, code }),
+            body: JSON.stringify({ session: lease.ownerToken, code }),
           })
         );
         if (!res.ok) {
@@ -1360,6 +1373,64 @@ export class CquSessionDO extends DurableObject<Env> {
   }
 
   /**
+   * 将验证码请求权授予指定登录会话。租约必须先落盘再调用本方法，
+   * 这样 Email Routing 在任意时刻投码都只会看到一个权威 owner。
+   */
+  private async grantVerificationCodePermit(token: string): Promise<void> {
+    const response = await this.env.LOGIN_NODE.fetch(
+      new Request(`${LOGIN_NODE_BASE}/code-permit`, {
+        method: "POST",
+        body: JSON.stringify({ session: token }),
+      })
+    );
+    if (!response.ok) {
+      throw new Error(`LOGIN_NODE /code-permit returned ${response.status}`);
+    }
+  }
+
+  /**
+   * 按 FIFO 获取共享验证码通道。CAS 与 aTrust 的浏览器登录可以并行，
+   * 但只有 owner 会被允许点击「获取验证码」。
+   */
+  private async acquireVerificationCodeLease(
+    token: string,
+    kind: LoginKind
+  ): Promise<void> {
+    const now = Date.now();
+    const current =
+      (await this.ctx.storage.get<CodeLease>("codeLease")) ?? null;
+    const next = acquireCodeLease(
+      current,
+      { token, kind, queuedAt: now },
+      now
+    );
+    const ownerChanged = current?.ownerToken !== next.ownerToken;
+    await this.ctx.storage.put("codeLease", next);
+    if (ownerChanged) {
+      await this.grantVerificationCodePermit(next.ownerToken);
+    }
+  }
+
+  /** 释放租约；owner 完成后原子推进 FIFO 队首，再向新 owner 发 permit。 */
+  private async releaseVerificationCodeLease(token: string): Promise<void> {
+    const now = Date.now();
+    const current =
+      (await this.ctx.storage.get<CodeLease>("codeLease")) ?? null;
+    const next = releaseCodeLease(current, token, now);
+    const ownerChanged = current?.ownerToken !== next?.ownerToken;
+
+    if (next) {
+      await this.ctx.storage.put("codeLease", next);
+    } else {
+      await this.ctx.storage.delete("codeLease");
+    }
+
+    if (ownerChanged && next) {
+      await this.grantVerificationCodePermit(next.ownerToken);
+    }
+  }
+
+  /**
    * 调容器 /run 跑一次完整浏览器登录(首登 / 重登共用)。
    *
    * single-flight 在此集中: 先从 storage 读最新锁, 若已有「活的、未过期」在途登录
@@ -1404,6 +1475,7 @@ export class CquSessionDO extends DurableObject<Env> {
     const token = crypto.randomUUID();
     const lock: LoginInFlight = { token, startedAt: Date.now() };
     await this.ctx.storage.put("loginInFlight", lock);
+    let runAbort: AbortController | null = null;
 
     try {
       const password = await decrypt(
@@ -1413,9 +1485,14 @@ export class CquSessionDO extends DurableObject<Env> {
       );
       // Phase 2: 经 Workers VPC binding 发到国内登录节点 POST /run(契约同容器, body 不变 ——
       // 青果提取在节点本地)。原 getLoginContainer(...).fetch("https://c/run") 已弃用。
-      const res = await this.env.LOGIN_NODE.fetch(
+      // 先点火 /run，让 CAS 与 aTrust 可以并行完成密码一因子；节点会在
+      // 真正请求验证码前等待 /code-permit。租约未授予时用 AbortSignal 中止在途请求，
+      // 避免留下无人 await 的悬空 Promise。
+      runAbort = new AbortController();
+      const runRequest = this.env.LOGIN_NODE.fetch(
         new Request(`${LOGIN_NODE_BASE}/run`, {
           method: "POST",
+          signal: runAbort.signal,
           body: JSON.stringify({
             studentId: state.studentId,
             password,
@@ -1425,6 +1502,14 @@ export class CquSessionDO extends DurableObject<Env> {
           }),
         })
       );
+      try {
+        await this.acquireVerificationCodeLease(token, "cas");
+      } catch (error) {
+        runAbort.abort();
+        await runRequest.catch(() => undefined);
+        throw error;
+      }
+      const res = await runRequest;
       const result = await res.json<ContainerRunResult>();
       // M5 回写完整性校验: 除 res.ok/result.ok/result.state 兜空外, 再套 hasValidTgt(升级后的
       // CAS 三件套校验)。容器可能返回 ok 但 state 半残(缺 SESSION/rg_objectid 等), 这种半残态
@@ -1487,7 +1572,6 @@ export class CquSessionDO extends DurableObject<Env> {
       await this.putStateGuarded(fresh);
       const status = await this.getStatus();
       await this.setStatus(nextStatus(status, okEvent));
-      await this.ctx.storage.delete("loginInFlight");
       return "ok";
     } catch (e) {
       console.error(
@@ -1497,6 +1581,18 @@ export class CquSessionDO extends DurableObject<Env> {
       this.lastLoginFailReason = "transient";
       await this.failLogin(failEvent);
       return "failed";
+    } finally {
+      runAbort?.abort();
+      try {
+        await this.releaseVerificationCodeLease(token);
+      } catch (error) {
+        // 当前登录的成败已确定，permit 轮转失败不应覆盖它；后续
+        // 排队登录会按自身超时路径失败并释放租约。日志不包含 token。
+        console.error(
+          `[CquSession] failed to rotate verification-code permit: ${errMsg(error)}`
+        );
+      }
+      await this.ctx.storage.delete("loginInFlight");
     }
   }
 

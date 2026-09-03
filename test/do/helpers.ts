@@ -108,6 +108,16 @@ export async function readState(
   );
 }
 
+/** 读取任意测试关注的 DO storage 键。 */
+export async function readStorage<T>(
+  stub: DurableObjectStub,
+  key: string
+): Promise<T | undefined> {
+  return runInDurableObject(stub, async (_inst, state) =>
+    state.storage.get<T>(key)
+  );
+}
+
 /** 读窗口内 ST 铸票记录(限流账本)。 */
 export async function readStMintLog(
   stub: DurableObjectStub
