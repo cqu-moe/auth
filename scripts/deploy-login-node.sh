@@ -140,10 +140,8 @@ for file in "${runtime_files[@]}"; do
 done
 
 # Worker 切流前的静态 gate：新 release 必须能加载全部新增模块。
-(
-  cd "$release_dir"
-  sudo -u cqulogin /opt/cqu-login/venv/bin/python -c 'import cqu_atrust, cqu_data_harvest, server; assert server.NODE_API_VERSION == "atrust-harvest-v1"'
-)
+# /opt/cqu-login 的父目录仅 service account 可穿越，不能先由 ubuntu `cd`。
+sudo -u cqulogin env PYTHONPATH="$release_dir" /opt/cqu-login/venv/bin/python -c 'import cqu_atrust, cqu_data_harvest, server; assert server.NODE_API_VERSION == "atrust-harvest-v1"'
 
 rollback() {
   for source in "$backup_dir"/*.py; do

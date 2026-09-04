@@ -47,3 +47,4 @@ def test_local_rsync_is_compatible_with_macos_rsync_2_6():
 
 def test_remote_health_and_import_checks_run_as_the_service_account():
     assert SCRIPT.count("sudo -u cqulogin") >= 5
+    assert 'sudo -u cqulogin env PYTHONPATH="$release_dir"' in SCRIPT
