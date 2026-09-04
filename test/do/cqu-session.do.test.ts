@@ -153,7 +153,7 @@ describe("verification-code lease orchestration", () => {
     expect(await readStorage(stub, "codePermitPending")).toBeUndefined();
   });
 
-  it("never leaves an authoritative owner behind when every permit attempt fails", async () => {
+  it("keeps a promoted owner fenced when every permit acknowledgement is lost", async () => {
     const stub = freshStub("code-lease-permit-terminal-failure");
     await seedSession(stub, {
       status: "active",
@@ -181,7 +181,153 @@ describe("verification-code lease orchestration", () => {
       ).rejects.toThrow("code-permit failed");
     });
 
-    expect(await readStorage(stub, "codeLease")).toBeUndefined();
+    expect(await readStorage(stub, "codeLease")).toMatchObject({
+      ownerToken: "atrust-1",
+      ownerKind: "atrust",
+      queue: [],
+    });
+    expect(await readStorage(stub, "codePermitPending")).toBe("atrust-1");
+  });
+
+  it("never promotes a successor when the node accepted a permit but every response was lost", async () => {
+    const stub = freshStub("code-lease-permit-accepted-response-lost");
+    await seedSession(stub, {
+      status: "active",
+      extra: {
+        codeLease: {
+          ownerToken: "cas-1",
+          ownerKind: "cas",
+          acquiredAt: Date.now(),
+          queue: [
+            { token: "atrust-1", kind: "atrust", queuedAt: Date.now() },
+            { token: "cas-2", kind: "cas", queuedAt: Date.now() },
+          ],
+        },
+      },
+    });
+    const accepted: string[] = [];
+    spyLoginNode({
+      "/code-permit": async (request) => {
+        const body = await request.json<{ session: string }>();
+        accepted.push(body.session);
+        throw new Error("response lost after accept");
+      },
+    });
+
+    await runInDurableObject(stub, async (instance) => {
+      await expect(
+        (instance as unknown as {
+          releaseVerificationCodeLease: (token: string) => Promise<void>;
+        }).releaseVerificationCodeLease("cas-1")
+      ).rejects.toThrow("code-permit failed");
+    });
+
+    expect(accepted).toEqual(["atrust-1", "atrust-1", "atrust-1"]);
+    expect(await readStorage(stub, "codeLease")).toMatchObject({
+      ownerToken: "atrust-1",
+      queue: [{ token: "cas-2", kind: "cas" }],
+    });
+    expect(await readStorage(stub, "codePermitPending")).toBe("atrust-1");
+  });
+
+  it("does not release a pending owner while the node may already have consumed its permit", async () => {
+    const stub = freshStub("code-lease-pending-release");
+    await seedSession(stub, {
+      status: "active",
+      extra: {
+        codeLease: {
+          ownerToken: "atrust-1",
+          ownerKind: "atrust",
+          acquiredAt: Date.now(),
+          queue: [
+            { token: "cas-2", kind: "cas", queuedAt: Date.now() },
+          ],
+        },
+        codePermitPending: "atrust-1",
+      },
+    });
+    const permit = spyLoginNode({
+      "/code-permit": async () => Response.json({ ok: true }),
+    });
+
+    await runInDurableObject(stub, async (instance) => {
+      await (instance as unknown as {
+        releaseVerificationCodeLease: (token: string) => Promise<void>;
+      }).releaseVerificationCodeLease("atrust-1");
+    });
+
+    expect(permit).not.toHaveBeenCalled();
+    expect(await readStorage(stub, "codeLease")).toMatchObject({
+      ownerToken: "atrust-1",
+      queue: [{ token: "cas-2", kind: "cas" }],
+    });
+    expect(await readStorage(stub, "codePermitPending")).toBe("atrust-1");
+  });
+
+  it("replays a persisted permit marker after activation and commits only its acknowledgement", async () => {
+    const stub = freshStub("code-lease-pending-recovery");
+    await seedSession(stub, {
+      status: "active",
+      extra: {
+        codeLease: {
+          ownerToken: "atrust-1",
+          ownerKind: "atrust",
+          acquiredAt: Date.now(),
+          queue: [],
+        },
+        codePermitPending: "atrust-1",
+      },
+    });
+    const permits: Array<{ session: string }> = [];
+    spyLoginNode({
+      "/code-permit": async (request) => {
+        permits.push(await request.json());
+        return Response.json({ ok: true });
+      },
+    });
+
+    await runInDurableObject(stub, async (instance) => {
+      await (instance as unknown as {
+        recoverPendingCodePermit: () => Promise<void>;
+      }).recoverPendingCodePermit();
+    });
+
+    expect(permits).toEqual([{ session: "atrust-1" }]);
+    expect(await readStorage(stub, "codeLease")).toMatchObject({
+      ownerToken: "atrust-1",
+    });
+    expect(await readStorage(stub, "codePermitPending")).toBeUndefined();
+  });
+
+  it("treats a received login code as proof that the pending owner consumed its permit", async () => {
+    const stub = freshStub("code-lease-pending-code-proof");
+    await seedSession(stub, {
+      status: "active",
+      extra: {
+        codeLease: {
+          ownerToken: "atrust-1",
+          ownerKind: "atrust",
+          acquiredAt: Date.now(),
+          queue: [],
+        },
+        codePermitPending: "atrust-1",
+      },
+    });
+    const delivered: Array<{ session: string; code: string }> = [];
+    spyLoginNode({
+      "/code": async (request) => {
+        delivered.push(await request.json());
+        return Response.json({ ok: true });
+      },
+    });
+
+    const response = await stub.fetch("http://do/deposit-code", {
+      method: "POST",
+      body: JSON.stringify({ code: "246810", kind: "login_2fa" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(delivered).toEqual([{ session: "atrust-1", code: "246810" }]);
     expect(await readStorage(stub, "codePermitPending")).toBeUndefined();
   });
 

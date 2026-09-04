@@ -35,12 +35,19 @@ app_dir="$2"
 release_root="$3"
 backup_dir="$release_root/$backup_id"
 contract_file="$backup_dir/health-contract"
+absent_file="$backup_dir/absent-files"
 [[ -d "$backup_dir" ]] || { echo "backup not found: $backup_id" >&2; exit 1; }
 [[ -f "$contract_file" ]] || { echo "backup health contract missing: $backup_id" >&2; exit 1; }
 for source in "$backup_dir"/*.py; do
   [[ -e "$source" ]] || continue
   sudo install -o cqulogin -g cqulogin -m 0644 "$source" "$app_dir/$(basename "$source")"
 done
+if [[ -f "$absent_file" ]]; then
+  while IFS= read -r file; do
+    [[ -n "$file" ]] || continue
+    sudo rm -f -- "$app_dir/$file"
+  done < "$absent_file"
+fi
 sudo systemctl restart cqu-login
 for _ in $(seq 1 20); do
   if payload=$(curl -fsS --max-time 3 http://127.0.0.1:8080/health 2>/dev/null) && \
@@ -85,10 +92,13 @@ previous_payload=$(curl -fsS --max-time 3 http://127.0.0.1:8080/health)
 previous_contract=$(PAYLOAD="$previous_payload" /opt/cqu-login/venv/bin/python -c 'import json, os; body=json.loads(os.environ["PAYLOAD"]); assert body["ok"] is True; print(body.get("apiVersion") or "legacy-ok")')
 printf '%s\n' "$previous_contract" | sudo tee "$backup_dir/health-contract" >/dev/null
 sudo chmod 0644 "$backup_dir/health-contract"
+sudo install -o cqulogin -g cqulogin -m 0644 /dev/null "$backup_dir/absent-files"
 for file in "${runtime_files[@]}"; do
   sudo install -o cqulogin -g cqulogin -m 0644 "$staging_dir/$file" "$release_dir/$file"
   if [[ -f "$app_dir/$file" ]]; then
     sudo cp -p "$app_dir/$file" "$backup_dir/$file"
+  else
+    printf '%s\n' "$file" | sudo tee -a "$backup_dir/absent-files" >/dev/null
   fi
 done
 
@@ -103,6 +113,10 @@ rollback() {
     [[ -e "$source" ]] || continue
     sudo install -o cqulogin -g cqulogin -m 0644 "$source" "$app_dir/$(basename "$source")"
   done
+  while IFS= read -r file; do
+    [[ -n "$file" ]] || continue
+    sudo rm -f -- "$app_dir/$file"
+  done < "$backup_dir/absent-files"
   sudo systemctl restart cqu-login
   for _ in $(seq 1 20); do
     if payload=$(curl -fsS --max-time 3 http://127.0.0.1:8080/health 2>/dev/null) && \
@@ -114,6 +128,26 @@ rollback() {
   return 1
 }
 
+live_tree_dirty=0
+deployment_committed=0
+rollback_on_error() {
+  rc="${1:-1}"
+  trap - ERR HUP INT TERM
+  if [[ "$live_tree_dirty" == 1 && "$deployment_committed" == 0 ]]; then
+    if rollback; then
+      echo "live tree switch interrupted; rollback verified: $backup_id" >&2
+    else
+      echo "live tree switch interrupted; rollback also failed: $backup_id" >&2
+    fi
+  fi
+  exit "$rc"
+}
+trap 'rollback_on_error $?' ERR
+trap 'rollback_on_error 129' HUP
+trap 'rollback_on_error 130' INT
+trap 'rollback_on_error 143' TERM
+
+live_tree_dirty=1
 for file in "${runtime_files[@]}"; do
   sudo install -o cqulogin -g cqulogin -m 0644 "$release_dir/$file" "$app_dir/$file"
 done
@@ -145,6 +179,9 @@ if [[ "$healthy" != 1 ]]; then
   exit 1
 fi
 
+deployment_committed=1
+live_tree_dirty=0
+trap - ERR HUP INT TERM
 rm -rf "$staging_dir"
 echo "node release healthy: $release_id"
 echo "rollback id: $backup_id"

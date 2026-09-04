@@ -208,6 +208,22 @@ export class CquSessionDO extends DurableObject<Env> {
   // 保留(应急可手改 DO 出站切回此直连路径), 随 CF 容器在 Phase 4 一并移除。
   private ssoClient = new CquSsoClient();
 
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    // `codePermitPending` is a durable outbox marker. Replaying the same token is
+    // idempotent on the node, so an activation after a crash can finish the
+    // acknowledgement without ever handing the shared channel to a successor.
+    ctx.blockConcurrencyWhile(async () => {
+      try {
+        await this.recoverPendingCodePermit();
+      } catch (error) {
+        console.warn(
+          `[CquSession] pending code permit recovery deferred (${error instanceof Error ? error.name : "unknown"})`
+        );
+      }
+    });
+  }
+
   private async loadState(): Promise<void> {
     if (!this.state) {
       this.state = (await this.ctx.storage.get<SessionState>("state")) ?? null;
@@ -1137,16 +1153,15 @@ export class CquSessionDO extends DurableObject<Env> {
         );
         return true;
       }
-      await this.persistCodeLeaseTransition(storedLease, lease);
       const permitPending =
         (await this.ctx.storage.get<string>("codePermitPending")) ?? null;
       if (permitPending === lease.ownerToken) {
-        await this.ctx.storage.put("pendingCode", {
-          ...pending,
-          ownerToken: lease.ownerToken,
-        } satisfies PendingCode);
-        return true;
+        // A mail code can only exist after some login clicked send. That is
+        // stronger proof than a lost HTTP response that this owner consumed its
+        // permit, so commit the marker and deliver the code to that same token.
+        await this.ctx.storage.delete("codePermitPending");
       }
+      await this.persistCodeLeaseTransition(storedLease, lease);
       await this.ctx.storage.put("pendingCode", pending);
       const userId = this.state?.userId;
       if (!userId) {
@@ -1718,10 +1733,46 @@ export class CquSessionDO extends DurableObject<Env> {
     return true;
   }
 
+  /** Finish the durable outbox entry only after the node acknowledged this owner. */
+  private async commitAcknowledgedCodePermit(token: string): Promise<void> {
+    const [latest, pendingToken] = await Promise.all([
+      this.ctx.storage.get<CodeLease>("codeLease"),
+      this.ctx.storage.get<string>("codePermitPending"),
+    ]);
+    if (latest?.ownerToken !== token || pendingToken !== token) return;
+    await this.ctx.storage.delete("codePermitPending");
+    const hadBufferedFresh = await this.deliverBufferedFreshCode(token);
+    if (!hadBufferedFresh) {
+      await this.offerPendingCodeForReuse(token);
+    }
+  }
+
+  /** Replay an activation-surviving outbox marker to the exact same owner only. */
+  private async recoverPendingCodePermit(): Promise<void> {
+    const [lease, pendingToken] = await Promise.all([
+      this.ctx.storage.get<CodeLease>("codeLease"),
+      this.ctx.storage.get<string>("codePermitPending"),
+    ]);
+    if (!pendingToken) return;
+    if (!lease || lease.ownerToken !== pendingToken) {
+      await this.ctx.storage.delete("codePermitPending");
+      return;
+    }
+
+    const pruned = pruneCodeLease(lease, Date.now());
+    if (pruned?.ownerToken !== lease.ownerToken) {
+      // The old node owner budget has certainly ended; only now may FIFO move.
+      await this.persistCodeLeaseTransition(lease, pruned);
+      return;
+    }
+    await this.grantVerificationCodePermit(pendingToken);
+    await this.commitAcknowledgedCodePermit(pendingToken);
+  }
+
   /**
    * 唯一租约转换入口：先持久化 owner + pending tombstone，再发 permit；成功后
-   * 提交 owner 并补投竞态窗口邮件。三次全失败则释放该 owner 并继续推进队列，
-   * 绝不留下“有 owner、无 permit”的永久状态。
+   * 提交 owner 并补投竞态窗口邮件。未收到确认时保留 owner + marker：请求可能
+   * 已被节点消费，只有 owner TTL 到期才可安全推进 FIFO。
    */
   private async persistCodeLeaseTransition(
     current: CodeLease | null,
@@ -1741,50 +1792,8 @@ export class CquSessionDO extends DurableObject<Env> {
       codeLease: next,
       codePermitPending: next.ownerToken,
     });
-    try {
-      await this.grantVerificationCodePermit(next.ownerToken);
-    } catch (error) {
-      const [latest, pendingToken] = await Promise.all([
-        this.ctx.storage.get<CodeLease>("codeLease"),
-        this.ctx.storage.get<string>("codePermitPending"),
-      ]);
-      if (
-        latest?.ownerToken === next.ownerToken &&
-        pendingToken === next.ownerToken
-      ) {
-        const buffered =
-          (await this.ctx.storage.get<PendingCode>("pendingCode")) ?? null;
-        if (buffered?.ownerToken === next.ownerToken) {
-          await this.ctx.storage.delete("pendingCode");
-        }
-        await this.ctx.storage.delete("codePermitPending");
-        const fallback = releaseCodeLease(
-          latest,
-          next.ownerToken,
-          Date.now()
-        );
-        await this.persistCodeLeaseTransition(latest, fallback);
-      }
-      throw error;
-    }
-
-    const [latest, pendingToken] = await Promise.all([
-      this.ctx.storage.get<CodeLease>("codeLease"),
-      this.ctx.storage.get<string>("codePermitPending"),
-    ]);
-    if (
-      latest?.ownerToken !== next.ownerToken ||
-      pendingToken !== next.ownerToken
-    ) {
-      return;
-    }
-    await this.ctx.storage.delete("codePermitPending");
-    const hadBufferedFresh = await this.deliverBufferedFreshCode(
-      next.ownerToken
-    );
-    if (!hadBufferedFresh) {
-      await this.offerPendingCodeForReuse(next.ownerToken);
-    }
+    await this.grantVerificationCodePermit(next.ownerToken);
+    await this.commitAcknowledgedCodePermit(next.ownerToken);
   }
 
   /**
@@ -1892,6 +1901,19 @@ export class CquSessionDO extends DurableObject<Env> {
     const now = Date.now();
     const current =
       (await this.ctx.storage.get<CodeLease>("codeLease")) ?? null;
+    const pendingToken =
+      (await this.ctx.storage.get<string>("codePermitPending")) ?? null;
+    const pruned = pruneCodeLease(current, now);
+    if (
+      current?.ownerToken === token &&
+      pendingToken === token &&
+      pruned?.ownerToken === token
+    ) {
+      // A failed acknowledgement is not proof the node missed the permit.
+      // Keep this owner fenced until its 720s TTL outlives the node's 660s
+      // owner budget; an immediate promotion could let two browsers send.
+      return;
+    }
     const next = releaseCodeLease(current, token, now);
     await this.persistCodeLeaseTransition(current, next);
   }
