@@ -23,3 +23,12 @@ def test_partial_live_tree_switch_is_trapped_and_rolled_back():
     assert "trap 'rollback_on_error 130' INT" in SCRIPT
     assert "trap 'rollback_on_error 143' TERM" in SCRIPT
     assert 'sudo rm -f -- "$app_dir/$file"' in SCRIPT
+
+
+def test_rollback_manifest_is_root_owned_allowlisted_and_fail_closed():
+    assert 'is_runtime_file "$file" || return 1' in SCRIPT
+    assert 'install -o root -g root -m 0644 /dev/null "$backup_dir/absent-files"' in SCRIPT
+    assert 'sudo install -o root -g root -m 0644 "$app_dir/$file" "$backup_dir/$file"' in SCRIPT
+    assert 'sudo install -o cqulogin -g cqulogin -m 0644 "$source" "$app_dir/$file" || return 1' in SCRIPT
+    assert 'sudo rm -f -- "$app_dir/$file" || return 1' in SCRIPT
+    assert 'sudo systemctl restart cqu-login || return 1' in SCRIPT

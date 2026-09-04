@@ -1158,8 +1158,9 @@ export class CquSessionDO extends DurableObject<Env> {
       if (permitPending === lease.ownerToken) {
         // A mail code can only exist after some login clicked send. That is
         // stronger proof than a lost HTTP response that this owner consumed its
-        // permit, so commit the marker and deliver the code to that same token.
-        await this.ctx.storage.delete("codePermitPending");
+        // permit. Publish separate proof; the in-flight grant/recovery path is
+        // the only writer allowed to commit (clear) the durable outbox marker.
+        await this.ctx.storage.put("codePermitProven", lease.ownerToken);
       }
       await this.persistCodeLeaseTransition(storedLease, lease);
       await this.ctx.storage.put("pendingCode", pending);
@@ -1261,7 +1262,48 @@ export class CquSessionDO extends DurableObject<Env> {
     return generation;
   }
 
+  /**
+   * Preserve only a still-live owner across destructive lifecycle changes.
+   * Tokens are non-secret fencing metadata. Queue entries are discarded because
+   * their login generations were invalidated and none has received a permit.
+   */
+  private async snapshotLiveCodeLeaseOwner(): Promise<{
+    lease: CodeLease;
+    pendingToken: string | null;
+    provenToken: string | null;
+  } | null> {
+    const now = Date.now();
+    const [lease, pendingToken, provenToken] = await Promise.all([
+      this.ctx.storage.get<CodeLease>("codeLease"),
+      this.ctx.storage.get<string>("codePermitPending"),
+      this.ctx.storage.get<string>("codePermitProven"),
+    ]);
+    if (!lease || pruneCodeLease(lease, now)?.ownerToken !== lease.ownerToken) {
+      return null;
+    }
+    return {
+      lease: { ...lease, queue: [] },
+      pendingToken:
+        pendingToken === lease.ownerToken ? pendingToken : null,
+      provenToken: provenToken === lease.ownerToken ? provenToken : null,
+    };
+  }
+
+  private async restoreCodeLeaseOwnerFence(
+    fence: Awaited<ReturnType<CquSessionDO["snapshotLiveCodeLeaseOwner"]>>
+  ): Promise<void> {
+    if (!fence) return;
+    await this.ctx.storage.put("codeLease", fence.lease);
+    if (fence.pendingToken) {
+      await this.ctx.storage.put("codePermitPending", fence.pendingToken);
+    }
+    if (fence.provenToken) {
+      await this.ctx.storage.put("codePermitProven", fence.provenToken);
+    }
+  }
+
   private async destroy(): Promise<void> {
+    const fence = await this.snapshotLiveCodeLeaseOwner();
     await this.ctx.storage.deleteAll();
     this.state = null;
     // deleteAll 已清掉 status/loginInFlight/pendingCode/state/credentials/reloginAttempts/reloginFailures;
@@ -1270,6 +1312,7 @@ export class CquSessionDO extends DurableObject<Env> {
       status: "unbound" satisfies CquStatus,
       atrustGeneration: crypto.randomUUID(),
     });
+    await this.restoreCodeLeaseOwnerFence(fence);
   }
 
   /**
@@ -1282,6 +1325,7 @@ export class CquSessionDO extends DurableObject<Env> {
    * cqu_bind_addresses.status=revoked 承载; 这里不 deleteAll, 故 revoked 是可逆禁用而非彻底清除。
    */
   private async revoke(): Promise<void> {
+    const fence = await this.snapshotLiveCodeLeaseOwner();
     // 刻意直写 setStatus("revoked") 而非走 nextStatus 状态机: 撤销要从任意状态(含空/
     // unbound 的 DO, admin 端点对未初始化的 DO 也会发 revoke)强制置位; 状态机表里
     // unbound 无 REVOKE 转移, 走表会停在 unbound 而漏置墓碑。勿"修回"成走表。
@@ -1291,7 +1335,12 @@ export class CquSessionDO extends DurableObject<Env> {
     await this.ctx.storage.delete("loginInFlight");
     await this.ctx.storage.delete("atrustLoginInFlight");
     await this.ctx.storage.delete("atrustSession");
-    await this.ctx.storage.delete(["codeLease", "codePermitPending"]);
+    await this.ctx.storage.delete([
+      "codeLease",
+      "codePermitPending",
+      "codePermitProven",
+    ]);
+    await this.restoreCodeLeaseOwnerFence(fence);
   }
 
   /**
@@ -1679,14 +1728,17 @@ export class CquSessionDO extends DurableObject<Env> {
           new Request(`${LOGIN_NODE_BASE}/code-permit`, {
             method: "POST",
             body: JSON.stringify({ session: token }),
+            signal: AbortSignal.timeout(10_000),
           })
         );
         lastStatus = response.status;
         if (response.ok) {
           return;
         }
+        if (await this.isCodePermitProven(token)) return;
       } catch (error) {
         lastStatus = 0;
+        if (await this.isCodePermitProven(token)) return;
         if (attempt === 3) {
           console.error(
             `[CquSession] LOGIN_NODE /code-permit failed after ${attempt} attempts (${error instanceof Error ? error.name : "unknown"})`
@@ -1696,6 +1748,19 @@ export class CquSessionDO extends DurableObject<Env> {
     }
     throw new Error(
       `LOGIN_NODE /code-permit failed after 3 attempts (status=${lastStatus})`
+    );
+  }
+
+  private async isCodePermitProven(token: string): Promise<boolean> {
+    const [lease, pendingToken, provenToken] = await Promise.all([
+      this.ctx.storage.get<CodeLease>("codeLease"),
+      this.ctx.storage.get<string>("codePermitPending"),
+      this.ctx.storage.get<string>("codePermitProven"),
+    ]);
+    return (
+      lease?.ownerToken === token &&
+      pendingToken === token &&
+      provenToken === token
     );
   }
 
@@ -1740,7 +1805,10 @@ export class CquSessionDO extends DurableObject<Env> {
       this.ctx.storage.get<string>("codePermitPending"),
     ]);
     if (latest?.ownerToken !== token || pendingToken !== token) return;
-    await this.ctx.storage.delete("codePermitPending");
+    await this.ctx.storage.delete([
+      "codePermitPending",
+      "codePermitProven",
+    ]);
     const hadBufferedFresh = await this.deliverBufferedFreshCode(token);
     if (!hadBufferedFresh) {
       await this.offerPendingCodeForReuse(token);
@@ -1755,7 +1823,10 @@ export class CquSessionDO extends DurableObject<Env> {
     ]);
     if (!pendingToken) return;
     if (!lease || lease.ownerToken !== pendingToken) {
-      await this.ctx.storage.delete("codePermitPending");
+      await this.ctx.storage.delete([
+        "codePermitPending",
+        "codePermitProven",
+      ]);
       return;
     }
 
@@ -1765,7 +1836,9 @@ export class CquSessionDO extends DurableObject<Env> {
       await this.persistCodeLeaseTransition(lease, pruned);
       return;
     }
-    await this.grantVerificationCodePermit(pendingToken);
+    if (!(await this.isCodePermitProven(pendingToken))) {
+      await this.grantVerificationCodePermit(pendingToken);
+    }
     await this.commitAcknowledgedCodePermit(pendingToken);
   }
 
@@ -1780,7 +1853,11 @@ export class CquSessionDO extends DurableObject<Env> {
   ): Promise<void> {
     const ownerChanged = current?.ownerToken !== next?.ownerToken;
     if (!next) {
-      await this.ctx.storage.delete(["codeLease", "codePermitPending"]);
+      await this.ctx.storage.delete([
+        "codeLease",
+        "codePermitPending",
+        "codePermitProven",
+      ]);
       return;
     }
     if (!ownerChanged) {
@@ -1788,6 +1865,7 @@ export class CquSessionDO extends DurableObject<Env> {
       return;
     }
 
+    await this.ctx.storage.delete("codePermitProven");
     await this.ctx.storage.put({
       codeLease: next,
       codePermitPending: next.ownerToken,
@@ -1862,7 +1940,10 @@ export class CquSessionDO extends DurableObject<Env> {
     const current =
       (await this.ctx.storage.get<CodeLease>("codeLease")) ?? null;
     if (!current) {
-      await this.ctx.storage.delete("codePermitPending");
+      await this.ctx.storage.delete([
+        "codePermitPending",
+        "codePermitProven",
+      ]);
       return;
     }
 
@@ -1870,6 +1951,14 @@ export class CquSessionDO extends DurableObject<Env> {
       ...current,
       queue: current.queue.filter((entry) => entry.kind !== kind),
     };
+    const currentStillLive =
+      pruneCodeLease(current, now)?.ownerToken === current.ownerToken;
+    if (current.ownerKind === kind && currentStillLive) {
+      // Reset invalidates the browser generation, not the external node's
+      // already-issued permit. Keep the owner fence until its own finally or TTL.
+      await this.ctx.storage.put("codeLease", filtered);
+      return;
+    }
     const next =
       current.ownerKind === kind
         ? releaseCodeLease(filtered, current.ownerToken, now)
@@ -1888,6 +1977,16 @@ export class CquSessionDO extends DurableObject<Env> {
     const now = Date.now();
     const current =
       (await this.ctx.storage.get<CodeLease>("codeLease")) ?? null;
+    const pendingToken =
+      (await this.ctx.storage.get<string>("codePermitPending")) ?? null;
+    if (
+      current?.ownerToken === token &&
+      pendingToken === token &&
+      pruneCodeLease(current, now)?.ownerToken === token
+    ) {
+      await this.recoverPendingCodePermit();
+      return;
+    }
     const next = acquireCodeLease(
       current,
       { token, kind, queuedAt: now },
@@ -1912,6 +2011,13 @@ export class CquSessionDO extends DurableObject<Env> {
       // A failed acknowledgement is not proof the node missed the permit.
       // Keep this owner fenced until its 720s TTL outlives the node's 660s
       // owner budget; an immediate promotion could let two browsers send.
+      try {
+        await this.recoverPendingCodePermit();
+      } catch (error) {
+        console.warn(
+          `[CquSession] pending code permit release recovery deferred (${error instanceof Error ? error.name : "unknown"})`
+        );
+      }
       return;
     }
     const next = releaseCodeLease(current, token, now);

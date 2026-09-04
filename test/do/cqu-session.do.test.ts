@@ -230,7 +230,7 @@ describe("verification-code lease orchestration", () => {
     expect(await readStorage(stub, "codePermitPending")).toBe("atrust-1");
   });
 
-  it("does not release a pending owner while the node may already have consumed its permit", async () => {
+  it("does not promote a pending owner even when its release retry is acknowledged", async () => {
     const stub = freshStub("code-lease-pending-release");
     await seedSession(stub, {
       status: "active",
@@ -256,12 +256,12 @@ describe("verification-code lease orchestration", () => {
       }).releaseVerificationCodeLease("atrust-1");
     });
 
-    expect(permit).not.toHaveBeenCalled();
+    expect(permit).toHaveBeenCalledTimes(1);
     expect(await readStorage(stub, "codeLease")).toMatchObject({
       ownerToken: "atrust-1",
       queue: [{ token: "cas-2", kind: "cas" }],
     });
-    expect(await readStorage(stub, "codePermitPending")).toBe("atrust-1");
+    expect(await readStorage(stub, "codePermitPending")).toBeUndefined();
   });
 
   it("replays a persisted permit marker after activation and commits only its acknowledgement", async () => {
@@ -299,6 +299,112 @@ describe("verification-code lease orchestration", () => {
     expect(await readStorage(stub, "codePermitPending")).toBeUndefined();
   });
 
+  it("same-owner acquire replays its durable permit marker without changing FIFO ownership", async () => {
+    const stub = freshStub("code-lease-pending-acquire-replay");
+    await seedSession(stub, {
+      status: "active",
+      extra: {
+        codeLease: {
+          ownerToken: "atrust-1",
+          ownerKind: "atrust",
+          acquiredAt: Date.now(),
+          queue: [{ token: "cas-2", kind: "cas", queuedAt: Date.now() }],
+        },
+        codePermitPending: "atrust-1",
+      },
+    });
+    const permits: string[] = [];
+    spyLoginNode({
+      "/code-permit": async (request) => {
+        permits.push((await request.json<{ session: string }>()).session);
+        return Response.json({ ok: true });
+      },
+    });
+
+    await runInDurableObject(stub, async (instance) => {
+      await (instance as unknown as {
+        acquireVerificationCodeLease: (
+          token: string,
+          kind: "atrust"
+        ) => Promise<void>;
+      }).acquireVerificationCodeLease("atrust-1", "atrust");
+    });
+
+    expect(permits).toEqual(["atrust-1"]);
+    expect(await readStorage(stub, "codeLease")).toMatchObject({
+      ownerToken: "atrust-1",
+      queue: [{ token: "cas-2", kind: "cas" }],
+    });
+    expect(await readStorage(stub, "codePermitPending")).toBeUndefined();
+  });
+
+  it("same-owner release replays an uncertain permit but keeps the owner fenced", async () => {
+    const stub = freshStub("code-lease-pending-release-replay");
+    await seedSession(stub, {
+      status: "active",
+      extra: {
+        codeLease: {
+          ownerToken: "atrust-1",
+          ownerKind: "atrust",
+          acquiredAt: Date.now(),
+          queue: [{ token: "cas-2", kind: "cas", queuedAt: Date.now() }],
+        },
+        codePermitPending: "atrust-1",
+      },
+    });
+    const permits: string[] = [];
+    spyLoginNode({
+      "/code-permit": async (request) => {
+        permits.push((await request.json<{ session: string }>()).session);
+        return Response.json({ ok: true });
+      },
+    });
+
+    await runInDurableObject(stub, async (instance) => {
+      await (instance as unknown as {
+        releaseVerificationCodeLease: (token: string) => Promise<void>;
+      }).releaseVerificationCodeLease("atrust-1");
+    });
+
+    expect(permits).toEqual(["atrust-1"]);
+    expect(await readStorage(stub, "codeLease")).toMatchObject({
+      ownerToken: "atrust-1",
+      queue: [{ token: "cas-2", kind: "cas" }],
+    });
+  });
+
+  it("treats code proof published during a lost acknowledgement as confirmed permit evidence", async () => {
+    const stub = freshStub("code-lease-marker-proof-during-grant");
+    await seedSession(stub, {
+      status: "active",
+      extra: {
+        codeLease: {
+          ownerToken: "atrust-1",
+          ownerKind: "atrust",
+          acquiredAt: Date.now(),
+          queue: [],
+        },
+        codePermitPending: "atrust-1",
+      },
+    });
+
+    await runInDurableObject(stub, async (instance, state) => {
+      spyLoginNode({
+        "/code-permit": async () => {
+          await state.storage.put("codePermitProven", "atrust-1");
+          throw new Error("response lost after code arrived");
+        },
+      });
+      await expect(
+        (instance as unknown as {
+          recoverPendingCodePermit: () => Promise<void>;
+        }).recoverPendingCodePermit()
+      ).resolves.toBeUndefined();
+    });
+    expect(await readStorage(stub, "codePermitPending")).toBeUndefined();
+    expect(await readStorage(stub, "codePermitProven")).toBeUndefined();
+  });
+
   it("treats a received login code as proof that the pending owner consumed its permit", async () => {
     const stub = freshStub("code-lease-pending-code-proof");
     await seedSession(stub, {
@@ -328,7 +434,8 @@ describe("verification-code lease orchestration", () => {
 
     expect(response.status).toBe(200);
     expect(delivered).toEqual([{ session: "atrust-1", code: "246810" }]);
-    expect(await readStorage(stub, "codePermitPending")).toBeUndefined();
+    expect(await readStorage(stub, "codePermitPending")).toBe("atrust-1");
+    expect(await readStorage(stub, "codePermitProven")).toBe("atrust-1");
   });
 
   it("promoting a stale owner grants the new permit but never forwards the stale arrival", async () => {
@@ -473,6 +580,54 @@ describe("verification-code lease orchestration", () => {
     });
     expect(spy).not.toHaveBeenCalled();
   });
+
+  it.each(["reset", "revoke", "destroy"] as const)(
+    "%s preserves an unexpired owner fence while invalidating login state",
+    async (operation) => {
+      const stub = freshStub(`code-lease-lifecycle-${operation}`);
+      await seedSession(stub, {
+        status: "active",
+        extra: {
+          atrustSession: {
+            status: "active",
+            storageState: validAtrustStorageState(),
+            loginAt: Date.now(),
+            lastUsedAt: 0,
+            consecutiveFailures: 0,
+          },
+          codeLease: {
+            ownerToken: "atrust-1",
+            ownerKind: "atrust",
+            acquiredAt: Date.now(),
+            queue: [{ token: "cas-2", kind: "cas", queuedAt: Date.now() }],
+          },
+          codePermitPending: "atrust-1",
+        },
+      });
+
+      await runInDurableObject(stub, async (instance) => {
+        const target = instance as unknown as {
+          resetAtrustAuthState: () => Promise<string>;
+          revoke: () => Promise<void>;
+          destroy: () => Promise<void>;
+        };
+        if (operation === "reset") await target.resetAtrustAuthState();
+        if (operation === "revoke") await target.revoke();
+        if (operation === "destroy") await target.destroy();
+      });
+
+      expect(await readStorage(stub, "codeLease")).toMatchObject({
+        ownerToken: "atrust-1",
+      });
+      expect(await readStorage(stub, "codePermitPending")).toBe("atrust-1");
+      if (operation === "destroy") {
+        expect(await readStatus(stub)).toBe("unbound");
+      }
+      if (operation === "revoke") {
+        expect(await readStatus(stub)).toBe("revoked");
+      }
+    }
+  );
 });
 
 function pathsOf(spy: ReturnType<typeof spyLoginNode>): string[] {

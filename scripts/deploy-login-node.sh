@@ -28,27 +28,41 @@ validate_id() {
 if [[ "${1:-}" == "--rollback" ]]; then
   backup_id="${2:-}"
   validate_id "$backup_id"
-  ssh "$node_host" bash -s -- "$backup_id" "$app_dir" "$release_root" <<'REMOTE'
+  ssh "$node_host" bash -s -- \
+    "$backup_id" "$app_dir" "$release_root" "${runtime_files[@]}" <<'REMOTE'
 set -euo pipefail
 backup_id="$1"
 app_dir="$2"
 release_root="$3"
+shift 3
+runtime_files=("$@")
 backup_dir="$release_root/$backup_id"
 contract_file="$backup_dir/health-contract"
 absent_file="$backup_dir/absent-files"
 [[ -d "$backup_dir" ]] || { echo "backup not found: $backup_id" >&2; exit 1; }
 [[ -f "$contract_file" ]] || { echo "backup health contract missing: $backup_id" >&2; exit 1; }
+is_runtime_file() {
+  local candidate="$1" allowed
+  [[ "$candidate" != */* && -n "$candidate" ]] || return 1
+  for allowed in "${runtime_files[@]}"; do
+    [[ "$candidate" == "$allowed" ]] && return 0
+  done
+  return 1
+}
 for source in "$backup_dir"/*.py; do
   [[ -e "$source" ]] || continue
-  sudo install -o cqulogin -g cqulogin -m 0644 "$source" "$app_dir/$(basename "$source")"
+  file="$(basename "$source")"
+  is_runtime_file "$file" || { echo "invalid backup entry: $file" >&2; exit 1; }
+  sudo install -o cqulogin -g cqulogin -m 0644 "$source" "$app_dir/$file" || exit 1
 done
 if [[ -f "$absent_file" ]]; then
   while IFS= read -r file; do
     [[ -n "$file" ]] || continue
-    sudo rm -f -- "$app_dir/$file"
+    is_runtime_file "$file" || { echo "invalid absence entry: $file" >&2; exit 1; }
+    sudo rm -f -- "$app_dir/$file" || exit 1
   done < "$absent_file"
 fi
-sudo systemctl restart cqu-login
+sudo systemctl restart cqu-login || exit 1
 for _ in $(seq 1 20); do
   if payload=$(curl -fsS --max-time 3 http://127.0.0.1:8080/health 2>/dev/null) && \
      CONTRACT="$(cat "$contract_file")" PAYLOAD="$payload" /opt/cqu-login/venv/bin/python -c 'import json, os; body=json.loads(os.environ["PAYLOAD"]); assert body["ok"] is True; expected=os.environ["CONTRACT"]; assert expected == "legacy-ok" or body.get("apiVersion") == expected'; then
@@ -87,16 +101,27 @@ release_dir="$release_root/$release_id"
 backup_id="backup-$(date -u +%Y%m%dT%H%M%SZ)-$release_id"
 backup_dir="$release_root/$backup_id"
 
-sudo install -d -o cqulogin -g cqulogin -m 0755 "$release_root" "$release_dir" "$backup_dir"
+is_runtime_file() {
+  local candidate="$1" allowed
+  [[ "$candidate" != */* && -n "$candidate" ]] || return 1
+  for allowed in "${runtime_files[@]}"; do
+    [[ "$candidate" == "$allowed" ]] && return 0
+  done
+  return 1
+}
+
+sudo install -d -o root -g root -m 0755 "$release_root" "$release_dir" "$backup_dir"
 previous_payload=$(curl -fsS --max-time 3 http://127.0.0.1:8080/health)
 previous_contract=$(PAYLOAD="$previous_payload" /opt/cqu-login/venv/bin/python -c 'import json, os; body=json.loads(os.environ["PAYLOAD"]); assert body["ok"] is True; print(body.get("apiVersion") or "legacy-ok")')
 printf '%s\n' "$previous_contract" | sudo tee "$backup_dir/health-contract" >/dev/null
+sudo chown root:root "$backup_dir/health-contract"
 sudo chmod 0644 "$backup_dir/health-contract"
-sudo install -o cqulogin -g cqulogin -m 0644 /dev/null "$backup_dir/absent-files"
+sudo install -o root -g root -m 0644 /dev/null "$backup_dir/absent-files"
 for file in "${runtime_files[@]}"; do
-  sudo install -o cqulogin -g cqulogin -m 0644 "$staging_dir/$file" "$release_dir/$file"
+  is_runtime_file "$file" || { echo "invalid runtime file: $file" >&2; exit 1; }
+  sudo install -o root -g root -m 0644 "$staging_dir/$file" "$release_dir/$file"
   if [[ -f "$app_dir/$file" ]]; then
-    sudo cp -p "$app_dir/$file" "$backup_dir/$file"
+    sudo install -o root -g root -m 0644 "$app_dir/$file" "$backup_dir/$file"
   else
     printf '%s\n' "$file" | sudo tee -a "$backup_dir/absent-files" >/dev/null
   fi
@@ -111,16 +136,20 @@ done
 rollback() {
   for source in "$backup_dir"/*.py; do
     [[ -e "$source" ]] || continue
-    sudo install -o cqulogin -g cqulogin -m 0644 "$source" "$app_dir/$(basename "$source")"
+    file="$(basename "$source")"
+    is_runtime_file "$file" || return 1
+    sudo install -o cqulogin -g cqulogin -m 0644 "$source" "$app_dir/$file" || return 1
   done
   while IFS= read -r file; do
     [[ -n "$file" ]] || continue
-    sudo rm -f -- "$app_dir/$file"
+    is_runtime_file "$file" || return 1
+    sudo rm -f -- "$app_dir/$file" || return 1
   done < "$backup_dir/absent-files"
-  sudo systemctl restart cqu-login
+  sudo systemctl restart cqu-login || return 1
+  contract="$(cat "$backup_dir/health-contract")" || return 1
   for _ in $(seq 1 20); do
     if payload=$(curl -fsS --max-time 3 http://127.0.0.1:8080/health 2>/dev/null) && \
-       CONTRACT="$(cat "$backup_dir/health-contract")" PAYLOAD="$payload" /opt/cqu-login/venv/bin/python -c 'import json, os; body=json.loads(os.environ["PAYLOAD"]); assert body["ok"] is True; expected=os.environ["CONTRACT"]; assert expected == "legacy-ok" or body.get("apiVersion") == expected'; then
+       CONTRACT="$contract" PAYLOAD="$payload" /opt/cqu-login/venv/bin/python -c 'import json, os; body=json.loads(os.environ["PAYLOAD"]); assert body["ok"] is True; expected=os.environ["CONTRACT"]; assert expected == "legacy-ok" or body.get("apiVersion") == expected'; then
       return 0
     fi
     sleep 1
