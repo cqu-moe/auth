@@ -151,14 +151,17 @@ async def _fail_fingerprint(pg):
 
 
 async def do_first_factor(pg, url, username, password, debug_screenshot=True):
-    """加载 → 表单导航式提交密码。返回 'success'(直接ticket) / '2fa' / 'fail:...'。
+    """加载 → 表单导航式提交密码。
+
+    返回判别前缀而非让调用方解析诊断文案：'success' / '2fa' /
+    'credential_rejected:<detail>' / 'transient:<detail>'。
 
     debug_screenshot=False 时跳过失败截图(及其文案后缀): 容器路径用之,
     避免在登录页落下凭证相邻产物 + 并发覆盖同名文件; CLI 路径保留(默认 True)便于调试。
     """
     croypto, flowkey = await load_login_page(pg, url)
     if not (croypto and flowkey):
-        return "fail:登录页未渲染(疑似被瑞数挑战/限流)"
+        return "transient:登录页未渲染(疑似被瑞数挑战/限流)"
     fields = {"_eventId": "submit", "type": "UsernamePassword", "execution": flowkey,
               "geolocation": "", "username": username,
               "password": aes_encrypt_password(croypto, password), "croypto": croypto}
@@ -174,6 +177,12 @@ async def do_first_factor(pg, url, username, password, debug_screenshot=True):
         err = (await pg.locator("#login-error-code").inner_text(timeout=800)).strip()
     except Exception:
         err = ""
+    credential_markers = ("用户名或密码", "密码错误", "账号已锁定", "帐号已锁定", "冻结")
+    outcome = (
+        "credential_rejected"
+        if err and any(marker in err for marker in credential_markers)
+        else "transient"
+    )
     if not err and await pg.locator("#login-croypto").count():
         err = "回到登录页(密码错误/瑞数软重挑战)"
     # TEMP 诊断(抓到瑞数封锁真实形态后移除): 仅对「未判定」兜底附加页面指纹;
@@ -181,8 +190,8 @@ async def do_first_factor(pg, url, username, password, debug_screenshot=True):
     diag = "" if err else " | " + await _fail_fingerprint(pg)
     if debug_screenshot:
         await pg.screenshot(path="firstfactor_fail.png", full_page=True)
-        return "fail:" + (err or f"未判定 url={pg.url[:70]}") + " (见 firstfactor_fail.png)" + diag
-    return "fail:" + (err or f"未判定 url={pg.url[:70]}") + diag
+        return outcome + ":" + (err or f"未判定 url={pg.url[:70]}") + " (见 firstfactor_fail.png)" + diag
+    return outcome + ":" + (err or f"未判定 url={pg.url[:70]}") + diag
 
 
 async def switch_2fa_tab(pg, method):

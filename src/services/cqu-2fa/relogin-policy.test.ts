@@ -111,6 +111,11 @@ describe("shouldThrottleRelogin", () => {
 
 describe("classifyLoginFailure", () => {
   it("CQU 明确凭据错误码 -> credential", () => {
+    expect(
+      classifyLoginFailure(
+        "first-factor failed: credential_rejected:用户名或密码错误"
+      )
+    ).toBe("credential");
     expect(classifyLoginFailure("first-factor failed: fail:用户名或密码错误")).toBe(
       "credential"
     );

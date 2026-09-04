@@ -16,8 +16,12 @@ def test_url_classification_uses_exact_atrust_hosts():
 
 def test_first_factor_failure_classification_only_marks_explicit_password_rejection():
     assert cqu_atrust.classify_first_factor_failure(
-        "fail:用户名或密码错误"
+        "credential_rejected:用户名或密码错误"
     ) == "password_rejected"
+    # 自由诊断文本不再作为凭据判据；只有 do_first_factor 的结构化前缀可熔断。
+    assert cqu_atrust.classify_first_factor_failure(
+        "fail:用户名或密码错误"
+    ) == "transient"
     assert cqu_atrust.classify_first_factor_failure(
         "fail:登录页未渲染(疑似被瑞数挑战/限流)"
     ) == "transient"

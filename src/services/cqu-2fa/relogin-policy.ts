@@ -83,6 +83,8 @@ export function classifyLoginFailure(
   error: string | null | undefined
 ): "credential" | "transient" {
   const s = error ?? "";
+  if (s.includes("credential_rejected:")) return "credential";
+  if (s.includes("transient:")) return "transient";
   const transientMarkers = [
     "回到登录页",
     "未判定",

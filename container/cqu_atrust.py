@@ -53,14 +53,12 @@ def is_atrust_login_done(url: str) -> bool:
 
 
 def classify_first_factor_failure(verdict: str) -> str:
-    text = str(verdict or "").lower()
-    # 「回到登录页(密码错误/瑞数软重挑战)」是现有浏览器 helper 的歧义兜底，
-    # 不能据此累计凭据熔断。只有 CAS 明确返回的账密错误文本才算 password_rejected。
-    if any(marker in text for marker in ("回到登录页", "瑞数", "软重挑战")):
-        return "transient"
-    if any(marker in text for marker in ("用户名或密码错误", "invalid password")):
-        return "password_rejected"
-    return "transient"
+    # 只接受 do_first_factor 的判别前缀；自由诊断文本即使含“密码错误”也不能熔断。
+    return (
+        "password_rejected"
+        if str(verdict or "").startswith("credential_rejected:")
+        else "transient"
+    )
 
 
 async def click_unified_identity(page) -> None:
