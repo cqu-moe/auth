@@ -111,6 +111,12 @@ RUN_TOTAL_TIMEOUT = 660
 # 当前 owner 并行，PERMIT_PHASE_TIMEOUT 再留 60s 给第一因素/页面渲染开销。
 PERMIT_WAIT_TIMEOUT = 720
 PERMIT_PHASE_TIMEOUT = 780
+# A queued CAS/aTrust run performs its first factor in parallel while a previous
+# ambiguous owner remains fenced for at most 1500s. Give that one successor the
+# predecessor fence plus 60s transport slack; per-kind single-flight means the
+# queue contains at most the other login track.
+QUEUED_PERMIT_WAIT_TIMEOUT = 1560
+QUEUED_PERMIT_PHASE_TIMEOUT = 1620
 
 # keepalive 的硬编码探测 URL(my.cqu.edu.cn)必须自身在白名单内 —— 防未来把它改坏后
 # /keepalive 仍 navigate 一个不该放行的 host。keepalive 不收外部 serviceUrl, 故无需对入参
@@ -169,14 +175,16 @@ def _sweep_stale_permits() -> None:
         PERMIT_EVENTS.pop(sess, None)
 
 
-async def _run_with_separate_permit_budget(login_coro, permit_claimed):
+async def _run_with_separate_permit_budget(
+    login_coro, permit_claimed, permit_phase_timeout=PERMIT_PHASE_TIMEOUT
+):
     """排队阶段与 owner 阶段分别计时，避免合法 FIFO waiter 先于 owner 退出。"""
     login_task = asyncio.create_task(login_coro)
     permit_task = asyncio.create_task(permit_claimed.wait())
     try:
         done, _ = await asyncio.wait(
             {login_task, permit_task},
-            timeout=PERMIT_PHASE_TIMEOUT,
+            timeout=permit_phase_timeout,
             return_when=asyncio.FIRST_COMPLETED,
         )
         if login_task in done:
@@ -185,7 +193,7 @@ async def _run_with_separate_permit_budget(login_coro, permit_claimed):
             login_task.cancel()
             await asyncio.gather(login_task, return_exceptions=True)
             raise PermitWaitTimeout(
-                f"code permit phase timed out (>{PERMIT_PHASE_TIMEOUT}s)"
+                f"code permit phase timed out (>{permit_phase_timeout}s)"
             )
         return await asyncio.wait_for(login_task, timeout=RUN_TOTAL_TIMEOUT)
     finally:
@@ -205,6 +213,13 @@ async def run_handler(request: web.Request) -> web.Response:
     service = body.get("service")
     method = body.get("method", "mail")
     session = body.get("session") or "default"
+    queued_permit = body.get("queuedPermit") is True
+    permit_wait_timeout = (
+        QUEUED_PERMIT_WAIT_TIMEOUT if queued_permit else PERMIT_WAIT_TIMEOUT
+    )
+    permit_phase_timeout = (
+        QUEUED_PERMIT_PHASE_TIMEOUT if queued_permit else PERMIT_PHASE_TIMEOUT
+    )
 
     if not (student_id and password and service):
         return web.json_response(
@@ -296,11 +311,11 @@ async def run_handler(request: web.Request) -> web.Response:
     async def permit_waiter() -> None:
         try:
             await asyncio.wait_for(
-                permit_ev.wait(), timeout=PERMIT_WAIT_TIMEOUT
+                permit_ev.wait(), timeout=permit_wait_timeout
             )
         except asyncio.TimeoutError as e:
             raise PermitWaitTimeout(
-                f"code permit timed out (>{PERMIT_WAIT_TIMEOUT}s)"
+                f"code permit timed out (>{permit_wait_timeout}s)"
             ) from e
         PERMIT_VALUES.pop(session, None)
         permit_claimed.set()
@@ -319,6 +334,7 @@ async def run_handler(request: web.Request) -> web.Response:
                 proxy=proxy,
             ),
             permit_claimed,
+            permit_phase_timeout,
         )
         # ticket 是 bearer 凭据, 不入日志(session 不是凭据可留); 对齐 DO 审计「绝不记录 ticket/cookies/密码」。
         log.info("run ok")
@@ -369,6 +385,13 @@ async def atrust_login_handler(request: web.Request) -> web.Response:
     password = body.get("password")
     method = body.get("method", "mail")
     session = body.get("session") or "default"
+    queued_permit = body.get("queuedPermit") is True
+    permit_wait_timeout = (
+        QUEUED_PERMIT_WAIT_TIMEOUT if queued_permit else PERMIT_WAIT_TIMEOUT
+    )
+    permit_phase_timeout = (
+        QUEUED_PERMIT_PHASE_TIMEOUT if queued_permit else PERMIT_PHASE_TIMEOUT
+    )
     if not (student_id and password):
         return web.json_response(
             {"ok": False, "error": "missing required field: studentId/password"},
@@ -437,7 +460,7 @@ async def atrust_login_handler(request: web.Request) -> web.Response:
     async def permit_waiter() -> None:
         try:
             await asyncio.wait_for(
-                permit_event.wait(), timeout=PERMIT_WAIT_TIMEOUT
+                permit_event.wait(), timeout=permit_wait_timeout
             )
         except asyncio.TimeoutError as e:
             raise PermitWaitTimeout("aTrust code permit timed out") from e
@@ -457,6 +480,7 @@ async def atrust_login_handler(request: web.Request) -> web.Response:
                 proxy=proxy,
             ),
             permit_claimed,
+            permit_phase_timeout,
         )
         log.info("atrust-login ok")
         return web.json_response({"ok": True, **result})

@@ -164,3 +164,5 @@ class AtrustLoginServerTestCase(AioHTTPTestCase):
 def test_fifo_wait_budget_is_separate_from_the_promoted_owners_login_budget():
     assert server.PERMIT_WAIT_TIMEOUT > server.RUN_TOTAL_TIMEOUT
     assert server.PERMIT_PHASE_TIMEOUT > server.PERMIT_WAIT_TIMEOUT
+    assert server.QUEUED_PERMIT_WAIT_TIMEOUT > 1500
+    assert server.QUEUED_PERMIT_PHASE_TIMEOUT > server.QUEUED_PERMIT_WAIT_TIMEOUT

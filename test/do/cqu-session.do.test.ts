@@ -1134,9 +1134,9 @@ describe("data-harvest action", () => {
     const response = await postAtrustHarvest(stub);
     expect(response.status).toBe(200);
     expect(pathsOf(spy)).toEqual([
-      "/atrust-login",
       "/code-permit",
       "/code",
+      "/atrust-login",
       "/data-harvest",
     ]);
     expect(await readStorage(stub, "loginInFlight")).toEqual(directLock);

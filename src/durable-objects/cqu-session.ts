@@ -1973,7 +1973,7 @@ export class CquSessionDO extends DurableObject<Env> {
   private async acquireVerificationCodeLease(
     token: string,
     kind: LoginKind
-  ): Promise<void> {
+  ): Promise<"owner" | "queued"> {
     const now = Date.now();
     const current =
       (await this.ctx.storage.get<CodeLease>("codeLease")) ?? null;
@@ -1985,7 +1985,7 @@ export class CquSessionDO extends DurableObject<Env> {
       pruneCodeLease(current, now)?.ownerToken === token
     ) {
       await this.recoverPendingCodePermit();
-      return;
+      return "owner";
     }
     const next = acquireCodeLease(
       current,
@@ -1993,6 +1993,7 @@ export class CquSessionDO extends DurableObject<Env> {
       now
     );
     await this.persistCodeLeaseTransition(current, next);
+    return next.ownerToken === token ? "owner" : "queued";
   }
 
   /** 释放租约；owner 完成后原子推进 FIFO 队首，再向新 owner 发 permit。 */
@@ -2145,13 +2146,20 @@ export class CquSessionDO extends DurableObject<Env> {
     } satisfies LoginInFlight);
 
     let runAbort: AbortController | null = null;
-    let permitAcquired = false;
+    let leaseAcquired = false;
     try {
       const password = await decrypt(
         credentials.encryptedPassword,
         credentials.iv,
         this.env.ENCRYPTION_KEY
       );
+      let permitRole: "owner" | "queued";
+      try {
+        permitRole = await this.acquireVerificationCodeLease(token, "atrust");
+        leaseAcquired = true;
+      } catch (error) {
+        throw error;
+      }
       runAbort = new AbortController();
       const runRequest = this.env.LOGIN_NODE.fetch(
         new Request(`${LOGIN_NODE_BASE}/atrust-login`, {
@@ -2162,17 +2170,10 @@ export class CquSessionDO extends DurableObject<Env> {
             password,
             method: "mail",
             session: token,
+            queuedPermit: permitRole === "queued",
           }),
         })
       );
-      try {
-        await this.acquireVerificationCodeLease(token, "atrust");
-        permitAcquired = true;
-      } catch (error) {
-        runAbort.abort();
-        await runRequest.catch(() => undefined);
-        throw error;
-      }
 
       const response = await runRequest;
       await this.assertAtrustOperationCurrent(expectedGeneration);
@@ -2238,7 +2239,7 @@ export class CquSessionDO extends DurableObject<Env> {
     } finally {
       runAbort?.abort();
       try {
-        await this.releaseVerificationCodeLease(token, permitAcquired);
+        await this.releaseVerificationCodeLease(token, leaseAcquired);
       } catch (error) {
         console.error(
           `[CquSession] failed to rotate aTrust verification-code permit (${error instanceof Error ? error.name : "unknown"})`
@@ -2299,7 +2300,7 @@ export class CquSessionDO extends DurableObject<Env> {
     const lock: LoginInFlight = { token, startedAt: Date.now() };
     await this.ctx.storage.put("loginInFlight", lock);
     let runAbort: AbortController | null = null;
-    let permitAcquired = false;
+    let leaseAcquired = false;
 
     try {
       const password = await decrypt(
@@ -2312,6 +2313,13 @@ export class CquSessionDO extends DurableObject<Env> {
       // 先点火 /run，让 CAS 与 aTrust 可以并行完成密码一因子；节点会在
       // 真正请求验证码前等待 /code-permit。租约未授予时用 AbortSignal 中止在途请求，
       // 避免留下无人 await 的悬空 Promise。
+      let permitRole: "owner" | "queued";
+      try {
+        permitRole = await this.acquireVerificationCodeLease(token, "cas");
+        leaseAcquired = true;
+      } catch (error) {
+        throw error;
+      }
       runAbort = new AbortController();
       const runRequest = this.env.LOGIN_NODE.fetch(
         new Request(`${LOGIN_NODE_BASE}/run`, {
@@ -2323,17 +2331,10 @@ export class CquSessionDO extends DurableObject<Env> {
             service: DUMMY_SERVICE,
             method: "mail",
             session: token,
+            queuedPermit: permitRole === "queued",
           }),
         })
       );
-      try {
-        await this.acquireVerificationCodeLease(token, "cas");
-        permitAcquired = true;
-      } catch (error) {
-        runAbort.abort();
-        await runRequest.catch(() => undefined);
-        throw error;
-      }
       const res = await runRequest;
       const result = await res.json<ContainerRunResult>();
       // M5 回写完整性校验: 除 res.ok/result.ok/result.state 兜空外, 再套 hasValidTgt(升级后的
@@ -2410,7 +2411,7 @@ export class CquSessionDO extends DurableObject<Env> {
     } finally {
       runAbort?.abort();
       try {
-        await this.releaseVerificationCodeLease(token, permitAcquired);
+        await this.releaseVerificationCodeLease(token, leaseAcquired);
       } catch (error) {
         // 当前登录的成败已确定，permit 轮转失败不应覆盖它；后续
         // 排队登录会按自身超时路径失败并释放租约。日志不包含 token。
