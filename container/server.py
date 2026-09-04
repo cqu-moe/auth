@@ -100,7 +100,8 @@ def is_allowed_service_url(url: str) -> str | None:
 #   · RUN_TOTAL_TIMEOUT(660s): 单次 /run 整体上限, 含第一因素 + 570s 等码 + 提交/开销。
 #     须 > CODE_WAIT(570s) + 第一因素/发码开销, 故取 660s。
 # 不变式(必须成立):
-#   LOGIN_LOCK_TTL_MS(720s) > RUN_TOTAL_TIMEOUT(660s) > CODE_WAIT_TIMEOUT(570s),
+#   LOGIN_LOCK_TTL_MS(1500s) > PERMIT_PHASE_TIMEOUT(780s) + RUN_TOTAL_TIMEOUT(660s),
+#   RUN_TOTAL_TIMEOUT(660s) > CODE_WAIT_TIMEOUT(570s),
 #   且 CODE_WAIT_TIMEOUT(570s) < 码有效期(600s)并留提交余量。
 # 改这两值须同步上调 src/services/cqu-2fa/single-flight.ts 的 LOGIN_LOCK_TTL_MS(须 > RUN_TOTAL_TIMEOUT)。
 CODE_WAIT_TIMEOUT = 570

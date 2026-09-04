@@ -2009,8 +2009,9 @@ export class CquSessionDO extends DurableObject<Env> {
       pruned?.ownerToken === token
     ) {
       // A failed acknowledgement is not proof the node missed the permit.
-      // Keep this owner fenced until its 720s TTL outlives the node's 660s
-      // owner budget; an immediate promotion could let two browsers send.
+      // Keep this owner fenced until its 1500s TTL outlives the node's full
+      // 780s permit phase + 660s owner budget; immediate promotion could let
+      // two browsers send.
       try {
         await this.recoverPendingCodePermit();
       } catch (error) {

@@ -1,8 +1,9 @@
 import { LOGIN_LOCK_TTL_MS } from "./single-flight";
 
-// owner 已获 permit 后只需覆盖 660s 登录预算 + VPC 余量；排队项则必须覆盖
-// 「前一 owner 完成 + 自己被提升」的完整 1500s 请求锁窗口。
-export const CODE_LEASE_OWNER_TTL_MS = 720 * 1000;
+// owner 在浏览器完成第一因素前就落盘，必须覆盖节点完整的 780s permit phase +
+// permit claimed 后 660s 登录预算，再留 60s VPC/清理余量。与完整请求锁共用 1500s，
+// 不能只按 post-permit 的 660s 预算设置，否则慢第一因素会与后继 owner 重叠。
+export const CODE_LEASE_OWNER_TTL_MS = LOGIN_LOCK_TTL_MS;
 export const CODE_LEASE_QUEUE_TTL_MS = LOGIN_LOCK_TTL_MS;
 
 export type LoginKind = "cas" | "atrust";

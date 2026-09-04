@@ -87,4 +87,11 @@ describe("verification-code lease", () => {
     const lease = acquireCodeLease(null, cas("cas-1", 0), 0);
     expect(pruneCodeLease(lease, LOGIN_LOCK_TTL_MS + 1)).toBeNull();
   });
+
+  it("keeps an owner fenced across the node permit phase plus post-permit run budget", () => {
+    const lease = acquireCodeLease(null, cas("cas-1", 0), 0);
+    // The node may spend up to 780s reaching/claiming permit and then 660s
+    // completing the owner run. The old 720s lease could overlap a successor.
+    expect(pruneCodeLease(lease, 1_440_000)).toEqual(lease);
+  });
 });
