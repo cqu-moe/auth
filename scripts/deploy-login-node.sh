@@ -22,7 +22,7 @@ usage() {
 }
 
 validate_id() {
-  [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]] || usage
+  [[ "$1" != "." && "$1" != ".." && "$1" =~ ^[A-Za-z0-9._-]+$ ]] || usage
 }
 
 if [[ "${1:-}" == "--rollback" ]]; then
@@ -37,9 +37,21 @@ release_root="$3"
 shift 3
 runtime_files=("$@")
 backup_dir="$release_root/$backup_id"
+[[ -d "$backup_dir" ]] || { echo "backup not found: $backup_id" >&2; exit 1; }
+release_root_real="$(cd "$release_root" && pwd -P)"
+backup_dir_real="$(cd "$backup_dir" && pwd -P)"
+[[ "$backup_dir_real" == "$release_root_real/"* ]] || {
+  echo "backup escapes release root: $backup_id" >&2
+  exit 1
+}
+backup_leaf="${backup_dir_real#"$release_root_real/"}"
+[[ -n "$backup_leaf" && "$backup_leaf" != */* ]] || {
+  echo "backup is not a direct release child: $backup_id" >&2
+  exit 1
+}
+backup_dir="$backup_dir_real"
 contract_file="$backup_dir/health-contract"
 absent_file="$backup_dir/absent-files"
-[[ -d "$backup_dir" ]] || { echo "backup not found: $backup_id" >&2; exit 1; }
 [[ -f "$contract_file" ]] || { echo "backup health contract missing: $backup_id" >&2; exit 1; }
 is_runtime_file() {
   local candidate="$1" allowed

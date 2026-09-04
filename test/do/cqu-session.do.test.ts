@@ -230,7 +230,7 @@ describe("verification-code lease orchestration", () => {
     expect(await readStorage(stub, "codePermitPending")).toBe("atrust-1");
   });
 
-  it("does not promote a pending owner even when its release retry is acknowledged", async () => {
+  it("does not release an uncertain owner when permit acquisition never completed", async () => {
     const stub = freshStub("code-lease-pending-release");
     await seedSession(stub, {
       status: "active",
@@ -252,16 +252,19 @@ describe("verification-code lease orchestration", () => {
 
     await runInDurableObject(stub, async (instance) => {
       await (instance as unknown as {
-        releaseVerificationCodeLease: (token: string) => Promise<void>;
-      }).releaseVerificationCodeLease("atrust-1");
+        releaseVerificationCodeLease: (
+          token: string,
+          ownerFinished: boolean
+        ) => Promise<void>;
+      }).releaseVerificationCodeLease("atrust-1", false);
     });
 
-    expect(permit).toHaveBeenCalledTimes(1);
+    expect(permit).not.toHaveBeenCalled();
     expect(await readStorage(stub, "codeLease")).toMatchObject({
       ownerToken: "atrust-1",
       queue: [{ token: "cas-2", kind: "cas" }],
     });
-    expect(await readStorage(stub, "codePermitPending")).toBeUndefined();
+    expect(await readStorage(stub, "codePermitPending")).toBe("atrust-1");
   });
 
   it("replays a persisted permit marker after activation and commits only its acknowledgement", async () => {
@@ -338,7 +341,7 @@ describe("verification-code lease orchestration", () => {
     expect(await readStorage(stub, "codePermitPending")).toBeUndefined();
   });
 
-  it("same-owner release replays an uncertain permit but keeps the owner fenced", async () => {
+  it("same-owner release promotes FIFO after its permit replay is acknowledged", async () => {
     const stub = freshStub("code-lease-pending-release-replay");
     await seedSession(stub, {
       status: "active",
@@ -366,11 +369,12 @@ describe("verification-code lease orchestration", () => {
       }).releaseVerificationCodeLease("atrust-1");
     });
 
-    expect(permits).toEqual(["atrust-1"]);
+    expect(permits).toEqual(["atrust-1", "cas-2"]);
     expect(await readStorage(stub, "codeLease")).toMatchObject({
-      ownerToken: "atrust-1",
-      queue: [{ token: "cas-2", kind: "cas" }],
+      ownerToken: "cas-2",
+      queue: [],
     });
+    expect(await readStorage(stub, "codePermitPending")).toBeUndefined();
   });
 
   it("treats code proof published during a lost acknowledgement as confirmed permit evidence", async () => {

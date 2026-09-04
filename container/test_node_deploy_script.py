@@ -32,3 +32,9 @@ def test_rollback_manifest_is_root_owned_allowlisted_and_fail_closed():
     assert 'sudo install -o cqulogin -g cqulogin -m 0644 "$source" "$app_dir/$file" || return 1' in SCRIPT
     assert 'sudo rm -f -- "$app_dir/$file" || return 1' in SCRIPT
     assert 'sudo systemctl restart cqu-login || return 1' in SCRIPT
+
+
+def test_release_and_rollback_ids_cannot_escape_the_release_root():
+    assert '"$1" != "." && "$1" != ".."' in SCRIPT
+    assert 'backup_dir_real="$(cd "$backup_dir" && pwd -P)"' in SCRIPT
+    assert '[[ "$backup_dir_real" == "$release_root_real/"* ]]' in SCRIPT
