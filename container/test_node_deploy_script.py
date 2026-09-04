@@ -38,3 +38,8 @@ def test_release_and_rollback_ids_cannot_escape_the_release_root():
     assert '"$1" != "." && "$1" != ".."' in SCRIPT
     assert 'backup_dir_real="$(cd "$backup_dir" && pwd -P)"' in SCRIPT
     assert '[[ "$backup_dir_real" == "$release_root_real/"* ]]' in SCRIPT
+
+
+def test_local_rsync_is_compatible_with_macos_rsync_2_6():
+    assert "--chmod=F600" not in SCRIPT
+    assert 'install -d -m 0700' in SCRIPT

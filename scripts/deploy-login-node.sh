@@ -94,7 +94,7 @@ validate_id "$release_id"
 staging_dir="/tmp/cqu-login-$release_id"
 
 ssh "$node_host" "install -d -m 0700 '$staging_dir'"
-rsync -a --chmod=F600 \
+rsync -a \
   "${runtime_files[@]/#/container/}" \
   "$node_host:$staging_dir/"
 
