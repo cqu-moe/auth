@@ -77,7 +77,7 @@ fi
 sudo systemctl restart cqu-login || exit 1
 for _ in $(seq 1 20); do
   if payload=$(curl -fsS --max-time 3 http://127.0.0.1:8080/health 2>/dev/null) && \
-     CONTRACT="$(cat "$contract_file")" PAYLOAD="$payload" /opt/cqu-login/venv/bin/python -c 'import json, os; body=json.loads(os.environ["PAYLOAD"]); assert body["ok"] is True; expected=os.environ["CONTRACT"]; assert expected == "legacy-ok" or body.get("apiVersion") == expected'; then
+     sudo -u cqulogin env CONTRACT="$(cat "$contract_file")" PAYLOAD="$payload" /opt/cqu-login/venv/bin/python -c 'import json, os; body=json.loads(os.environ["PAYLOAD"]); assert body["ok"] is True; expected=os.environ["CONTRACT"]; assert expected == "legacy-ok" or body.get("apiVersion") == expected'; then
     echo "rollback healthy: $backup_id"
     exit 0
   fi
@@ -124,7 +124,7 @@ is_runtime_file() {
 
 sudo install -d -o root -g root -m 0755 "$release_root" "$release_dir" "$backup_dir"
 previous_payload=$(curl -fsS --max-time 3 http://127.0.0.1:8080/health)
-previous_contract=$(PAYLOAD="$previous_payload" /opt/cqu-login/venv/bin/python -c 'import json, os; body=json.loads(os.environ["PAYLOAD"]); assert body["ok"] is True; print(body.get("apiVersion") or "legacy-ok")')
+previous_contract=$(sudo -u cqulogin env PAYLOAD="$previous_payload" /opt/cqu-login/venv/bin/python -c 'import json, os; body=json.loads(os.environ["PAYLOAD"]); assert body["ok"] is True; print(body.get("apiVersion") or "legacy-ok")')
 printf '%s\n' "$previous_contract" | sudo tee "$backup_dir/health-contract" >/dev/null
 sudo chown root:root "$backup_dir/health-contract"
 sudo chmod 0644 "$backup_dir/health-contract"
@@ -142,7 +142,7 @@ done
 # Worker 切流前的静态 gate：新 release 必须能加载全部新增模块。
 (
   cd "$release_dir"
-  /opt/cqu-login/venv/bin/python -c 'import cqu_atrust, cqu_data_harvest, server; assert server.NODE_API_VERSION == "atrust-harvest-v1"'
+  sudo -u cqulogin /opt/cqu-login/venv/bin/python -c 'import cqu_atrust, cqu_data_harvest, server; assert server.NODE_API_VERSION == "atrust-harvest-v1"'
 )
 
 rollback() {
@@ -161,7 +161,7 @@ rollback() {
   contract="$(cat "$backup_dir/health-contract")" || return 1
   for _ in $(seq 1 20); do
     if payload=$(curl -fsS --max-time 3 http://127.0.0.1:8080/health 2>/dev/null) && \
-       CONTRACT="$contract" PAYLOAD="$payload" /opt/cqu-login/venv/bin/python -c 'import json, os; body=json.loads(os.environ["PAYLOAD"]); assert body["ok"] is True; expected=os.environ["CONTRACT"]; assert expected == "legacy-ok" or body.get("apiVersion") == expected'; then
+       sudo -u cqulogin env CONTRACT="$contract" PAYLOAD="$payload" /opt/cqu-login/venv/bin/python -c 'import json, os; body=json.loads(os.environ["PAYLOAD"]); assert body["ok"] is True; expected=os.environ["CONTRACT"]; assert expected == "legacy-ok" or body.get("apiVersion") == expected'; then
       return 0
     fi
     sleep 1
@@ -203,7 +203,7 @@ fi
 healthy=0
 for _ in $(seq 1 20); do
   if payload=$(curl -fsS --max-time 3 http://127.0.0.1:8080/health 2>/dev/null) && \
-     EXPECTED_API_VERSION="$expected_api_version" PAYLOAD="$payload" /opt/cqu-login/venv/bin/python -c 'import json, os; body=json.loads(os.environ["PAYLOAD"]); assert body["ok"] is True; assert body["apiVersion"] == os.environ["EXPECTED_API_VERSION"]; required={"atrust-login","code-permit","reusable-code","data-harvest"}; assert required <= set(body["capabilities"])'; then
+     sudo -u cqulogin env EXPECTED_API_VERSION="$expected_api_version" PAYLOAD="$payload" /opt/cqu-login/venv/bin/python -c 'import json, os; body=json.loads(os.environ["PAYLOAD"]); assert body["ok"] is True; assert body["apiVersion"] == os.environ["EXPECTED_API_VERSION"]; required={"atrust-login","code-permit","reusable-code","data-harvest"}; assert required <= set(body["capabilities"])'; then
     healthy=1
     break
   fi

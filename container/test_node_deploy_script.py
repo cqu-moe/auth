@@ -43,3 +43,7 @@ def test_release_and_rollback_ids_cannot_escape_the_release_root():
 def test_local_rsync_is_compatible_with_macos_rsync_2_6():
     assert "--chmod=F600" not in SCRIPT
     assert 'install -d -m 0700' in SCRIPT
+
+
+def test_remote_health_and_import_checks_run_as_the_service_account():
+    assert SCRIPT.count("sudo -u cqulogin") >= 5
