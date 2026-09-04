@@ -21,6 +21,9 @@ def test_first_factor_failure_classification_only_marks_explicit_password_reject
     assert cqu_atrust.classify_first_factor_failure(
         "fail:登录页未渲染(疑似被瑞数挑战/限流)"
     ) == "transient"
+    assert cqu_atrust.classify_first_factor_failure(
+        "fail:回到登录页(密码错误/瑞数软重挑战)"
+    ) == "transient"
     assert cqu_atrust.is_atrust_login_done(
         "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/workspace/curriculum"
     ) is True
@@ -145,7 +148,7 @@ class _FlowAsyncPlaywrightCM:
         return False
 
 
-def test_run_atrust_login_waits_for_permit_and_returns_state_only(monkeypatch):
+def test_run_atrust_login_reuses_pending_code_when_backend_refuses_to_resend(monkeypatch):
     events = []
     cm = _FlowAsyncPlaywrightCM()
     page = cm.playwright.chromium.browser.context.page
@@ -173,7 +176,11 @@ def test_run_atrust_login_waits_for_permit_and_returns_state_only(monkeypatch):
         return True
 
     async def code():
-        events.append("code")
+        events.append("fresh-code")
+        return "999999"
+
+    async def reusable_code():
+        events.append("reusable-code")
         return "123456"
 
     async def submit(target, *_args):
@@ -183,13 +190,19 @@ def test_run_atrust_login_waits_for_permit_and_returns_state_only(monkeypatch):
     async def wait_app(_target):
         events.append("app")
 
+    async def verify_app(_target):
+        events.append("ready")
+
     monkeypatch.setattr(cqu_atrust, "click_unified_identity", click)
     monkeypatch.setattr(cqu_atrust, "wait_for_rewritten_sso", wait_sso)
     monkeypatch.setattr(cqu_atrust, "wait_for_atrust_app", wait_app)
+    monkeypatch.setattr(cqu_atrust, "verify_atrust_app_ready", verify_app)
     monkeypatch.setattr(cqu_atrust.cqu_login, "do_first_factor", first_factor)
     monkeypatch.setattr(cqu_atrust.cqu_login, "switch_2fa_tab", switch)
     monkeypatch.setattr(cqu_atrust.cqu_login, "request_code", request)
-    monkeypatch.setattr(cqu_atrust.cqu_login, "classify_send_code", lambda *_: "sent")
+    monkeypatch.setattr(
+        cqu_atrust.cqu_login, "classify_send_code", lambda *_: "already_valid"
+    )
     monkeypatch.setattr(cqu_atrust.cqu_login, "submit_code", submit)
 
     result = asyncio.run(cqu_atrust.run_atrust_login(
@@ -197,6 +210,7 @@ def test_run_atrust_login_waits_for_permit_and_returns_state_only(monkeypatch):
         "pw",
         method="mail",
         code_provider=code,
+        reusable_code_provider=reusable_code,
         permit_provider=permit,
     ))
 
@@ -205,7 +219,7 @@ def test_run_atrust_login_waits_for_permit_and_returns_state_only(monkeypatch):
     }
     assert "ticket" not in result
     assert events == [
-        "portal", "sso", "switch", "permit", "request", "code", "submit", "app"
+        "portal", "sso", "switch", "permit", "request", "reusable-code", "submit", "app", "ready"
     ]
     assert cm.playwright.chromium.browser.closed is True
 

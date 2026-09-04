@@ -138,7 +138,13 @@ class _FlowAsyncPlaywrightCM:
         return False
 
 
-def test_run_login_waits_for_permit_before_requesting_code(monkeypatch):
+@pytest.mark.parametrize(
+    ("send_verdict", "expected_code_event"),
+    [("sent", "fresh-code"), ("already_valid", "reusable-code")],
+)
+def test_run_login_waits_for_permit_and_selects_the_right_code_source(
+    monkeypatch, send_verdict, expected_code_event
+):
     """缺少 permit await 会让 CAS/aTrust 同时点击发码，竞争消费共享验证码。"""
     events = []
     cm = _FlowAsyncPlaywrightCM()
@@ -164,13 +170,17 @@ def test_run_login_waits_for_permit_before_requesting_code(monkeypatch):
         events.append("permit")
 
     async def code_provider():
-        events.append("code")
+        events.append("fresh-code")
+        return "123456"
+
+    async def reusable_code_provider():
+        events.append("reusable-code")
         return "123456"
 
     monkeypatch.setattr(cqu_login, "do_first_factor", first_factor)
     monkeypatch.setattr(cqu_login, "switch_2fa_tab", switch)
     monkeypatch.setattr(cqu_login, "request_code", request)
-    monkeypatch.setattr(cqu_login, "classify_send_code", lambda *_: "sent")
+    monkeypatch.setattr(cqu_login, "classify_send_code", lambda *_: send_verdict)
     monkeypatch.setattr(cqu_login, "submit_code", submit)
 
     result = asyncio.run(
@@ -180,9 +190,10 @@ def test_run_login_waits_for_permit_before_requesting_code(monkeypatch):
             cqu_login.DEFAULT_SERVICE,
             method="mail",
             code_provider=code_provider,
+            reusable_code_provider=reusable_code_provider,
             permit_provider=permit_provider,
         )
     )
 
     assert result["ticket"] == "ST-test"
-    assert events == ["switch", "permit", "request", "code", "submit"]
+    assert events == ["switch", "permit", "request", expected_code_event, "submit"]

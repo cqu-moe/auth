@@ -341,6 +341,7 @@ async def run_login(
     service,
     method="mail",
     code_provider=None,
+    reusable_code_provider=None,
     permit_provider=None,
     proxy=None,
 ):
@@ -412,8 +413,15 @@ async def run_login(
                     f"发码失败 status={sms_state['status']} body={sms_state['body']}(验证码未发出)"
                 )
 
-            # 替代 read_code 文件轮询: 等 /code 端点经 code_provider 推入。
-            code = (await code_provider() or "").strip()
+            # 后端拒绝重复发送(already_valid)时不会再来一封邮件；此时只能使用 DO
+            # 在授予租约时定向预载的、仍在 10 分钟有效期内的旧码。真正发出新码(sent)
+            # 时必须只等新邮件，绝不能误吃预载旧码。
+            provider = (
+                reusable_code_provider
+                if send_verdict == "already_valid" and reusable_code_provider is not None
+                else code_provider
+            )
+            code = (await provider() or "").strip()
             if not code:
                 raise RuntimeError("未取到验证码(code_provider 返回空)")
 

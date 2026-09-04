@@ -31,6 +31,13 @@ from qg_proxy import acquire_qg_proxy, QgExtractError, should_use_proxy  # 青�
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("cqu-login-server")
+NODE_API_VERSION = "atrust-harvest-v1"
+NODE_CAPABILITIES = [
+    "atrust-login",
+    "code-permit",
+    "reusable-code",
+    "data-harvest",
+]
 
 
 # ── serviceUrl host 白名单(纵深第二层) ──────────────────────────────────────
@@ -97,8 +104,12 @@ def is_allowed_service_url(url: str) -> str | None:
 #   且 CODE_WAIT_TIMEOUT(570s) < 码有效期(600s)并留提交余量。
 # 改这两值须同步上调 src/services/cqu-2fa/single-flight.ts 的 LOGIN_LOCK_TTL_MS(须 > RUN_TOTAL_TIMEOUT)。
 CODE_WAIT_TIMEOUT = 570
-# 单次 /run 的整体上限(秒): 含发码 + 等码 + 提交, 超时返回 504 而非永久挂住凭证路径。
+# 被提升为 owner 后的登录上限(秒): 含发码 + 等码 + 提交。
 RUN_TOTAL_TIMEOUT = 660
+# FIFO 排队者的 permit 等待预算独立于其成为 owner 后的登录预算。第一因素可以与
+# 当前 owner 并行，PERMIT_PHASE_TIMEOUT 再留 60s 给第一因素/页面渲染开销。
+PERMIT_WAIT_TIMEOUT = 720
+PERMIT_PHASE_TIMEOUT = 780
 
 # keepalive 的硬编码探测 URL(my.cqu.edu.cn)必须自身在白名单内 —— 防未来把它改坏后
 # /keepalive 仍 navigate 一个不该放行的 host。keepalive 不收外部 serviceUrl, 故无需对入参
@@ -113,6 +124,9 @@ assert PROBE_SERVICE_HOST_OK, (
 CODE_EVENTS: dict[str, asyncio.Event] = {}
 # session -> (验证码字符串, 存入时刻 time.time())。存入时刻用于清理过期(孤儿)码, 避免明文码长期驻留。
 CODE_VALUES: dict[str, tuple[str, float]] = {}
+# `already_valid` 专用预载码。与新邮件码分桶，保证服务端真发新码(sent)时不会误吃旧码。
+REUSABLE_CODE_EVENTS: dict[str, asyncio.Event] = {}
+REUSABLE_CODE_VALUES: dict[str, tuple[str, float]] = {}
 # session -> Event(被 /code-permit set 唤醒)。permit 不含凭据，仅控制何时允许点击发码。
 PERMIT_EVENTS: dict[str, asyncio.Event] = {}
 # session -> permit 到达时刻；允许 permit 比浏览器注册 Event 更早到。
@@ -136,6 +150,13 @@ def _sweep_stale_codes() -> None:
     for sess in [s for s, (_, ts) in CODE_VALUES.items() if now - ts > CODE_WAIT_TIMEOUT]:
         CODE_VALUES.pop(sess, None)
         CODE_EVENTS.pop(sess, None)
+    for sess in [
+        s
+        for s, (_, ts) in REUSABLE_CODE_VALUES.items()
+        if now - ts > CODE_WAIT_TIMEOUT
+    ]:
+        REUSABLE_CODE_VALUES.pop(sess, None)
+        REUSABLE_CODE_EVENTS.pop(sess, None)
 
 
 def _sweep_stale_permits() -> None:
@@ -145,6 +166,31 @@ def _sweep_stale_permits() -> None:
     ]:
         PERMIT_VALUES.pop(sess, None)
         PERMIT_EVENTS.pop(sess, None)
+
+
+async def _run_with_separate_permit_budget(login_coro, permit_claimed):
+    """排队阶段与 owner 阶段分别计时，避免合法 FIFO waiter 先于 owner 退出。"""
+    login_task = asyncio.create_task(login_coro)
+    permit_task = asyncio.create_task(permit_claimed.wait())
+    try:
+        done, _ = await asyncio.wait(
+            {login_task, permit_task},
+            timeout=PERMIT_PHASE_TIMEOUT,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if login_task in done:
+            return await login_task
+        if permit_task not in done:
+            login_task.cancel()
+            await asyncio.gather(login_task, return_exceptions=True)
+            raise PermitWaitTimeout(
+                f"code permit phase timed out (>{PERMIT_PHASE_TIMEOUT}s)"
+            )
+        return await asyncio.wait_for(login_task, timeout=RUN_TOTAL_TIMEOUT)
+    finally:
+        if not permit_task.done():
+            permit_task.cancel()
+        await asyncio.gather(permit_task, return_exceptions=True)
 
 
 async def run_handler(request: web.Request) -> web.Response:
@@ -194,7 +240,12 @@ async def run_handler(request: web.Request) -> web.Response:
     # I1: /code 可能在本 Event 注册前略早到达; 若码已在, 立即唤醒, 避免错过唤醒永久阻塞。
     if session in CODE_VALUES:
         ev.set()
+    reusable_ev = asyncio.Event()
+    REUSABLE_CODE_EVENTS[session] = reusable_ev
+    if session in REUSABLE_CODE_VALUES:
+        reusable_ev.set()
     permit_ev = asyncio.Event()
+    permit_claimed = asyncio.Event()
     PERMIT_EVENTS[session] = permit_ev
     if session in PERMIT_VALUES:
         permit_ev.set()
@@ -213,30 +264,60 @@ async def run_handler(request: web.Request) -> web.Response:
         entry = CODE_VALUES.pop(session, None)
         return entry[0] if entry else ""
 
+    async def reusable_code_waiter() -> str:
+        # already_valid 不会再发邮件；优先吃恰好迟到的新鲜投递，否则吃 owner 专属预载码。
+        if session not in CODE_VALUES and session not in REUSABLE_CODE_VALUES:
+            fresh_wait = asyncio.create_task(ev.wait())
+            reusable_wait = asyncio.create_task(reusable_ev.wait())
+            try:
+                done, pending = await asyncio.wait(
+                    {fresh_wait, reusable_wait},
+                    timeout=CODE_WAIT_TIMEOUT,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if not done:
+                    raise CodeWaitTimeout("reusable code never arrived")
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+            finally:
+                for task in (fresh_wait, reusable_wait):
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(
+                    fresh_wait, reusable_wait, return_exceptions=True
+                )
+        entry = CODE_VALUES.pop(session, None)
+        if entry is None:
+            entry = REUSABLE_CODE_VALUES.pop(session, None)
+        return entry[0] if entry else ""
+
     async def permit_waiter() -> None:
         try:
             await asyncio.wait_for(
-                permit_ev.wait(), timeout=CODE_WAIT_TIMEOUT
+                permit_ev.wait(), timeout=PERMIT_WAIT_TIMEOUT
             )
         except asyncio.TimeoutError as e:
             raise PermitWaitTimeout(
-                f"code permit timed out (>{CODE_WAIT_TIMEOUT}s)"
+                f"code permit timed out (>{PERMIT_WAIT_TIMEOUT}s)"
             ) from e
         PERMIT_VALUES.pop(session, None)
+        permit_claimed.set()
 
     log.info("run start method=%s", method)
     try:
-        result = await asyncio.wait_for(
+        result = await _run_with_separate_permit_budget(
             cqu_login.run_login(
                 student_id=student_id,
                 password=password,
                 service=service,
                 method=method,
                 code_provider=code_waiter,
+                reusable_code_provider=reusable_code_waiter,
                 permit_provider=permit_waiter,
                 proxy=proxy,
             ),
-            timeout=RUN_TOTAL_TIMEOUT,
+            permit_claimed,
         )
         # ticket 是 bearer 凭据, 不入日志(session 不是凭据可留); 对齐 DO 审计「绝不记录 ticket/cookies/密码」。
         log.info("run ok")
@@ -269,6 +350,8 @@ async def run_handler(request: web.Request) -> web.Response:
     finally:
         CODE_EVENTS.pop(session, None)
         CODE_VALUES.pop(session, None)
+        REUSABLE_CODE_EVENTS.pop(session, None)
+        REUSABLE_CODE_VALUES.pop(session, None)
         PERMIT_EVENTS.pop(session, None)
         PERMIT_VALUES.pop(session, None)
 
@@ -302,11 +385,16 @@ async def atrust_login_handler(request: web.Request) -> web.Response:
             )
 
     code_event = asyncio.Event()
+    reusable_code_event = asyncio.Event()
     permit_event = asyncio.Event()
+    permit_claimed = asyncio.Event()
     CODE_EVENTS[session] = code_event
+    REUSABLE_CODE_EVENTS[session] = reusable_code_event
     PERMIT_EVENTS[session] = permit_event
     if session in CODE_VALUES:
         code_event.set()
+    if session in REUSABLE_CODE_VALUES:
+        reusable_code_event.set()
     if session in PERMIT_VALUES:
         permit_event.set()
 
@@ -318,27 +406,56 @@ async def atrust_login_handler(request: web.Request) -> web.Response:
         entry = CODE_VALUES.pop(session, None)
         return entry[0] if entry else ""
 
+    async def reusable_code_waiter() -> str:
+        if session not in CODE_VALUES and session not in REUSABLE_CODE_VALUES:
+            fresh_wait = asyncio.create_task(code_event.wait())
+            reusable_wait = asyncio.create_task(reusable_code_event.wait())
+            try:
+                done, pending = await asyncio.wait(
+                    {fresh_wait, reusable_wait},
+                    timeout=CODE_WAIT_TIMEOUT,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if not done:
+                    raise CodeWaitTimeout("aTrust reusable code never arrived")
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
+            finally:
+                for task in (fresh_wait, reusable_wait):
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(
+                    fresh_wait, reusable_wait, return_exceptions=True
+                )
+        entry = CODE_VALUES.pop(session, None)
+        if entry is None:
+            entry = REUSABLE_CODE_VALUES.pop(session, None)
+        return entry[0] if entry else ""
+
     async def permit_waiter() -> None:
         try:
             await asyncio.wait_for(
-                permit_event.wait(), timeout=CODE_WAIT_TIMEOUT
+                permit_event.wait(), timeout=PERMIT_WAIT_TIMEOUT
             )
         except asyncio.TimeoutError as e:
             raise PermitWaitTimeout("aTrust code permit timed out") from e
         PERMIT_VALUES.pop(session, None)
+        permit_claimed.set()
 
     log.info("atrust-login start method=%s", method)
     try:
-        result = await asyncio.wait_for(
+        result = await _run_with_separate_permit_budget(
             cqu_atrust.run_atrust_login(
                 student_id=student_id,
                 password=password,
                 method=method,
                 code_provider=code_waiter,
+                reusable_code_provider=reusable_code_waiter,
                 permit_provider=permit_waiter,
                 proxy=proxy,
             ),
-            timeout=RUN_TOTAL_TIMEOUT,
+            permit_claimed,
         )
         log.info("atrust-login ok")
         return web.json_response({"ok": True, **result})
@@ -360,6 +477,8 @@ async def atrust_login_handler(request: web.Request) -> web.Response:
     finally:
         CODE_EVENTS.pop(session, None)
         CODE_VALUES.pop(session, None)
+        REUSABLE_CODE_EVENTS.pop(session, None)
+        REUSABLE_CODE_VALUES.pop(session, None)
         PERMIT_EVENTS.pop(session, None)
         PERMIT_VALUES.pop(session, None)
 
@@ -372,11 +491,21 @@ async def code_handler(request: web.Request) -> web.Response:
 
     session = body.get("session") or "default"
     code = body.get("code")
+    reusable = body.get("reusable") is True
     if not code:
         return web.json_response({"ok": False, "error": "missing code"}, status=400)
 
     # I2: 顺手清掉过期孤儿码, 防止无人认领的明文码无界堆积/长期驻留。
     _sweep_stale_codes()
+    if reusable:
+        REUSABLE_CODE_VALUES[session] = (str(code), time.time())
+        reusable_event = REUSABLE_CODE_EVENTS.get(session)
+        if reusable_event is not None:
+            reusable_event.set()
+            log.info("reusable code deposited (woke in-flight login)")
+            return web.json_response({"ok": True})
+        log.info("reusable code deposited (no in-flight login yet)")
+        return web.json_response({"ok": True, "waiting": False})
     CODE_VALUES[session] = (str(code), time.time())
     ev = CODE_EVENTS.get(session)
     if ev is not None:
@@ -507,7 +636,7 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
         return web.json_response(
             {"ok": False, "error": "missing required field: state (object)"}, status=400)
 
-    # 纵深第二层: recipe(navUrl/capture/fetch)host 全过白名单, 仅 https my.cqu.edu.cn。
+    # 纵深第二层: recipe(navUrl/capture/fetch)只允许两个代码固定 host，并要求 same-host。
     # 不通过 → 400, error 不泄露具体红线细节(只回类型名)。
     try:
         recipe = cqu_data_harvest.parse_harvest_recipe(body)
@@ -545,7 +674,13 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
 
 
 async def health_handler(_request: web.Request) -> web.Response:
-    return web.json_response({"ok": True})
+    return web.json_response(
+        {
+            "ok": True,
+            "apiVersion": NODE_API_VERSION,
+            "capabilities": NODE_CAPABILITIES,
+        }
+    )
 
 
 def build_app() -> web.Application:

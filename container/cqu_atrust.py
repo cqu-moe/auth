@@ -5,6 +5,7 @@ constants. The flow exports only a browser storage state: the Service Ticket
 is consumed by the aTrust passport and is never returned to callers.
 """
 
+import asyncio
 import urllib.parse
 
 from patchright.async_api import async_playwright
@@ -53,7 +54,11 @@ def is_atrust_login_done(url: str) -> bool:
 
 def classify_first_factor_failure(verdict: str) -> str:
     text = str(verdict or "").lower()
-    if any(marker in text for marker in ("用户名或密码", "密码错误", "password")):
+    # 「回到登录页(密码错误/瑞数软重挑战)」是现有浏览器 helper 的歧义兜底，
+    # 不能据此累计凭据熔断。只有 CAS 明确返回的账密错误文本才算 password_rejected。
+    if any(marker in text for marker in ("回到登录页", "瑞数", "软重挑战")):
+        return "transient"
+    if any(marker in text for marker in ("用户名或密码错误", "invalid password")):
         return "password_rejected"
     return "transient"
 
@@ -94,11 +99,53 @@ async def wait_for_atrust_app(page) -> None:
     raise RuntimeError("ATRUST_APP_NOT_REACHED")
 
 
+async def verify_atrust_app_ready(page) -> None:
+    """Require a real curriculum API response before persisting the session."""
+    ready = asyncio.Event()
+
+    async def inspect_response(response) -> None:
+        try:
+            parsed = urllib.parse.urlparse(response.url)
+            if (
+                _safe_host(response.url) == ATRUST_APP_HOST
+                and "my-table-detail" in parsed.path
+                and response.status == 200
+            ):
+                # A gateway HTML/error shell on the right hostname is not enough.
+                # Requiring parseable JSON proves the rewritten application can use
+                # the freshly established aTrust state for its target API.
+                await response.json()
+                ready.set()
+        except Exception:
+            return
+
+    def on_response(response) -> None:
+        asyncio.create_task(inspect_response(response))
+
+    page.on("response", on_response)
+    try:
+        await page.goto(
+            ATRUST_APP_URL,
+            wait_until="domcontentloaded",
+            timeout=40_000,
+        )
+        await asyncio.wait_for(ready.wait(), timeout=25)
+        if not is_atrust_login_done(page.url):
+            raise RuntimeError("ATRUST_APP_NOT_READY")
+        # Let the SPA finish any immediate localStorage writes before export.
+        await page.wait_for_timeout(500)
+    except asyncio.TimeoutError as error:
+        raise RuntimeError("ATRUST_APP_NOT_READY") from error
+    finally:
+        page.remove_listener("response", on_response)
+
+
 async def run_atrust_login(
     student_id,
     password,
     method="mail",
     code_provider=None,
+    reusable_code_provider=None,
     permit_provider=None,
     proxy=None,
 ):
@@ -154,7 +201,13 @@ async def run_atrust_login(
                 )
                 if send_verdict == "failed":
                     raise RuntimeError("ATRUST_CODE_REQUEST_FAILED")
-                code = (await code_provider() or "").strip()
+                provider = (
+                    reusable_code_provider
+                    if send_verdict == "already_valid"
+                    and reusable_code_provider is not None
+                    else code_provider
+                )
+                code = (await provider() or "").strip()
                 if not code:
                     raise RuntimeError("ATRUST_CODE_MISSING")
                 await cqu_login.submit_code(
@@ -166,6 +219,7 @@ async def run_atrust_login(
                 raise RuntimeError("ATRUST_FIRST_FACTOR_FAILED")
 
             await wait_for_atrust_app(page)
+            await verify_atrust_app_ready(page)
             state = await context.storage_state()
             return {"state": state}
         finally:

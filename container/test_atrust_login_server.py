@@ -26,6 +26,8 @@ class AtrustLoginServerTestCase(AioHTTPTestCase):
         server.CODE_VALUES.clear()
         server.PERMIT_EVENTS.clear()
         server.PERMIT_VALUES.clear()
+        server.REUSABLE_CODE_EVENTS.clear()
+        server.REUSABLE_CODE_VALUES.clear()
         self._orig_run = server.cqu_atrust.run_atrust_login
         self._orig_should = server.should_use_proxy
         self._orig_acquire = server.acquire_qg_proxy
@@ -39,6 +41,8 @@ class AtrustLoginServerTestCase(AioHTTPTestCase):
         server.CODE_VALUES.clear()
         server.PERMIT_EVENTS.clear()
         server.PERMIT_VALUES.clear()
+        server.REUSABLE_CODE_EVENTS.clear()
+        server.REUSABLE_CODE_VALUES.clear()
         super().tearDown()
 
     async def test_early_permit_is_consumed_and_fixed_login_contract_returns_state_only(self):
@@ -111,3 +115,52 @@ class AtrustLoginServerTestCase(AioHTTPTestCase):
     async def test_code_permit_requires_session(self):
         resp = await self.client.post("/code-permit", json={})
         assert resp.status == 400
+
+    async def test_health_advertises_the_node_api_version_before_worker_cutover(self):
+        resp = await self.client.get("/health")
+        assert resp.status == 200
+        body = await resp.json()
+        assert body["ok"] is True
+        assert body["apiVersion"] == "atrust-harvest-v1"
+        assert set(body["capabilities"]) >= {
+            "atrust-login",
+            "code-permit",
+            "reusable-code",
+            "data-harvest",
+        }
+
+    async def test_early_reusable_code_is_reserved_for_already_valid_flow(self):
+        async def fake_run(**kwargs):
+            await kwargs["permit_provider"]()
+            code = await kwargs["reusable_code_provider"]()
+            assert code == "123456"
+            return {"state": {"cookies": [], "origins": []}}
+
+        server.cqu_atrust.run_atrust_login = fake_run
+
+        code = await self.client.post(
+            "/code",
+            json={
+                "session": _BODY["session"],
+                "code": "123456",
+                "reusable": True,
+            },
+        )
+        assert code.status == 200
+        permit = await self.client.post(
+            "/code-permit", json={"session": _BODY["session"]}
+        )
+        assert permit.status == 200
+
+        resp = await self.client.post("/atrust-login", json=_BODY)
+        assert resp.status == 200
+        assert await resp.json() == {
+            "ok": True,
+            "state": {"cookies": [], "origins": []},
+        }
+        assert _BODY["session"] not in server.REUSABLE_CODE_VALUES
+
+
+def test_fifo_wait_budget_is_separate_from_the_promoted_owners_login_budget():
+    assert server.PERMIT_WAIT_TIMEOUT > server.RUN_TOTAL_TIMEOUT
+    assert server.PERMIT_PHASE_TIMEOUT > server.PERMIT_WAIT_TIMEOUT

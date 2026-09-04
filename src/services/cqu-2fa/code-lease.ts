@@ -1,5 +1,10 @@
 import { LOGIN_LOCK_TTL_MS } from "./single-flight";
 
+// owner 已获 permit 后只需覆盖 660s 登录预算 + VPC 余量；排队项则必须覆盖
+// 「前一 owner 完成 + 自己被提升」的完整 1500s 请求锁窗口。
+export const CODE_LEASE_OWNER_TTL_MS = 720 * 1000;
+export const CODE_LEASE_QUEUE_TTL_MS = LOGIN_LOCK_TTL_MS;
+
 export type LoginKind = "cas" | "atrust";
 
 export interface CodeLeaseEntry {
@@ -35,9 +40,9 @@ export function pruneCodeLease(
 ): CodeLease | null {
   if (!lease) return null;
   const validQueue = lease.queue.filter(
-    (entry) => now - entry.queuedAt <= LOGIN_LOCK_TTL_MS
+    (entry) => now - entry.queuedAt <= CODE_LEASE_QUEUE_TTL_MS
   );
-  if (now - lease.acquiredAt <= LOGIN_LOCK_TTL_MS) {
+  if (now - lease.acquiredAt <= CODE_LEASE_OWNER_TTL_MS) {
     return { ...lease, queue: validQueue };
   }
   return promote(validQueue, now);
