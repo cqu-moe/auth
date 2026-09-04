@@ -150,6 +150,39 @@ describe("verification-code lease orchestration", () => {
     expect(await readStorage(stub, "codeLease")).toMatchObject({
       ownerToken: "atrust-1",
     });
+    expect(await readStorage(stub, "codePermitPending")).toBeUndefined();
+  });
+
+  it("never leaves an authoritative owner behind when every permit attempt fails", async () => {
+    const stub = freshStub("code-lease-permit-terminal-failure");
+    await seedSession(stub, {
+      status: "active",
+      extra: {
+        codeLease: {
+          ownerToken: "cas-1",
+          ownerKind: "cas",
+          acquiredAt: Date.now(),
+          queue: [
+            { token: "atrust-1", kind: "atrust", queuedAt: Date.now() },
+          ],
+        },
+      },
+    });
+    spyLoginNode({
+      "/code-permit": async () =>
+        Response.json({ ok: false }, { status: 502 }),
+    });
+
+    await runInDurableObject(stub, async (instance) => {
+      await expect(
+        (instance as unknown as {
+          releaseVerificationCodeLease: (token: string) => Promise<void>;
+        }).releaseVerificationCodeLease("cas-1")
+      ).rejects.toThrow("code-permit failed");
+    });
+
+    expect(await readStorage(stub, "codeLease")).toBeUndefined();
+    expect(await readStorage(stub, "codePermitPending")).toBeUndefined();
   });
 
   it("promoting a stale owner grants the new permit but never forwards the stale arrival", async () => {

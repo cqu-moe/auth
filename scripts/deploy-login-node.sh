@@ -28,14 +28,15 @@ validate_id() {
 if [[ "${1:-}" == "--rollback" ]]; then
   backup_id="${2:-}"
   validate_id "$backup_id"
-  ssh "$node_host" bash -s -- "$backup_id" "$app_dir" "$release_root" "$expected_api_version" <<'REMOTE'
+  ssh "$node_host" bash -s -- "$backup_id" "$app_dir" "$release_root" <<'REMOTE'
 set -euo pipefail
 backup_id="$1"
 app_dir="$2"
 release_root="$3"
-expected_api_version="$4"
 backup_dir="$release_root/$backup_id"
+contract_file="$backup_dir/health-contract"
 [[ -d "$backup_dir" ]] || { echo "backup not found: $backup_id" >&2; exit 1; }
+[[ -f "$contract_file" ]] || { echo "backup health contract missing: $backup_id" >&2; exit 1; }
 for source in "$backup_dir"/*.py; do
   [[ -e "$source" ]] || continue
   sudo install -o cqulogin -g cqulogin -m 0644 "$source" "$app_dir/$(basename "$source")"
@@ -43,7 +44,7 @@ done
 sudo systemctl restart cqu-login
 for _ in $(seq 1 20); do
   if payload=$(curl -fsS --max-time 3 http://127.0.0.1:8080/health 2>/dev/null) && \
-     EXPECTED_API_VERSION="$expected_api_version" PAYLOAD="$payload" /opt/cqu-login/venv/bin/python -c 'import json, os; body=json.loads(os.environ["PAYLOAD"]); assert body["ok"] is True; assert body["apiVersion"] == os.environ["EXPECTED_API_VERSION"]'; then
+     CONTRACT="$(cat "$contract_file")" PAYLOAD="$payload" /opt/cqu-login/venv/bin/python -c 'import json, os; body=json.loads(os.environ["PAYLOAD"]); assert body["ok"] is True; expected=os.environ["CONTRACT"]; assert expected == "legacy-ok" or body.get("apiVersion") == expected'; then
     echo "rollback healthy: $backup_id"
     exit 0
   fi
@@ -79,7 +80,11 @@ release_dir="$release_root/$release_id"
 backup_id="backup-$(date -u +%Y%m%dT%H%M%SZ)-$release_id"
 backup_dir="$release_root/$backup_id"
 
-sudo install -d -o cqulogin -g cqulogin -m 0750 "$release_root" "$release_dir" "$backup_dir"
+sudo install -d -o cqulogin -g cqulogin -m 0755 "$release_root" "$release_dir" "$backup_dir"
+previous_payload=$(curl -fsS --max-time 3 http://127.0.0.1:8080/health)
+previous_contract=$(PAYLOAD="$previous_payload" /opt/cqu-login/venv/bin/python -c 'import json, os; body=json.loads(os.environ["PAYLOAD"]); assert body["ok"] is True; print(body.get("apiVersion") or "legacy-ok")')
+printf '%s\n' "$previous_contract" | sudo tee "$backup_dir/health-contract" >/dev/null
+sudo chmod 0644 "$backup_dir/health-contract"
 for file in "${runtime_files[@]}"; do
   sudo install -o cqulogin -g cqulogin -m 0644 "$staging_dir/$file" "$release_dir/$file"
   if [[ -f "$app_dir/$file" ]]; then
@@ -98,7 +103,15 @@ rollback() {
     [[ -e "$source" ]] || continue
     sudo install -o cqulogin -g cqulogin -m 0644 "$source" "$app_dir/$(basename "$source")"
   done
-  sudo systemctl restart cqu-login || true
+  sudo systemctl restart cqu-login
+  for _ in $(seq 1 20); do
+    if payload=$(curl -fsS --max-time 3 http://127.0.0.1:8080/health 2>/dev/null) && \
+       CONTRACT="$(cat "$backup_dir/health-contract")" PAYLOAD="$payload" /opt/cqu-login/venv/bin/python -c 'import json, os; body=json.loads(os.environ["PAYLOAD"]); assert body["ok"] is True; expected=os.environ["CONTRACT"]; assert expected == "legacy-ok" or body.get("apiVersion") == expected'; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
 }
 
 for file in "${runtime_files[@]}"; do
@@ -106,7 +119,9 @@ for file in "${runtime_files[@]}"; do
 done
 
 if ! sudo systemctl restart cqu-login; then
-  rollback
+  if ! rollback; then
+    echo "node restart and automatic rollback both failed" >&2
+  fi
   exit 1
 fi
 
@@ -122,8 +137,11 @@ done
 
 if [[ "$healthy" != 1 ]]; then
   sudo systemctl status cqu-login --no-pager >&2 || true
-  rollback
-  echo "node health gate failed; restored $backup_id" >&2
+  if rollback; then
+    echo "node health gate failed; rollback verified: $backup_id" >&2
+  else
+    echo "node health gate failed; rollback also failed: $backup_id" >&2
+  fi
   exit 1
 fi
 

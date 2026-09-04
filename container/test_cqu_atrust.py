@@ -94,6 +94,57 @@ def test_click_unified_identity_uses_fixed_entry_and_exact_visible_text():
     assert page.clicks == ["统一身份认证"]
 
 
+class _ReadyResponse:
+    url = (
+        "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/"
+        "api/timetable/class/timetable/student/my-table-detail"
+    )
+    status = 200
+
+    def __init__(self, payload):
+        self.payload = payload
+
+    async def json(self):
+        return self.payload
+
+
+class _ReadyPage:
+    def __init__(self, payload):
+        self.url = cqu_atrust.ATRUST_APP_URL
+        self.response = _ReadyResponse(payload)
+        self.handler = None
+
+    def on(self, event, handler):
+        assert event == "response"
+        self.handler = handler
+
+    def remove_listener(self, event, handler):
+        assert event == "response"
+        assert handler is self.handler
+
+    async def goto(self, url, **_kwargs):
+        self.url = url
+        self.handler(self.response)
+
+    async def wait_for_timeout(self, _timeout):
+        return None
+
+
+def test_atrust_ready_gate_requires_the_real_timetable_success_shape():
+    asyncio.run(
+        cqu_atrust.verify_atrust_app_ready(
+            _ReadyPage({"classTimetableVOList": []}), timeout_seconds=0.1
+        )
+    )
+    with pytest.raises(RuntimeError, match="ATRUST_APP_NOT_READY"):
+        asyncio.run(
+            cqu_atrust.verify_atrust_app_ready(
+                _ReadyPage({"status": "failed", "message": "expired"}),
+                timeout_seconds=0.01,
+            )
+        )
+
+
 class _FlowPage:
     def __init__(self):
         self.url = "about:blank"

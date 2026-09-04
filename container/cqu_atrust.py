@@ -97,7 +97,7 @@ async def wait_for_atrust_app(page) -> None:
     raise RuntimeError("ATRUST_APP_NOT_REACHED")
 
 
-async def verify_atrust_app_ready(page) -> None:
+async def verify_atrust_app_ready(page, timeout_seconds: float = 25) -> None:
     """Require a real curriculum API response before persisting the session."""
     ready = asyncio.Event()
 
@@ -112,8 +112,11 @@ async def verify_atrust_app_ready(page) -> None:
                 # A gateway HTML/error shell on the right hostname is not enough.
                 # Requiring parseable JSON proves the rewritten application can use
                 # the freshly established aTrust state for its target API.
-                await response.json()
-                ready.set()
+                payload = await response.json()
+                if isinstance(payload, dict) and isinstance(
+                    payload.get("classTimetableVOList"), list
+                ):
+                    ready.set()
         except Exception:
             return
 
@@ -127,7 +130,7 @@ async def verify_atrust_app_ready(page) -> None:
             wait_until="domcontentloaded",
             timeout=40_000,
         )
-        await asyncio.wait_for(ready.wait(), timeout=25)
+        await asyncio.wait_for(ready.wait(), timeout=timeout_seconds)
         if not is_atrust_login_done(page.url):
             raise RuntimeError("ATRUST_APP_NOT_READY")
         # Let the SPA finish any immediate localStorage writes before export.

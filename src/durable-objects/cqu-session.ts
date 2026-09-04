@@ -125,6 +125,8 @@ interface LoginInFlight {
 interface PendingCode {
   code: string;
   kind: string;
+  // permit 已送到节点但 DO 尚未提交 owner 时到达的邮件，定向缓冲给该 token。
+  ownerToken?: string;
   // DO 真实收到该码的时刻(ms, 原始值)。回放时原样发回, 作前端倒计时锚点 + 去重键,
   // 不能用 Date.now() 顶替, 否则倒计时锚点漂移且无法去重。
   ts: number;
@@ -1120,27 +1122,32 @@ export class CquSessionDO extends DurableObject<Env> {
       // 但绝不把迟到旧码转发/暂存给新 owner；用户实时面板已收到上方广播。
       if (ownerChanged) {
         await this.ctx.storage.delete("pendingCode");
-        if (lease) {
-          await this.ctx.storage.put("codeLease", lease);
-          await this.grantVerificationCodePermit(lease.ownerToken);
-        } else {
-          await this.ctx.storage.delete("codeLease");
-        }
+        await this.persistCodeLeaseTransition(storedLease, lease);
         console.info(
           `[CquSession] discarded code from stale login owner after FIFO promotion`
         );
         return true;
       }
 
-      await this.ctx.storage.put("pendingCode", pending);
       if (!lease) {
+        await this.ctx.storage.put("pendingCode", pending);
         // 无在途登录 = 用户手动登录触发的码, 已送达上方实时面板。不再算丢码。
         console.info(
           `[CquSession] login_2fa code arrived with no login in flight → broadcast to user live panel`
         );
         return true;
       }
-      await this.ctx.storage.put("codeLease", lease);
+      await this.persistCodeLeaseTransition(storedLease, lease);
+      const permitPending =
+        (await this.ctx.storage.get<string>("codePermitPending")) ?? null;
+      if (permitPending === lease.ownerToken) {
+        await this.ctx.storage.put("pendingCode", {
+          ...pending,
+          ownerToken: lease.ownerToken,
+        } satisfies PendingCode);
+        return true;
+      }
+      await this.ctx.storage.put("pendingCode", pending);
       const userId = this.state?.userId;
       if (!userId) {
         // 退化态: 有在途登录锁却无 session 状态, 节点路径走不通。码已广播无害, 但节点收码失败。
@@ -1269,7 +1276,7 @@ export class CquSessionDO extends DurableObject<Env> {
     await this.ctx.storage.delete("loginInFlight");
     await this.ctx.storage.delete("atrustLoginInFlight");
     await this.ctx.storage.delete("atrustSession");
-    await this.ctx.storage.delete("codeLease");
+    await this.ctx.storage.delete(["codeLease", "codePermitPending"]);
   }
 
   /**
@@ -1661,7 +1668,6 @@ export class CquSessionDO extends DurableObject<Env> {
         );
         lastStatus = response.status;
         if (response.ok) {
-          await this.offerPendingCodeForReuse(token);
           return;
         }
       } catch (error) {
@@ -1678,6 +1684,109 @@ export class CquSessionDO extends DurableObject<Env> {
     );
   }
 
+  /** 将 permit 窄竞态窗口内缓冲的新邮件码补投给已提交的 owner。 */
+  private async deliverBufferedFreshCode(token: string): Promise<boolean> {
+    const pending =
+      (await this.ctx.storage.get<PendingCode>("pendingCode")) ?? null;
+    if (
+      !pending ||
+      pending.kind !== "login_2fa" ||
+      pending.ownerToken !== token ||
+      Date.now() - pending.ts >= CODE_VALIDITY_MS
+    ) {
+      return false;
+    }
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const lease =
+        (await this.ctx.storage.get<CodeLease>("codeLease")) ?? null;
+      if (lease?.ownerToken !== token) return true;
+      try {
+        const response = await this.env.LOGIN_NODE.fetch(
+          new Request(`${LOGIN_NODE_BASE}/code`, {
+            method: "POST",
+            body: JSON.stringify({ session: token, code: pending.code }),
+          })
+        );
+        if (response.ok) return true;
+      } catch {
+        // 同 reusable 预载，最多三次；最终失败由节点自身 code wait 超时收敛。
+      }
+    }
+    console.warn(
+      `[CquSession] buffered fresh login code delivery failed after 3 attempts`
+    );
+    return true;
+  }
+
+  /**
+   * 唯一租约转换入口：先持久化 owner + pending tombstone，再发 permit；成功后
+   * 提交 owner 并补投竞态窗口邮件。三次全失败则释放该 owner 并继续推进队列，
+   * 绝不留下“有 owner、无 permit”的永久状态。
+   */
+  private async persistCodeLeaseTransition(
+    current: CodeLease | null,
+    next: CodeLease | null
+  ): Promise<void> {
+    const ownerChanged = current?.ownerToken !== next?.ownerToken;
+    if (!next) {
+      await this.ctx.storage.delete(["codeLease", "codePermitPending"]);
+      return;
+    }
+    if (!ownerChanged) {
+      await this.ctx.storage.put("codeLease", next);
+      return;
+    }
+
+    await this.ctx.storage.put({
+      codeLease: next,
+      codePermitPending: next.ownerToken,
+    });
+    try {
+      await this.grantVerificationCodePermit(next.ownerToken);
+    } catch (error) {
+      const [latest, pendingToken] = await Promise.all([
+        this.ctx.storage.get<CodeLease>("codeLease"),
+        this.ctx.storage.get<string>("codePermitPending"),
+      ]);
+      if (
+        latest?.ownerToken === next.ownerToken &&
+        pendingToken === next.ownerToken
+      ) {
+        const buffered =
+          (await this.ctx.storage.get<PendingCode>("pendingCode")) ?? null;
+        if (buffered?.ownerToken === next.ownerToken) {
+          await this.ctx.storage.delete("pendingCode");
+        }
+        await this.ctx.storage.delete("codePermitPending");
+        const fallback = releaseCodeLease(
+          latest,
+          next.ownerToken,
+          Date.now()
+        );
+        await this.persistCodeLeaseTransition(latest, fallback);
+      }
+      throw error;
+    }
+
+    const [latest, pendingToken] = await Promise.all([
+      this.ctx.storage.get<CodeLease>("codeLease"),
+      this.ctx.storage.get<string>("codePermitPending"),
+    ]);
+    if (
+      latest?.ownerToken !== next.ownerToken ||
+      pendingToken !== next.ownerToken
+    ) {
+      return;
+    }
+    await this.ctx.storage.delete("codePermitPending");
+    const hadBufferedFresh = await this.deliverBufferedFreshCode(
+      next.ownerToken
+    );
+    if (!hadBufferedFresh) {
+      await this.offerPendingCodeForReuse(next.ownerToken);
+    }
+  }
+
   /**
    * 将仍有效的账号级旧码预载到当前 owner 的独立 reusable 槽。节点只有在
    * CQU 发码接口明确返回 already_valid 时才会消费；若真发出新码(sent)，该槽
@@ -1691,6 +1800,7 @@ export class CquSessionDO extends DurableObject<Env> {
     if (
       !pending ||
       pending.kind !== "login_2fa" ||
+      pending.ownerToken !== undefined ||
       Date.now() - pending.ts >= CODE_VALIDITY_MS ||
       lease?.ownerToken !== token
     ) {
@@ -1742,7 +1852,10 @@ export class CquSessionDO extends DurableObject<Env> {
     const now = Date.now();
     const current =
       (await this.ctx.storage.get<CodeLease>("codeLease")) ?? null;
-    if (!current) return;
+    if (!current) {
+      await this.ctx.storage.delete("codePermitPending");
+      return;
+    }
 
     const filtered: CodeLease = {
       ...current,
@@ -1752,15 +1865,7 @@ export class CquSessionDO extends DurableObject<Env> {
       current.ownerKind === kind
         ? releaseCodeLease(filtered, current.ownerToken, now)
         : pruneCodeLease(filtered, now);
-    const ownerChanged = current.ownerToken !== next?.ownerToken;
-    if (next) {
-      await this.ctx.storage.put("codeLease", next);
-    } else {
-      await this.ctx.storage.delete("codeLease");
-    }
-    if (ownerChanged && next) {
-      await this.grantVerificationCodePermit(next.ownerToken);
-    }
+    await this.persistCodeLeaseTransition(current, next);
   }
 
   /**
@@ -1779,11 +1884,7 @@ export class CquSessionDO extends DurableObject<Env> {
       { token, kind, queuedAt: now },
       now
     );
-    const ownerChanged = current?.ownerToken !== next.ownerToken;
-    await this.ctx.storage.put("codeLease", next);
-    if (ownerChanged) {
-      await this.grantVerificationCodePermit(next.ownerToken);
-    }
+    await this.persistCodeLeaseTransition(current, next);
   }
 
   /** 释放租约；owner 完成后原子推进 FIFO 队首，再向新 owner 发 permit。 */
@@ -1792,17 +1893,7 @@ export class CquSessionDO extends DurableObject<Env> {
     const current =
       (await this.ctx.storage.get<CodeLease>("codeLease")) ?? null;
     const next = releaseCodeLease(current, token, now);
-    const ownerChanged = current?.ownerToken !== next?.ownerToken;
-
-    if (next) {
-      await this.ctx.storage.put("codeLease", next);
-    } else {
-      await this.ctx.storage.delete("codeLease");
-    }
-
-    if (ownerChanged && next) {
-      await this.grantVerificationCodePermit(next.ownerToken);
-    }
+    await this.persistCodeLeaseTransition(current, next);
   }
 
   private async getAtrustSessionForHarvest(
