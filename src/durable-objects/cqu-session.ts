@@ -1696,26 +1696,34 @@ export class CquSessionDO extends DurableObject<Env> {
     ) {
       return;
     }
-    try {
-      const response = await this.env.LOGIN_NODE.fetch(
-        new Request(`${LOGIN_NODE_BASE}/code`, {
-          method: "POST",
-          body: JSON.stringify({
-            session: token,
-            code: pending.code,
-            reusable: true,
-          }),
-        })
-      );
-      if (!response.ok) {
-        console.warn(
-          `[CquSession] reusable login code preload returned status=${response.status}`
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const currentLease =
+        (await this.ctx.storage.get<CodeLease>("codeLease")) ?? null;
+      if (currentLease?.ownerToken !== token) return;
+      try {
+        const response = await this.env.LOGIN_NODE.fetch(
+          new Request(`${LOGIN_NODE_BASE}/code`, {
+            method: "POST",
+            body: JSON.stringify({
+              session: token,
+              code: pending.code,
+              reusable: true,
+            }),
+          })
         );
+        if (response.ok) return;
+        if (attempt === 3) {
+          console.warn(
+            `[CquSession] reusable login code preload failed after ${attempt} attempts (status=${response.status})`
+          );
+        }
+      } catch (error) {
+        if (attempt === 3) {
+          console.warn(
+            `[CquSession] reusable login code preload failed after ${attempt} attempts (${error instanceof Error ? error.name : "unknown"})`
+          );
+        }
       }
-    } catch (error) {
-      console.warn(
-        `[CquSession] reusable login code preload failed (${error instanceof Error ? error.name : "unknown"})`
-      );
     }
   }
 

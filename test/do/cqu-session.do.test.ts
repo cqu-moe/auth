@@ -216,6 +216,7 @@ describe("verification-code lease orchestration", () => {
     });
 
     const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+    let reusableAttempts = 0;
     spyLoginNode({
       "/code-permit": async (request) => {
         calls.push({ path: "/code-permit", body: await request.json() });
@@ -223,7 +224,11 @@ describe("verification-code lease orchestration", () => {
       },
       "/code": async (request) => {
         calls.push({ path: "/code", body: await request.json() });
-        return Response.json({ ok: true });
+        reusableAttempts += 1;
+        return Response.json(
+          { ok: reusableAttempts >= 3 },
+          { status: reusableAttempts >= 3 ? 200 : 502 }
+        );
       },
     });
 
@@ -235,6 +240,14 @@ describe("verification-code lease orchestration", () => {
 
     expect(calls).toEqual([
       { path: "/code-permit", body: { session: "atrust-1" } },
+      {
+        path: "/code",
+        body: { session: "atrust-1", code: "123456", reusable: true },
+      },
+      {
+        path: "/code",
+        body: { session: "atrust-1", code: "123456", reusable: true },
+      },
       {
         path: "/code",
         body: { session: "atrust-1", code: "123456", reusable: true },
