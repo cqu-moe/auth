@@ -21,6 +21,7 @@ const nativeTwoFactorActions: LoginChallengeActions = {
 
 export default function TwoFactorChallenge() {
   const navigate = useNavigate();
+  const { refetch: refetchSession } = authClient.useSession();
   const [method, setMethod] = useState<LoginChallengeMethod>("totp");
   const [code, setCode] = useState("");
   const [trustDevice, setTrustDevice] = useState(false);
@@ -77,7 +78,13 @@ export default function TwoFactorChallenge() {
     }
 
     setLoading(true);
-    const result = await verifyLoginChallenge(nativeTwoFactorActions, method, value, trustDevice);
+    const result = await verifyLoginChallenge(
+      nativeTwoFactorActions,
+      method,
+      value,
+      trustDevice,
+      refetchSession
+    );
     setLoading(false);
 
     if (result.error) {

@@ -50,6 +50,41 @@ describe("two-factor login challenge", () => {
     expect(actions.verifyBackupCode).toHaveBeenCalledWith({ code: "recovery-code", trustDevice: true });
   });
 
+  it("refreshes the authenticated session before completing a successful challenge", async () => {
+    const events: string[] = [];
+    const actions = {
+      verifyTotp: vi.fn(async () => {
+        events.push("verified");
+        return { data: { token: "session-token" }, error: null };
+      }),
+      verifyOtp: vi.fn(async () => ({ data: null, error: null })),
+      verifyBackupCode: vi.fn(async () => ({ data: null, error: null })),
+      sendOtp: vi.fn(async () => ({ data: null, error: null })),
+    };
+    const refreshSession = vi.fn(async () => {
+      events.push("refresh-started");
+      await Promise.resolve();
+      events.push("refresh-finished");
+    });
+
+    const result = await verifyLoginChallenge(
+      actions,
+      "totp",
+      "123456",
+      false,
+      refreshSession
+    );
+    events.push("completed");
+
+    expect(result.error).toBeNull();
+    expect(events).toEqual([
+      "verified",
+      "refresh-started",
+      "refresh-finished",
+      "completed",
+    ]);
+  });
+
   it("sends email OTPs natively and leaves success distinguishable from failure", async () => {
     const sendOtp = vi.fn(async (input: { fetchOptions: { body: { trustDevice: boolean } } }) => ({
       data: input,

@@ -23,15 +23,24 @@ export interface LoginChallengeActions {
   }): Promise<LoginChallengeResult>;
 }
 
-export function verifyLoginChallenge(
+export async function verifyLoginChallenge(
   actions: LoginChallengeActions,
   method: LoginChallengeMethod,
   code: string,
-  trustDevice: boolean
+  trustDevice: boolean,
+  refreshSession?: () => Promise<void>
 ): Promise<LoginChallengeResult> {
-  if (method === "totp") return actions.verifyTotp({ code, trustDevice });
-  if (method === "email-otp") return actions.verifyOtp({ code, trustDevice });
-  return actions.verifyBackupCode({ code, trustDevice });
+  const result = method === "totp"
+    ? await actions.verifyTotp({ code, trustDevice })
+    : method === "email-otp"
+      ? await actions.verifyOtp({ code, trustDevice })
+      : await actions.verifyBackupCode({ code, trustDevice });
+
+  if (!result.error && refreshSession) {
+    await refreshSession();
+  }
+
+  return result;
 }
 
 export function sendLoginChallengeOtp(
