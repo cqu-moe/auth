@@ -104,27 +104,6 @@ export default function Register() {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label htmlFor="invitationCode" className="block text-sm font-medium text-gray-700 mb-1">
-                邀请码
-              </label>
-              <input
-                id="invitationCode"
-                type="text"
-                value={code}
-                onChange={(e) => setCode(e.target.value.trim().toUpperCase().slice(0, 8))}
-                required
-                minLength={8}
-                maxLength={8}
-                pattern="[A-HJ-NP-Z2-9]{8}"
-                autoComplete="one-time-code"
-                spellCheck={false}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono tracking-widest uppercase focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="例如：7K3M9X2P"
-              />
-              <p className="mt-1 text-xs text-gray-400">请填写管理员提供的 8 位邀请码</p>
-            </div>
-
-            <div>
               <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
                 昵称
               </label>
@@ -208,6 +187,26 @@ export default function Register() {
               {confirmPassword && confirmPassword !== password && (
                 <p className="mt-1 text-xs text-red-600">两次密码不一致</p>
               )}
+            </div>
+
+            <div>
+              <label htmlFor="invitationCode" className="block text-sm font-medium text-gray-700 mb-1">
+                邀请码
+              </label>
+              <input
+                id="invitationCode"
+                type="text"
+                value={code}
+                onChange={(e) => setCode(e.target.value.trim().toUpperCase().slice(0, 8))}
+                required
+                minLength={8}
+                maxLength={8}
+                pattern="[A-HJ-NP-Z2-9]{8}"
+                autoComplete="one-time-code"
+                spellCheck={false}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono tracking-widest uppercase focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="请输入邀请码"
+              />
             </div>
 
             <button
