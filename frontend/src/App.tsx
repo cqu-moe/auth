@@ -10,6 +10,7 @@ import Admin from "./pages/Admin";
 import OAuthAuthorize from "./pages/OAuthAuthorize";
 import CquBindWizard from "./pages/CquBindWizard";
 import VerifyEmail from "./pages/VerifyEmail";
+import TwoFactorChallenge from "./pages/TwoFactorChallenge";
 import ProtectedRoute from "./components/ProtectedRoute";
 import EmailVerificationGate from "./components/EmailVerificationGate";
 
@@ -38,6 +39,7 @@ export default function App() {
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/reset-password/confirm" element={<ResetPasswordConfirm />} />
           <Route path="/verify-email" element={<VerifyEmail />} />
+          <Route path="/two-factor" element={<TwoFactorChallenge />} />
           <Route
             path="/settings"
             element={

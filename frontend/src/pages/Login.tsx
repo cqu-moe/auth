@@ -22,6 +22,9 @@ export default function Login() {
     if (error) {
       setError(error.message ?? "登录失败，请检查邮箱和密码");
     } else {
+      if (data && "twoFactorRedirect" in data && data.twoFactorRedirect === true) {
+        return;
+      }
       navigate(getPostAuthDestination(data?.user.emailVerified === true), { replace: true });
     }
   };
