@@ -86,7 +86,8 @@ async function post(
   auth: ReturnType<typeof createAuth>,
   path: string,
   headers: Headers,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  clientIp?: string
 ) {
   return auth.handler(
     new Request(`http://localhost:8787/api/auth${path}`, {
@@ -95,6 +96,7 @@ async function post(
         cookie: headers.get("cookie") ?? "",
         "content-type": "application/json",
         origin: "http://localhost:8787",
+        ...(clientIp ? { "cf-connecting-ip": clientIp } : {}),
       }),
       body: JSON.stringify(body),
     })
@@ -237,11 +239,44 @@ describe("native two-factor authentication", () => {
       code: enabled.backupCodes[0],
     });
     expect(firstUse.status).toBe(200);
-    const secondUse = await post(auth, "/two-factor/verify-backup-code", backupHeaders, {
+    const retrySignIn = await auth.api.signInEmail({
+      body: { email: "user@example.com", password: "password123" },
+      returnHeaders: true,
+    });
+    expect(retrySignIn.response.twoFactorRedirect).toBe(true);
+    const retryHeaders = new Headers({ cookie: cookieFromHeaders(retrySignIn.headers) });
+    const secondUse = await post(auth, "/two-factor/verify-backup-code", retryHeaders, {
       code: enabled.backupCodes[0],
     });
     expect(secondUse.status).toBe(401);
     database.close();
+  });
+
+  it("rate limits every sensitive native two-factor and email-OTP path", async () => {
+    const rules = [
+      ["/two-factor/send-otp", 3],
+      ["/two-factor/verify-totp", 5],
+      ["/two-factor/verify-otp", 5],
+      ["/two-factor/verify-backup-code", 5],
+      ["/email-otp/send-verification-otp", 3],
+      ["/email-otp/check-verification-otp", 5],
+      ["/email-otp/request-email-change", 5],
+      ["/email-otp/change-email", 5],
+    ] as const;
+
+    for (const [path, max] of rules) {
+      const { auth, database } = authForTest();
+      const headers = new Headers();
+      const clientIp = "198.51.100.42";
+
+      for (let request = 0; request <= max; request += 1) {
+        const response = await post(auth, path, headers, {}, clientIp);
+        if (request < max) expect(response.status).not.toBe(429);
+        else expect(response.status).toBe(429);
+      }
+
+      database.close();
+    }
   });
 
   it("expires current-email OTPs and invalidates them after the attempt budget", async () => {
