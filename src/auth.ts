@@ -1,4 +1,5 @@
 import { betterAuth } from "better-auth";
+import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { withCloudflare, type CloudflareGeolocation } from "better-auth-cloudflare";
 import { admin } from "better-auth/plugins/admin";
 import { defaultStatements, adminAc } from "better-auth/plugins/admin/access";
@@ -82,6 +83,32 @@ export function createAuth(env: Env, request: Request) {
               html: `<p>点击链接重置密码：<a href="${url}">${url}</a></p>`,
             });
           },
+        },
+        user: {
+          changeEmail: {
+            enabled: true,
+            updateEmailWithoutVerification: false,
+            sendChangeEmailConfirmation: async ({ user, newEmail, url }) => {
+              await getResend().emails.send({
+                from: "auth.cqu.moe <noreply@cqu.moe>",
+                to: user.email,
+                subject: "确认更换登录邮箱 - auth.cqu.moe",
+                html: `<p>你正在将 auth.cqu.moe 的登录邮箱更换为 ${newEmail}。</p><p>请先点击以下链接确认本次操作：<a href="${url}">${url}</a></p><p>确认后，我们才会向新邮箱发送第二封验证邮件。</p>`,
+              });
+            },
+          },
+        },
+        hooks: {
+          before: createAuthMiddleware(async (ctx) => {
+            if (ctx.path !== "/change-email") return;
+            const session = await getSessionFromCtx(ctx);
+            if (!session?.user.emailVerified) {
+              throw new APIError("FORBIDDEN", {
+                code: "CURRENT_EMAIL_NOT_VERIFIED",
+                message: "请先验证当前邮箱，再发起邮箱更换",
+              });
+            }
+          }),
         },
         emailVerification: {
           sendOnSignUp: true,

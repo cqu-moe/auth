@@ -5,6 +5,7 @@ import Register from "./pages/Register";
 import ResetPassword from "./pages/ResetPassword";
 import ResetPasswordConfirm from "./pages/ResetPasswordConfirm";
 import Settings from "./pages/Settings";
+import ChangeEmail from "./pages/ChangeEmail";
 import Admin from "./pages/Admin";
 import OAuthAuthorize from "./pages/OAuthAuthorize";
 import CquBindWizard from "./pages/CquBindWizard";
@@ -42,6 +43,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <Settings />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings/email"
+            element={
+              <ProtectedRoute>
+                <ChangeEmail />
               </ProtectedRoute>
             }
           />

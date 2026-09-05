@@ -2,6 +2,7 @@ import { useState, FormEvent, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
 import Layout from "../components/Layout";
+import AccountProfileSection from "../components/AccountProfileSection";
 
 // DO /status 返回的会话状态对象（active/relogin_required/... + studentId）；
 // 后端在 DO 非 2xx 或解析失败时回传 { error: true } sentinel。
@@ -879,7 +880,7 @@ function CquBindingSection() {
 }
 
 export default function Settings() {
-  const { data: session } = authClient.useSession();
+  const { data: session, refetch: refetchSession } = authClient.useSession();
   const user = session?.user as { email?: string; name?: string; createdAt?: string } | undefined;
 
   return (
@@ -888,20 +889,11 @@ export default function Settings() {
         <h1 className="text-2xl font-bold text-gray-900 mb-6">账户设置</h1>
 
         <div className="space-y-6">
-          {/* 个人信息 */}
-          <div className="bg-white rounded-2xl border border-gray-200 p-6">
-            <h3 className="text-base font-semibold text-gray-900 mb-4">个人信息</h3>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between py-2 border-b border-gray-100">
-                <span className="text-sm text-gray-500">昵称</span>
-                <span className="text-sm font-medium text-gray-900">{user?.name ?? "—"}</span>
-              </div>
-              <div className="flex items-center justify-between py-2">
-                <span className="text-sm text-gray-500">邮箱</span>
-                <span className="text-sm font-medium text-gray-900">{user?.email ?? "—"}</span>
-              </div>
-            </div>
-          </div>
+          <AccountProfileSection
+            name={user?.name ?? ""}
+            email={user?.email ?? ""}
+            onSessionRefresh={refetchSession}
+          />
 
           {/* 修改密码 */}
           <ChangePasswordSection />
