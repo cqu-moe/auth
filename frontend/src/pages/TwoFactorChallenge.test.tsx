@@ -2,12 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
-import TwoFactorChallenge, {
+import TwoFactorChallenge from "./TwoFactorChallenge";
+import {
   getLoginChallengeError,
   loginChallengeMethods,
   sendLoginChallengeOtp,
   verifyLoginChallenge,
-} from "./TwoFactorChallenge";
+} from "../lib/two-factor-challenge";
 
 describe("two-factor login challenge", () => {
   it("renders the supported challenge controls without passkey", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nextEmailChangeStep } from "./email-change-flow";
+import { nextEmailChangeStep, restartEmailChangeFlow } from "./email-change-flow";
 
 describe("email change flow", () => {
   it("allows each legal mailbox-verification transition", () => {
@@ -12,5 +12,16 @@ describe("email change flow", () => {
     expect(() => nextEmailChangeStep("current-email", "email-changed")).toThrow(
       "Invalid email change transition: current-email -> email-changed"
     );
+  });
+
+  it("restarts at current-email verification while retaining only the selected new email", () => {
+    expect(restartEmailChangeFlow("new@example.com")).toEqual({
+      step: "current-email",
+      currentOtp: "",
+      currentOtpSent: false,
+      newEmail: "new@example.com",
+      newEmailOtp: "",
+      cooldown: 0,
+    });
   });
 });

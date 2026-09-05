@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   getLoginNavigationDestination,
   shouldSkipPostLoginNavigation,
-} from "./Login";
+} from "../lib/login-routing";
 
 describe("password login routing", () => {
   it("does not navigate while the native two-factor plugin owns the redirect", () => {

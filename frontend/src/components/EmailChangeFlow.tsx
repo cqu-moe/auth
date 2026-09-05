@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { validateNewEmail } from "../lib/account-settings";
-import { nextEmailChangeStep, type EmailChangeStep } from "../lib/email-change-flow";
+import { nextEmailChangeStep, restartEmailChangeFlow, type EmailChangeStep } from "../lib/email-change-flow";
 import { authClient } from "../lib/auth-client";
 import { mapAuthError, normalizeOtp } from "../lib/two-factor";
 
@@ -156,6 +156,17 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
     setStep(nextEmailChangeStep(step, "email-changed"));
   };
 
+  const restartCurrentEmailVerification = () => {
+    const restarted = restartEmailChangeFlow(newEmail);
+    setStep(restarted.step);
+    setCurrentOtp(restarted.currentOtp);
+    setCurrentOtpSent(restarted.currentOtpSent);
+    setNewEmail(restarted.newEmail);
+    setNewEmailOtp(restarted.newEmailOtp);
+    setCooldown(restarted.cooldown);
+    setError("");
+  };
+
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-6">
       <Link to="/settings" className="mb-5 inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 transition-colors hover:text-blue-600">
@@ -212,7 +223,16 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
             <OtpInput id="new-email-otp" value={newEmailOtp} onChange={setNewEmailOtp} />
           </div>
           <button type="submit" disabled={loading} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:bg-blue-400">{loading ? "验证中..." : "确认更换邮箱"}</button>
-          {cooldown > 0 && <p className="text-xs text-gray-500">验证码已发送；{cooldown} 秒内请勿重复请求。</p>}
+          {cooldown > 0 ? (
+            <p className="text-xs text-gray-500">验证码已发送；{cooldown} 秒内请勿重复请求。</p>
+          ) : (
+            <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+              <p>未收到新邮箱验证码？为保证安全，需要重新验证当前邮箱后才能再次发送。</p>
+              <button type="button" onClick={restartCurrentEmailVerification} className="mt-2 font-medium text-blue-700 hover:text-blue-800">
+                重新验证当前邮箱
+              </button>
+            </div>
+          )}
         </form>
       )}
 
