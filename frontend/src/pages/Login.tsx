@@ -3,6 +3,29 @@ import { Link, useNavigate } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
 import { getPostAuthDestination } from "../lib/email-verification-routing";
 
+export function shouldSkipPostLoginNavigation(data: unknown): boolean {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    "twoFactorRedirect" in data &&
+    data.twoFactorRedirect === true
+  );
+}
+
+export function getLoginNavigationDestination(data: unknown): string | null {
+  if (shouldSkipPostLoginNavigation(data)) return null;
+
+  const user =
+    typeof data === "object" && data !== null && "user" in data
+      ? data.user
+      : undefined;
+  const emailVerified =
+    typeof user === "object" && user !== null && "emailVerified" in user
+      ? user.emailVerified === true
+      : false;
+  return getPostAuthDestination(emailVerified);
+}
+
 export default function Login() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
@@ -22,10 +45,9 @@ export default function Login() {
     if (error) {
       setError(error.message ?? "登录失败，请检查邮箱和密码");
     } else {
-      if (data && "twoFactorRedirect" in data && data.twoFactorRedirect === true) {
-        return;
-      }
-      navigate(getPostAuthDestination(data?.user.emailVerified === true), { replace: true });
+      const destination = getLoginNavigationDestination(data);
+      if (!destination) return;
+      navigate(destination, { replace: true });
     }
   };
 

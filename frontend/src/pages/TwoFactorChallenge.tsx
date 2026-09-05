@@ -3,16 +3,65 @@ import { Link, useNavigate } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
 import { mapAuthError, normalizeOtp } from "../lib/two-factor";
 
-type LoginChallengeMethod = "totp" | "email-otp" | "backup-code";
+export type LoginChallengeMethod = "totp" | "email-otp" | "backup-code";
 
-const methods: ReadonlyArray<{ value: LoginChallengeMethod; label: string }> = [
+export const loginChallengeMethods: ReadonlyArray<{
+  value: LoginChallengeMethod;
+  label: string;
+}> = [
   { value: "totp", label: "身份验证器" },
   { value: "email-otp", label: "邮箱验证码" },
   { value: "backup-code", label: "备用恢复码" },
 ];
 
-function authErrorCode(error: { code?: string } | null): string | undefined {
-  return error?.code;
+type LoginChallengeError = { code?: string; message?: string } | null;
+type LoginChallengeResult = { data: unknown; error: LoginChallengeError };
+
+export interface LoginChallengeActions {
+  verifyTotp(input: { code: string; trustDevice: boolean }): Promise<LoginChallengeResult>;
+  verifyOtp(input: { code: string; trustDevice: boolean }): Promise<LoginChallengeResult>;
+  verifyBackupCode(input: { code: string; trustDevice: boolean }): Promise<LoginChallengeResult>;
+  sendOtp(input: {
+    fetchOptions: { body: { trustDevice: boolean } };
+  }): Promise<LoginChallengeResult>;
+}
+
+const nativeTwoFactorActions: LoginChallengeActions = {
+  verifyTotp: (input) => authClient.twoFactor.verifyTotp(input),
+  verifyOtp: (input) => authClient.twoFactor.verifyOtp(input),
+  verifyBackupCode: (input) => authClient.twoFactor.verifyBackupCode(input),
+  sendOtp: (input) => authClient.twoFactor.sendOtp(input),
+};
+
+export function verifyLoginChallenge(
+  actions: LoginChallengeActions,
+  method: LoginChallengeMethod,
+  code: string,
+  trustDevice: boolean
+): Promise<LoginChallengeResult> {
+  if (method === "totp") return actions.verifyTotp({ code, trustDevice });
+  if (method === "email-otp") return actions.verifyOtp({ code, trustDevice });
+  return actions.verifyBackupCode({ code, trustDevice });
+}
+
+export function sendLoginChallengeOtp(
+  actions: LoginChallengeActions,
+  trustDevice: boolean
+): Promise<LoginChallengeResult> {
+  return actions.sendOtp({ fetchOptions: { body: { trustDevice } } });
+}
+
+export function getLoginChallengeError(
+  error: LoginChallengeError,
+  fallback: string
+): { message: string; expired: boolean } {
+  if (error?.code === "INVALID_TWO_FACTOR_COOKIE") {
+    return { message: "验证会话已过期，请重新登录", expired: true };
+  }
+  return {
+    message: mapAuthError(error?.code, error?.message ?? fallback),
+    expired: false,
+  };
 }
 
 export default function TwoFactorChallenge() {
@@ -33,14 +82,10 @@ export default function TwoFactorChallenge() {
     return () => window.clearTimeout(timer);
   }, [resendSeconds]);
 
-  const showError = (responseError: { code?: string; message?: string } | null, fallback: string) => {
-    const code = authErrorCode(responseError);
-    if (code === "INVALID_TWO_FACTOR_COOKIE") {
-      setChallengeExpired(true);
-      setError("验证会话已过期，请重新登录");
-      return;
-    }
-    setError(mapAuthError(code, responseError?.message ?? fallback));
+  const showError = (responseError: LoginChallengeError, fallback: string) => {
+    const mapped = getLoginChallengeError(responseError, fallback);
+    setChallengeExpired(mapped.expired);
+    setError(mapped.message);
   };
 
   const selectMethod = (nextMethod: LoginChallengeMethod) => {
@@ -55,9 +100,7 @@ export default function TwoFactorChallenge() {
     setChallengeExpired(false);
     setSending(true);
 
-    const { error } = await authClient.twoFactor.sendOtp({
-      fetchOptions: { body: { trustDevice } },
-    });
+    const { error } = await sendLoginChallengeOtp(nativeTwoFactorActions, trustDevice);
 
     setSending(false);
     if (error) {
@@ -79,12 +122,7 @@ export default function TwoFactorChallenge() {
     }
 
     setLoading(true);
-    const result =
-      method === "totp"
-        ? await authClient.twoFactor.verifyTotp({ code: value, trustDevice })
-        : method === "email-otp"
-          ? await authClient.twoFactor.verifyOtp({ code: value, trustDevice })
-          : await authClient.twoFactor.verifyBackupCode({ code: value, trustDevice });
+    const result = await verifyLoginChallenge(nativeTwoFactorActions, method, value, trustDevice);
     setLoading(false);
 
     if (result.error) {
@@ -107,7 +145,7 @@ export default function TwoFactorChallenge() {
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
           <div className="grid grid-cols-3 gap-1 rounded-lg bg-gray-100 p-1" role="tablist" aria-label="验证方式">
-            {methods.map(({ value, label }) => (
+            {loginChallengeMethods.map(({ value, label }) => (
               <button
                 key={value}
                 type="button"
