@@ -112,3 +112,16 @@ export const userEntitlement = sqliteTable(
     primaryKey({ columns: [table.userId, table.subsystem, table.capability] }),
   ]
 );
+
+export const registrationInvitation = sqliteTable("registration_invitation", {
+  code: text("code").primaryKey(),
+  createdBy: text("created_by").notNull(),
+  createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
+  expiresAt: text("expires_at").notNull(),
+  claimedAt: text("claimed_at"),
+  claimedByEmail: text("claimed_by_email"),
+  claimToken: text("claim_token").unique(),
+  usedAt: text("used_at"),
+  usedByUserId: text("used_by_user_id"),
+  revokedAt: text("revoked_at"),
+});

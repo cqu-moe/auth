@@ -1,5 +1,5 @@
 import { useState, FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
 
 function getPasswordStrength(password: string): { level: number; label: string; color: string } {
@@ -20,6 +20,10 @@ function getPasswordStrength(password: string): { level: number; label: string; 
 
 export default function Register() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const [code, setCode] = useState(() =>
+    (searchParams.get("code") ?? "").trim().toUpperCase().slice(0, 8)
+  );
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -45,7 +49,10 @@ export default function Register() {
     }
 
     setLoading(true);
-    const { error } = await authClient.signUp.email({ email, password, name });
+    const signup = { email, password, name, code } as Parameters<
+      typeof authClient.signUp.email
+    >[0] & { code: string };
+    const { error } = await authClient.signUp.email(signup);
     setLoading(false);
 
     if (error) {
@@ -96,6 +103,27 @@ export default function Register() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label htmlFor="invitationCode" className="block text-sm font-medium text-gray-700 mb-1">
+                邀请码
+              </label>
+              <input
+                id="invitationCode"
+                type="text"
+                value={code}
+                onChange={(e) => setCode(e.target.value.trim().toUpperCase().slice(0, 8))}
+                required
+                minLength={8}
+                maxLength={8}
+                pattern="[A-HJ-NP-Z2-9]{8}"
+                autoComplete="one-time-code"
+                spellCheck={false}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono tracking-widest uppercase focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="例如：7K3M9X2P"
+              />
+              <p className="mt-1 text-xs text-gray-400">请填写管理员提供的 8 位邀请码</p>
+            </div>
+
             <div>
               <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
                 昵称

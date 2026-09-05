@@ -9,7 +9,9 @@ import type { Env } from "../../src/types";
 
 declare global {
   namespace Cloudflare {
-    interface Env extends ImportedEnv {}
+    interface Env extends ImportedEnv {
+      TEST_MIGRATIONS: Array<{ name: string; queries: string[] }>;
+    }
   }
 }
 

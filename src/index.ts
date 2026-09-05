@@ -12,6 +12,7 @@ import { cquQuicklogin } from "./routes/cqu-quicklogin";
 import { admin } from "./routes/admin";
 import { handleEmail } from "./email-handler";
 import type { Env } from "./types";
+import { handleInvitationSignup } from "./services/registration-invitations";
 
 const app = new Hono<HonoEnv>();
 
@@ -29,6 +30,17 @@ app.get("/.well-known/oauth-authorization-server", async (c) => {
 app.get("/.well-known/openid-configuration", async (c) => {
   const auth = createAuth(c.env, c.req.raw);
   return oauthProviderOpenIdConfigMetadata(auth)(c.req.raw);
+});
+
+// 注册必须先由应用层原子占用邀请码；单独挂在 Better Auth catch-all 之前，
+// 确保直接调用公开 sign-up endpoint 也不能绕过邀请码校验。
+app.post("/api/auth/sign-up/email", async (c) => {
+  const auth = createAuth(c.env, c.req.raw);
+  return handleInvitationSignup(
+    c.req.raw,
+    c.env.DATABASE,
+    (request) => auth.handler(request)
+  );
 });
 
 app.all("/api/auth/*", async (c) => {

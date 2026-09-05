@@ -9,7 +9,12 @@
 // 改用从 `@cloudflare/vitest-pool-workers` 导出的 `cloudflareTest(<opts>)` Vite 插件(opts 形状
 // 与旧 poolOptions.workers 一致)。见 dist/codemods/vitest-v3-to-v4。
 import { defineConfig } from "vitest/config";
-import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
+import {
+  cloudflareTest,
+  readD1Migrations,
+} from "@cloudflare/vitest-pool-workers";
+
+const testMigrations = await readD1Migrations("./drizzle/migrations");
 
 export default defineConfig({
   plugins: [
@@ -37,6 +42,7 @@ export default defineConfig({
           BETTER_AUTH_SECRET: "dev-secret-for-local-testing-only",
           RESEND_API_KEY: "re_dev_placeholder",
           BIND_EMAIL_DOMAIN: "cquotp.com",
+          TEST_MIGRATIONS: testMigrations,
         },
       },
     }),

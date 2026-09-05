@@ -17,6 +17,12 @@ import {
 } from "../services/entitlements";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, and } from "drizzle-orm";
+import {
+  createRegistrationInvitation,
+  InvitationError,
+  listRegistrationInvitations,
+  revokeRegistrationInvitation,
+} from "../services/registration-invitations";
 
 const admin = new Hono<HonoEnv>();
 
@@ -291,6 +297,53 @@ admin.patch("/users/:id", async (c) => {
   }
 
   return errorResponse(c, "INVALID_ACTION", "需要 action 或 role 参数", 400);
+});
+
+// ── Registration invitations ────────────────────────────────────────────────
+// 管理员和超级管理员都可邀请新用户；邀请仅开放注册，不附带任何 entitlement。
+
+// GET /api/admin/registration-invitations - 最近 100 条邀请及实时状态。
+admin.get("/registration-invitations", async (c) => {
+  const data = await listRegistrationInvitations(c.env.DATABASE);
+  return c.json({ data });
+});
+
+// POST /api/admin/registration-invitations - 生成 8 位明文 code，默认 7 天有效。
+admin.post("/registration-invitations", async (c) => {
+  const user = c.get("user");
+  try {
+    const invitation = await createRegistrationInvitation(
+      c.env.DATABASE,
+      user.id
+    );
+    const registrationUrl = new URL("/register", c.env.BETTER_AUTH_URL);
+    registrationUrl.searchParams.set("code", invitation.code);
+    return c.json(
+      { data: { ...invitation, registrationUrl: registrationUrl.toString() } },
+      201
+    );
+  } catch (error) {
+    if (error instanceof InvitationError) {
+      return errorResponse(c, error.code, error.message, error.status);
+    }
+    throw error;
+  }
+});
+
+// DELETE /api/admin/registration-invitations/:code - 撤销未使用邀请（幂等）。
+admin.delete("/registration-invitations/:code", async (c) => {
+  try {
+    await revokeRegistrationInvitation(
+      c.env.DATABASE,
+      c.req.param("code")
+    );
+    return c.body(null, 204);
+  } catch (error) {
+    if (error instanceof InvitationError) {
+      return errorResponse(c, error.code, error.message, error.status);
+    }
+    throw error;
+  }
 });
 
 // PATCH /api/admin/users/:id/cqu-binding - Change a user's CQU binding status.
