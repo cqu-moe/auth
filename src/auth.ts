@@ -5,7 +5,7 @@ import { admin } from "better-auth/plugins/admin";
 import { defaultStatements, adminAc } from "better-auth/plugins/admin/access";
 import { jwt } from "better-auth/plugins/jwt";
 import { createAccessControl } from "better-auth/plugins/access";
-import { customSession } from "better-auth/plugins";
+import { customSession, emailOTP, twoFactor } from "better-auth/plugins";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { Resend } from "resend";
 import type { Env } from "./types";
@@ -59,6 +59,11 @@ export const OAUTH_SCOPES = [
   "cqu:ticket:any",
 ];
 
+const currentEmailOtpPaths = new Set([
+  "/email-otp/send-verification-otp",
+  "/email-otp/check-verification-otp",
+]);
+
 export function createAuth(env: Env, request: Request) {
   const getResend = () => new Resend(env.RESEND_API_KEY);
 
@@ -84,28 +89,20 @@ export function createAuth(env: Env, request: Request) {
             });
           },
         },
-        user: {
-          changeEmail: {
-            enabled: true,
-            updateEmailWithoutVerification: false,
-            sendChangeEmailConfirmation: async ({ user, newEmail, url }) => {
-              await getResend().emails.send({
-                from: "auth.cqu.moe <noreply@cqu.moe>",
-                to: user.email,
-                subject: "确认更换登录邮箱 - auth.cqu.moe",
-                html: `<p>你正在将 auth.cqu.moe 的登录邮箱更换为 ${newEmail}。</p><p>请先点击以下链接确认本次操作：<a href="${url}">${url}</a></p><p>确认后，我们才会向新邮箱发送第二封验证邮件。</p>`,
-              });
-            },
-          },
-        },
         hooks: {
           before: createAuthMiddleware(async (ctx) => {
-            if (ctx.path !== "/change-email") return;
+            if (!currentEmailOtpPaths.has(ctx.path)) return;
             const session = await getSessionFromCtx(ctx);
-            if (!session?.user.emailVerified) {
+            const body = ctx.body as { email?: string; type?: string } | undefined;
+            const matchesCurrentEmail =
+              session &&
+              body?.type === "email-verification" &&
+              body.email?.trim().toLowerCase() === session.user.email.toLowerCase();
+
+            if (!matchesCurrentEmail) {
               throw new APIError("FORBIDDEN", {
-                code: "CURRENT_EMAIL_NOT_VERIFIED",
-                message: "请先验证当前邮箱，再发起邮箱更换",
+                code: "CURRENT_EMAIL_OTP_ONLY",
+                message: "只能向当前登录邮箱发送或校验验证码",
               });
             }
           }),
@@ -149,6 +146,58 @@ export function createAuth(env: Env, request: Request) {
               openidConfig: true,
             },
           }),
+          emailOTP({
+            async sendVerificationOTP({ email, otp, type }) {
+              const copy = type === "change-email"
+                ? {
+                    subject: "验证新登录邮箱 - auth.cqu.moe",
+                    intro: "请输入以下验证码，完成登录邮箱更换。",
+                  }
+                : {
+                    subject: "确认当前登录邮箱 - auth.cqu.moe",
+                    intro: "请输入以下验证码，确认是你本人在更换登录邮箱。",
+                  };
+
+              await getResend().emails.send({
+                from: "auth.cqu.moe <noreply@cqu.moe>",
+                to: email,
+                subject: copy.subject,
+                html: `<p>${copy.intro}</p><p style="font-size:24px;font-weight:700;letter-spacing:6px">${otp}</p><p>验证码 5 分钟内有效，请勿转发。</p>`,
+              });
+            },
+            otpLength: 6,
+            expiresIn: 300,
+            allowedAttempts: 3,
+            storeOTP: "hashed",
+            resendStrategy: "rotate",
+            disableSignUp: true,
+            changeEmail: { enabled: true, verifyCurrentEmail: true },
+          }),
+          twoFactor({
+            issuer: "auth.cqu.moe",
+            twoFactorCookieMaxAge: 600,
+            trustDeviceMaxAge: 60 * 60 * 24 * 30,
+            totpOptions: { digits: 6, period: 30 },
+            otpOptions: {
+              digits: 6,
+              period: 5,
+              allowedAttempts: 3,
+              storeOTP: "hashed",
+              async sendOTP({ user, otp }) {
+                await getResend().emails.send({
+                  from: "auth.cqu.moe <noreply@cqu.moe>",
+                  to: user.email,
+                  subject: "登录二次验证码 - auth.cqu.moe",
+                  html: `<p>请输入以下验证码完成登录：</p><p style="font-size:24px;font-weight:700;letter-spacing:6px">${otp}</p><p>验证码 5 分钟内有效，请勿转发。</p>`,
+                });
+              },
+            },
+            backupCodeOptions: {
+              amount: 10,
+              length: 10,
+              storeBackupCodes: "encrypted",
+            },
+          }),
           // customSession 必须放在 plugins 数组最后:它内部调用 getSession()
           // 拿到已组装好的 {user, session}(含 admin 的 role),再追加 caps。
           // 返回值会"完全替换" get-session 响应体,故必须显式回传 user+session。
@@ -177,6 +226,17 @@ export function createAuth(env: Env, request: Request) {
           enabled: true,
           window: 60,
           max: 30,
+          storage: "secondary-storage",
+          customRules: {
+            "/two-factor/send-otp": { window: 60, max: 3 },
+            "/two-factor/verify-totp": { window: 60, max: 5 },
+            "/two-factor/verify-otp": { window: 60, max: 5 },
+            "/two-factor/verify-backup-code": { window: 60, max: 5 },
+            "/email-otp/send-verification-otp": { window: 60, max: 3 },
+            "/email-otp/check-verification-otp": { window: 60, max: 5 },
+            "/email-otp/request-email-change": { window: 60, max: 5 },
+            "/email-otp/change-email": { window: 60, max: 5 },
+          },
         },
       }
     ),
