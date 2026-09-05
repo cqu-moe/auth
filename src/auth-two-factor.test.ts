@@ -119,6 +119,14 @@ describe("native two-factor authentication", () => {
     expect(pluginIds).toContain("two-factor");
     expect(pluginIds).toContain("email-otp");
     expect(auth.options.user?.changeEmail).toBeUndefined();
+    expect(auth.options.disabledPaths).toEqual([
+      "/token",
+      "/sign-in/email-otp",
+      "/email-otp/request-password-reset",
+      "/forget-password/email-otp",
+      "/email-otp/reset-password",
+      "/email-otp/verify-email",
+    ]);
     expect(plugins.at(-1)?.id).toBe("custom-session");
     expect(emailOtp.options).toMatchObject({
       otpLength: 6,
@@ -162,6 +170,61 @@ describe("native two-factor authentication", () => {
         "/email-otp/change-email": { window: 60, max: 5 },
       },
     });
+    database.close();
+  });
+
+  it("keeps unused public email-OTP authentication routes unavailable", async () => {
+    const { auth, database } = authForTest();
+    const blockedRequests = [
+      ["/sign-in/email-otp", { email: "user@example.com", otp: "000000" }],
+      ["/email-otp/request-password-reset", { email: "user@example.com" }],
+      ["/forget-password/email-otp", { email: "user@example.com" }],
+      ["/email-otp/reset-password", { email: "user@example.com", otp: "000000", password: "new-password123" }],
+      ["/email-otp/verify-email", { email: "user@example.com", otp: "000000" }],
+    ] as const;
+
+    for (const [path, body] of blockedRequests) {
+      const response = await post(auth, path, new Headers(), body);
+      expect(response.status, path).toBe(404);
+    }
+
+    expect(sendEmail).not.toHaveBeenCalled();
+    database.close();
+  });
+
+  it("keeps only the native double-OTP email-change routes usable", async () => {
+    const { auth, database } = authForTest();
+    const { runMigrations } = await getMigrations(auth.options);
+    await runMigrations();
+    const headers = await signUp(auth);
+    sendEmail.mockClear();
+
+    const sentCurrent = await post(auth, "/email-otp/send-verification-otp", headers, {
+      email: "user@example.com",
+      type: "email-verification",
+    });
+    expect(sentCurrent.status).toBe(200);
+    const currentOtp = otpFromEmail();
+
+    const checkedCurrent = await post(auth, "/email-otp/check-verification-otp", headers, {
+      email: "user@example.com",
+      type: "email-verification",
+      otp: currentOtp,
+    });
+    expect(checkedCurrent.status).toBe(200);
+
+    const sentNew = await post(auth, "/email-otp/request-email-change", headers, {
+      newEmail: "new@example.com",
+      otp: currentOtp,
+    });
+    expect(sentNew.status).toBe(200);
+    const newEmailOtp = otpFromEmail();
+
+    const changed = await post(auth, "/email-otp/change-email", headers, {
+      newEmail: "new@example.com",
+      otp: newEmailOtp,
+    });
+    expect(changed.status).toBe(200);
     database.close();
   });
 

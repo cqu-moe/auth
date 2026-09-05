@@ -50,6 +50,35 @@ function FlowProgress({ step }: { step: EmailChangeStep }) {
   );
 }
 
+export function NewEmailOtpDeliveryNotice({
+  newEmail,
+  cooldown,
+  onRestart,
+}: {
+  newEmail: string;
+  cooldown: number;
+  onRestart: () => void;
+}) {
+  return (
+    <>
+      <div>
+        <h2 className="text-base font-semibold text-gray-900">验证新邮箱</h2>
+        <p className="mt-1 text-sm text-gray-500">若该地址可用，验证码已发送至 {newEmail}。</p>
+      </div>
+      {cooldown > 0 ? (
+        <p className="text-xs text-gray-500">若该地址可用，验证码已发送；{cooldown} 秒内请勿重复请求。</p>
+      ) : (
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+          <p>未收到新邮箱验证码？为保证安全，需要重新验证当前邮箱后才能再次发送。</p>
+          <button type="button" onClick={onRestart} className="mt-2 font-medium text-blue-700 hover:text-blue-800">
+            重新验证当前邮箱
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
 export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: EmailChangeFlowProps) {
   const [step, setStep] = useState<EmailChangeStep>("current-email");
   const [currentOtp, setCurrentOtp] = useState("");
@@ -214,25 +243,16 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
 
       {step === "new-email-otp" && (
         <form onSubmit={changeEmail} className="mt-5 space-y-4">
-          <div>
-            <h2 className="text-base font-semibold text-gray-900">验证新邮箱</h2>
-            <p className="mt-1 text-sm text-gray-500">已向 {newEmail} 发送验证码。</p>
-          </div>
+          <NewEmailOtpDeliveryNotice
+            newEmail={newEmail}
+            cooldown={cooldown}
+            onRestart={restartCurrentEmailVerification}
+          />
           <div>
             <label htmlFor="new-email-otp" className="mb-1.5 block text-sm font-medium text-gray-700">新邮箱验证码</label>
             <OtpInput id="new-email-otp" value={newEmailOtp} onChange={setNewEmailOtp} />
           </div>
           <button type="submit" disabled={loading} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:bg-blue-400">{loading ? "验证中..." : "确认更换邮箱"}</button>
-          {cooldown > 0 ? (
-            <p className="text-xs text-gray-500">验证码已发送；{cooldown} 秒内请勿重复请求。</p>
-          ) : (
-            <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
-              <p>未收到新邮箱验证码？为保证安全，需要重新验证当前邮箱后才能再次发送。</p>
-              <button type="button" onClick={restartCurrentEmailVerification} className="mt-2 font-medium text-blue-700 hover:text-blue-800">
-                重新验证当前邮箱
-              </button>
-            </div>
-          )}
         </form>
       )}
 

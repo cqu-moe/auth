@@ -3,9 +3,27 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import TwoFactorSettings from "./TwoFactorSettings";
-import { shouldShowEnrollmentBackupCodes } from "../lib/two-factor";
+import { completeTotpEnrollment, shouldShowEnrollmentBackupCodes } from "../lib/two-factor";
 
 describe("two-factor settings page", () => {
+  it("reveals issued backup codes before a failed session refresh", async () => {
+    const events: string[] = [];
+
+    await expect(completeTotpEnrollment({
+      verifyTotp: async () => {
+        events.push("verified");
+        return { error: null };
+      },
+      revealBackupCodes: () => events.push("backup-codes"),
+      refetchSession: async () => {
+        events.push("refresh");
+        throw new Error("session refresh refused");
+      },
+    })).resolves.toBeNull();
+
+    expect(events).toEqual(["verified", "backup-codes", "refresh"]);
+  });
+
   it("keeps newly issued backup codes visible even after session refresh marks 2FA enabled", () => {
     expect(shouldShowEnrollmentBackupCodes("backup-codes", true)).toBe(true);
     expect(shouldShowEnrollmentBackupCodes("scan", true)).toBe(false);

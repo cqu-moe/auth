@@ -6,6 +6,31 @@ export const availableSecondFactorMethods = [
   "backup-code",
 ] as const satisfies readonly Exclude<SecondFactorMethod, "passkey">[];
 
+type AuthError = { code?: string; message?: string } | null | undefined;
+
+interface CompleteTotpEnrollmentOptions {
+  verifyTotp: () => Promise<{ error: AuthError }>;
+  revealBackupCodes: () => void;
+  refetchSession: () => Promise<unknown>;
+}
+
+export async function completeTotpEnrollment({
+  verifyTotp,
+  revealBackupCodes,
+  refetchSession,
+}: CompleteTotpEnrollmentOptions): Promise<AuthError> {
+  const { error } = await verifyTotp();
+  if (error) return error;
+
+  revealBackupCodes();
+  try {
+    await refetchSession();
+  } catch {
+    // Recovery codes are already issued and must remain visible even if refresh fails.
+  }
+  return null;
+}
+
 export function normalizeOtp(value: string): string {
   return value.replace(/\D/g, "").slice(0, 6);
 }

@@ -119,7 +119,14 @@ export function createAuth(env: Env, request: Request) {
             });
           },
         },
-        disabledPaths: ["/token"],
+        disabledPaths: [
+          "/token",
+          "/sign-in/email-otp",
+          "/email-otp/request-password-reset",
+          "/forget-password/email-otp",
+          "/email-otp/reset-password",
+          "/email-otp/verify-email",
+        ],
         plugins: [
           admin({
             ac,

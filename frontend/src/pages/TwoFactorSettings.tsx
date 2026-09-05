@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import QRCode from "qrcode";
 import Layout from "../components/Layout";
 import { authClient } from "../lib/auth-client";
-import { mapAuthError, normalizeOtp, shouldShowEnrollmentBackupCodes } from "../lib/two-factor";
+import { completeTotpEnrollment, mapAuthError, normalizeOtp, shouldShowEnrollmentBackupCodes } from "../lib/two-factor";
 
 export type EnrollmentStep = "password" | "scan" | "backup-codes" | "complete";
 export interface EnrollmentSecret {
@@ -158,15 +158,20 @@ export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettin
       return;
     }
     setLoading(true);
-    const { error: authError } = await authClient.twoFactor.verifyTotp({ code });
-    setLoading(false);
+    const authError = await completeTotpEnrollment({
+      verifyTotp: () => authClient.twoFactor.verifyTotp({ code }),
+      revealBackupCodes: () => {
+        setTotpCode("");
+        setStep("backup-codes");
+        setLoading(false);
+      },
+      refetchSession,
+    });
     if (authError) {
+      setLoading(false);
       setError(errorMessage(authError, "验证失败，请重试"));
       return;
     }
-    await refetchSession();
-    setTotpCode("");
-    setStep("backup-codes");
   };
 
   const submitManagement = async (event: FormEvent) => {
