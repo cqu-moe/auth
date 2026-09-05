@@ -51,15 +51,15 @@ jobs:
       - name: Install (root)
         run: npm ci
 
+      - name: Install (frontend)
+        run: npm ci
+        working-directory: frontend
+
       - name: Typecheck (backend)
         run: npm run typecheck
 
       - name: Test
         run: npm test
-
-      - name: Install (frontend)
-        run: npm ci
-        working-directory: frontend
 
       - name: Typecheck (frontend)
         run: npx tsc --noEmit
