@@ -1,19 +1,17 @@
-import { useSearchParams } from "react-router-dom";
 import Layout from "../components/Layout";
-import { AccountEmailChangeSection } from "../components/AccountProfileSection";
+import EmailChangeFlow from "../components/EmailChangeFlow";
 import { authClient } from "../lib/auth-client";
 
 export default function ChangeEmail() {
-  const { data: session } = authClient.useSession();
-  const [searchParams] = useSearchParams();
+  const { data: session, refetch } = authClient.useSession();
   const user = session?.user as { email?: string } | undefined;
 
   return (
     <Layout>
       <div className="max-w-2xl">
-        <AccountEmailChangeSection
-          email={user?.email ?? ""}
-          emailFlowReturned={searchParams.get("email-change") === "confirmed"}
+        <EmailChangeFlow
+          currentEmail={user?.email ?? ""}
+          onSessionRefresh={refetch}
         />
       </div>
     </Layout>

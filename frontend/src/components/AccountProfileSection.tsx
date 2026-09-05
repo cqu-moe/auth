@@ -3,18 +3,12 @@ import { Link } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
 import {
   validateDisplayName,
-  validateNewEmail,
 } from "../lib/account-settings";
 
 interface AccountProfileSectionProps {
   name: string;
   email: string;
   onSessionRefresh: () => Promise<unknown>;
-}
-
-interface AccountEmailChangeSectionProps {
-  email: string;
-  emailFlowReturned?: boolean;
 }
 
 function EditIcon() {
@@ -178,114 +172,6 @@ export default function AccountProfileSection({
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-export function AccountEmailChangeSection({
-  email,
-  emailFlowReturned = false,
-}: AccountEmailChangeSectionProps) {
-  const [newEmail, setNewEmail] = useState("");
-  const [emailError, setEmailError] = useState("");
-  const [emailSuccess, setEmailSuccess] = useState(false);
-  const [emailLoading, setEmailLoading] = useState(false);
-
-  const handleEmailSubmit = async (event: FormEvent) => {
-    event.preventDefault();
-    setEmailError("");
-    setEmailSuccess(false);
-
-    const validation = validateNewEmail(email, newEmail);
-    if (validation.error || validation.value === null) {
-      setEmailError(validation.error ?? "新邮箱不合法");
-      return;
-    }
-
-    setEmailLoading(true);
-    const { error } = await authClient.changeEmail({
-      newEmail: validation.value,
-      callbackURL: "/settings/email?email-change=confirmed",
-    });
-    setEmailLoading(false);
-
-    if (error) {
-      setEmailError(error.message ?? "邮箱更换申请失败，请稍后重试");
-      return;
-    }
-
-    setNewEmail(validation.value);
-    setEmailSuccess(true);
-  };
-
-  return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-6">
-      <Link
-        to="/settings"
-        className="mb-5 inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 transition-colors hover:text-blue-600"
-      >
-        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-        </svg>
-        返回账户设置
-      </Link>
-
-      <div>
-        <h1 className="text-xl font-semibold text-gray-900">修改登录邮箱</h1>
-        <p className="mt-1 text-sm text-gray-500">当前邮箱：{email || "—"}</p>
-      </div>
-
-      <div className="mt-5 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
-        <ol className="flex flex-col gap-2 text-xs text-blue-800 sm:flex-row sm:items-center sm:gap-3">
-          <li className="flex items-center gap-2">
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 font-semibold text-white">1</span>
-            旧邮箱确认
-          </li>
-          <li className="hidden text-blue-300 sm:block" aria-hidden="true">→</li>
-          <li className="flex items-center gap-2">
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-blue-300 bg-white font-semibold text-blue-700">2</span>
-            新邮箱确认
-          </li>
-          <li className="hidden text-blue-300 sm:block" aria-hidden="true">→</li>
-          <li className="text-blue-600">两步完成后才会更换</li>
-        </ol>
-      </div>
-
-      {emailFlowReturned && (
-        <p className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700" role="status">
-          确认操作已处理。若当前邮箱尚未更新，请到新邮箱完成第二次确认。
-        </p>
-      )}
-      {emailError && <p className="mt-4 text-sm text-red-700" role="alert">{emailError}</p>}
-      {emailSuccess && (
-        <p className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700" role="status">
-          第一封确认邮件已发送至当前邮箱。确认后，系统才会向新邮箱发送第二封验证邮件。
-        </p>
-      )}
-
-      <form onSubmit={handleEmailSubmit} className="mt-5">
-        <label htmlFor="newEmail" className="mb-1.5 block text-sm font-medium text-gray-700">新邮箱</label>
-        <input
-          id="newEmail"
-          type="email"
-          value={newEmail}
-          onChange={(event) => setNewEmail(event.target.value)}
-          required
-          autoComplete="email"
-          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
-          placeholder="请输入新邮箱"
-        />
-        <button
-          type="submit"
-          disabled={emailLoading}
-          className="mt-4 inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:bg-blue-400"
-        >
-          {emailLoading && (
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-          )}
-          {emailLoading ? "发送中..." : "发送确认邮件"}
-        </button>
-      </form>
     </div>
   );
 }
