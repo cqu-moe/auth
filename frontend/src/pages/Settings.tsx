@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
 import Layout from "../components/Layout";
 import AccountProfileSection from "../components/AccountProfileSection";
+import TwoFactorSettingsSection from "../components/TwoFactorSettingsSection";
 
 // DO /status 返回的会话状态对象（active/relogin_required/... + studentId）；
 // 后端在 DO 非 2xx 或解析失败时回传 { error: true } sentinel。
@@ -881,7 +882,7 @@ function CquBindingSection() {
 
 export default function Settings() {
   const { data: session, refetch: refetchSession } = authClient.useSession();
-  const user = session?.user as { email?: string; name?: string; createdAt?: string } | undefined;
+  const user = session?.user as { email?: string; name?: string; createdAt?: string; twoFactorEnabled?: boolean } | undefined;
 
   return (
     <Layout>
@@ -894,6 +895,8 @@ export default function Settings() {
             email={user?.email ?? ""}
             onSessionRefresh={refetchSession}
           />
+
+          <TwoFactorSettingsSection enabled={user?.twoFactorEnabled === true} />
 
           {/* 修改密码 */}
           <ChangePasswordSection />

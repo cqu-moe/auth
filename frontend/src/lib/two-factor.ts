@@ -10,6 +10,13 @@ export function normalizeOtp(value: string): string {
   return value.replace(/\D/g, "").slice(0, 6);
 }
 
+export function shouldShowEnrollmentBackupCodes(
+  step: "password" | "scan" | "backup-codes" | "complete",
+  hasSecret: boolean
+) {
+  return step === "backup-codes" && hasSecret;
+}
+
 export function mapAuthError(code: string | undefined, fallback: string): string {
   if (code === "INVALID_CODE" || code === "INVALID_OTP") return "验证码不正确";
   if (code === "OTP_HAS_EXPIRED" || code === "OTP_EXPIRED") return "验证码已过期，请重新获取";

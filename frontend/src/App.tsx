@@ -11,6 +11,7 @@ import OAuthAuthorize from "./pages/OAuthAuthorize";
 import CquBindWizard from "./pages/CquBindWizard";
 import VerifyEmail from "./pages/VerifyEmail";
 import TwoFactorChallenge from "./pages/TwoFactorChallenge";
+import TwoFactorSettings from "./pages/TwoFactorSettings";
 import ProtectedRoute from "./components/ProtectedRoute";
 import EmailVerificationGate from "./components/EmailVerificationGate";
 
@@ -53,6 +54,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <ChangeEmail />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings/two-factor"
+            element={
+              <ProtectedRoute>
+                <TwoFactorSettings />
               </ProtectedRoute>
             }
           />
