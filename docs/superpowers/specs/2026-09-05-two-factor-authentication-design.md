@@ -70,7 +70,7 @@ Passkey 插件、Passkey 数据表、WebAuthn 注册/认证页面不在本阶段
   - `userId` 外键，删除用户时级联删除；
   - `secret`；
   - `backupCodes`；
-  - `verified`，默认 `true`；
+  - `verified`，默认 `false`，首次 TOTP 校验通过后再由 Better Auth 标记为已验证；
   - `secret` 和 `userId` 索引。
 
 OTP 继续使用现有 `verification` 表，不新增 OTP 表。迁移必须能在已有用户和已有 verification 数据的数据库上直接应用。
