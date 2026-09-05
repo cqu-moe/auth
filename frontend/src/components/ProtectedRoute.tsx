@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
+import { canAccessAdmin } from "../../../src/user-roles";
 
 interface ProtectedRouteProps {
   children: ReactNode;
@@ -24,7 +25,7 @@ export default function ProtectedRoute({ children, requireAdmin = false }: Prote
 
   if (requireAdmin) {
     const user = session.user as { role?: string };
-    if (user.role !== "admin" && user.role !== "superAdmin") {
+    if (!canAccessAdmin(user.role)) {
       return <Navigate to="/settings" replace />;
     }
   }

@@ -8,6 +8,7 @@ import {
   type CapDef,
   type Subsystem,
 } from "../../../src/capabilities";
+import { USER_ROLE_OPTIONS } from "../../../src/user-roles";
 
 // --- Types ---
 interface User {
@@ -142,11 +143,6 @@ const AUTH_METHOD_OPTIONS = [
   { value: "client_secret_post", label: "Post (client_secret_post)" },
 ];
 
-const ROLE_OPTIONS = [
-  { value: "user", label: "普通用户" },
-  { value: "admin", label: "管理员" },
-];
-
 // Read the message from a non-2xx response. The backend's errorResponse shape is
 // { detail: { error: { code, message } } }, so read that path (not body.error).
 async function readErrorMessage(res: Response, fallback: string): Promise<string> {
@@ -256,7 +252,7 @@ function UsersSection() {
                     className="text-xs border border-gray-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
                     aria-label={`${user.name} 的角色`}
                   >
-                    {ROLE_OPTIONS.map((opt) => (
+                    {USER_ROLE_OPTIONS.map((opt) => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
                   </select>

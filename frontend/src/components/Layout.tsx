@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
+import { canAccessAdmin } from "../../../src/user-roles";
 
 interface LayoutProps {
   children: ReactNode;
@@ -17,7 +18,7 @@ export default function Layout({ children }: LayoutProps) {
   };
 
   const user = session?.user as { role?: string; email?: string; name?: string } | undefined;
-  const isAdmin = user?.role === "admin";
+  const isAdmin = canAccessAdmin(user?.role);
 
   return (
     <div className="min-h-screen bg-gray-50">
