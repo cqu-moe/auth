@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   availableSecondFactorMethods,
+  createBackupCodesDownload,
   mapAuthError,
   normalizeOtp,
   type SecondFactorMethod,
@@ -16,6 +17,25 @@ describe("two-factor helpers", () => {
 
   it("normalizes six-digit codes", () => {
     expect(normalizeOtp(" 12 34-56 ")).toBe("123456");
+  });
+
+  it("builds a dated UTF-8 text download containing every backup code", () => {
+    expect(createBackupCodesDownload(
+      ["recovery-alpha", "recovery-beta"],
+      new Date(2026, 8, 5)
+    )).toEqual({
+      filename: "cqu-moe-recovery-codes-2026-09-05.txt",
+      content: [
+        "CQU MOE 账户备用恢复码",
+        "生成日期：2026-09-05",
+        "",
+        "请妥善保管此文件。每个恢复码只能使用一次。",
+        "",
+        "recovery-alpha",
+        "recovery-beta",
+        "",
+      ].join("\n"),
+    });
   });
 
   it("maps invalid, expired, attempt-limit, backup-code, and rate-limit errors", () => {

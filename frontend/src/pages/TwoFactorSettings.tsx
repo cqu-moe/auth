@@ -3,7 +3,13 @@ import { Link } from "react-router-dom";
 import QRCode from "qrcode";
 import Layout from "../components/Layout";
 import { authClient } from "../lib/auth-client";
-import { completeTotpEnrollment, mapAuthError, normalizeOtp, shouldShowEnrollmentBackupCodes } from "../lib/two-factor";
+import {
+  completeTotpEnrollment,
+  createBackupCodesDownload,
+  mapAuthError,
+  normalizeOtp,
+  shouldShowEnrollmentBackupCodes,
+} from "../lib/two-factor";
 
 export type EnrollmentStep = "password" | "scan" | "backup-codes" | "complete";
 export interface EnrollmentSecret {
@@ -47,9 +53,27 @@ function PasswordField({
   );
 }
 
-function BackupCodes({ codes, onComplete }: { codes: string[]; onComplete: () => void }) {
+export function BackupCodes({ codes, onComplete }: { codes: string[]; onComplete: () => void }) {
   const [acknowledged, setAcknowledged] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  const downloadAll = () => {
+    const { filename, content } = createBackupCodesDownload(codes);
+    const objectUrl = URL.createObjectURL(
+      new Blob([content], { type: "text/plain;charset=utf-8" })
+    );
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = filename;
+
+    try {
+      document.body.appendChild(anchor);
+      anchor.click();
+    } finally {
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    }
+  };
 
   const copyAll = async () => {
     try {
@@ -67,13 +91,25 @@ function BackupCodes({ codes, onComplete }: { codes: string[]; onComplete: () =>
       <div className="mt-4 grid grid-cols-1 gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3 font-mono text-sm text-gray-800 sm:grid-cols-2">
         {codes.map((code) => <code key={code} className="break-all">{code}</code>)}
       </div>
-      <button
-        type="button"
-        onClick={() => void copyAll()}
-        className="mt-3 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
-      >
-        {copied ? "已复制" : "复制全部"}
-      </button>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={downloadAll}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+        >
+          <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" className="h-4 w-4" stroke="currentColor" strokeWidth="1.8">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M10 3v9m0 0 3-3m-3 3-3-3M4 14.5V16h12v-1.5" />
+          </svg>
+          下载恢复码
+        </button>
+        <button
+          type="button"
+          onClick={() => void copyAll()}
+          className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+        >
+          {copied ? "已复制" : "复制全部"}
+        </button>
+      </div>
       <label className="mt-4 flex items-start gap-2 text-sm text-gray-700">
         <input
           type="checkbox"
