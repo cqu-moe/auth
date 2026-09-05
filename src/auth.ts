@@ -84,8 +84,10 @@ export function createAuth(env: Env, request: Request) {
           },
         },
         emailVerification: {
+          sendOnSignUp: true,
+          autoSignInAfterVerification: true,
           sendVerificationEmail: async ({ user, url }) => {
-            void getResend().emails.send({
+            await getResend().emails.send({
               from: "auth.cqu.moe <noreply@cqu.moe>",
               to: user.email,
               subject: "验证你的邮箱 - auth.cqu.moe",

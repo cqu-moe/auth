@@ -1,6 +1,7 @@
 import { useState, FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
+import { getPostAuthDestination } from "../lib/email-verification-routing";
 
 function getPasswordStrength(password: string): { level: number; label: string; color: string } {
   if (!password) return { level: 0, label: "", color: "" };
@@ -30,8 +31,6 @@ export default function Register() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
-
   const strength = getPasswordStrength(password);
 
   const handleSubmit = async (e: FormEvent) => {
@@ -49,41 +48,24 @@ export default function Register() {
     }
 
     setLoading(true);
-    const signup = { email, password, name, code } as Parameters<
+    const signup = {
+      email,
+      password,
+      name,
+      code,
+      callbackURL: "/verify-email?verified=1",
+    } as Parameters<
       typeof authClient.signUp.email
     >[0] & { code: string };
-    const { error } = await authClient.signUp.email(signup);
+    const { data, error } = await authClient.signUp.email(signup);
     setLoading(false);
 
     if (error) {
       setError(error.message ?? "注册失败，请稍后重试");
     } else {
-      setSuccess(true);
-      setTimeout(() => navigate("/login"), 3000);
+      navigate(getPostAuthDestination(data?.user.emailVerified === true), { replace: true });
     }
   };
-
-  if (success) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-        <div className="w-full max-w-md">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8 text-center">
-            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-            </div>
-            <h2 className="text-xl font-semibold text-gray-900 mb-2">注册成功</h2>
-            <p className="text-gray-500 text-sm">
-              验证邮件已发送到 <span className="font-medium text-gray-700">{email}</span>，
-              请查收并点击邮件中的链接完成验证。
-            </p>
-            <p className="mt-4 text-sm text-gray-400">正在跳转到登录页面...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">

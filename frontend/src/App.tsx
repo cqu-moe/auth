@@ -8,7 +8,9 @@ import Settings from "./pages/Settings";
 import Admin from "./pages/Admin";
 import OAuthAuthorize from "./pages/OAuthAuthorize";
 import CquBindWizard from "./pages/CquBindWizard";
+import VerifyEmail from "./pages/VerifyEmail";
 import ProtectedRoute from "./components/ProtectedRoute";
+import EmailVerificationGate from "./components/EmailVerificationGate";
 
 function RootRedirect() {
   const { data: session, isPending } = authClient.useSession();
@@ -27,45 +29,48 @@ function RootRedirect() {
 export default function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<RootRedirect />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route path="/reset-password" element={<ResetPassword />} />
-        <Route path="/reset-password/confirm" element={<ResetPasswordConfirm />} />
-        <Route
-          path="/settings"
-          element={
-            <ProtectedRoute>
-              <Settings />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/admin"
-          element={
-            <ProtectedRoute requireAdmin>
-              <Admin />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/oauth/authorize"
-          element={
-            <ProtectedRoute>
-              <OAuthAuthorize />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="/cqu/bind"
-          element={
-            <ProtectedRoute>
-              <CquBindWizard />
-            </ProtectedRoute>
-          }
-        />
-      </Routes>
+      <EmailVerificationGate>
+        <Routes>
+          <Route path="/" element={<RootRedirect />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/reset-password/confirm" element={<ResetPasswordConfirm />} />
+          <Route path="/verify-email" element={<VerifyEmail />} />
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute>
+                <Settings />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute requireAdmin>
+                <Admin />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/oauth/authorize"
+            element={
+              <ProtectedRoute>
+                <OAuthAuthorize />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/cqu/bind"
+            element={
+              <ProtectedRoute>
+                <CquBindWizard />
+              </ProtectedRoute>
+            }
+          />
+        </Routes>
+      </EmailVerificationGate>
     </BrowserRouter>
   );
 }

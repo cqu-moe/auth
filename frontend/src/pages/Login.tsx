@@ -1,6 +1,7 @@
 import { useState, FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
+import { getPostAuthDestination } from "../lib/email-verification-routing";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -14,14 +15,14 @@ export default function Login() {
     setError("");
     setLoading(true);
 
-    const { error } = await authClient.signIn.email({ email, password });
+    const { data, error } = await authClient.signIn.email({ email, password });
 
     setLoading(false);
 
     if (error) {
       setError(error.message ?? "登录失败，请检查邮箱和密码");
     } else {
-      navigate("/settings");
+      navigate(getPostAuthDestination(data?.user.emailVerified === true), { replace: true });
     }
   };
 
