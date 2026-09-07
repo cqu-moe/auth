@@ -26,6 +26,11 @@ export const CAPABILITIES = {
     batch: { type: "flag", label: "批量评教" },
   },
   cqu: {
+    // 浏览器插件快捷登录的「功能开放」闸(灰度/准入):由 admin 授予。无此权益的用户
+    // 在设置页看不到快捷登录卡片,自助端点拒写,DO 广路径取票也拒(见 cqu-session.ts)。
+    // 与 quicklogin 是两个独立维度:access 管「是否向该用户开放此功能」,
+    // quicklogin 管「用户本人是否同意插件替他取 ST」—— 准入绝不等于代用户同意。
+    quicklogin_access: { type: "flag", label: "浏览器插件快捷登录(功能开放)" },
     // 浏览器插件快捷登录的 per-user 同意开关(见 Phase D)。它**永远不是取票闸**
     // ——出票的权威校验落在 DO;此 flag 只表达「用户是否同意插件替他取 ST」。
     quicklogin: { type: "flag", label: "允许浏览器插件快捷登录" },

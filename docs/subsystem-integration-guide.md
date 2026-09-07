@@ -76,7 +76,7 @@ else { const st = r.ticket /* ST-... */ }
 > - `verifySession(cookieHeader: string | null) → null | { user, caps }`(caps 实时,全子系统;需用户 cookie,**仅在线**)。
 > - `getCaps({ clientId, clientSecret, userId }) → null | { calendar }`(**离线**读权益:无 cookie/session,直查 entitlements 表,只返回你这片 caps;须验 `client_secret`,见 §1.3)。
 > - `getCquTicket({ clientId, clientSecret, service?, serviceUrl?, userId }) → { ticket } | { error }`。
->   取票全程经 auth 的 DO 万能闸:host 校验 + 用户 `cqu.quicklogin` opt-in(仅 serviceUrl 广域路径)+ 限流 + 审计。
+>   取票全程经 auth 的 DO 万能闸:host 校验 + `cqu.quicklogin_access` 功能开放闸 + 用户 `cqu.quicklogin` opt-in(后两道仅 serviceUrl 广域路径)+ 限流 + 审计。
 > - `cquHarvest({ clientId, clientSecret, userId, navUrl, capture?, fetch? }) → { captures, fetches } | { error }`。
 >   **organic harvest 批量取数原语**(my.cqu.edu.cn 全站瑞数化后,后端纯 HTTP POST 取课表被
 >   412 专守;唯一过墙 = 让真前端在 auth 已登录浏览器里有机 fire 请求、auth 截获响应)。
@@ -225,7 +225,7 @@ Authorization: Bearer ACCESS_TOKEN
 
 用返回的 ST 访问对应 CQU 系统(`<服务URL>?ticket=ST-...`)完成 CAS 认证。前置:用户必须已在 `auth.cqu.moe/settings` 绑定 CQU 且会话 `active`;未绑定/会话未激活 → 取票失败(`SESSION_INACTIVE`,HTTP **409**),引导用户去绑定页。
 
-取票错误码 → HTTP 状态(策略/客户端错误回 4xx,可据此判定是否可重试):`SESSION_INACTIVE` **409** · `RATE_LIMITED` **429**(限频,可退避后重试) · `QUICKLOGIN_NOT_ENABLED` **403**(见 §5,广路径未开 opt-in) · `INVALID_SERVICE_URL`/`UNKNOWN_SERVICE`/缺参数 **400**。服务端/未知错误(TGT 过期、无票、网络等)仍回 **500**。
+取票错误码 → HTTP 状态(策略/客户端错误回 4xx,可据此判定是否可重试):`SESSION_INACTIVE` **409** · `RATE_LIMITED` **429**(限频,可退避后重试) · `QUICKLOGIN_NOT_ENABLED` **403**(见 §5,广路径功能未开放或未开 opt-in) · `INVALID_SERVICE_URL`/`UNKNOWN_SERVICE`/缺参数 **400**。服务端/未知错误(TGT 过期、无票、网络等)仍回 **500**。
 
 ---
 
@@ -278,7 +278,7 @@ Authorization: Bearer EXT_ACCESS_TOKEN
 ### 5.3 必须知道的约束
 
 - **`serviceUrl` 由 auth 服务端严格校验**(https + 解析后 `*.cqu.edu.cn` host + 拒 userinfo/异常端口)。非法直接 403——别指望"它来自 SSO 页"就被信任。
-- **用户级 opt-in**:用户须在设置里开启 `cqu.quicklogin`,否则即使 token 在也签不出 ST。该开关由用户**自助**读写:`GET /api/cqu/quicklogin` → `{enabled}`、`PUT /api/cqu/quicklogin {enabled}`(仅认 auth 站登录 session,**绝不接受 Bearer/OAuth token** —— OAuth client 不能替用户翻这个开关);设置页已内置开关。superAdmin 也可经 admin entitlement 路由代写。
+- **功能开放闸 + 用户级 opt-in(两道独立 flag)**:`cqu.quicklogin_access`(admin 授予)是功能开放闸 —— 无此权益的用户设置页不显示快捷登录卡片、自助端点拒写(403)、DO 广路径取票同拒;被开放的用户还须本人开启 `cqu.quicklogin`(同意开关),否则即使 token 在也签不出 ST。同意开关由用户**自助**读写:`GET /api/cqu/quicklogin` → `{eligible, enabled}`、`PUT /api/cqu/quicklogin {enabled}`(仅认 auth 站登录 session,**绝不接受 Bearer/OAuth token** —— OAuth client 不能替用户翻这个开关);设置页已内置开关。superAdmin 也可经 admin entitlement 路由代写。
 - **失败一律降级到原生登录页,绝不伪造流程**:
   - 服务未在 CQU CAS 注册 → 报"不支持此服务"。
   - 非 `?ticket=` 回调(POST-binding 等)→ 交回服务自身登录按钮。

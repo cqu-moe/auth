@@ -13,6 +13,7 @@ describe("capabilities catalog", () => {
   });
   it("has cqu.quicklogin opt-in flag for the extension", () => {
     expect(isFlag(CAPABILITIES.cqu.quicklogin)).toBe(true);
+    expect(isFlag(CAPABILITIES.cqu.quicklogin_access)).toBe(true);
   });
   it("presets only reference real catalog keys", () => {
     for (const preset of Object.values(PRESETS)) {

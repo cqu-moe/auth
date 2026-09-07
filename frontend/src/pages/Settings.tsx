@@ -432,34 +432,35 @@ function LiveCodeSection() {
 // QuickLoginSection — 浏览器插件快捷登录的用户自助 opt-in 开关
 // GET /api/cqu/quicklogin 读当前状态；PUT 切换。后端仅认 session（绝不接受 Bearer），
 // 故只能由登录用户本人操作自己的 cqu.quicklogin entitlement。
+// 显隐由 cqu.quicklogin_access（admin 授予的功能开放闸）决定：
+// GET 返回 eligible=false（或未登录/失败）时整张卡片不渲染，无权益用户看不到该功能。
 // ─────────────────────────────────────────────────────────────────────────────
 function QuickLoginSection() {
+  // eligible: null = 尚未查明;false = 无 cqu.quicklogin_access 权益(或读取失败)。
+  // 无权益用户整张卡片不渲染 —— 功能只对被开放的用户可见。
+  const [eligible, setEligible] = useState<boolean | null>(null);
   const [enabled, setEnabled] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const fetchState = async () => {
-    setLoading(true);
-    setLoadError(false);
-    try {
-      const res = await fetch("/api/cqu/quicklogin", { credentials: "include" });
-      if (res.ok) {
-        const data = (await res.json()) as { enabled?: boolean };
-        setEnabled(data.enabled === true);
-      } else {
-        setLoadError(true);
-      }
-    } catch {
-      setLoadError(true);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    void fetchState();
+    (async () => {
+      try {
+        const res = await fetch("/api/cqu/quicklogin", { credentials: "include" });
+        if (!res.ok) {
+          setEligible(false);
+          return;
+        }
+        const data = (await res.json()) as {
+          eligible?: boolean;
+          enabled?: boolean;
+        };
+        setEligible(data.eligible === true);
+        setEnabled(data.enabled === true);
+      } catch {
+        setEligible(false);
+      }
+    })();
   }, []);
 
   const handleToggle = async () => {
@@ -487,6 +488,9 @@ function QuickLoginSection() {
     }
   };
 
+  // 未开放(或状态未明)时不渲染:无权益用户在设置页完全看不到该功能。
+  if (eligible !== true) return null;
+
   return (
     <SettingsCard title="浏览器插件快捷登录">
 
@@ -496,51 +500,31 @@ function QuickLoginSection() {
         </div>
       )}
 
-      {loading ? (
-        <div className="flex items-center gap-2 text-sm text-gray-400">
-          <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-transparent" />
-          加载中...
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-gray-900">允许浏览器插件快捷登录</p>
+          <p className="mt-1 text-sm text-gray-500 leading-relaxed">
+            开启后，浏览器插件可代你向 *.cqu.edu.cn 取一次性登录票，免去手动登录。可随时关闭。
+          </p>
         </div>
-      ) : loadError ? (
-        <div className="space-y-3">
-          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">
-            获取设置失败，请稍后重试。
-          </div>
-          <button
-            type="button"
-            onClick={() => void fetchState()}
-            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
-          >
-            重新加载
-          </button>
-        </div>
-      ) : (
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-gray-900">允许浏览器插件快捷登录</p>
-            <p className="mt-1 text-sm text-gray-500 leading-relaxed">
-              开启后，浏览器插件可代你向 *.cqu.edu.cn 取一次性登录票，免去手动登录。可随时关闭。
-            </p>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={enabled}
-            aria-label="允许浏览器插件快捷登录"
-            disabled={saving}
-            onClick={() => void handleToggle()}
-            className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 ${
-              enabled ? "bg-blue-600" : "bg-gray-300"
+        <button
+          type="button"
+          role="switch"
+          aria-checked={enabled}
+          aria-label="允许浏览器插件快捷登录"
+          disabled={saving}
+          onClick={() => void handleToggle()}
+          className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 ${
+            enabled ? "bg-blue-600" : "bg-gray-300"
+          }`}
+        >
+          <span
+            className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+              enabled ? "translate-x-6" : "translate-x-1"
             }`}
-          >
-            <span
-              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-                enabled ? "translate-x-6" : "translate-x-1"
-              }`}
-            />
-          </button>
-        </div>
-      )}
+          />
+        </button>
+      </div>
     </SettingsCard>
   );
 }

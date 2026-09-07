@@ -12,6 +12,10 @@ import { eq, and } from "drizzle-orm";
 // 浏览器插件凭广域 scope 代他取一次性登录票(见 capabilities.ts 与 cqu-session.ts)。
 // superAdmin 也能经 admin 路由写这条 entitlement,但日常应由用户自己掌控,故提供本自助端点。
 //
+// 功能开放闸 `cqu.quicklogin_access`(admin 授予,灰度/准入):无此权益的用户
+// GET 拿到 eligible=false(设置页据此隐藏整张卡片),PUT 直接 403 —— 准入与同意分离,
+// 未开放用户不能经任何路径自助打开快捷登录。
+//
 // 安全契约(关键):
 //   - **鉴权只认 Better Auth session**(浏览器登录态),**绝不接受 Bearer/OAuth access token**。
 //     若接受 Bearer,任一持有用户 access token 的 OAuth client 就能替用户翻这个开关
@@ -24,6 +28,7 @@ const cquQuicklogin = new Hono<HonoEnv>();
 
 const SUBSYSTEM = "cqu";
 const CAPABILITY = "quicklogin";
+const ACCESS_CAPABILITY = "quicklogin_access";
 const VALUE_ON = "1";
 
 // session-only 鉴权中间件。无有效 Better Auth session → 401。
@@ -36,22 +41,39 @@ cquQuicklogin.use("/*", async (c, next) => {
   return next();
 });
 
-// GET /api/cqu/quicklogin → { enabled: boolean }
-// 读调用者自己的 (userId, "cqu", "quicklogin") 行:value==="1" 视为开,行缺失视为关。
-cquQuicklogin.get("/", async (c) => {
-  const user = c.get("user") as { id: string };
-  const row = await drizzle(c.env.DATABASE)
+// 读调用者自己的一条 cqu entitlement 行;行缺失返回 undefined(约定:缺失 = 关/未授予)。
+async function getOwnFlag(
+  db: ReturnType<typeof drizzle>,
+  userId: string,
+  capability: string
+) {
+  return db
     .select()
     .from(userEntitlement)
     .where(
       and(
-        eq(userEntitlement.userId, user.id),
+        eq(userEntitlement.userId, userId),
         eq(userEntitlement.subsystem, SUBSYSTEM),
-        eq(userEntitlement.capability, CAPABILITY)
+        eq(userEntitlement.capability, capability)
       )
     )
     .get();
-  return c.json({ enabled: row?.value === VALUE_ON });
+}
+
+// GET /api/cqu/quicklogin → { eligible: boolean, enabled: boolean }
+// eligible = 有 cqu.quicklogin_access(功能对该用户开放;设置页据此决定显隐);
+// enabled = cqu.quicklogin === "1"(用户本人的同意开关,行缺失视为关)。
+cquQuicklogin.get("/", async (c) => {
+  const user = c.get("user") as { id: string };
+  const db = drizzle(c.env.DATABASE);
+  const [access, consent] = await Promise.all([
+    getOwnFlag(db, user.id, ACCESS_CAPABILITY),
+    getOwnFlag(db, user.id, CAPABILITY),
+  ]);
+  return c.json({
+    eligible: access?.value === VALUE_ON,
+    enabled: consent?.value === VALUE_ON,
+  });
 });
 
 // PUT /api/cqu/quicklogin  body { enabled: boolean } → { enabled }
@@ -59,6 +81,14 @@ cquQuicklogin.get("/", async (c) => {
 // 只动调用者自己的这一条 entitlement。
 cquQuicklogin.put("/", async (c) => {
   const user = c.get("user") as { id: string };
+
+  const db = drizzle(c.env.DATABASE);
+
+  // 功能开放闸:无 cqu.quicklogin_access 的用户连自助开关都不能碰(与设置页显隐同源)。
+  const access = await getOwnFlag(db, user.id, ACCESS_CAPABILITY);
+  if (access?.value !== VALUE_ON) {
+    return errorResponse(c, "FORBIDDEN", "未开放浏览器插件快捷登录功能", 403);
+  }
 
   let body: { enabled?: unknown };
   try {
@@ -70,7 +100,6 @@ cquQuicklogin.put("/", async (c) => {
     return errorResponse(c, "INVALID_BODY", "enabled 必须是布尔值", 400);
   }
 
-  const db = drizzle(c.env.DATABASE);
   if (body.enabled) {
     // 开启:存在则更新 value,不存在则插入。复合主键 (user_id, subsystem, capability)。
     await db

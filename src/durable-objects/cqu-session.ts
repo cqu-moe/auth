@@ -661,7 +661,13 @@ export class CquSessionDO extends DurableObject<Env> {
     // 它只表达「用户是否同意插件替他用任意广路径取 ST」—— 未同意则广路径直接拒。
     if (broad) {
       const caps = await resolveCaps(this.env.DATABASE, this.state.userId, "cqu");
-      if (caps.cqu?.quicklogin !== true) {
+      // 两道 flag 都要:quicklogin_access = admin 授予的功能开放闸(灰度/准入,可整体撤销);
+      // quicklogin = 用户本人 opt-in 同意。缺任一即拒 —— 撤销 access 后不能留有
+      // 「设置页已隐藏、插件却仍能取票」的失控状态。
+      if (
+        caps.cqu?.quicklogin_access !== true ||
+        caps.cqu?.quicklogin !== true
+      ) {
         throw new CquSsoError(
           "QUICKLOGIN_NOT_ENABLED",
           "未开启浏览器插件快捷登录"
