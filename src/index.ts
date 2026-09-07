@@ -13,6 +13,7 @@ import { admin } from "./routes/admin";
 import { handleEmail } from "./email-handler";
 import type { Env } from "./types";
 import { handleInvitationSignup } from "./services/registration-invitations";
+import { processScheduleNotificationBatch } from "./queue/schedule-notifications";
 
 const app = new Hono<HonoEnv>();
 
@@ -73,6 +74,17 @@ export default {
   fetch: app.fetch,
   async email(message, env, _ctx) {
     await handleEmail(message, env);
+  },
+  async queue(batch, env, _ctx) {
+    if (batch.queue === "schedule-notifications") {
+      await processScheduleNotificationBatch(batch, env);
+      return;
+    }
+    console.warn(JSON.stringify({
+      event: "queue.unknown",
+      queue: batch.queue,
+      message: "Unknown queue",
+    }));
   },
 } satisfies ExportedHandler<Env>;
 export { CquSessionDO } from "./durable-objects/cqu-session";

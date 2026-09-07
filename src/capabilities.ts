@@ -16,6 +16,7 @@ export const CAPABILITIES = {
     sync: { type: "flag", label: "日历同步" }, // 个人课表自动同步开关
     external: { type: "flag", label: "外部订阅" }, // 教师/教室/实验室/课程/行政班 公开课表订阅
     share: { type: "flag", label: "共享日历" }, // 共享链接开关
+    change_notification: { type: "flag", label: "课表变更邮件通知" },
     sub_limit: { type: "quota", label: "订阅上限", unit: "条" }, // 订阅数量上限;null=无限
     share_limit: { type: "quota", label: "分享链接上限", unit: "条" }, // 每用户分享链接总数;null=无限
     sync_interval: { type: "quota", label: "同步间隔", unit: "分钟" }, // 自动同步间隔档位(越小越新鲜);null=默认/最长。实际下限受 cron 每小时一次限制

@@ -6,6 +6,7 @@ describe("capabilities catalog", () => {
     expect(isFlag(CAPABILITIES.calendar.sync)).toBe(true);
     expect(isFlag(CAPABILITIES.calendar.external)).toBe(true);
     expect(isFlag(CAPABILITIES.calendar.share)).toBe(true);
+    expect(isFlag(CAPABILITIES.calendar.change_notification)).toBe(true);
     expect(isQuota(CAPABILITIES.calendar.sub_limit)).toBe(true);
     expect(isQuota(CAPABILITIES.calendar.share_limit)).toBe(true);
     expect(isQuota(CAPABILITIES.calendar.sync_interval)).toBe(true);
