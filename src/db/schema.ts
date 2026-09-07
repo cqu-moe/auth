@@ -133,6 +133,22 @@ export const userEntitlement = sqliteTable(
   ]
 );
 
+// 权益预设:管理台可编辑的命名授权组合(原代码常量 PRESETS 的落库版)。
+// items 为 JSON 数组 [{subsystem,capability,value}],值约定同 user_entitlement.value。
+export const entitlementPreset = sqliteTable("entitlement_preset", {
+  name: text("name").primaryKey(),
+  items: text("items").notNull(), // JSON:[{subsystem,capability,value}]
+  updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+});
+
+// 权益相关全局配置(k/v)。目前唯一键:default_preset = 新注册用户自动套用的预设名;
+// 无此行 = 新用户不带任何默认权益(fail-closed,等同零行)。
+export const entitlementConfig = sqliteTable("entitlement_config", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: text("updated_at").notNull().default(sql`(datetime('now'))`),
+});
+
 export const registrationInvitation = sqliteTable("registration_invitation", {
   code: text("code").primaryKey(),
   createdBy: text("created_by").notNull(),

@@ -13,7 +13,12 @@ import {
 } from "../utils/oauth-secret";
 import {
   validateEntitlementItems,
-  presetToItems,
+  listPresets,
+  getPresetItems,
+  upsertPreset,
+  deletePreset,
+  getDefaultPresetName,
+  setDefaultPresetName,
 } from "../services/entitlements";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, and } from "drizzle-orm";
@@ -467,6 +472,7 @@ admin.put("/users/:id/entitlements", async (c) => {
 
 // POST /api/admin/users/:id/entitlements/preset - 一键套用命名预设。
 // body { preset: string }。写权限:entitlement:assign(superAdmin)。
+// 预设事实源是 entitlement_preset 表(管理台可编辑),不再是代码常量。
 // upsert 语义:仅删该预设涉及的 (subsystem,capability) 行,再插预设项 —— 覆盖预设
 // 包含的能力,但保留用户其它无关 entitlement(契合「套用预设写若干行,仍可逐项加 share」)。
 admin.post("/users/:id/entitlements/preset", async (c) => {
@@ -478,8 +484,14 @@ admin.post("/users/:id/entitlements/preset", async (c) => {
   const body = await c.req
     .json<{ preset?: string }>()
     .catch(() => ({}) as { preset?: string });
-  const items = presetToItems(body.preset ?? "");
+  const items = await getPresetItems(c.env.DATABASE, body.preset ?? "");
   if (!items) return errorResponse(c, "UNKNOWN_PRESET", "未知预设", 400);
+  // DB 里的预设可被 superAdmin 直接编辑,写入用户前仍要过目录校验,
+  // 挡住「能力目录已删除某键但预设还引用它」之类的漂移。
+  const invalid = validateEntitlementItems(items);
+  if (invalid) {
+    return errorResponse(c, "INVALID_PRESET", `预设数据已失效：${invalid}`, 409);
+  }
 
   const db = drizzle(c.env.DATABASE);
   // 仅删预设涵盖的 (subsystem,capability) 对（按 userId 限定），不动用户其它无关行。
@@ -514,6 +526,79 @@ admin.post("/users/:id/entitlements/preset", async (c) => {
   );
   await db.batch([stmts[0], ...stmts.slice(1), ins]);
   return c.json({ success: true, applied: items.length });
+});
+
+// ── 预设管理与新用户默认权益 ─────────────────────────────────────────────────
+// 读:admin/superAdmin(中间件已 gate)。写:entitlement:assign(superAdmin),
+// 与 per-user 写入同一档 —— 预设改动等价于批量授权能力。
+
+// GET /api/admin/entitlement-presets - 全部预设(按中文名排序)。
+admin.get("/entitlement-presets", async (c) => {
+  return c.json({ data: await listPresets(c.env.DATABASE) });
+});
+
+// PUT /api/admin/entitlement-presets/:name - 新建或整体更新一个预设。
+// body { items: [...] }。name 取 URL(允许中文),1-50 字符;items 过目录校验。
+admin.put("/entitlement-presets/:name", async (c) => {
+  const auth = createAuth(c.env, c.req.raw);
+  if (!(await hasEntitlementPermission(c, auth, "assign"))) {
+    return errorResponse(c, "FORBIDDEN", "需要权益写权限", 403);
+  }
+  const name = decodeURIComponent(c.req.param("name")).trim();
+  if (!name || name.length > 50) {
+    return errorResponse(c, "INVALID_NAME", "预设名需要 1-50 个字符", 400);
+  }
+  const body = await c.req
+    .json<{ items?: unknown }>()
+    .catch(() => ({}) as { items?: unknown });
+  const invalid = validateEntitlementItems(body.items as never);
+  if (invalid) return errorResponse(c, "INVALID_ENTITLEMENTS", invalid, 400);
+  await upsertPreset(
+    c.env.DATABASE,
+    name,
+    body.items as { subsystem: string; capability: string; value: string }[]
+  );
+  return c.json({ success: true });
+});
+
+// DELETE /api/admin/entitlement-presets/:name - 删除预设(幂等)。
+// 同时清掉指向它的 default_preset 配置,避免新用户注册时引用不存在的预设。
+admin.delete("/entitlement-presets/:name", async (c) => {
+  const auth = createAuth(c.env, c.req.raw);
+  if (!(await hasEntitlementPermission(c, auth, "assign"))) {
+    return errorResponse(c, "FORBIDDEN", "需要权益写权限", 403);
+  }
+  const name = decodeURIComponent(c.req.param("name"));
+  await deletePreset(c.env.DATABASE, name);
+  if ((await getDefaultPresetName(c.env.DATABASE)) === name) {
+    await setDefaultPresetName(c.env.DATABASE, null);
+  }
+  return c.json({ success: true });
+});
+
+// GET /api/admin/entitlement-default - 新注册用户自动套用的预设名(null = 无)。
+admin.get("/entitlement-default", async (c) => {
+  return c.json({ preset: await getDefaultPresetName(c.env.DATABASE) });
+});
+
+// PUT /api/admin/entitlement-default - body { preset: string | null }。
+// 非 null 时预设必须已存在,否则注册钩子会静默 no-op,造成「以为配了其实没生效」。
+admin.put("/entitlement-default", async (c) => {
+  const auth = createAuth(c.env, c.req.raw);
+  if (!(await hasEntitlementPermission(c, auth, "assign"))) {
+    return errorResponse(c, "FORBIDDEN", "需要权益写权限", 403);
+  }
+  const body = await c.req
+    .json<{ preset?: string | null }>()
+    .catch(() => ({}) as { preset?: string | null });
+  const preset = body.preset ?? null;
+  if (preset !== null) {
+    if (typeof preset !== "string" || !(await getPresetItems(c.env.DATABASE, preset))) {
+      return errorResponse(c, "UNKNOWN_PRESET", "未知预设", 400);
+    }
+  }
+  await setDefaultPresetName(c.env.DATABASE, preset);
+  return c.json({ success: true, preset });
 });
 
 // DELETE /api/admin/users/:id/entitlements/:subsystem/:capability - 撤销单条能力。

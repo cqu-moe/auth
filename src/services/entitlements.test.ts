@@ -5,6 +5,7 @@ import {
   subsystemForAccessToken,
   validateEntitlementItems,
   presetToItems,
+  parsePresetItems,
 } from "./entitlements";
 
 describe("rowsToCaps", () => {
@@ -259,5 +260,33 @@ describe("presetToItems (admin one-click apply)", () => {
   });
   it("returns null for an unknown preset name", () => {
     expect(presetToItems("unknown")).toBe(null);
+  });
+});
+
+describe("parsePresetItems (DB preset rows)", () => {
+  it("parses a well-formed items JSON array", () => {
+    const items = parsePresetItems(
+      '[{"subsystem":"calendar","capability":"sync","value":"1"}]'
+    );
+    expect(items).toEqual([
+      { subsystem: "calendar", capability: "sync", value: "1" },
+    ]);
+  });
+  it("accepts an empty array (preset with no items)", () => {
+    expect(parsePresetItems("[]")).toEqual([]);
+  });
+  it.each([
+    "not json",
+    "{}",
+    '"学生"',
+    "null",
+    // 缺字段 / 字段类型不对一律拒绝:坏数据绝不能进入写入路径。
+    '[{"subsystem":"calendar"}]',
+    '[{"subsystem":"calendar","capability":"sync"}]',
+    '[{"subsystem":1,"capability":"sync","value":"1"}]',
+    '[{"subsystem":"calendar","capability":"sync","value":1}]',
+    '["calendar.sync"]',
+  ])("rejects malformed payload %s → null", (bad) => {
+    expect(parsePresetItems(bad)).toBe(null);
   });
 });

@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback, type ReactNode } from "react";
 import Layout from "../components/Layout";
-// 能力目录单一事实源:直接复用后端 src/capabilities.ts(纯常量,无服务端依赖,
-// 可被前端 bundle)。新增能力只需在后端那一处加行,前端自动同步。
+import MenuSelect from "../components/MenuSelect";
+import { EntitlementMatrix } from "../components/EntitlementFields";
 import {
-  CAPABILITIES,
-  PRESETS,
-  type CapDef,
-  type Subsystem,
-} from "../../../src/capabilities";
+  buildItems,
+  formFromItems,
+  summarizeItems,
+  type EntitlementForm,
+  type EntitlementItem,
+} from "../components/entitlement-form";
 import { USER_ROLE_OPTIONS } from "../../../src/user-roles";
 
 // --- Types ---
@@ -20,23 +21,12 @@ interface User {
   createdAt: string;
 }
 
-// 一行 entitlement:GET /api/admin/users/:id/entitlements 返回的原始记录。
-interface EntitlementRow {
-  userId: string;
-  subsystem: string;
-  capability: string;
-  value: string;
-  updatedAt?: string | number;
+// 一个权益预设:GET /api/admin/entitlement-presets 的元素。
+interface EntitlementPreset {
+  name: string;
+  items: EntitlementItem[];
+  updatedAt?: string;
 }
-
-// 子系统中文名(展示用;键来自 CAPABILITIES,缺省回退键名本身)。
-const SUBSYSTEM_LABELS: Record<string, string> = {
-  calendar: "日历",
-  eval: "评教",
-  cqu: "CQU 服务",
-};
-
-const PRESET_NAMES = Object.keys(PRESETS);
 
 interface UsersResponse {
   data: User[];
@@ -156,6 +146,43 @@ async function readErrorMessage(res: Response, fallback: string): Promise<string
   }
 }
 
+// 角色的展示元数据:色点与权限说明。值与 src/user-roles.ts 的 USER_ROLE_OPTIONS 对齐。
+const ROLE_META: Record<string, { dotClass: string; hint: string }> = {
+  user: { dotClass: "bg-gray-400", hint: "普通使用,无管理入口" },
+  admin: { dotClass: "bg-blue-500", hint: "可管理用户与邀请" },
+  superAdmin: { dotClass: "bg-violet-500", hint: "含权益与客户端写权限" },
+};
+
+// 角色选择:徽章式自定义下拉(原生 select 在表格里样式不可控)。
+function RoleSelect({
+  value,
+  disabled,
+  onChange,
+  ariaLabel,
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (role: string) => void;
+  ariaLabel: string;
+}) {
+  const options = USER_ROLE_OPTIONS.map((opt) => ({
+    value: opt.value as string,
+    label: opt.label,
+    dotClass: ROLE_META[opt.value]?.dotClass ?? "bg-gray-400",
+    hint: ROLE_META[opt.value]?.hint,
+  }));
+  return (
+    <MenuSelect
+      value={value}
+      options={options}
+      onChange={onChange}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      buttonClassName="px-2.5 py-1 text-xs"
+    />
+  );
+}
+
 // --- Users Section ---
 function UsersSection() {
   const [users, setUsers] = useState<User[]>([]);
@@ -245,17 +272,12 @@ function UsersSection() {
                   <div className="text-xs text-gray-400">{user.email}</div>
                 </td>
                 <td className="py-3 px-4">
-                  <select
+                  <RoleSelect
                     value={user.role}
-                    onChange={(e) => updateUser(user.id, { role: e.target.value })}
                     disabled={actionLoading === user.id}
-                    className="text-xs border border-gray-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
-                    aria-label={`${user.name} 的角色`}
-                  >
-                    {USER_ROLE_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
+                    onChange={(role) => updateUser(user.id, { role })}
+                    ariaLabel={`${user.name} 的角色`}
+                  />
                 </td>
                 <td className="py-3 px-4">
                   <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
@@ -498,34 +520,9 @@ function Modal({
 }
 
 // --- Entitlement panel (per-user 分级权益 / 能力授权) ---
-// 表单态:flag → boolean(勾选=授权);quota → 字符串(空=无限,否则数字串)。
-// key = `${subsystem}.${capability}`。Save 为整组替换(full replace):
-// 仅把勾选的 flag(value "1")与非空 quota(value 数字串)发给 PUT,
-// 未勾/空缺省即「false / 无限」。
-type EntitlementForm = Record<string, { flag?: boolean; quota?: string }>;
-
-// 把后端返回的 rows 投影进表单态(以 CAPABILITIES 为准遍历,逐个能力填值)。
-function formFromRows(rows: EntitlementRow[]): EntitlementForm {
-  const byKey = new Map(
-    rows.map((r) => [`${r.subsystem}.${r.capability}`, r.value])
-  );
-  const form: EntitlementForm = {};
-  for (const subsystem of Object.keys(CAPABILITIES) as Subsystem[]) {
-    const caps = CAPABILITIES[subsystem] as Record<string, CapDef>;
-    for (const capability of Object.keys(caps)) {
-      const key = `${subsystem}.${capability}`;
-      const value = byKey.get(key);
-      if (caps[capability].type === "flag") {
-        form[key] = { flag: value === "1" };
-      } else {
-        // quota:存在且为数字串则填入;空/缺省 → 无限(空输入框)。
-        form[key] = { quota: value && /^\d+$/.test(value) ? value : "" };
-      }
-    }
-  }
-  return form;
-}
-
+// 表单态/矩阵实现见 components/EntitlementFields。保存为整组替换(full replace):
+// 仅把勾选的 flag 与非空 quota 发给 PUT,未勾/空缺省即「false / 无限」。
+// 预设从 GET /api/admin/entitlement-presets 读(管理台「权益预设」页可编辑)。
 function EntitlementPanel({
   user,
   onClose,
@@ -537,7 +534,8 @@ function EntitlementPanel({
   const [initLoading, setInitLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [applyingPreset, setApplyingPreset] = useState(false);
-  const [preset, setPreset] = useState(PRESET_NAMES[0] ?? "");
+  const [presets, setPresets] = useState<EntitlementPreset[]>([]);
+  const [preset, setPreset] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -545,12 +543,24 @@ function EntitlementPanel({
     setInitLoading(true);
     setError("");
     try {
-      const res = await fetch(`/api/admin/users/${user.id}/entitlements`);
+      const [res, presetsRes] = await Promise.all([
+        fetch(`/api/admin/users/${user.id}/entitlements`),
+        fetch("/api/admin/entitlement-presets"),
+      ]);
       if (res.ok) {
-        const data = (await res.json()) as { data: EntitlementRow[] };
-        setForm(formFromRows(data.data ?? []));
+        const data = (await res.json()) as { data: EntitlementItem[] };
+        setForm(formFromItems(data.data ?? []));
       } else {
         setError(await readErrorMessage(res, "加载权益失败"));
+      }
+      if (presetsRes.ok) {
+        const data = (await presetsRes.json()) as { data: EntitlementPreset[] };
+        const list = data.data ?? [];
+        setPresets(list);
+        // 首次载入或当前选中项已不存在时,回落到第一个预设。
+        setPreset((prev) =>
+          prev && list.some((p) => p.name === prev) ? prev : (list[0]?.name ?? "")
+        );
       }
     } catch {
       setError("网络错误，请稍后重试");
@@ -563,36 +573,6 @@ function EntitlementPanel({
     void load();
   }, [load]);
 
-  const setFlag = (key: string, flag: boolean) =>
-    setForm((prev) => ({ ...prev, [key]: { ...prev[key], flag } }));
-  const setQuota = (key: string, quota: string) =>
-    // 仅允许数字(空串=无限);非数字字符直接丢弃,保证 value 始终是数字串或 ""。
-    setForm((prev) => ({
-      ...prev,
-      [key]: { ...prev[key], quota: quota.replace(/[^\d]/g, "") },
-    }));
-
-  // 把表单态压成 PUT items(整组替换):勾选 flag→value "1";非空 quota→数字串。
-  // 未勾 flag / 空 quota 一律省略(absence = false / 无限)。
-  const buildItems = () => {
-    const items: { subsystem: string; capability: string; value: string }[] = [];
-    for (const subsystem of Object.keys(CAPABILITIES) as Subsystem[]) {
-      const caps = CAPABILITIES[subsystem] as Record<string, CapDef>;
-      for (const capability of Object.keys(caps)) {
-        const key = `${subsystem}.${capability}`;
-        const entry = form[key];
-        if (!entry) continue;
-        if (caps[capability].type === "flag") {
-          if (entry.flag) items.push({ subsystem, capability, value: "1" });
-        } else {
-          const q = (entry.quota ?? "").trim();
-          if (q) items.push({ subsystem, capability, value: q });
-        }
-      }
-    }
-    return items;
-  };
-
   const handleSave = async () => {
     setError("");
     setSuccess("");
@@ -601,7 +581,7 @@ function EntitlementPanel({
       const res = await fetch(`/api/admin/users/${user.id}/entitlements`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: buildItems() }),
+        body: JSON.stringify({ items: buildItems(form) }),
       });
       if (res.ok) {
         setSuccess("已保存");
@@ -685,19 +665,21 @@ function EntitlementPanel({
         ) : (
           <>
             {/* --- 预设套用 --- */}
-            {PRESET_NAMES.length > 0 && (
+            {presets.length > 0 && (
               <div className="flex items-end gap-2 border border-gray-100 bg-gray-50 rounded-xl p-3">
                 <div className="flex-1">
                   <FieldLabel hint="一键写入预设权益,之后仍可逐项调整">套用预设</FieldLabel>
-                  <select
+                  <MenuSelect
                     value={preset}
-                    onChange={(e) => setPreset(e.target.value)}
-                    className={inputClass}
-                  >
-                    {PRESET_NAMES.map((name) => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                  </select>
+                    onChange={setPreset}
+                    options={presets.map((p) => ({
+                      value: p.name,
+                      label: p.name,
+                      hint: `${p.items.length} 项能力`,
+                    }))}
+                    aria-label="选择要套用的预设"
+                    buttonClassName="w-full justify-between px-3 py-2"
+                  />
                 </div>
                 <button
                   type="button"
@@ -712,63 +694,9 @@ function EntitlementPanel({
             )}
 
             {/* --- 按子系统分组的能力 --- */}
-            {(Object.keys(CAPABILITIES) as Subsystem[]).map((subsystem) => {
-              const caps = CAPABILITIES[subsystem] as Record<string, CapDef>;
-              return (
-                <div key={subsystem} className="border-t border-gray-100 pt-4 first:border-t-0 first:pt-0">
-                  <p className="text-xs font-semibold text-gray-700 mb-2">
-                    {SUBSYSTEM_LABELS[subsystem] ?? subsystem}
-                    <span className="ml-2 font-mono font-normal text-gray-400">{subsystem}</span>
-                  </p>
-                  <div className="space-y-1">
-                    {Object.keys(caps).map((capability) => {
-                      const def = caps[capability];
-                      const key = `${subsystem}.${capability}`;
-                      if (def.type === "flag") {
-                        return (
-                          <label
-                            key={key}
-                            className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 cursor-pointer"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={form[key]?.flag ?? false}
-                              onChange={(e) => setFlag(key, e.target.checked)}
-                              className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-                            />
-                            <span className="text-sm text-gray-700">{def.label}</span>
-                            <span className="text-xs text-gray-400 font-mono ml-auto">{capability}</span>
-                          </label>
-                        );
-                      }
-                      // quota:数字输入框,空=无限。
-                      return (
-                        <div
-                          key={key}
-                          className="flex items-center gap-3 p-2 rounded-lg"
-                        >
-                          <span className="text-sm text-gray-700">{def.label}</span>
-                          <span className="text-xs text-gray-400 font-mono">{capability}</span>
-                          <div className="flex items-center gap-1.5 ml-auto">
-                            <input
-                              type="number"
-                              min={0}
-                              inputMode="numeric"
-                              value={form[key]?.quota ?? ""}
-                              onChange={(e) => setQuota(key, e.target.value)}
-                              placeholder="无限"
-                              className="w-28 text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-300"
-                              aria-label={`${def.label}(${def.unit ?? "数量"};留空为无限)`}
-                            />
-                            {def.unit && <span className="text-xs text-gray-400">{def.unit}</span>}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
+            <div className="border-t border-gray-100 pt-4">
+              <EntitlementMatrix form={form} onChange={setForm} />
+            </div>
           </>
         )}
       </div>
@@ -1871,14 +1799,378 @@ function RegistrationInvitationsSection() {
   );
 }
 
+// --- Presets section (权益预设 + 新用户默认权益) ---
+
+// 预设编辑器:新建(name = null)或编辑既有预设。与 per-user 权益面板共用
+// EntitlementMatrix;保存 = PUT 整体覆盖该预设的 items。
+function PresetEditor({
+  name,
+  initialForm,
+  onClose,
+  onSaved,
+}: {
+  name: string | null;
+  initialForm: EntitlementForm;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const isEdit = name !== null;
+  const [presetName, setPresetName] = useState(name ?? "");
+  const [form, setForm] = useState<EntitlementForm>(initialForm);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSave = async () => {
+    const trimmed = presetName.trim();
+    if (!trimmed) {
+      setError("请填写预设名称");
+      return;
+    }
+    setError("");
+    setSaving(true);
+    try {
+      const res = await fetch(
+        `/api/admin/entitlement-presets/${encodeURIComponent(trimmed)}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: buildItems(form) }),
+        }
+      );
+      if (res.ok) {
+        onSaved();
+      } else if (res.status === 403) {
+        setError("需要 superAdmin 权限");
+      } else {
+        setError(await readErrorMessage(res, "保存失败，请稍后重试"));
+      }
+    } catch {
+      setError("网络错误，请稍后重试");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose} maxWidth="max-w-xl">
+      <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+        <h3 className="text-base font-semibold text-gray-900">
+          {isEdit ? `编辑预设「${name}」` : "新建预设"}
+        </h3>
+        <button
+          onClick={onClose}
+          className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors shrink-0"
+          aria-label="关闭"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="p-6 space-y-5">
+        {error && (
+          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+            {error}
+            <button onClick={() => setError("")} className="ml-2 underline">关闭</button>
+          </div>
+        )}
+
+        {!isEdit && (
+          <div>
+            <FieldLabel hint="例如:学生、助教、特邀教师">预设名称</FieldLabel>
+            <input
+              type="text"
+              value={presetName}
+              onChange={(e) => setPresetName(e.target.value)}
+              maxLength={50}
+              placeholder="预设名称"
+              className={inputClass}
+            />
+          </div>
+        )}
+
+        <EntitlementMatrix form={form} onChange={setForm} />
+      </div>
+
+      <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex items-center justify-between gap-2">
+        <p className="text-xs text-gray-400">勾选/填值即授权;留空数量表示无限。</p>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+          >
+            取消
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-400 flex items-center gap-1.5 transition-colors"
+          >
+            {saving && <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+            保存
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// 权益预设管理 + 新注册用户默认权益。
+// 预设事实源在 D1(entitlement_preset 表);默认预设名存 entitlement_config,
+// 注册钩子按它给新用户写初始权益行。删除默认预设时后端会顺带清掉默认配置。
+function PresetsSection() {
+  const [presets, setPresets] = useState<EntitlementPreset[]>([]);
+  const [defaultPreset, setDefaultPreset] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  // 默认权益下拉的保存状态:idle | saving | saved。
+  const [defaultState, setDefaultState] = useState<"idle" | "saving" | "saved">("idle");
+  // 打开编辑器的预设:null = 关闭;{ name: null } = 新建。
+  const [editing, setEditing] = useState<{
+    name: string | null;
+    form: EntitlementForm;
+  } | null>(null);
+  // 删除两段确认:先点「删除」进入待确认,再点「确认删除」执行。
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const [presetsRes, defaultRes] = await Promise.all([
+        fetch("/api/admin/entitlement-presets"),
+        fetch("/api/admin/entitlement-default"),
+      ]);
+      if (presetsRes.ok) {
+        const data = (await presetsRes.json()) as { data: EntitlementPreset[] };
+        setPresets(data.data ?? []);
+      } else {
+        setError(await readErrorMessage(presetsRes, "加载预设失败"));
+      }
+      if (defaultRes.ok) {
+        const data = (await defaultRes.json()) as { preset: string | null };
+        setDefaultPreset(data.preset ?? null);
+      }
+    } catch {
+      setError("网络错误，请稍后重试");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // 选择即保存:新默认预设(空串 = 无默认权益)。
+  const changeDefault = async (value: string) => {
+    const next = value === "" ? null : value;
+    setError("");
+    setNotice("");
+    setDefaultState("saving");
+    try {
+      const res = await fetch("/api/admin/entitlement-default", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preset: next }),
+      });
+      if (res.ok) {
+        setDefaultPreset(next);
+        setDefaultState("saved");
+        setTimeout(() => setDefaultState("idle"), 2000);
+      } else if (res.status === 403) {
+        setDefaultState("idle");
+        setError("需要 superAdmin 权限");
+      } else {
+        setDefaultState("idle");
+        setError(await readErrorMessage(res, "保存默认权益失败"));
+      }
+    } catch {
+      setDefaultState("idle");
+      setError("网络错误，请稍后重试");
+    }
+  };
+
+  const handleDelete = async (name: string) => {
+    setError("");
+    setNotice("");
+    setDeleting(name);
+    try {
+      const res = await fetch(
+        `/api/admin/entitlement-presets/${encodeURIComponent(name)}`,
+        { method: "DELETE" }
+      );
+      if (res.ok) {
+        setNotice(`已删除预设「${name}」`);
+        await load();
+      } else if (res.status === 403) {
+        setError("需要 superAdmin 权限");
+      } else {
+        setError(await readErrorMessage(res, "删除失败，请稍后重试"));
+      }
+    } catch {
+      setError("网络错误，请稍后重试");
+    } finally {
+      setDeleting(null);
+      setConfirmDelete(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-gray-400 text-sm py-8">
+        <div className="w-5 h-5 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
+        加载中...
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {error && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          {error}
+          <button onClick={() => setError("")} className="ml-2 underline">关闭</button>
+        </div>
+      )}
+      {notice && (
+        <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
+          {notice}
+          <button onClick={() => setNotice("")} className="ml-2 underline">关闭</button>
+        </div>
+      )}
+
+      {/* --- 新用户默认权益 --- */}
+      <div className="flex items-center justify-between gap-4 border border-gray-100 bg-gray-50 rounded-xl p-4">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-gray-900">新用户默认权益</p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            注册成功后自动套用的预设;选「无」则新用户不带任何权益。
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {defaultState === "saving" && (
+            <span className="w-3.5 h-3.5 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
+          )}
+          {defaultState === "saved" && (
+            <span className="text-xs text-green-600">已保存</span>
+          )}
+          <MenuSelect
+            value={defaultPreset ?? ""}
+            onChange={(v) => void changeDefault(v)}
+            disabled={defaultState === "saving"}
+            options={[
+              { value: "", label: "无默认权益" },
+              ...presets.map((p) => ({
+                value: p.name,
+                label: p.name,
+                hint: `${p.items.length} 项能力`,
+              })),
+            ]}
+            aria-label="新用户默认权益"
+            align="right"
+            buttonClassName="px-3 py-1.5 text-sm"
+          />
+        </div>
+      </div>
+
+      {/* --- 预设列表 --- */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-sm font-medium text-gray-900">全部预设</p>
+          <button
+            type="button"
+            onClick={() =>
+              setEditing({ name: null, form: formFromItems([]) })
+            }
+            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+          >
+            + 新建预设
+          </button>
+        </div>
+
+        {presets.length === 0 ? (
+          <p className="text-sm text-gray-400 py-4">暂无预设</p>
+        ) : (
+          <div className="divide-y divide-gray-100 border border-gray-100 rounded-xl">
+            {presets.map((p) => (
+              <div key={p.name} className="flex items-center gap-4 px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-900">{p.name}</span>
+                    {defaultPreset === p.name && (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">
+                        默认
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-0.5 truncate">
+                    {summarizeItems(p.items)}
+                    {p.updatedAt && ` · 更新于 ${new Date(p.updatedAt + "Z").toLocaleDateString("zh-CN")}`}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditing({ name: p.name, form: formFromItems(p.items) })
+                    }
+                    className="text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
+                  >
+                    编辑
+                  </button>
+                  {confirmDelete === p.name ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleDelete(p.name)}
+                      disabled={deleting === p.name}
+                      className="text-xs font-medium px-3 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:bg-red-400 transition-colors"
+                    >
+                      {deleting === p.name ? "删除中..." : "确认删除"}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDelete(p.name)}
+                      className="text-xs font-medium px-3 py-1.5 rounded-lg text-red-600 hover:bg-red-50 transition-colors"
+                    >
+                      删除
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {editing && (
+        <PresetEditor
+          name={editing.name}
+          initialForm={editing.form}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            setNotice(editing.name ? `已保存预设「${editing.name}」` : "预设已创建");
+            void load();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
 // --- Main Admin Page ---
-type Tab = "users" | "invitations" | "oauth";
+type Tab = "users" | "presets" | "invitations" | "oauth";
 
 export default function Admin() {
   const [activeTab, setActiveTab] = useState<Tab>("users");
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "users", label: "用户管理" },
+    { key: "presets", label: "权益预设" },
     { key: "invitations", label: "注册邀请" },
     { key: "oauth", label: "OAuth 客户端" },
   ];
@@ -1906,6 +2198,7 @@ export default function Admin() {
 
         <div className="bg-white rounded-2xl border border-gray-200 p-6">
           {activeTab === "users" && <UsersSection />}
+          {activeTab === "presets" && <PresetsSection />}
           {activeTab === "invitations" && <RegistrationInvitationsSection />}
           {activeTab === "oauth" && <OAuthClientsSection />}
         </div>

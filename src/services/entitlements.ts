@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
-import { userEntitlement } from "../db/schema";
+import { eq, sql } from "drizzle-orm";
+import { entitlementConfig, entitlementPreset, userEntitlement } from "../db/schema";
 import { CAPABILITIES, PRESETS, SUBSYSTEMS, type Subsystem } from "../capabilities";
 
 type Row = { subsystem: string; capability: string; value: string };
@@ -161,4 +161,136 @@ export async function resolveCapsForRpc(
     .where(eq(userEntitlement.userId, userId))
     .all();
   return rowsToCapsForRpc(rows);
+}
+
+// ── DB 预设与默认权益 ────────────────────────────────────────────────────────
+// 事实源已落库(migration 0007):entitlement_preset 存预设,entitlement_config 存
+// default_preset(新注册用户自动套用的预设名)。capabilities.ts 的 PRESETS 常量仅作
+// 历史快照/种子来源保留。预设项与 user_entitlement 走同一套校验与写入约定。
+
+export interface PresetRecord {
+  name: string;
+  items: Item[];
+  updatedAt?: string;
+}
+
+const DEFAULT_PRESET_KEY = "default_preset";
+
+// 解析 DB 里的 items JSON。形状不对(非数组/字段缺失)返回 null,交给调用方
+// 按「未知预设」处理 —— 坏数据绝不进入写入路径。
+export function parsePresetItems(json: string): Item[] | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+  for (const raw of parsed) {
+    if (
+      !raw ||
+      typeof raw !== "object" ||
+      typeof (raw as Item).subsystem !== "string" ||
+      typeof (raw as Item).capability !== "string" ||
+      typeof (raw as Item).value !== "string"
+    ) {
+      return null;
+    }
+  }
+  return parsed as Item[];
+}
+
+export async function listPresets(db: D1Database): Promise<PresetRecord[]> {
+  const rows = await drizzle(db).select().from(entitlementPreset).all();
+  const out: PresetRecord[] = [];
+  for (const row of rows) {
+    const items = parsePresetItems(row.items);
+    if (items) out.push({ name: row.name, items, updatedAt: row.updatedAt });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+}
+
+// 按名取预设项。不存在或 items 损坏 → null。
+export async function getPresetItems(
+  db: D1Database,
+  name: string
+): Promise<Item[] | null> {
+  const row = await drizzle(db)
+    .select()
+    .from(entitlementPreset)
+    .where(eq(entitlementPreset.name, name))
+    .get();
+  if (!row) return null;
+  return parsePresetItems(row.items);
+}
+
+// upsert 预设。name 为空串拒绝;items 必须先过 validateEntitlementItems。
+export async function upsertPreset(
+  db: D1Database,
+  name: string,
+  items: Item[]
+): Promise<void> {
+  const d = drizzle(db);
+  await d
+    .insert(entitlementPreset)
+    .values({ name, items: JSON.stringify(items) })
+    .onConflictDoUpdate({
+      target: entitlementPreset.name,
+      // 与列默认值同样的 sqlite 日期格式(YYYY-MM-DD HH:MM:SS),避免混入 ISO 串。
+      set: { items: JSON.stringify(items), updatedAt: sql`(datetime('now'))` },
+    });
+}
+
+export async function deletePreset(db: D1Database, name: string): Promise<void> {
+  await drizzle(db)
+    .delete(entitlementPreset)
+    .where(eq(entitlementPreset.name, name));
+}
+
+// 读取默认预设名;未配置返回 null。
+export async function getDefaultPresetName(db: D1Database): Promise<string | null> {
+  const row = await drizzle(db)
+    .select()
+    .from(entitlementConfig)
+    .where(eq(entitlementConfig.key, DEFAULT_PRESET_KEY))
+    .get();
+  return row?.value ?? null;
+}
+
+// 设置/清除默认预设(null = 清除)。预设名存在性由调用方保证。
+export async function setDefaultPresetName(
+  db: D1Database,
+  name: string | null
+): Promise<void> {
+  const d = drizzle(db);
+  if (name === null) {
+    await d
+      .delete(entitlementConfig)
+      .where(eq(entitlementConfig.key, DEFAULT_PRESET_KEY));
+    return;
+  }
+  await d
+    .insert(entitlementConfig)
+    .values({ key: DEFAULT_PRESET_KEY, value: name })
+    .onConflictDoUpdate({
+      target: entitlementConfig.key,
+      set: { value: name, updatedAt: sql`(datetime('now'))` },
+    });
+}
+
+// 注册后钩子:把默认预设写成新用户的 entitlement 行。
+// 未配置默认预设、预设被删、或预设无项 → 安全 no-op(新用户零行 = fail-closed)。
+// 出错抛给调用方;auth 钩子侧负责 catch + 记日志,不让注册失败。
+export async function applyDefaultEntitlements(
+  db: D1Database,
+  userId: string
+): Promise<number> {
+  const name = await getDefaultPresetName(db);
+  if (!name) return 0;
+  const items = await getPresetItems(db, name);
+  if (!items || items.length === 0) return 0;
+  await drizzle(db)
+    .insert(userEntitlement)
+    .values(items.map((it) => ({ userId, ...it })));
+  return items.length;
 }
