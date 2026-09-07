@@ -1,7 +1,12 @@
 import { useState, FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
-import { getPostAuthDestination } from "../lib/email-verification-routing";
+import { getPostAuthNavigationDestination } from "../lib/login-routing";
+import {
+  isExternalHttpTarget,
+  sanitizePostLoginRedirect,
+  withRedirectParam,
+} from "../lib/post-login-redirect";
 
 function getPasswordStrength(password: string): { level: number; label: string; color: string } {
   if (!password) return { level: 0, label: "", color: "" };
@@ -22,6 +27,7 @@ function getPasswordStrength(password: string): { level: number; label: string; 
 export default function Register() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
   const [code, setCode] = useState(() =>
     (searchParams.get("code") ?? "").trim().toUpperCase().slice(0, 8)
   );
@@ -53,7 +59,7 @@ export default function Register() {
       password,
       name,
       code,
-      callbackURL: "/verify-email?verified=1",
+      callbackURL: withRedirectParam("/verify-email?verified=1", postLoginRedirect),
     } as Parameters<
       typeof authClient.signUp.email
     >[0] & { code: string };
@@ -63,7 +69,15 @@ export default function Register() {
     if (error) {
       setError(error.message ?? "注册失败，请稍后重试");
     } else {
-      navigate(getPostAuthDestination(data?.user.emailVerified === true), { replace: true });
+      const destination = getPostAuthNavigationDestination(
+        data?.user.emailVerified === true,
+        postLoginRedirect
+      );
+      if (isExternalHttpTarget(destination)) {
+        window.location.assign(destination);
+        return;
+      }
+      navigate(destination, { replace: true });
     }
   };
 
@@ -205,7 +219,10 @@ export default function Register() {
 
           <p className="mt-6 text-center text-sm text-gray-500">
             已有账户？{" "}
-            <Link to="/login" className="text-blue-600 hover:text-blue-700 font-medium">
+            <Link
+              to={withRedirectParam("/login", postLoginRedirect)}
+              className="text-blue-600 hover:text-blue-700 font-medium"
+            >
               立即登录
             </Link>
           </p>

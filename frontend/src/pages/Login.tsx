@@ -1,10 +1,17 @@
 import { useState, FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
 import { getLoginNavigationDestination } from "../lib/login-routing";
+import {
+  isExternalHttpTarget,
+  sanitizePostLoginRedirect,
+  withRedirectParam,
+} from "../lib/post-login-redirect";
 
 export default function Login() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -22,8 +29,12 @@ export default function Login() {
     if (error) {
       setError(error.message ?? "登录失败，请检查邮箱和密码");
     } else {
-      const destination = getLoginNavigationDestination(data);
+      const destination = getLoginNavigationDestination(data, postLoginRedirect);
       if (!destination) return;
+      if (isExternalHttpTarget(destination)) {
+        window.location.assign(destination);
+        return;
+      }
       navigate(destination, { replace: true });
     }
   };
@@ -101,7 +112,10 @@ export default function Login() {
 
           <p className="mt-6 text-center text-sm text-gray-500">
             还没有账户？{" "}
-            <Link to="/register" className="text-blue-600 hover:text-blue-700 font-medium">
+            <Link
+              to={withRedirectParam("/register", postLoginRedirect)}
+              className="text-blue-600 hover:text-blue-700 font-medium"
+            >
               立即注册
             </Link>
           </p>

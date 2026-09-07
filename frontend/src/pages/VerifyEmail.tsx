@@ -2,12 +2,14 @@ import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
 import { getVerificationLinkErrorMessage } from "../lib/email-verification-routing";
+import { sanitizePostLoginRedirect, withRedirectParam } from "../lib/post-login-redirect";
 
 type SendStatus = "idle" | "sending" | "sent" | "error";
 
 export default function VerifyEmail() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
   const { data: session } = authClient.useSession();
   const [sendStatus, setSendStatus] = useState<SendStatus>("idle");
   const [error, setError] = useState("");
@@ -21,7 +23,7 @@ export default function VerifyEmail() {
     setError("");
     const { error: sendError } = await authClient.sendVerificationEmail({
       email: user.email,
-      callbackURL: "/verify-email?verified=1",
+      callbackURL: withRedirectParam("/verify-email?verified=1", postLoginRedirect),
     });
 
     if (sendError) {

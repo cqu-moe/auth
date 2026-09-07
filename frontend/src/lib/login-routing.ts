@@ -1,4 +1,5 @@
 import { getPostAuthDestination } from "./email-verification-routing";
+import { withRedirectParam } from "./post-login-redirect";
 
 export function shouldSkipPostLoginNavigation(data: unknown): boolean {
   return (
@@ -9,7 +10,18 @@ export function shouldSkipPostLoginNavigation(data: unknown): boolean {
   );
 }
 
-export function getLoginNavigationDestination(data: unknown): string | null {
+export function getPostAuthNavigationDestination(
+  emailVerified: boolean,
+  postLoginRedirect: string | null
+): string {
+  if (emailVerified && postLoginRedirect) return postLoginRedirect;
+  return withRedirectParam(getPostAuthDestination(emailVerified), postLoginRedirect);
+}
+
+export function getLoginNavigationDestination(
+  data: unknown,
+  postLoginRedirect: string | null = null
+): string | null {
   if (shouldSkipPostLoginNavigation(data)) return null;
 
   const user =
@@ -20,5 +32,5 @@ export function getLoginNavigationDestination(data: unknown): string | null {
     typeof user === "object" && user !== null && "emailVerified" in user
       ? user.emailVerified === true
       : false;
-  return getPostAuthDestination(emailVerified);
+  return getPostAuthNavigationDestination(emailVerified, postLoginRedirect);
 }

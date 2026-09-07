@@ -1,6 +1,11 @@
 import { FormEvent, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
+import {
+  isExternalHttpTarget,
+  sanitizePostLoginRedirect,
+  withRedirectParam,
+} from "../lib/post-login-redirect";
 import { normalizeOtp } from "../lib/two-factor";
 import {
   getLoginChallengeError,
@@ -21,7 +26,9 @@ const nativeTwoFactorActions: LoginChallengeActions = {
 
 export default function TwoFactorChallenge() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { refetch: refetchSession } = authClient.useSession();
+  const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
   const [method, setMethod] = useState<LoginChallengeMethod>("totp");
   const [code, setCode] = useState("");
   const [trustDevice, setTrustDevice] = useState(false);
@@ -91,7 +98,12 @@ export default function TwoFactorChallenge() {
       showError(result.error, "验证失败，请重试");
       return;
     }
-    navigate("/settings", { replace: true });
+    const destination = postLoginRedirect ?? "/settings";
+    if (isExternalHttpTarget(destination)) {
+      window.location.assign(destination);
+      return;
+    }
+    navigate(destination, { replace: true });
   };
 
   const isBackupCode = method === "backup-code";
@@ -129,7 +141,10 @@ export default function TwoFactorChallenge() {
             <div className="mt-5 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700" role="alert">
               {error}
               {challengeExpired && (
-                <Link to="/login" className="ml-1 underline font-medium">
+                <Link
+                  to={withRedirectParam("/login", postLoginRedirect)}
+                  className="ml-1 underline font-medium"
+                >
                   返回登录
                 </Link>
               )}
