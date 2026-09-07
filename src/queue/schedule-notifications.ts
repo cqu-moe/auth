@@ -145,12 +145,12 @@ export async function processScheduleNotification(
       userId: notification.userId,
     }));
     return "ack";
-  } catch (error) {
+  } catch {
     console.error(JSON.stringify({
       event: "queue.schedule_notification.send_retry",
       notificationId: notification.notificationId,
       userId: notification.userId,
-      error: error instanceof Error ? error.message : String(error),
+      reason: "notification_send_failed",
     }));
     return "retry";
   }
