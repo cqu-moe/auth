@@ -175,6 +175,9 @@ export interface PresetRecord {
 }
 
 const DEFAULT_PRESET_KEY = "default_preset";
+// 注册政策开关:"1" = 必须有邀请码才能注册(缺省值,保持历史行为);
+// "0" = 无邀请码也可注册(按 default_preset 给权益)。
+const INVITATION_REQUIRED_KEY = "invitation_required";
 
 // 解析 DB 里的 items JSON。形状不对(非数组/字段缺失)返回 null,交给调用方
 // 按「未知预设」处理 —— 坏数据绝不进入写入路径。
@@ -280,17 +283,50 @@ export async function setDefaultPresetName(
 
 // 注册后钩子:把默认预设写成新用户的 entitlement 行。
 // 未配置默认预设、预设被删、或预设无项 → 安全 no-op(新用户零行 = fail-closed)。
-// 出错抛给调用方;auth 钩子侧负责 catch + 记日志,不让注册失败。
+// 出错抛给调用方;注册流程侧负责 catch + 记日志,不让注册失败。
 export async function applyDefaultEntitlements(
   db: D1Database,
   userId: string
 ): Promise<number> {
   const name = await getDefaultPresetName(db);
   if (!name) return 0;
+  return applyPresetEntitlements(db, userId, name);
+}
+
+// 把指定预设写成用户的 entitlement 行(注册场景:用户尚无行,纯 insert)。
+// 预设不存在或无项 → 安全 no-op。返回写入行数。
+export async function applyPresetEntitlements(
+  db: D1Database,
+  userId: string,
+  name: string
+): Promise<number> {
   const items = await getPresetItems(db, name);
   if (!items || items.length === 0) return 0;
   await drizzle(db)
     .insert(userEntitlement)
     .values(items.map((it) => ({ userId, ...it })));
   return items.length;
+}
+
+// 注册是否强制邀请码。缺省 true:与引入开关前的行为一致(邀请码制)。
+export async function isInvitationRequired(db: D1Database): Promise<boolean> {
+  const row = await drizzle(db)
+    .select()
+    .from(entitlementConfig)
+    .where(eq(entitlementConfig.key, INVITATION_REQUIRED_KEY))
+    .get();
+  return row?.value !== "0";
+}
+
+export async function setInvitationRequired(
+  db: D1Database,
+  required: boolean
+): Promise<void> {
+  await drizzle(db)
+    .insert(entitlementConfig)
+    .values({ key: INVITATION_REQUIRED_KEY, value: required ? "1" : "0" })
+    .onConflictDoUpdate({
+      target: entitlementConfig.key,
+      set: { value: required ? "1" : "0", updatedAt: sql`(datetime('now'))` },
+    });
 }

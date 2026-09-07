@@ -1,4 +1,4 @@
-import { useState, FormEvent } from "react";
+import { useState, useEffect, FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
 import { getPostAuthNavigationDestination } from "../lib/login-routing";
@@ -38,6 +38,22 @@ export default function Register() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const strength = getPasswordStrength(password);
+  // 邀请码是否必填由管理台「注册政策」控制;默认按必填渲染(与后端缺省一致),
+  // 拉到设置后再放宽为选填。
+  const [invitationRequired, setInvitationRequired] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/auth/registration-settings")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { invitationRequired?: boolean } | null) => {
+        if (typeof data?.invitationRequired === "boolean") {
+          setInvitationRequired(data.invitationRequired);
+        }
+      })
+      .catch(() => {
+        // 拉不到设置就维持必填(后端缺省同样要求邀请码,行为一致)。
+      });
+  }, []);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -188,20 +204,23 @@ export default function Register() {
             <div>
               <label htmlFor="invitationCode" className="block text-sm font-medium text-gray-700 mb-1">
                 邀请码
+                {!invitationRequired && (
+                  <span className="ml-2 text-xs font-normal text-gray-400">选填</span>
+                )}
               </label>
               <input
                 id="invitationCode"
                 type="text"
                 value={code}
                 onChange={(e) => setCode(e.target.value.trim().toUpperCase().slice(0, 8))}
-                required
-                minLength={8}
+                required={invitationRequired}
+                minLength={invitationRequired ? 8 : 0}
                 maxLength={8}
-                pattern="[A-HJ-NP-Z2-9]{8}"
+                pattern={invitationRequired ? "[A-HJ-NP-Z2-9]{8}" : "([A-HJ-NP-Z2-9]{8})?"}
                 autoComplete="one-time-code"
                 spellCheck={false}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono tracking-widest uppercase focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="请输入邀请码"
+                placeholder={invitationRequired ? "请输入邀请码" : "请输入邀请码，可留空"}
               />
             </div>
 

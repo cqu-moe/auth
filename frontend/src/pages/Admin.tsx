@@ -50,6 +50,7 @@ interface RegistrationInvitation {
   usedAt: string | null;
   usedByUserId: string | null;
   revokedAt: string | null;
+  preset: string | null;
   status: InvitationStatus;
 }
 
@@ -1605,17 +1606,37 @@ function RegistrationInvitationsSection() {
   const [creating, setCreating] = useState(false);
   const [revoking, setRevoking] = useState<string | null>(null);
   const [error, setError] = useState("");
+  // 注册政策:是否强制邀请码;savingPolicy 期间禁用开关防连点。
+  const [invitationRequired, setInvitationRequired] = useState(true);
+  const [savingPolicy, setSavingPolicy] = useState(false);
+  // 生成邀请时可选的权益预设("" = 跟随全局默认权益)。
+  const [presets, setPresets] = useState<EntitlementPreset[]>([]);
+  const [createPreset, setCreatePreset] = useState("");
 
   const fetchInvitations = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/admin/registration-invitations");
+      const [res, settingsRes, presetsRes] = await Promise.all([
+        fetch("/api/admin/registration-invitations"),
+        fetch("/api/admin/registration-settings"),
+        fetch("/api/admin/entitlement-presets"),
+      ]);
       if (!res.ok) {
         setError(await readErrorMessage(res, "加载注册邀请失败"));
         return;
       }
       const body = (await res.json()) as { data: RegistrationInvitation[] };
       setInvitations(body.data ?? []);
+      if (settingsRes.ok) {
+        const settings = (await settingsRes.json()) as { invitationRequired?: boolean };
+        if (typeof settings.invitationRequired === "boolean") {
+          setInvitationRequired(settings.invitationRequired);
+        }
+      }
+      if (presetsRes.ok) {
+        const data = (await presetsRes.json()) as { data: EntitlementPreset[] };
+        setPresets(data.data ?? []);
+      }
     } catch {
       setError("网络错误，请稍后重试");
     } finally {
@@ -1627,12 +1648,37 @@ function RegistrationInvitationsSection() {
     void fetchInvitations();
   }, [fetchInvitations]);
 
+  const togglePolicy = async (required: boolean) => {
+    setSavingPolicy(true);
+    setError("");
+    try {
+      const res = await fetch("/api/admin/registration-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ invitationRequired: required }),
+      });
+      if (res.ok) {
+        setInvitationRequired(required);
+      } else if (res.status === 403) {
+        setError("需要 superAdmin 权限");
+      } else {
+        setError(await readErrorMessage(res, "保存注册政策失败"));
+      }
+    } catch {
+      setError("网络错误，请稍后重试");
+    } finally {
+      setSavingPolicy(false);
+    }
+  };
+
   const createInvitation = async () => {
     setCreating(true);
     setError("");
     try {
       const res = await fetch("/api/admin/registration-invitations", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preset: createPreset || null }),
       });
       if (!res.ok) {
         setError(await readErrorMessage(res, "生成邀请码失败"));
@@ -1690,10 +1736,41 @@ function RegistrationInvitationsSection() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <p className="text-sm text-gray-700">注册必须使用邀请码</p>
-          <p className="mt-0.5 text-xs text-gray-400">邀请码为 8 位字符，单次使用，生成后 7 天过期</p>
+      {/* --- 注册政策开关 --- */}
+      <div className="border border-gray-100 bg-gray-50 rounded-xl p-4">
+        <Toggle
+          checked={invitationRequired}
+          onChange={(v) => void togglePolicy(v)}
+          label="强制邀请码注册"
+          hint={
+            invitationRequired
+              ? "未填写邀请码无法注册;邀请码可携带指定权益预设。"
+              : "任何人都能注册,未填邀请码的新用户套用「权益预设」页的默认权益。"
+          }
+        />
+        {savingPolicy && (
+          <p className="mt-1 text-xs text-gray-400">保存中...</p>
+        )}
+      </div>
+
+      {/* --- 生成邀请 --- */}
+      <div className="flex items-end justify-between gap-4">
+        <div className="min-w-0 flex-1 max-w-xs">
+          <FieldLabel hint="使用该邀请码注册的用户获得对应权益">注册后权益</FieldLabel>
+          <MenuSelect
+            value={createPreset}
+            onChange={setCreatePreset}
+            options={[
+              { value: "", label: "跟随默认权益" },
+              ...presets.map((p) => ({
+                value: p.name,
+                label: p.name,
+                hint: `${p.items.length} 项能力`,
+              })),
+            ]}
+            aria-label="新邀请的权益预设"
+            buttonClassName="w-full justify-between px-3 py-2"
+          />
         </div>
         <button
           type="button"
@@ -1744,6 +1821,7 @@ function RegistrationInvitationsSection() {
               <tr className="border-b border-gray-200">
                 <th className="text-left py-3 px-3 text-xs font-semibold text-gray-500">邀请码</th>
                 <th className="text-left py-3 px-3 text-xs font-semibold text-gray-500">状态</th>
+                <th className="text-left py-3 px-3 text-xs font-semibold text-gray-500">权益</th>
                 <th className="text-left py-3 px-3 text-xs font-semibold text-gray-500">过期时间</th>
                 <th className="text-left py-3 px-3 text-xs font-semibold text-gray-500">使用情况</th>
                 <th className="text-right py-3 px-3 text-xs font-semibold text-gray-500">操作</th>
@@ -1764,6 +1842,9 @@ function RegistrationInvitationsSection() {
                       <span className={`inline-flex text-xs font-medium px-2 py-0.5 rounded-full ${meta.className}`}>
                         {meta.label}
                       </span>
+                    </td>
+                    <td className="py-3 px-3 text-xs text-gray-500">
+                      {invitation.preset ?? <span className="text-gray-400">默认</span>}
                     </td>
                     <td className="py-3 px-3 text-xs text-gray-500 whitespace-nowrap">
                       {new Date(invitation.expiresAt).toLocaleString("zh-CN")}

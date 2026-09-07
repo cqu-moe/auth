@@ -160,4 +160,6 @@ export const registrationInvitation = sqliteTable("registration_invitation", {
   usedAt: text("used_at"),
   usedByUserId: text("used_by_user_id"),
   revokedAt: text("revoked_at"),
+  // 注册该邀请码时套用的权益预设名;NULL = 回落默认预设。
+  preset: text("preset"),
 });

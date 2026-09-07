@@ -1,8 +1,15 @@
 const INVITATION_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const INVITATION_CODE_LENGTH = 8;
 
+import {
+  applyDefaultEntitlements,
+  applyPresetEntitlements,
+  isInvitationRequired,
+} from "./entitlements";
+
 export type InvitationErrorCode =
   | "INVALID_INVITATION_CODE"
+  | "INVITATION_REQUIRED"
   | "INVITATION_EXPIRED"
   | "INVITATION_REVOKED"
   | "INVITATION_USED"
@@ -44,6 +51,8 @@ export interface RegistrationInvitation {
   usedAt: string | null;
   usedByUserId: string | null;
   revokedAt: string | null;
+  // 注册该邀请码时套用的权益预设名;null = 回落全局默认预设。
+  preset: string | null;
   status: RegistrationInvitationStatus;
 }
 
@@ -80,6 +89,7 @@ interface InvitationAdminRow {
   used_at: string | null;
   used_by_user_id: string | null;
   revoked_at: string | null;
+  preset: string | null;
 }
 
 function invitationStatus(
@@ -107,6 +117,7 @@ function adminRowToInvitation(
     usedAt: row.used_at,
     usedByUserId: row.used_by_user_id,
     revokedAt: row.revoked_at,
+    preset: row.preset,
     status: invitationStatus(row, nowIso),
   };
 }
@@ -114,9 +125,13 @@ function adminRowToInvitation(
 export async function createRegistrationInvitation(
   db: D1Database,
   createdBy: string,
-  now = new Date(),
-  codeFactory: () => string = generateInvitationCode
+  options: {
+    preset?: string | null;
+    now?: Date;
+    codeFactory?: () => string;
+  } = {}
 ): Promise<RegistrationInvitation> {
+  const { preset = null, now = new Date(), codeFactory = generateInvitationCode } = options;
   const createdAt = now.toISOString();
   const expiresAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -125,10 +140,10 @@ export async function createRegistrationInvitation(
     const result = await db
       .prepare(
         `INSERT OR IGNORE INTO registration_invitation
-           (code, created_by, created_at, expires_at)
-         VALUES (?, ?, ?, ?)`
+           (code, created_by, created_at, expires_at, preset)
+         VALUES (?, ?, ?, ?, ?)`
       )
-      .bind(code, createdBy, createdAt, expiresAt)
+      .bind(code, createdBy, createdAt, expiresAt, preset)
       .run();
     if (result.meta.changes === 1) {
       return {
@@ -141,6 +156,7 @@ export async function createRegistrationInvitation(
         usedAt: null,
         usedByUserId: null,
         revokedAt: null,
+        preset,
         status: "active",
       };
     }
@@ -159,7 +175,7 @@ export async function listRegistrationInvitations(
   const result = await db
     .prepare(
       `SELECT code, created_by, created_at, expires_at,
-              claimed_at, claimed_by_email, used_at, used_by_user_id, revoked_at
+              claimed_at, claimed_by_email, used_at, used_by_user_id, revoked_at, preset
        FROM registration_invitation
        ORDER BY created_at DESC
        LIMIT 100`
@@ -354,6 +370,63 @@ export async function handleInvitationSignup(
   }
 
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+  const codeProvided =
+    typeof body.code === "string" && body.code.trim() !== "";
+
+  // 剥掉 code 字段后转发给 Better Auth(它不认识这个字段)。
+  const forward = () => {
+    const { code: _code, ...authBody } = body;
+    const headers = new Headers(request.headers);
+    headers.delete("content-length");
+    headers.set("content-type", "application/json");
+    const forwarded = new Request(request.url, {
+      method: request.method,
+      headers,
+      body: JSON.stringify(authBody),
+    });
+    return register(forwarded);
+  };
+
+  // 注册成功后从响应/邮箱反查 userId(响应体拿不到时按 email 兜底)。
+  const resolveUserId = async (response: Response): Promise<string | null> => {
+    const fromBody = await responseUserId(response);
+    if (fromBody || !email) return fromBody;
+    const existing = await db
+      .prepare(`SELECT id FROM user WHERE lower(email) = lower(?) LIMIT 1`)
+      .bind(email)
+      .first<{ id: string }>();
+    return existing?.id ?? null;
+  };
+
+  // 权益写入失败只记日志,不让已成功的注册报错(缺省零行 = fail-closed)。
+  const applyEntitlements = async (userId: string, preset: string | null) => {
+    try {
+      if (preset) await applyPresetEntitlements(db, userId, preset);
+      else await applyDefaultEntitlements(db, userId);
+    } catch (e) {
+      console.error(
+        `[signup] apply entitlements failed for userId=${userId}: ${e instanceof Error ? e.message : String(e)}`
+      );
+    }
+  };
+
+  // ── 无邀请码路径:仅当管理台关闭了「强制邀请码」才放行 ──
+  if (!codeProvided) {
+    if (await isInvitationRequired(db)) {
+      return invitationErrorResponse(
+        new InvitationError("INVITATION_REQUIRED", "注册需要邀请码")
+      );
+    }
+    const response = await forward();
+    if (response.ok) {
+      const userId = await resolveUserId(response);
+      // 无码注册按全局默认预设给权益(未配置 = 零权益)。
+      if (userId) await applyEntitlements(userId, null);
+    }
+    return response;
+  }
+
+  // ── 邀请码路径:原子占用 → 注册 → 核销 → 写权益 ──
   let claim: InvitationClaim;
   try {
     claim = await claimInvitation(db, body.code, email, now);
@@ -362,19 +435,9 @@ export async function handleInvitationSignup(
     throw error;
   }
 
-  const { code: _code, ...authBody } = body;
-  const headers = new Headers(request.headers);
-  headers.delete("content-length");
-  headers.set("content-type", "application/json");
-  const forwarded = new Request(request.url, {
-    method: request.method,
-    headers,
-    body: JSON.stringify(authBody),
-  });
-
   let response: Response;
   try {
-    response = await register(forwarded);
+    response = await forward();
   } catch (error) {
     await releaseInvitation(db, claim);
     throw error;
@@ -384,14 +447,7 @@ export async function handleInvitationSignup(
     return response;
   }
 
-  let userId = await responseUserId(response);
-  if (!userId && email) {
-    const existing = await db
-      .prepare(`SELECT id FROM user WHERE lower(email) = lower(?) LIMIT 1`)
-      .bind(email)
-      .first<{ id: string }>();
-    userId = existing?.id ?? null;
-  }
+  const userId = await resolveUserId(response);
   if (!userId) {
     throw new InvitationError(
       "INVITATION_CLAIM_LOST",
@@ -401,5 +457,11 @@ export async function handleInvitationSignup(
   }
 
   await completeInvitation(db, claim, userId, now);
+  // 邀请码自带预设优先(完全替代默认);未指定则回落全局默认预设。
+  const invitation = await db
+    .prepare(`SELECT preset FROM registration_invitation WHERE code = ?`)
+    .bind(claim.code)
+    .first<{ preset: string | null }>();
+  await applyEntitlements(userId, invitation?.preset ?? null);
   return response;
 }

@@ -9,11 +9,7 @@ import { customSession, emailOTP, twoFactor } from "better-auth/plugins";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { Resend } from "resend";
 import type { Env } from "./types";
-import {
-  applyDefaultEntitlements,
-  resolveCaps,
-  subsystemForAccessToken,
-} from "./services/entitlements";
+import { resolveCaps, subsystemForAccessToken } from "./services/entitlements";
 import { isCquMoeHost } from "./utils/cookie-domain";
 
 // Must spread the admin plugin's defaultStatements: its built-in endpoints
@@ -222,24 +218,11 @@ export function createAuth(env: Env, request: Request) {
         // trustedOrigins 是顶层选项,通配符匹配整个 origin(含 :// 与 *);baseURL 已自动可信。
         // dev(localhost)下保留无害 —— baseURL 已自动可信,不靠它。
         trustedOrigins: ["https://*.cqu.moe"],
-        databaseHooks: {
-          user: {
-            create: {
-              // 新注册用户自动套用「默认权益」预设(entitlement_config.default_preset,
-              // 管理台可配)。失败只记日志、不阻断注册:缺省即零 entitlement 行,
-              // 下游(caps resolve / schedule fail-closed)天然按无权限处理,安全。
-              after: async (user) => {
-                try {
-                  await applyDefaultEntitlements(env.DATABASE, user.id);
-                } catch (e) {
-                  console.error(
-                    `[auth] applyDefaultEntitlements failed for userId=${user.id}: ${e instanceof Error ? e.message : String(e)}`
-                  );
-                }
-              },
-            },
-          },
-        },
+        // 注册权益不落在这里的 databaseHooks:公开注册唯一入口是
+        // handleInvitationSignup(src/index.ts 拦截 /api/auth/sign-up/email),
+        // 它按「邀请码自带预设 → 全局默认预设」显式写入,语义比全局钩子精确
+        // (钩子分不清用户是凭哪个邀请码/无码注册的)。admin 后台建号不带权益
+        // (fail-closed),需要时由管理台单独授权。
         // 跨子域 cookie 的 Domain 只在 auth host 真为 cqu.moe(生产)时才设。
         // 必须显式写 domain: "cqu.moe":省略时 better-auth 默认取
         // new URL(baseURL).hostname = "auth.cqu.moe",cookie 仅作用于该单一子域,

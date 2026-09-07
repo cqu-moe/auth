@@ -44,6 +44,9 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await env.DATABASE.prepare("DELETE FROM registration_invitation").run();
+  await env.DATABASE.prepare("DELETE FROM user_entitlement").run();
+  await env.DATABASE.prepare("DELETE FROM entitlement_preset").run();
+  await env.DATABASE.prepare("DELETE FROM entitlement_config").run();
 });
 
 describe("invitation claim lifecycle", () => {
@@ -130,8 +133,7 @@ describe("invitation administration", () => {
     const created = await createRegistrationInvitation(
       env.DATABASE,
       "admin-7",
-      NOW,
-      () => "CREATE22"
+      { now: NOW, codeFactory: () => "CREATE22" }
     );
 
     expect(created).toMatchObject({
@@ -150,8 +152,7 @@ describe("invitation administration", () => {
     const created = await createRegistrationInvitation(
       env.DATABASE,
       "admin-1",
-      NOW,
-      () => codes.shift() ?? "UN3QUE22"
+      { now: NOW, codeFactory: () => codes.shift() ?? "UN3QUE22" }
     );
 
     expect(created.code).toBe("UN3QUE22");
@@ -198,7 +199,7 @@ describe("invitation administration", () => {
 });
 
 describe("invitation-only signup boundary", () => {
-  it("rejects a missing code without calling Better Auth", async () => {
+  it("rejects a missing code without calling Better Auth when invitations are required", async () => {
     let called = false;
     const request = new Request("https://auth.cqu.moe/api/auth/sign-up/email", {
       method: "POST",
@@ -221,7 +222,7 @@ describe("invitation-only signup boundary", () => {
     );
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({ code: "INVALID_INVITATION_CODE" });
+    expect(await response.json()).toMatchObject({ code: "INVITATION_REQUIRED" });
     expect(called).toBe(false);
   });
 
@@ -353,4 +354,186 @@ it("InvitationError exposes a stable code for route error mapping", () => {
   expect(new InvitationError("INVITATION_USED", "邀请码已使用").code).toBe(
     "INVITATION_USED"
   );
+});
+
+describe("registration entitlements (preset wiring)", () => {
+  const signupRequest = (body: Record<string, unknown>) =>
+    new Request("https://auth.cqu.moe/api/auth/sign-up/email", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "New User",
+        email: "new@example.com",
+        password: "password123",
+        ...body,
+      }),
+    });
+  const okRegister = async () => Response.json({ user: { id: "user-ent" } });
+
+  async function insertPreset(name: string, items: { subsystem: string; capability: string; value: string }[]) {
+    await env.DATABASE.prepare(
+      "INSERT INTO entitlement_preset (name, items) VALUES (?, ?)"
+    )
+      .bind(name, JSON.stringify(items))
+      .run();
+  }
+
+  async function entitlementRows(userId: string) {
+    const result = await env.DATABASE.prepare(
+      "SELECT subsystem, capability, value FROM user_entitlement WHERE user_id = ? ORDER BY subsystem, capability"
+    )
+      .bind(userId)
+      .all<{ subsystem: string; capability: string; value: string }>();
+    return result.results;
+  }
+
+  it("grants the invitation's own preset on signup", async () => {
+    await insertPreset("助教", [
+      { subsystem: "calendar", capability: "sync", value: "1" },
+      { subsystem: "eval", capability: "batch", value: "1" },
+    ]);
+    await createRegistrationInvitation(env.DATABASE, "admin-1", {
+      preset: "助教",
+      now: NOW,
+      codeFactory: () => "V3PPPP22",
+    });
+
+    const response = await handleInvitationSignup(
+      signupRequest({ code: "V3PPPP22" }),
+      env.DATABASE,
+      okRegister,
+      NOW
+    );
+
+    expect(response.status).toBe(200);
+    expect(await entitlementRows("user-ent")).toEqual([
+      { subsystem: "calendar", capability: "sync", value: "1" },
+      { subsystem: "eval", capability: "batch", value: "1" },
+    ]);
+  });
+
+  it("invitation preset overrides the global default preset", async () => {
+    await insertPreset("学生", [
+      { subsystem: "calendar", capability: "sync", value: "1" },
+    ]);
+    await insertPreset("助教", [
+      { subsystem: "eval", capability: "batch", value: "1" },
+    ]);
+    await env.DATABASE.prepare(
+      "INSERT INTO entitlement_config (key, value) VALUES ('default_preset', '学生')"
+    ).run();
+    await createRegistrationInvitation(env.DATABASE, "admin-1", {
+      preset: "助教",
+      now: NOW,
+      codeFactory: () => "VV3D2222",
+    });
+
+    await handleInvitationSignup(
+      signupRequest({ code: "VV3D2222" }),
+      env.DATABASE,
+      okRegister,
+      NOW
+    );
+
+    // 只含助教项:邀请码预设是完全替代,不是与默认合并。
+    expect(await entitlementRows("user-ent")).toEqual([
+      { subsystem: "eval", capability: "batch", value: "1" },
+    ]);
+  });
+
+  it("plain invitation falls back to the global default preset", async () => {
+    await insertPreset("学生", [
+      { subsystem: "calendar", capability: "sync", value: "1" },
+      { subsystem: "calendar", capability: "sub_limit", value: "50" },
+    ]);
+    await env.DATABASE.prepare(
+      "INSERT INTO entitlement_config (key, value) VALUES ('default_preset', '学生')"
+    ).run();
+    await insertInvitation("PLA3N222");
+
+    await handleInvitationSignup(
+      signupRequest({ code: "PLA3N222" }),
+      env.DATABASE,
+      okRegister,
+      NOW
+    );
+
+    expect(await entitlementRows("user-ent")).toEqual([
+      { subsystem: "calendar", capability: "sub_limit", value: "50" },
+      { subsystem: "calendar", capability: "sync", value: "1" },
+    ]);
+  });
+
+  it("allows signup without a code when invitations are not required, applying the default preset", async () => {
+    await insertPreset("学生", [
+      { subsystem: "calendar", capability: "sync", value: "1" },
+    ]);
+    await env.DATABASE.prepare(
+      "INSERT INTO entitlement_config (key, value) VALUES ('default_preset', '学生')"
+    ).run();
+    await env.DATABASE.prepare(
+      "INSERT INTO entitlement_config (key, value) VALUES ('invitation_required', '0')"
+    ).run();
+    let called = false;
+
+    const response = await handleInvitationSignup(
+      signupRequest({}),
+      env.DATABASE,
+      async () => {
+        called = true;
+        return Response.json({ user: { id: "user-ent" } });
+      },
+      NOW
+    );
+
+    expect(response.status).toBe(200);
+    expect(called).toBe(true);
+    expect(await entitlementRows("user-ent")).toEqual([
+      { subsystem: "calendar", capability: "sync", value: "1" },
+    ]);
+  });
+
+  it("no-code signup with no default preset leaves the user entitlement-free (fail-closed)", async () => {
+    await env.DATABASE.prepare(
+      "INSERT INTO entitlement_config (key, value) VALUES ('invitation_required', '0')"
+    ).run();
+
+    const response = await handleInvitationSignup(
+      signupRequest({}),
+      env.DATABASE,
+      okRegister,
+      NOW
+    );
+
+    expect(response.status).toBe(200);
+    expect(await entitlementRows("user-ent")).toEqual([]);
+  });
+
+  it("empty-string code counts as no code (rejected when required)", async () => {
+    const response = await handleInvitationSignup(
+      signupRequest({ code: "   " }),
+      env.DATABASE,
+      okRegister,
+      NOW
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "INVITATION_REQUIRED" });
+  });
+
+  it("failed no-code registration does not write entitlements", async () => {
+    await env.DATABASE.prepare(
+      "INSERT INTO entitlement_config (key, value) VALUES ('invitation_required', '0')"
+    ).run();
+
+    const response = await handleInvitationSignup(
+      signupRequest({}),
+      env.DATABASE,
+      async () => Response.json({ message: "User already exists" }, { status: 422 }),
+      NOW
+    );
+
+    expect(response.status).toBe(422);
+    expect(await entitlementRows("user-ent")).toEqual([]);
+  });
 });

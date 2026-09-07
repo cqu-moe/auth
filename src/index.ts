@@ -43,6 +43,13 @@ app.post("/api/auth/sign-up/email", async (c) => {
   );
 });
 
+// 公开只读:注册页据此决定邀请码是必填还是选填。
+// 只回一个布尔位,不泄露任何预设/邀请码内容。
+app.get("/api/auth/registration-settings", async (c) => {
+  const { isInvitationRequired } = await import("./services/entitlements");
+  return c.json({ invitationRequired: await isInvitationRequired(c.env.DATABASE) });
+});
+
 app.all("/api/auth/*", async (c) => {
   const auth = createAuth(c.env, c.req.raw);
   return auth.handler(c.req.raw);

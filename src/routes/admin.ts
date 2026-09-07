@@ -19,6 +19,8 @@ import {
   deletePreset,
   getDefaultPresetName,
   setDefaultPresetName,
+  isInvitationRequired,
+  setInvitationRequired,
 } from "../services/entitlements";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, and } from "drizzle-orm";
@@ -314,12 +316,22 @@ admin.get("/registration-invitations", async (c) => {
 });
 
 // POST /api/admin/registration-invitations - 生成 8 位明文 code，默认 7 天有效。
+// body 可选 { preset: string | null }:注册使用该邀请码时套用的权益预设;
+// null/省略 = 回落全局默认预设。指定的预设必须已存在。
 admin.post("/registration-invitations", async (c) => {
   const user = c.get("user");
+  const body = await c.req
+    .json<{ preset?: string | null }>()
+    .catch(() => ({}) as { preset?: string | null });
+  const preset = body.preset ?? null;
+  if (preset !== null && !(await getPresetItems(c.env.DATABASE, preset))) {
+    return errorResponse(c, "UNKNOWN_PRESET", "未知预设", 400);
+  }
   try {
     const invitation = await createRegistrationInvitation(
       c.env.DATABASE,
-      user.id
+      user.id,
+      { preset }
     );
     const registrationUrl = new URL("/register", c.env.BETTER_AUTH_URL);
     registrationUrl.searchParams.set("code", invitation.code);
@@ -333,6 +345,32 @@ admin.post("/registration-invitations", async (c) => {
     }
     throw error;
   }
+});
+
+// ── 注册政策开关 ─────────────────────────────────────────────────────────────
+// invitationRequired = true(缺省):注册必须填邀请码(无码 = 禁止注册);
+// false:无码也可注册,权益按 entitlement_config.default_preset 给。
+// 读:admin/superAdmin;写:superAdmin(entitlement:assign,与预设管理同档)。
+
+// GET /api/admin/registration-settings
+admin.get("/registration-settings", async (c) => {
+  return c.json({ invitationRequired: await isInvitationRequired(c.env.DATABASE) });
+});
+
+// PUT /api/admin/registration-settings - body { invitationRequired: boolean }
+admin.put("/registration-settings", async (c) => {
+  const auth = createAuth(c.env, c.req.raw);
+  if (!(await hasEntitlementPermission(c, auth, "assign"))) {
+    return errorResponse(c, "FORBIDDEN", "需要权益写权限", 403);
+  }
+  const body = await c.req
+    .json<{ invitationRequired?: unknown }>()
+    .catch(() => ({}) as { invitationRequired?: unknown });
+  if (typeof body.invitationRequired !== "boolean") {
+    return errorResponse(c, "INVALID_SETTING", "invitationRequired 必须是布尔值", 400);
+  }
+  await setInvitationRequired(c.env.DATABASE, body.invitationRequired);
+  return c.json({ success: true, invitationRequired: body.invitationRequired });
 });
 
 // DELETE /api/admin/registration-invitations/:code - 撤销未使用邀请（幂等）。
