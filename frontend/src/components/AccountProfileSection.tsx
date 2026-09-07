@@ -4,30 +4,12 @@ import { authClient } from "../lib/auth-client";
 import {
   validateDisplayName,
 } from "../lib/account-settings";
+import SettingsCard from "./SettingsCard";
 
 interface AccountProfileSectionProps {
   name: string;
   email: string;
   onSessionRefresh: () => Promise<unknown>;
-}
-
-function EditIcon() {
-  return (
-    <svg
-      className="h-4 w-4"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      aria-hidden="true"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.862 4.487zM19.5 7.125L16.862 4.487M18 14.25V19.5A1.5 1.5 0 0116.5 21h-12A1.5 1.5 0 013 19.5v-12A1.5 1.5 0 014.5 6H9.75"
-      />
-    </svg>
-  );
 }
 
 export default function AccountProfileSection({
@@ -83,35 +65,31 @@ export default function AccountProfileSection({
   };
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-6">
-      <h3 className="mb-4 text-base font-semibold text-gray-900">个人信息</h3>
-
-      <div className="space-y-3">
-        <div className="border-b border-gray-100 py-2">
+    <SettingsCard title="个人信息" description="登录账户和对外展示的基本信息。">
+      <div className="divide-y divide-gray-100">
+        <div className="pb-4">
           <div className="flex items-center justify-between gap-4">
-            <span className="text-sm text-gray-500">昵称</span>
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="truncate text-sm font-medium text-gray-900">{name || "—"}</span>
-              <button
-                type="button"
-                onClick={openNameEditor}
-                aria-label="修改昵称"
-                aria-expanded={editingName}
-                aria-controls="display-name-editor"
-                className="shrink-0 rounded-md p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
-              >
-                <EditIcon />
-              </button>
-            </div>
+            <span className="w-16 shrink-0 text-sm text-gray-500">昵称</span>
+            <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-900">{name || "—"}</span>
+            <button
+              type="button"
+              onClick={openNameEditor}
+              aria-label="修改昵称"
+              aria-expanded={editingName}
+              aria-controls="display-name-editor"
+              className="shrink-0 rounded-md px-2 py-1 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-50 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+            >
+              修改
+            </button>
           </div>
 
           {editingName && (
             <form
               id="display-name-editor"
               onSubmit={handleNameSubmit}
-              className="mt-3 rounded-xl bg-gray-50 p-3"
+              className="mt-3 rounded-xl bg-gray-50 p-4"
             >
-              <label htmlFor="displayName" className="mb-1.5 block text-xs font-medium text-gray-600">
+              <label htmlFor="displayName" className="mb-1.5 block text-sm font-medium text-gray-700">
                 新昵称
               </label>
               <div className="flex flex-col gap-2 sm:flex-row">
@@ -124,7 +102,13 @@ export default function AccountProfileSection({
                   maxLength={64}
                   autoComplete="name"
                   autoFocus
-                  className="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  aria-invalid={nameError ? true : undefined}
+                  aria-describedby="display-name-hint"
+                  className={`min-w-0 flex-1 rounded-lg border bg-white px-3 py-2 text-base focus:outline-none focus:ring-2 sm:text-sm ${
+                    nameError
+                      ? "border-red-300 focus:ring-red-500"
+                      : "border-gray-300 focus:ring-blue-500"
+                  }`}
                   placeholder="请输入昵称"
                 />
                 <div className="flex gap-2">
@@ -148,30 +132,33 @@ export default function AccountProfileSection({
                   </button>
                 </div>
               </div>
-              <p className="mt-1.5 text-xs text-gray-400">最多 64 个字符，保存时会移除首尾空格。</p>
-              {nameError && <p className="mt-2 text-sm text-red-700" role="alert">{nameError}</p>}
+              <p id="display-name-hint" className="mt-1.5 text-xs text-gray-400">最多 64 个字符，保存时会移除首尾空格。</p>
+              {nameError && <p className="mt-2 flex items-center gap-1.5 text-sm text-red-700" role="alert"><span aria-hidden="true">⚠</span>{nameError}</p>}
             </form>
           )}
 
           {nameSuccess && !editingName && (
-            <p className="mt-2 text-right text-xs text-green-700" role="status">昵称已更新</p>
+            <p className="mt-2 flex items-center justify-end gap-1 text-xs text-green-700" role="status">
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              昵称已更新
+            </p>
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-4 py-2">
-          <span className="text-sm text-gray-500">邮箱</span>
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-sm font-medium text-gray-900">{email || "—"}</span>
-            <Link
-              to="/settings/email"
-              aria-label="修改邮箱"
-              className="shrink-0 rounded-md p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
-            >
-              <EditIcon />
-            </Link>
-          </div>
+        <div className="flex items-center justify-between gap-4 pt-4">
+          <span className="w-16 shrink-0 text-sm text-gray-500">邮箱</span>
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-900">{email || "—"}</span>
+          <Link
+            to="/settings/email"
+            aria-label="修改邮箱"
+            className="shrink-0 rounded-md px-2 py-1 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-50 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+          >
+            修改
+          </Link>
         </div>
       </div>
-    </div>
+    </SettingsCard>
   );
 }

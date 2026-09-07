@@ -1,9 +1,10 @@
-import { useState, FormEvent, useEffect, useRef, useCallback } from "react";
+import { useState, ReactNode, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
 import Layout from "../components/Layout";
 import AccountProfileSection from "../components/AccountProfileSection";
-import TwoFactorSettingsSection from "../components/TwoFactorSettingsSection";
+import SecuritySection from "../components/SecuritySection";
+import SettingsCard from "../components/SettingsCard";
 
 // DO /status 返回的会话状态对象（active/relogin_required/... + studentId）；
 // 后端在 DO 非 2xx 或解析失败时回传 { error: true } sentinel。
@@ -18,124 +19,6 @@ interface CquBindStatus {
   address?: string;
   bindStatus: "pending" | "active" | "revoked" | "unbound";
   sessionStatus: CquSessionStatus;
-}
-
-function ChangePasswordSection() {
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState(false);
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError("");
-    setSuccess(false);
-
-    if (newPassword !== confirmPassword) {
-      setError("两次输入的新密码不一致");
-      return;
-    }
-
-    if (newPassword.length < 8) {
-      setError("新密码至少需要 8 个字符");
-      return;
-    }
-
-    setLoading(true);
-    const { error } = await authClient.changePassword({
-      currentPassword,
-      newPassword,
-      revokeOtherSessions: false,
-    });
-    setLoading(false);
-
-    if (error) {
-      setError(error.message ?? "修改失败，请检查当前密码是否正确");
-    } else {
-      setSuccess(true);
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-    }
-  };
-
-  return (
-    <div className="bg-white rounded-2xl border border-gray-200 p-6">
-      <h3 className="text-base font-semibold text-gray-900 mb-4">修改密码</h3>
-
-      {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-          {error}
-        </div>
-      )}
-      {success && (
-        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
-          密码已成功修改
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label htmlFor="currentPassword" className="block text-sm font-medium text-gray-700 mb-1">
-            当前密码
-          </label>
-          <input
-            id="currentPassword"
-            type="password"
-            value={currentPassword}
-            onChange={(e) => setCurrentPassword(e.target.value)}
-            required
-            autoComplete="current-password"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          />
-        </div>
-
-        <div>
-          <label htmlFor="newPassword" className="block text-sm font-medium text-gray-700 mb-1">
-            新密码
-          </label>
-          <input
-            id="newPassword"
-            type="password"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            required
-            autoComplete="new-password"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            placeholder="至少 8 个字符"
-          />
-        </div>
-
-        <div>
-          <label htmlFor="confirmNewPassword" className="block text-sm font-medium text-gray-700 mb-1">
-            确认新密码
-          </label>
-          <input
-            id="confirmNewPassword"
-            type="password"
-            value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
-            required
-            autoComplete="new-password"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          />
-        </div>
-
-        <button
-          type="submit"
-          disabled={loading}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
-        >
-          {loading && (
-            <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-          )}
-          {loading ? "保存中..." : "保存修改"}
-        </button>
-      </form>
-    </div>
-  );
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -412,25 +295,25 @@ function LiveCodeSection() {
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+    <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
       {/* ── Collapsible header ─────────────────────────────────────────────── */}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-gray-50 transition-colors"
+        className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-gray-50"
         aria-expanded={open}
       >
         <div className="flex items-center gap-2">
-          <svg className="w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+          <svg className="h-4 w-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
           </svg>
-          <span className="text-base font-semibold text-gray-900">实时验证码</span>
+          <span className="text-sm font-semibold text-gray-900">实时验证码</span>
           {open && wsState === "open" && (
-            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" aria-hidden="true" />
+            <span className="h-2 w-2 animate-pulse rounded-full bg-green-500" aria-hidden="true" />
           )}
         </div>
         <svg
-          className={`w-4 h-4 text-gray-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -442,7 +325,7 @@ function LiveCodeSection() {
 
       {/* ── Collapsible body ───────────────────────────────────────────────── */}
       {open && (
-        <div className="border-t border-gray-100 px-6 pb-6 pt-4 space-y-4">
+        <div className="space-y-4 border-t border-gray-100 px-4 pb-4 pt-3">
           {/* WS connection status */}
           <div className={`flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg ${
             wsState === "open"
@@ -605,29 +488,28 @@ function QuickLoginSection() {
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 p-6">
-      <h3 className="text-base font-semibold text-gray-900 mb-4">浏览器插件快捷登录</h3>
+    <SettingsCard title="浏览器插件快捷登录">
 
       {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">
           {error}
         </div>
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 text-gray-400 text-sm">
-          <span className="w-4 h-4 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
+        <div className="flex items-center gap-2 text-sm text-gray-400">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-transparent" />
           加载中...
         </div>
       ) : loadError ? (
         <div className="space-y-3">
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">
             获取设置失败，请稍后重试。
           </div>
           <button
             type="button"
             onClick={() => void fetchState()}
-            className="px-4 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-medium rounded-lg transition-colors"
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
           >
             重新加载
           </button>
@@ -652,14 +534,14 @@ function QuickLoginSection() {
             }`}
           >
             <span
-              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+              className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
                 enabled ? "translate-x-6" : "translate-x-1"
               }`}
             />
           </button>
         </div>
       )}
-    </div>
+    </SettingsCard>
   );
 }
 
@@ -729,32 +611,30 @@ function CquBindingSection() {
   // ── Loading skeleton ────────────────────────────────────────────────────────
   if (statusLoading) {
     return (
-      <div className="bg-white rounded-2xl border border-gray-200 p-6">
-        <h3 className="text-base font-semibold text-gray-900 mb-4">CQU 账户绑定</h3>
-        <div className="flex items-center gap-2 text-gray-400 text-sm">
-          <span className="w-4 h-4 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
+      <SettingsCard title="CQU 账户绑定">
+        <div className="flex items-center gap-2 text-sm text-gray-400">
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-transparent" />
           加载中...
         </div>
-      </div>
+      </SettingsCard>
     );
   }
 
   // ── Status fetch error ──────────────────────────────────────────────────────
   if (statusError) {
     return (
-      <div className="bg-white rounded-2xl border border-gray-200 p-6">
-        <h3 className="text-base font-semibold text-gray-900 mb-4">CQU 账户绑定</h3>
-        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 mb-4">
+      <SettingsCard title="CQU 账户绑定">
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">
           获取绑定状态失败，请稍后重试。
         </div>
         <button
           type="button"
           onClick={() => void fetchStatus()}
-          className="px-4 py-2 border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-medium rounded-lg transition-colors"
+          className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
         >
           重新加载
         </button>
-      </div>
+      </SettingsCard>
     );
   }
 
@@ -778,17 +658,16 @@ function CquBindingSection() {
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 p-6">
-      <h3 className="text-base font-semibold text-gray-900 mb-4">CQU 账户绑定</h3>
+    <SettingsCard title="CQU 账户绑定" description="绑定后由系统代你维护与重庆大学统一认证的会话。">
 
       {/* Action feedback */}
       {actionError && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">
           {actionError}
         </div>
       )}
       {actionSuccess && (
-        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
+        <div className="mb-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700" role="status">
           {actionSuccess}
         </div>
       )}
@@ -796,37 +675,37 @@ function CquBindingSection() {
       {isBound ? (
         <div className="space-y-5">
           {/* ── Bound info card ─────────────────────────────────────────────── */}
-          <div className="flex flex-col gap-0 divide-y divide-gray-100 border border-gray-200 rounded-xl overflow-hidden">
+          <div className="flex flex-col gap-0 divide-y divide-gray-100 rounded-xl border border-gray-200">
             {/* Student ID row */}
-            <div className="flex items-center justify-between px-4 py-3 bg-gray-50">
+            <div className="flex items-center justify-between px-4 py-3">
               <span className="text-sm text-gray-500">统一身份认证账号</span>
-              <span className="text-sm font-medium text-gray-900">{studentId ?? "—"}</span>
+              <span className="text-sm font-medium tabular-nums text-gray-900">{studentId ?? "—"}</span>
             </div>
 
             {/* Session status row */}
-            <div className="flex items-center justify-between px-4 py-3 bg-gray-50">
+            <div className="flex items-center justify-between px-4 py-3">
               <span className="text-sm text-gray-500">会话状态</span>
               <span
-                className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-0.5 rounded-full ${badgeClasses[sessionBadge.variant].pill}`}
+                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${badgeClasses[sessionBadge.variant].pill}`}
               >
-                <span className={`w-1.5 h-1.5 rounded-full ${badgeClasses[sessionBadge.variant].dot}`} />
+                <span className={`h-1.5 w-1.5 rounded-full ${badgeClasses[sessionBadge.variant].dot}`} />
                 {sessionBadge.label}
               </span>
             </div>
 
             {/* Dedicated inbox address — given extra prominence */}
             {status?.address && (
-              <div className="px-4 py-4 bg-blue-50">
-                <div className="flex items-start justify-between gap-3 mb-2">
+              <div className="bg-blue-50/70 px-4 py-4">
+                <div className="mb-2 flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide">专属密保邮箱</p>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-blue-700">专属密保邮箱</p>
                     <p className="mt-0.5 text-xs text-blue-600">
                       需将此地址设置为 CQU 自服务中心的密保邮箱，系统才能自动接收 2FA 验证码。
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-3 flex-wrap">
-                  <span className="font-mono text-sm font-semibold text-blue-900 break-all flex-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-blue-900">
                     {status.address}
                   </span>
                   <CopyButton text={status.address} />
@@ -842,7 +721,7 @@ function CquBindingSection() {
           <div className="flex flex-wrap items-center gap-3">
             <Link
               to="/cqu/bind"
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
             >
               绑定新账号
             </Link>
@@ -867,16 +746,16 @@ function CquBindingSection() {
           </p>
           <Link
             to="/cqu/bind"
-            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
             </svg>
             绑定 CQU 账户
           </Link>
         </div>
       )}
-    </div>
+    </SettingsCard>
   );
 }
 
@@ -886,28 +765,43 @@ export default function Settings() {
 
   return (
     <Layout>
-      <div className="max-w-2xl">
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">账户设置</h1>
+      <div className="max-w-3xl">
+        <h1 className="text-2xl font-bold text-gray-900">账户设置</h1>
+        <p className="mt-1 text-sm text-gray-500">管理账户信息、安全设置与 CQU 服务集成。</p>
 
-        <div className="space-y-6">
-          <AccountProfileSection
-            name={user?.name ?? ""}
-            email={user?.email ?? ""}
-            onSessionRefresh={refetchSession}
-          />
+        <div className="mt-8 space-y-10">
+          <SettingsGroup label="账户">
+            <AccountProfileSection
+              name={user?.name ?? ""}
+              email={user?.email ?? ""}
+              onSessionRefresh={refetchSession}
+            />
+          </SettingsGroup>
 
-          <TwoFactorSettingsSection enabled={user?.twoFactorEnabled === true} />
+          <SettingsGroup label="安全">
+            <SecuritySection twoFactorEnabled={user?.twoFactorEnabled === true} />
+          </SettingsGroup>
 
-          {/* 修改密码 */}
-          <ChangePasswordSection />
+          <SettingsGroup label="CQU 集成">
+            {/* CQU 绑定 */}
+            <CquBindingSection />
 
-          {/* CQU 绑定 */}
-          <CquBindingSection />
-
-          {/* 浏览器插件快捷登录自助开关 */}
-          <QuickLoginSection />
+            {/* 浏览器插件快捷登录自助开关 */}
+            <QuickLoginSection />
+          </SettingsGroup>
         </div>
       </div>
     </Layout>
+  );
+}
+
+function SettingsGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <section aria-label={label}>
+      <h2 className="mb-3 px-1 text-xs font-semibold uppercase tracking-widest text-gray-400">
+        {label}
+      </h2>
+      <div className="space-y-4">{children}</div>
+    </section>
   );
 }

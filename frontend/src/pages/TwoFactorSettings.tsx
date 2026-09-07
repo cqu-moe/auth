@@ -244,7 +244,7 @@ export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettin
         <Link to="/settings" className="mb-5 inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 transition-colors hover:text-blue-600">
           <span aria-hidden="true">←</span> 返回账户设置
         </Link>
-        <div className="rounded-2xl border border-gray-200 bg-white p-6">
+        <div className="rounded-2xl border border-gray-950/[0.08] bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
           <h1 className="text-xl font-semibold text-gray-900">设置二次验证</h1>
           <p className="mt-1 text-sm text-gray-500">使用身份验证器生成验证码，为账户增加一层保护。</p>
           {error && <p className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">{error}</p>}

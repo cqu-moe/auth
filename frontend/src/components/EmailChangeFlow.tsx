@@ -197,7 +197,7 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
   };
 
   return (
-    <div className="rounded-2xl border border-gray-200 bg-white p-6">
+    <div className="rounded-2xl border border-gray-950/[0.08] bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
       <Link to="/settings" className="mb-5 inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 transition-colors hover:text-blue-600">
         <span aria-hidden="true">←</span> 返回账户设置
       </Link>
