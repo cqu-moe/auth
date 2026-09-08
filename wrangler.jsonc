@@ -10,10 +10,11 @@
   "vars": {
     "BIND_EMAIL_DOMAIN": "cquotp.com",
     // 全局浏览器后端开关(名称与 src/types.ts Env.CQU_BROWSER_BACKEND 逐字一致)。
-    // 准备版本固定 node: 新登录/取票/保活/采集仍走国内节点; Task 11 单独一次发布
-    // 把它改为 cloudflare 对全部用户启用 APAC(不做用户灰度)。已建立的持久 route
-    // 不受此值影响, 仍按各自 route 完成。
-    "CQU_BROWSER_BACKEND": "node"
+    // 2026-09-08 全量切换 cloudflare: 全部用户新 CAS/aTrust 登录、取票、保活、采集
+    // 进入 APAC Containers(不做用户灰度)。已建立的持久 route 不受此值影响,
+    // 仍按各自 route 完成(T 前 node token 排空不算漏迁移)。系统性失败时改回 node
+    // 并正常发布即回滚。
+    "CQU_BROWSER_BACKEND": "cloudflare"
   },
 
   "assets": {
