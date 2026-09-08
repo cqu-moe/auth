@@ -20,7 +20,7 @@
 //     来复现「探活在途 status 被改写」的因果, 断言写回分支命中撤销守卫。
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:test";
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, vi, type MockInstance } from "vitest";
 import { encrypt } from "../../src/services/crypto";
 import {
   freshStub,
@@ -831,6 +831,374 @@ describe("persistent browser route records", () => {
       ])
     );
     expect(keys).not.toContain("browserRoute:tok-dead");
+  });
+});
+
+describe("login control routing", () => {
+  function seedCloudflareLogin(stub: DurableObjectStub, token: string, bootId = "boot-1") {
+    return seedSession(stub, {
+      status: "active",
+      extra: {
+        loginInFlight: { token, startedAt: Date.now(), browserRouteVersion: 1 },
+        codeLease: {
+          ownerToken: token,
+          ownerKind: "cas",
+          acquiredAt: Date.now(),
+          queue: [],
+          ownerBrowserRouteVersion: 1,
+        },
+        [`browserRoute:${token}`]: {
+          token,
+          kind: "cas",
+          route: { version: 1, backend: "cloudflare", userId: "u1", bootId },
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 600_000,
+        },
+      },
+    });
+  }
+
+  function spyContainerFetch(
+    handler: (request: Request) => Response | Promise<Response>
+  ): MockInstance {
+    const fetchMock = vi.fn(handler);
+    vi.spyOn(env.CQU_LOGIN, "get").mockReturnValue({
+      fetch: fetchMock,
+    } as never);
+    vi.spyOn(env.CQU_LOGIN, "idFromName").mockReturnValue(
+      "container-user-u1" as never
+    );
+    return fetchMock;
+  }
+
+  function captureControlRequest(
+    respond: () => Response = () => Response.json({ ok: true })
+  ) {
+    const seen: Array<{
+      path: string;
+      bootId: string | null;
+      body: unknown;
+    }> = [];
+    const fetchMock = spyContainerFetch(async (request) => {
+      seen.push({
+        path: new URL(request.url).pathname,
+        bootId: request.headers.get("X-Cqu-Expected-Boot-Id"),
+        body: request.method === "GET" ? null : await request.json(),
+      });
+      return respond();
+    });
+    return { seen, fetchMock };
+  }
+
+  it("delivers a fresh code to the persisted cloudflare route with the boot header", async () => {
+    const stub = freshStub("control-cf-code");
+    await seedCloudflareLogin(stub, "tok-cf");
+    const nodeFetch = spyLoginNode({
+      "/code": () => {
+        throw new Error("cloudflare-routed code must not reach LOGIN_NODE");
+      },
+    });
+    const { seen, fetchMock } = captureControlRequest();
+
+    const response = await stub.fetch("https://do/deposit-code", {
+      method: "POST",
+      body: JSON.stringify({ code: "123456", kind: "login_2fa" }),
+    });
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as { delivered: boolean };
+    expect(payload.delivered).toBe(true);
+    expect(nodeFetch).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(seen[0]).toEqual({
+      path: "/code",
+      bootId: "boot-1",
+      body: { session: "tok-cf", code: "123456" },
+    });
+  });
+
+  it("keeps delivering to the cloudflare route even when the global default is node", async () => {
+    // 测试 env 未配置 CQU_BROWSER_BACKEND(缺省 node);持久 route 为 cloudflare。
+    // 这正是"CF 登录在途时开关切回 node,码仍送 CF"的等价可观测形式。
+    const stub = freshStub("control-route-pin");
+    await seedCloudflareLogin(stub, "tok-pin");
+    spyLoginNode({
+      "/code": () => {
+        throw new Error("must stay on the persisted route");
+      },
+    });
+    const { fetchMock } = captureControlRequest();
+    await stub.fetch("https://do/deposit-code", {
+      method: "POST",
+      body: JSON.stringify({ code: "654321", kind: "login_2fa" }),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a boot-replaced code without broadcasting to node or counting failures", async () => {
+    const stub = freshStub("control-boot-replaced");
+    await seedCloudflareLogin(stub, "tok-boot", "old-boot");
+    const nodeFetch = spyLoginNode({
+      "/code": () => {
+        throw new Error("boot-replaced code must not fall back to node");
+      },
+    });
+    const { fetchMock } = captureControlRequest(() =>
+      Response.json({ ok: false, error: "BROWSER_INSTANCE_REPLACED" }, { status: 409 })
+    );
+
+    const response = await stub.fetch("https://do/deposit-code", {
+      method: "POST",
+      body: JSON.stringify({ code: "111222", kind: "login_2fa" }),
+    });
+    const payload = (await response.json()) as { delivered: boolean };
+    expect(payload.delivered).toBe(false);
+    expect(nodeFetch).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const atrust = await readStorage(stub, "atrustSession");
+    expect(atrust).toBeUndefined();
+  });
+
+  it("fails closed when a versioned owner has no route record", async () => {
+    const stub = freshStub("control-missing-route");
+    await seedSession(stub, {
+      status: "active",
+      extra: {
+        loginInFlight: {
+          token: "tok-noroute",
+          startedAt: Date.now(),
+          browserRouteVersion: 1,
+        },
+        codeLease: {
+          ownerToken: "tok-noroute",
+          ownerKind: "cas",
+          acquiredAt: Date.now(),
+          queue: [],
+          ownerBrowserRouteVersion: 1,
+        },
+      },
+    });
+    const nodeFetch = spyLoginNode({
+      "/code": () => {
+        throw new Error("missing route must not guess node");
+      },
+    });
+    const { fetchMock } = captureControlRequest();
+    const response = await stub.fetch("https://do/deposit-code", {
+      method: "POST",
+      body: JSON.stringify({ code: "999888", kind: "login_2fa" }),
+    });
+    const payload = (await response.json()) as { delivered: boolean };
+    expect(payload.delivered).toBe(false);
+    expect(nodeFetch).not.toHaveBeenCalled();
+    // versioned owner 缺 route:两个后端都不投递(fetchLoginControl 受控失败)。
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("recovers a pending permit through the persisted cloudflare route after reactivation", async () => {
+    const stub = freshStub("control-reactivation");
+    await seedSession(stub, {
+      status: "active",
+      extra: {
+        codeLease: {
+          ownerToken: "tok-recover",
+          ownerKind: "cas",
+          acquiredAt: Date.now(),
+          queue: [],
+          ownerBrowserRouteVersion: 1,
+        },
+        codePermitPending: "tok-recover",
+        [`browserRoute:tok-recover`]: {
+          token: "tok-recover",
+          kind: "cas",
+          route: {
+            version: 1,
+            backend: "cloudflare",
+            userId: "u1",
+            bootId: "boot-react",
+          },
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 600_000,
+        },
+      },
+    });
+    const nodeFetch = spyLoginNode({
+      "/code-permit": () => {
+        throw new Error("recovery must follow the persisted route");
+      },
+    });
+    const { seen, fetchMock } = captureControlRequest();
+
+    // 种子写入会先构造 DO(构造期 storage 尚空),故直接驱动恢复方法体 ——
+    // 生产语义由"新进程首次加载即执行 recoverPendingCodePermit"保证。
+    await runInDurableObject(stub, async (inst) => {
+      await (
+        inst as unknown as { recoverPendingCodePermit: () => Promise<void> }
+      ).recoverPendingCodePermit();
+    });
+    expect(nodeFetch).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(seen[0]).toEqual({
+      path: "/code-permit",
+      bootId: "boot-react",
+      body: { session: "tok-recover" },
+    });
+    expect(await readStorage(stub, "codePermitPending")).toBeUndefined();
+  });
+
+  describe("cloudflare route preparation", () => {
+    async function drivePrepare(
+      stub: DurableObjectStub,
+      token: string,
+      budgetMs = 1_000
+    ): Promise<unknown> {
+      return runInDurableObject(stub, async (inst) => {
+        return (
+          inst as unknown as {
+            prepareLoginRoute: (
+              token: string,
+              route: unknown,
+              lockKey: string,
+              recheck: () => Promise<void>,
+              budgetMs: number
+            ) => Promise<unknown>;
+          }
+        ).prepareLoginRoute(
+          token,
+          { version: 1, backend: "cloudflare", userId: "u1" },
+          "loginInFlight",
+          async () => {},
+          budgetMs
+        );
+      });
+    }
+
+    it("retries a cold start, validates capabilities, and writes bootId back to the route", async () => {
+      const stub = freshStub("warmup-success");
+      await seedSession(stub, {
+        status: "active",
+        extra: {
+          loginInFlight: {
+            token: "tok-warm",
+            startedAt: Date.now(),
+            browserRouteVersion: 1,
+          },
+          "browserRoute:tok-warm": {
+            token: "tok-warm",
+            kind: "cas",
+            route: { version: 1, backend: "cloudflare", userId: "u1" },
+            createdAt: Date.now(),
+            expiresAt: Date.now() + 600_000,
+          },
+        },
+      });
+      let calls = 0;
+      const { fetchMock } = captureControlRequest(() => {
+        calls += 1;
+        if (calls === 1) {
+          return new Response("starting", { status: 503 });
+        }
+        return Response.json({
+          ok: true,
+          bootId: "boot-warm",
+          browserProfile: "cloudflare",
+          capabilities: [
+            "atrust-login",
+            "code-permit",
+            "browser-route-v1",
+            "operation-deadline-v1",
+          ],
+        });
+      });
+
+      const route = (await drivePrepare(stub, "tok-warm")) as {
+        bootId?: string;
+      };
+      expect(route.bootId).toBe("boot-warm");
+      expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+      const record = await readStorage<{
+        route?: { backend?: string; bootId?: string; userId?: string };
+      }>(stub, "browserRoute:tok-warm");
+      expect(record).toMatchObject({
+        token: "tok-warm",
+        route: { backend: "cloudflare", bootId: "boot-warm", userId: "u1" },
+      });
+    });
+
+    it("fails as BROWSER_BUSY when the container never reports a cloudflare profile", async () => {
+      const stub = freshStub("warmup-timeout");
+      await seedSession(stub, {
+        status: "active",
+        extra: {
+          loginInFlight: {
+            token: "tok-warm-timeout",
+            startedAt: Date.now(),
+            browserRouteVersion: 1,
+          },
+          "browserRoute:tok-warm-timeout": {
+            token: "tok-warm-timeout",
+            kind: "cas",
+            route: { version: 1, backend: "cloudflare", userId: "u1" },
+            createdAt: Date.now(),
+            expiresAt: Date.now() + 600_000,
+          },
+        },
+      });
+      captureControlRequest(() =>
+        Response.json({
+          ok: true,
+          bootId: "stale-boot",
+          browserProfile: "default",
+          capabilities: ["atrust-login"],
+        })
+      );
+
+      await expect(drivePrepare(stub, "tok-warm-timeout", 150)).rejects.toThrow(
+        /preparation|busy|timed out/i
+      );
+      const record = await readStorage<{ route?: Record<string, unknown> }>(
+        stub,
+        "browserRoute:tok-warm-timeout"
+      );
+      expect(record?.route).not.toHaveProperty("bootId");
+    });
+
+    it("refuses the bootId writeback when the login token changed during warmup", async () => {
+      const stub = freshStub("warmup-superseded");
+      await seedSession(stub, {
+        status: "active",
+        extra: {
+          loginInFlight: {
+            token: "someone-else",
+            startedAt: Date.now(),
+            browserRouteVersion: 1,
+          },
+          "browserRoute:tok-old": {
+            token: "tok-old",
+            kind: "cas",
+            route: { version: 1, backend: "cloudflare", userId: "u1" },
+            createdAt: Date.now(),
+            expiresAt: Date.now() + 600_000,
+          },
+        },
+      });
+      captureControlRequest(() =>
+        Response.json({
+          ok: true,
+          bootId: "boot-late",
+          browserProfile: "cloudflare",
+          capabilities: ["browser-route-v1", "operation-deadline-v1"],
+        })
+      );
+
+      await expect(drivePrepare(stub, "tok-old")).rejects.toThrow(
+        /owner|replaced|changed/i
+      );
+      const record = await readStorage<{ route?: Record<string, unknown> }>(
+        stub,
+        "browserRoute:tok-old"
+      );
+      expect(record?.route).not.toHaveProperty("bootId");
+    });
   });
 });
 

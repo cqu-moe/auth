@@ -24,10 +24,12 @@ import {
 import {
   acquireCodeLease,
   pruneCodeLease,
+  resolveControlRoute,
   releaseCodeLease,
   type CodeLease,
   type LoginKind,
 } from "../services/cqu-2fa/code-lease";
+import { fetchBrowser } from "../services/cqu-browser-routing";
 import { decodeJwtExp } from "../services/cqu-2fa/jwt-exp";
 import {
   shouldProactiveRelogin,
@@ -96,6 +98,10 @@ const DUMMY_SERVICE = "https://my.cqu.edu.cn/authserver/authentication/cas";
 // 「连 CQU」四处出站(/run /service-ticket /keepalive /code)均经此前缀发到国内节点
 // (节点本地用青果代理连 CQU)。Phase 2 四处出站迁移已完成。
 const LOGIN_NODE_BASE = "http://cqu-login.internal";
+// Cloudflare 登录路由预热预算:容器冷启动 + health 就绪,最多 30s。
+const LOGIN_ROUTE_PREPARE_BUDGET_MS = 30_000;
+// 单次 health 请求超时(冷启动握手交给 SDK,这里只防单次请求悬挂)。
+const LOGIN_ROUTE_HEALTH_TIMEOUT_MS = 10_000;
 
 export const SERVICE_URLS: Record<string, string> = {
   jwxt: "https://my.cqu.edu.cn/authserver/authentication/cas",
@@ -1192,9 +1198,10 @@ export class CquSessionDO extends DurableObject<Env> {
         return false;
       }
       try {
-        // Phase 2: 2FA 码经 Workers VPC binding 推到国内登录节点 POST /code(凭 session=lease.ownerToken
-        // 路由到在途 /run, 契约同容器, body 不变)。原 getLoginContainer(userId).fetch("https://c/code") 已弃用。
-        const res = await this.env.LOGIN_NODE.fetch(
+        // 2FA 码按该 token 的持久 route 定向投递(新格式 CF 带 boot 头,旧格式兼容 node),
+        // 不读全局开关,不向两个后端广播。
+        const res = await this.fetchLoginControl(
+          lease.ownerToken,
           new Request(`${LOGIN_NODE_BASE}/code`, {
             method: "POST",
             body: JSON.stringify({ session: lease.ownerToken, code }),
@@ -1743,7 +1750,8 @@ export class CquSessionDO extends DurableObject<Env> {
         (await this.ctx.storage.get<CodeLease>("codeLease")) ?? null;
       if (lease?.ownerToken !== token) return;
       try {
-        const response = await this.env.LOGIN_NODE.fetch(
+        const response = await this.fetchLoginControl(
+          token,
           new Request(`${LOGIN_NODE_BASE}/code-permit`, {
             method: "POST",
             body: JSON.stringify({ session: token }),
@@ -1800,7 +1808,8 @@ export class CquSessionDO extends DurableObject<Env> {
         (await this.ctx.storage.get<CodeLease>("codeLease")) ?? null;
       if (lease?.ownerToken !== token) return true;
       try {
-        const response = await this.env.LOGIN_NODE.fetch(
+        const response = await this.fetchLoginControl(
+          token,
           new Request(`${LOGIN_NODE_BASE}/code`, {
             method: "POST",
             body: JSON.stringify({ session: token, code: pending.code }),
@@ -1917,7 +1926,8 @@ export class CquSessionDO extends DurableObject<Env> {
         (await this.ctx.storage.get<CodeLease>("codeLease")) ?? null;
       if (currentLease?.ownerToken !== token) return;
       try {
-        const response = await this.env.LOGIN_NODE.fetch(
+        const response = await this.fetchLoginControl(
+          token,
           new Request(`${LOGIN_NODE_BASE}/code`, {
             method: "POST",
             body: JSON.stringify({
@@ -2177,6 +2187,13 @@ export class CquSessionDO extends DurableObject<Env> {
       // 锁获取跨 await:重新核对 generation,防旧请求在换绑/撤销后点火新登录。
       await this.assertAtrustOperationCurrent(expectedGeneration);
       await this.cleanupExpiredBrowserRoutes();
+      // 预热成功后 bootId 已写入持久 route;正式登录 transport 切换在后续任务统一落地。
+      await this.prepareLoginRoute(
+        token,
+        acquired.route,
+        "atrustLoginInFlight",
+        () => this.assertAtrustOperationCurrent(expectedGeneration)
+      );
       const password = await decrypt(
         credentials.encryptedPassword,
         credentials.iv,
@@ -2336,18 +2353,32 @@ export class CquSessionDO extends DurableObject<Env> {
     try {
       // 锁获取跨 await:再核对绑定与状态,撤销/解绑已落地时不点火、不复位状态机。
       // 注意首登(initSession)的占位 state 尚未落盘:storage 无 state 属正常,不据此拦截;
-      // 只在已落盘且 userId 不匹配(换绑)或状态已 revoked 时受控退出。
-      const [storedState, currentStatus] = await Promise.all([
-        this.ctx.storage.get<SessionState>("state"),
-        this.getStatus(),
-      ]);
-      if (
-        (storedState !== undefined && storedState.userId !== state.userId) ||
-        currentStatus === "revoked"
-      ) {
-        return "failed";
-      }
+      // 只在已落盘且 userId 不匹配(换绑)或状态已 revoked 时受控退出。预热写回前还会再核对。
+      const recheckBinding = async () => {
+        const [storedState, currentStatus] = await Promise.all([
+          this.ctx.storage.get<SessionState>("state"),
+          this.getStatus(),
+        ]);
+        if (
+          (storedState !== undefined && storedState.userId !== state.userId) ||
+          currentStatus === "revoked"
+        ) {
+          throw new CquSsoError(
+            "LOGIN_BINDING_CHANGED",
+            "binding changed while login was in flight"
+          );
+        }
+      };
+      await recheckBinding();
       await this.cleanupExpiredBrowserRoutes();
+      // Cloudflare route 先预热(health/bootId/能力)再进入验证码租约与登录;
+      // node route 原样返回,不发送新 boot 头。
+      await this.prepareLoginRoute(
+        token,
+        acquired.route,
+        "loginInFlight",
+        recheckBinding
+      );
       const password = await decrypt(
         creds.encryptedPassword,
         creds.iv,
@@ -2493,6 +2524,149 @@ export class CquSessionDO extends DurableObject<Env> {
 
   private browserRouteKey(token: string): string {
     return `${BROWSER_ROUTE_PREFIX}${token}`;
+  }
+
+  /**
+   * 验证码/permit 控制请求的唯一出口(设计 4.2 的解析顺序):
+   *   ① 重新核对 lease.ownerToken 仍是本 token(被替换则停止投递,交调用点原语义);
+   *   ② 读持久 browserRoute:<token>,存在则固定用该 route,不看当前全局开关;
+   *   ③ 无 route 的旧格式锁/lease(部署前记录)→ 兼容送 LOGIN_NODE(不带 boot 头);
+   *   ④ 新格式(version 标记)缺 route / route 用户不匹配 / 缺 bootId → 受控失败,不猜后端;
+   * Cloudflare 控制请求携带该 token 预热时的 bootId 头;绝不把同一验证码广播到两个后端。
+   */
+  private async fetchLoginControl(
+    token: string,
+    request: Request
+  ): Promise<Response> {
+    await this.loadState();
+    const lease =
+      (await this.ctx.storage.get<CodeLease>("codeLease")) ?? null;
+    if (lease && lease.ownerToken !== token) {
+      throw new CquSsoError(
+        "CODE_OWNER_REPLACED",
+        "verification code owner was replaced"
+      );
+    }
+    const [record, casLock, atrustLock] = await Promise.all([
+      this.ctx.storage.get<LoginRouteRecord>(this.browserRouteKey(token)),
+      this.ctx.storage.get<LoginInFlight>("loginInFlight"),
+      this.ctx.storage.get<LoginInFlight>("atrustLoginInFlight"),
+    ]);
+    const casLockIsToken = casLock?.token === token;
+    const atrustLockIsToken = atrustLock?.token === token;
+    const routeVersioned =
+      (casLockIsToken && casLock?.browserRouteVersion === 1) ||
+      (atrustLockIsToken && atrustLock?.browserRouteVersion === 1) ||
+      (lease !== null && lease.ownerBrowserRouteVersion === 1);
+    const resolution = resolveControlRoute({
+      routeRecord: record ?? null,
+      routeVersioned,
+      legacyRecord: casLockIsToken || atrustLockIsToken || lease !== null,
+    });
+    if (resolution.outcome === "reject") {
+      throw new CquSsoError(
+        "CODE_ROUTE_UNAVAILABLE",
+        "verification code route unavailable"
+      );
+    }
+    if (resolution.outcome === "legacy-node") {
+      // 部署前的旧记录:维持原国内契约,不带新 boot 头。
+      return this.env.LOGIN_NODE.fetch(request);
+    }
+    const boundUserId = this.state?.userId ?? null;
+    if (!boundUserId || resolution.route.userId !== boundUserId) {
+      throw new CquSsoError(
+        "CODE_ROUTE_UNAVAILABLE",
+        "verification code route user mismatch"
+      );
+    }
+    if (resolution.route.backend === "cloudflare" && !resolution.route.bootId) {
+      throw new CquSsoError(
+        "CODE_ROUTE_UNAVAILABLE",
+        "verification code route missing boot id"
+      );
+    }
+    if (resolution.route.backend === "cloudflare") {
+      request.headers.set("X-Cqu-Expected-Boot-Id", resolution.route.bootId!);
+    }
+    return fetchBrowser(this.env, resolution.route, request);
+  }
+
+  /**
+   * Cloudflare 登录的路由准备:按用户容器 /health 预热(允许冷启动,30s 预算),
+   * 校验 cloudflare profile 与 browser-route-v1/operation-deadline-v1 能力,
+   * 成功后把 bootId 写回该 token 的 route(写回前核对 token 与绑定/generation 没变)。
+   * node route 不做预热、不带 boot 头,保证准备发布时与原国内服务兼容。
+   * 预热完成后调用方才 acquireCodeLease、发 permit、真正登录。
+   */
+  private async prepareLoginRoute(
+    token: string,
+    route: BrowserRoute,
+    lockKey: "loginInFlight" | "atrustLoginInFlight",
+    recheck: () => Promise<void>,
+    budgetMs: number = LOGIN_ROUTE_PREPARE_BUDGET_MS
+  ): Promise<BrowserRoute> {
+    if (route.backend !== "cloudflare") return route;
+    const deadline = Date.now() + budgetMs;
+    const stub = this.getLoginContainer(route.userId);
+    let bootId: string | null = null;
+    for (;;) {
+      try {
+        const response = await stub.fetch(
+          new Request(`${LOGIN_NODE_BASE}/health`, {
+            signal: AbortSignal.timeout(LOGIN_ROUTE_HEALTH_TIMEOUT_MS),
+          })
+        );
+        if (response.ok) {
+          const payload = (await response.json()) as {
+            bootId?: unknown;
+            browserProfile?: unknown;
+            capabilities?: unknown;
+          };
+          if (
+            typeof payload.bootId === "string" &&
+            payload.bootId.length > 0 &&
+            payload.browserProfile === "cloudflare" &&
+            Array.isArray(payload.capabilities) &&
+            payload.capabilities.includes("browser-route-v1") &&
+            payload.capabilities.includes("operation-deadline-v1")
+          ) {
+            bootId = payload.bootId;
+            break;
+          }
+        } else {
+          await response.body?.cancel();
+        }
+      } catch {
+        // 冷启动/瞬时失败:在准备预算内重试。
+      }
+      const now = Date.now();
+      if (now >= deadline) {
+        throw new CquSsoError(
+          "BROWSER_BUSY",
+          "browser route preparation timed out"
+        );
+      }
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(1_000, deadline - now))
+      );
+    }
+
+    await recheck();
+    const key = this.browserRouteKey(token);
+    const [record, lock] = await Promise.all([
+      this.ctx.storage.get<LoginRouteRecord>(key),
+      this.ctx.storage.get<LoginInFlight>(lockKey),
+    ]);
+    if (record?.token !== token || lock?.token !== token) {
+      throw new CquSsoError(
+        "CODE_OWNER_REPLACED",
+        "login token changed during route preparation"
+      );
+    }
+    const updated: BrowserRoute = { ...route, bootId };
+    await this.ctx.storage.put(key, { ...record, route: updated });
+    return updated;
   }
 
   /**
