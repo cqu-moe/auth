@@ -59,4 +59,14 @@ describe("cquErrorHttpStatus", () => {
   it("maps an unknown code → 500", () => {
     expect(cquErrorHttpStatus("SOME_UNKNOWN_CODE")).toBe(500);
   });
+
+  it("maps browser capacity/replacement/deadline codes → 503", () => {
+    expect(cquErrorHttpStatus("BROWSER_BUSY")).toBe(503);
+    expect(cquErrorHttpStatus("BROWSER_INSTANCE_REPLACED")).toBe(503);
+    expect(cquErrorHttpStatus("BROWSER_DEADLINE")).toBe(503);
+  });
+
+  it("maps INVALID_BROWSER_DEADLINE → 400", () => {
+    expect(cquErrorHttpStatus("INVALID_BROWSER_DEADLINE")).toBe(400);
+  });
 });

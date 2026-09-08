@@ -25,6 +25,12 @@ const CODE_TO_STATUS: Record<string, number> = {
   ATRUST_NEEDS_REAUTH: 409,
   ATRUST_LOGIN_IN_FLIGHT: 409,
   ATRUST_TRANSIENT: 503,
+  // 浏览器容量/实例替换/截止时间:瞬态基础设施状态,保留旧会话 → 503。
+  BROWSER_BUSY: 503,
+  BROWSER_INSTANCE_REPLACED: 503,
+  BROWSER_DEADLINE: 503,
+  // deadline 入参非法是客户端输入错误 → 400。
+  INVALID_BROWSER_DEADLINE: 400,
   RATE_LIMITED: 429,
 };
 

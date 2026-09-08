@@ -13,6 +13,9 @@ export interface Env {
   BETTER_AUTH_URL: string;
   BETTER_AUTH_SECRET: string;
   BIND_EMAIL_DOMAIN: string;
+  // 浏览器后端选择:缺失/空串兼容旧部署为 node;生产最终值为 cloudflare。
+  // 只用于新任务的路由快照,验证码投递按登录 token 的持久 route,不实时读它。
+  CQU_BROWSER_BACKEND?: string;
 }
 
 export interface HonoEnv {
