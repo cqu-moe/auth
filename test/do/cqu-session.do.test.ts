@@ -1202,6 +1202,134 @@ describe("login control routing", () => {
   });
 });
 
+describe("cloudflare CAS migration", () => {
+  function withCloudflareBackend<T>(fn: () => Promise<T>): Promise<T> {
+    const original = (env as { CQU_BROWSER_BACKEND?: string }).CQU_BROWSER_BACKEND;
+    (env as { CQU_BROWSER_BACKEND?: string }).CQU_BROWSER_BACKEND = "cloudflare";
+    return fn().finally(() => {
+      delete (env as { CQU_BROWSER_BACKEND?: string }).CQU_BROWSER_BACKEND;
+      if (original !== undefined) {
+        (env as { CQU_BROWSER_BACKEND?: string }).CQU_BROWSER_BACKEND = original;
+      }
+    });
+  }
+
+  it("proactive 7h relogin sends /run to the user container with boot header and budget", async () => {
+    const stub = freshStub("cf-relogin");
+    await seedSession(stub, {
+      status: "active",
+      loginAt: Date.now() - 7 * 60 * 60 * 1000 - 1000,
+    });
+    await seedCredentials(stub);
+    const seen: Array<{ path: string; bootId: string | null; body: any }> = [];
+    const nodeFetch = spyLoginNode({
+      "/run": () => {
+        throw new Error("cloudflare relogin must not hit LOGIN_NODE");
+      },
+    });
+    vi.spyOn(env.CQU_LOGIN, "get").mockReturnValue({
+      fetch: vi.fn(async (input: RequestInfo | URL) => {
+        const request = input instanceof Request ? input : new Request(String(input));
+        seen.push({
+          path: new URL(request.url).pathname,
+          bootId: request.headers.get("X-Cqu-Expected-Boot-Id"),
+          body: request.method === "GET" ? null : await request.json(),
+        });
+        if (request.method === "GET") {
+          return Response.json({
+            ok: true,
+            bootId: "boot-relogin",
+            browserProfile: "cloudflare",
+            capabilities: ["browser-route-v1", "operation-deadline-v1"],
+          });
+        }
+        return Response.json({ ok: false, error: "code wait timed out" });
+      }),
+    } as never);
+    vi.spyOn(env.CQU_LOGIN, "idFromName").mockReturnValue("cf-id" as never);
+
+    await withCloudflareBackend(() => driveAlarm(stub));
+
+    expect(nodeFetch).not.toHaveBeenCalled();
+    const run = seen.find((entry) => entry.path === "/run");
+    expect(run).toBeDefined();
+    expect(run?.bootId).toBe("boot-relogin");
+    expect(run?.body.operationTimeoutMs).toBeGreaterThan(0);
+    expect(run?.body.operationTimeoutMs).toBeLessThanOrEqual(780_000);
+    expect(run?.body.session).toEqual(expect.any(String));
+  });
+
+  it("keepalive below the relogin threshold goes to the container with a bounded budget", async () => {
+    const stub = freshStub("cf-keepalive");
+    await seedSession(stub, {
+      status: "active",
+      loginAt: Date.now() - 60 * 60 * 1000,
+    });
+    const seen: Array<{ path: string; body: any }> = [];
+    const nodeFetch = spyLoginNode({
+      "/keepalive": () => {
+        throw new Error("cloudflare keepalive must not hit LOGIN_NODE");
+      },
+    });
+    vi.spyOn(env.CQU_LOGIN, "get").mockReturnValue({
+      fetch: vi.fn(async (input: RequestInfo | URL) => {
+        const request = input instanceof Request ? input : new Request(String(input));
+        seen.push({
+          path: new URL(request.url).pathname,
+          body: request.method === "GET" ? null : await request.json(),
+        });
+        if (request.method === "GET") {
+          return Response.json({ ok: true, apiVersion: "atrust-harvest-v1" });
+        }
+        return Response.json({
+          ok: true,
+          status: "alive",
+          state: validStorageState(),
+        });
+      }),
+    } as never);
+    vi.spyOn(env.CQU_LOGIN, "idFromName").mockReturnValue("cf-id" as never);
+
+    await withCloudflareBackend(() => driveAlarm(stub));
+
+    expect(nodeFetch).not.toHaveBeenCalled();
+    const keepalive = seen.find((entry) => entry.path === "/keepalive");
+    expect(keepalive).toBeDefined();
+    expect(keepalive?.body.operationTimeoutMs).toBeGreaterThan(0);
+    expect(keepalive?.body.operationTimeoutMs).toBeLessThanOrEqual(190_000);
+    expect(await readStatus(stub)).toBe("active");
+  });
+
+  it("browser capacity exhaustion keeps the session and schedules a retry", async () => {
+    const stub = freshStub("cf-keepalive-busy");
+    await seedSession(stub, {
+      status: "active",
+      loginAt: Date.now() - 60 * 60 * 1000,
+    });
+    const nodeFetch = spyLoginNode({
+      "/keepalive": () => {
+        throw new Error("busy path must not fall back to node");
+      },
+    });
+    vi.spyOn(env.CQU_LOGIN, "get").mockReturnValue({
+      fetch: vi.fn(() =>
+        Promise.resolve(new Response("capacity", { status: 503 }))
+      ),
+    } as never);
+    vi.spyOn(env.CQU_LOGIN, "idFromName").mockReturnValue("cf-id" as never);
+
+    await withCloudflareBackend(() => driveAlarm(stub));
+
+    expect(nodeFetch).not.toHaveBeenCalled();
+    expect(await readStatus(stub)).toBe("active");
+    const state = await readState(stub);
+    expect(state?.storageState).toBeDefined();
+    const alarm = await readAlarm(stub);
+    expect(alarm).not.toBeNull();
+    expect(alarm!).toBeGreaterThan(Date.now() - 1000);
+  });
+});
+
 function pathsOf(spy: ReturnType<typeof spyLoginNode>): string[] {
   return spy.mock.calls.map((c) => {
     const input = c[0] as RequestInfo | URL;

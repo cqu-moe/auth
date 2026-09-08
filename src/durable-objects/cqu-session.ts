@@ -30,6 +30,12 @@ import {
   type LoginKind,
 } from "../services/cqu-2fa/code-lease";
 import { fetchBrowser } from "../services/cqu-browser-routing";
+import {
+  BROWSER_CLEANUP_MARGIN_MS,
+  CONTAINER_BROWSER_DEADLINE_MS,
+  remainingBrowserBudget,
+  resolveBrowserDeadline,
+} from "../services/cqu-browser-budget";
 import { decodeJwtExp } from "../services/cqu-2fa/jwt-exp";
 import {
   shouldProactiveRelogin,
@@ -102,6 +108,13 @@ const LOGIN_NODE_BASE = "http://cqu-login.internal";
 const LOGIN_ROUTE_PREPARE_BUDGET_MS = 30_000;
 // 单次 health 请求超时(冷启动握手交给 SDK,这里只防单次请求悬挂)。
 const LOGIN_ROUTE_HEALTH_TIMEOUT_MS = 10_000;
+
+// 集中 transport 抛出的稳定浏览器错误码:必须原样透传,不得包装成 WAF_CHALLENGE。
+const STABLE_BROWSER_CODES = new Set([
+  "BROWSER_BUSY",
+  "BROWSER_INSTANCE_REPLACED",
+  "BROWSER_DEADLINE",
+]);
 
 export const SERVICE_URLS: Record<string, string> = {
   jwxt: "https://my.cqu.edu.cn/authserver/authentication/cas",
@@ -747,7 +760,10 @@ export class CquSessionDO extends DurableObject<Env> {
     // 与 M8 legacy(本地 storageState===null 的已知坏态)主动标 expired 不同 —— 别为"对称"补 setStatus。
     let ticket: string;
     try {
-      ticket = await this.mintServiceTicketViaNode(this.state.storageState, target);
+      ticket = await this.mintServiceTicketViaBrowser(
+        this.state.storageState,
+        target
+      );
     } catch (e) {
       if (e instanceof CquSsoError && e.code === "TGT_EXPIRED") {
         await this.ctx.storage.setAlarm(Date.now());
@@ -773,30 +789,45 @@ export class CquSessionDO extends DurableObject<Env> {
   }
 
   /**
-   * 闸后那一跳「换票」出站:经 Workers VPC binding 发到国内节点 POST /service-ticket,
-   * 节点本地用青果代理去 CQU CAS 换 ST(并已对同青果 IP 做过瞬态退避重试)。
+   * 闸后那一跳「换票」出站:集中 transport(node→国内节点;CF→该用户 APAC 容器)。
    * 取票四道闸仍在 getServiceTicket 上游, 这里只负责出站换票 + 把节点响应映射回
    * 既有 CquSsoError 语义, 让 route/RPC 调用方无感(与原 ssoClient.getServiceTicket 抛的码一致):
    *   · 200 {ok,ticket} → 返回 ticket
    *   · 409            → CquSsoError("TGT_EXPIRED")  真过期, 交重登(不重试)
    *   · 502 / 其它非 ok → CquSsoError("WAF_CHALLENGE") 瞬态(重试已在节点端做尽)
    */
-  private async mintServiceTicketViaNode(
+  private async mintServiceTicketViaBrowser(
     state: CquStorageState | null,
-    serviceUrl: string
+    serviceUrl: string,
+    deadlineAt?: number
   ): Promise<string> {
+    const route = this.currentBrowserRoute();
+    const budget = this.browserOperationBudget(
+      route,
+      deadlineAt ?? resolveBrowserDeadline(undefined, Date.now())
+    );
+    const requestBody: Record<string, unknown> = { serviceUrl, state };
+    if (route.backend === "cloudflare" && budget.operationTimeoutMs) {
+      requestBody.operationTimeoutMs = budget.operationTimeoutMs;
+    }
     let res: Response;
     try {
-      res = await this.env.LOGIN_NODE.fetch(
+      res = await fetchBrowser(
+        this.env,
+        route,
         new Request(`${LOGIN_NODE_BASE}/service-ticket`, {
           method: "POST",
-          body: JSON.stringify({ serviceUrl, state }),
-          // 出站 deadline(NODE_DEADLINE_MS=90s, 略大于节点最坏 ~80s): 防节点 backlog 时
-          // DO 被无限拖住(DO 单线程串行, 长 fetch 阻塞该用户后续请求)。超时归 transient。
-          signal: AbortSignal.timeout(NODE_DEADLINE_MS),
+          body: JSON.stringify(requestBody),
+          // 出站 deadline:node 90s(略大于节点最坏 ~80s);CF 为 210s 单操作上限与
+          // 剩余 invocation 时间的较小值。超时归 transient。
+          signal: AbortSignal.timeout(budget.fetchTimeoutMs),
         })
       );
     } catch (e) {
+      // 稳定浏览器错误(容量/实例替换/预算)原样透传,不包装成 WAF_CHALLENGE。
+      if (e instanceof CquSsoError && STABLE_BROWSER_CODES.has(e.code)) {
+        throw e;
+      }
       // VPC/网络层异常 + AbortError(超时)= 瞬态(WAF_CHALLENGE), 让 DO 退避而非误判过期。
       throw new CquSsoError(
         "WAF_CHALLENGE",
@@ -1390,6 +1421,9 @@ export class CquSessionDO extends DurableObject<Env> {
   async alarm(): Promise<void> {
     await this.loadState();
     if (!this.state) return;
+    // alarm 的 13 分钟平台预算在入口建立一次,贯穿保活/主动重登;
+    // 内部函数不得重新取得新的 13 分钟。
+    const deadlineAt = resolveBrowserDeadline(undefined, Date.now());
     const status = await this.getStatus();
     // 已撤销/未绑定的会话不再保活。
     if (
@@ -1412,7 +1446,7 @@ export class CquSessionDO extends DurableObject<Env> {
       console.warn(
         `[CquSession] ${this.state.studentId}: TGT age >= 7h, proactive relogin`
       );
-      await this.relogin();
+      await this.relogin(deadlineAt);
       // M7 防复活 + 熔断早退: relogin 容器登录 await 期间 input gate 开, admin 可能 revoke/unbind;
       // relogin 也可能落 needs_reauth(连续凭据失败)。两者都收敛到 shouldAbandonKeepaliveWriteback
       // (revoked/unbound/needs_reauth)→ 放弃重排, 停止保活循环(撤销不复活 / 终态等用户重绑)。
@@ -1429,7 +1463,7 @@ export class CquSessionDO extends DurableObject<Env> {
       return;
     }
 
-    const outcome = await this.runKeepAlive();
+    const outcome = await this.runKeepAlive(deadlineAt);
 
     if (outcome === "active") {
       // M7 防复活: runKeepAlive 的 LOGIN_NODE.fetch(最长 90s)await 期间 input gate 打开,
@@ -1462,7 +1496,7 @@ export class CquSessionDO extends DurableObject<Env> {
       console.warn(
         `[CquSession] ${this.state.studentId}: session expired server-side, triggering container relogin`
       );
-      await this.relogin();
+      await this.relogin(deadlineAt);
       // M7 防复活: runKeepAlive 探活 + relogin 容器登录的 await 期间 input gate 都开过,
       // admin 可能已 revoke/unbind。relogin 经状态机推进(nextStatus 对 revoked 无 RELOGIN_OK
       // 转移, 不会复活 status), 但本分支仍可能重排 alarm 重启保活循环。写回前重查 status,
@@ -1505,7 +1539,9 @@ export class CquSessionDO extends DurableObject<Env> {
    * NOTE: 与旧实现不同, 这里只「探针」, 不在 runKeepAlive 内直接重登;
    * 重登(走容器)由 alarm() 在 outcome==="expired" 时统一触发, 以复用 single-flight。
    */
-  private async runKeepAlive(): Promise<"active" | "expired" | "transient"> {
+  private async runKeepAlive(
+    deadlineAt?: number
+  ): Promise<"active" | "expired" | "transient"> {
     const state = this.state!;
     // 旧会话迁移守卫:改造前只存 3 cookie(无完整 storageState)。报 expired 让 alarm 触发重登,
     // 铸一套新的完整 storageState 自愈;绝不把 null state 发给节点(否则 400 → 永远退避不重登)。
@@ -1515,20 +1551,31 @@ export class CquSessionDO extends DurableObject<Env> {
       );
       return "expired";
     }
-    // 探活经 Workers VPC binding 发到国内节点 POST /keepalive(节点本地经青果探测 CQU 会话)。
+    // 探活走集中 transport(node→国内节点;CF→该用户 APAC 容器)。
     // 节点恒返回 200 {ok, status: alive|expired|unreachable}, 映射回三态:
     //   alive→active / expired→expired / unreachable→transient。
     // 够不到节点本身(VPC/网络抛错、非 JSON、非 ok)或未知 status = 探不通 → transient
     // (保 cookies/status 不动、退避重试), 绝不误判过期触发容器重登。
     let res: Response;
     try {
-      res = await this.env.LOGIN_NODE.fetch(
+      const route = this.currentBrowserRoute();
+      const budget = this.browserOperationBudget(
+        route,
+        deadlineAt ?? resolveBrowserDeadline(undefined, Date.now())
+      );
+      const body: Record<string, unknown> = { state: state.storageState };
+      if (route.backend === "cloudflare" && budget.operationTimeoutMs) {
+        body.operationTimeoutMs = budget.operationTimeoutMs;
+      }
+      res = await fetchBrowser(
+        this.env,
+        route,
         new Request(`${LOGIN_NODE_BASE}/keepalive`, {
           method: "POST",
-          body: JSON.stringify({ state: state.storageState }),
-          // 出站 deadline(同取票路径, 90s 略大于节点最坏 ~80s): 探活也在节点侧排队持槽,
-          // 无超时则节点 backlog 时阻塞 DO 单线程。超时/AbortError 归 transient(退避不误判过期)。
-          signal: AbortSignal.timeout(NODE_DEADLINE_MS),
+          body: JSON.stringify(body),
+          // 出站 deadline(同取票路径):探活也在节点侧排队持槽,无超时则 backlog 时
+          // 阻塞 DO 单线程。超时/AbortError/容量错误归 transient(退避不误判过期)。
+          signal: AbortSignal.timeout(budget.fetchTimeoutMs),
         })
       );
     } catch (e) {
@@ -1658,7 +1705,7 @@ export class CquSessionDO extends DurableObject<Env> {
    * 解密存储的密码 → 调容器 /run 铸新 TGT → 成功落 cookies + loginAt + RELOGIN_OK(→ active);
    * 失败落 RELOGIN_FAIL(→ expired)。锁无论成败都清掉。
    */
-  private async relogin(): Promise<void> {
+  private async relogin(deadlineAt?: number): Promise<void> {
     if (!this.state) throw new Error("No state");
     const studentId = this.state.studentId;
     const now = Date.now();
@@ -1691,7 +1738,8 @@ export class CquSessionDO extends DurableObject<Env> {
       "RELOGIN_FAIL",
       // RELOGIN_START 仅在真正发起新登录时推进状态(active/expired → relogging);
       // 命中在途锁则不动状态, 让在途登录自己收尾。
-      "RELOGIN_START"
+      "RELOGIN_START",
+      deadlineAt
     );
     if (outcome === "in_flight") {
       // 命中在途锁: 不算一次失败、也不重置失败计数(让在途登录自己收尾)。
@@ -2319,9 +2367,14 @@ export class CquSessionDO extends DurableObject<Env> {
   private async containerLogin(
     okEvent: "FIRST_LOGIN_OK" | "RELOGIN_OK",
     failEvent: "FIRST_LOGIN_FAIL" | "RELOGIN_FAIL",
-    startEvent?: CquEvent
+    startEvent?: CquEvent,
+    deadlineAt?: number
   ): Promise<"in_flight" | "ok" | "failed"> {
     const state = this.state!;
+    // deadline 只在操作链入口 resolve 一次:alarm 链由 alarm() 传入;首登(init)链
+    // 在此 resolve。内部函数不得再次重新取得 13 分钟预算。
+    const operationDeadline =
+      deadlineAt ?? resolveBrowserDeadline(undefined, Date.now());
 
     // single-flight 守卫: 读最新锁, 活锁在途则直接退出, 不抢锁、不二次发码。
     const existingLock =
@@ -2372,8 +2425,8 @@ export class CquSessionDO extends DurableObject<Env> {
       await recheckBinding();
       await this.cleanupExpiredBrowserRoutes();
       // Cloudflare route 先预热(health/bootId/能力)再进入验证码租约与登录;
-      // node route 原样返回,不发送新 boot 头。
-      await this.prepareLoginRoute(
+      // node route 原样返回,不发送新 boot 头。预热结果(带 bootId)供 /run 使用。
+      const loginRoute = await this.prepareLoginRoute(
         token,
         acquired.route,
         "loginInFlight",
@@ -2384,8 +2437,7 @@ export class CquSessionDO extends DurableObject<Env> {
         creds.iv,
         this.env.ENCRYPTION_KEY
       );
-      // Phase 2: 经 Workers VPC binding 发到国内登录节点 POST /run(契约同容器, body 不变 ——
-      // 青果提取在节点本地)。原 getLoginContainer(...).fetch("https://c/run") 已弃用。
+      // /run 走集中 transport(按登录 route:node→LOGIN_NODE,CF→用户容器并带 boot 头)。
       // 先点火 /run，让 CAS 与 aTrust 可以并行完成密码一因子；节点会在
       // 真正请求验证码前等待 /code-permit。租约未授予时用 AbortSignal 中止在途请求，
       // 避免留下无人 await 的悬空 Promise。
@@ -2397,19 +2449,37 @@ export class CquSessionDO extends DurableObject<Env> {
         throw error;
       }
       runAbort = new AbortController();
-      const runRequest = this.env.LOGIN_NODE.fetch(
-        new Request(`${LOGIN_NODE_BASE}/run`, {
-          method: "POST",
-          signal: runAbort.signal,
-          body: JSON.stringify({
-            studentId: state.studentId,
-            password,
-            service: DUMMY_SERVICE,
-            method: "mail",
-            session: token,
-            queuedPermit: permitRole === "queued",
-          }),
-        })
+      // CF 预算:剩余 invocation 时间(登录含等码,受 13min 预算裁剪),减 20s 清理余量;
+      // AbortSignal 同时覆盖外层 fetch,防止容器/传输悬挂拖住 DO。
+      const remainingMs = remainingBrowserBudget(operationDeadline, Date.now());
+      const runTimeoutMs = Math.max(1, remainingMs - BROWSER_CLEANUP_MARGIN_MS);
+      const runSignal = AbortSignal.any([
+        runAbort.signal,
+        AbortSignal.timeout(remainingMs),
+      ]);
+      const runBody: Record<string, unknown> = {
+        studentId: state.studentId,
+        password,
+        service: DUMMY_SERVICE,
+        method: "mail",
+        session: token,
+        queuedPermit: permitRole === "queued",
+      };
+      if (loginRoute.backend === "cloudflare") {
+        runBody.operationTimeoutMs = runTimeoutMs;
+      }
+      const runHttpRequest = new Request(`${LOGIN_NODE_BASE}/run`, {
+        method: "POST",
+        signal: runSignal,
+        body: JSON.stringify(runBody),
+      });
+      if (loginRoute.backend === "cloudflare" && loginRoute.bootId) {
+        runHttpRequest.headers.set("X-Cqu-Expected-Boot-Id", loginRoute.bootId);
+      }
+      const runRequest = fetchBrowser(
+        this.env,
+        loginRoute,
+        runHttpRequest
       );
       const res = await runRequest;
       const result = await res.json<ContainerRunResult>();
@@ -2524,6 +2594,41 @@ export class CquSessionDO extends DurableObject<Env> {
 
   private browserRouteKey(token: string): string {
     return `${BROWSER_ROUTE_PREFIX}${token}`;
+  }
+
+  /**
+   * 非登录类浏览器操作(取票/保活/采集)的 route:按全局配置快照 + 当前绑定用户。
+   * 这些操作不绑定登录 token(无 boot 头契约),但同样按用户固定容器 ID。
+   */
+  private currentBrowserRoute(): BrowserRoute {
+    return {
+      version: 1,
+      backend: selectBrowserBackend(this.env.CQU_BROWSER_BACKEND),
+      userId: this.state?.userId ?? "",
+    };
+  }
+
+  /**
+   * 单阶段浏览器操作的出站预算:node 保留原 90s;CF 取 210s 单操作上限与
+   * 剩余 invocation 时间中较小者(减去 DO 清理余量后作为 Python operationTimeoutMs)。
+   * 剩余不足 30s 时受控抛 BROWSER_DEADLINE,不启动注定做不完的操作。
+   */
+  private browserOperationBudget(
+    route: BrowserRoute,
+    deadlineAt: number
+  ): { fetchTimeoutMs: number; operationTimeoutMs?: number } {
+    if (route.backend !== "cloudflare") {
+      return { fetchTimeoutMs: NODE_DEADLINE_MS };
+    }
+    const remaining = remainingBrowserBudget(deadlineAt, Date.now());
+    const fetchTimeoutMs = Math.min(CONTAINER_BROWSER_DEADLINE_MS, remaining);
+    return {
+      fetchTimeoutMs,
+      operationTimeoutMs: Math.max(
+        1,
+        fetchTimeoutMs - BROWSER_CLEANUP_MARGIN_MS
+      ),
+    };
   }
 
   /**
