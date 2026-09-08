@@ -11,6 +11,7 @@ capture 匹配)抽出便于单测。
 import asyncio
 import urllib.parse
 from patchright.async_api import async_playwright
+import browser_profile
 import cqu_login  # UA / locale 等浏览器对抗参数,与取票统一
 import cqu_ticket_browser  # 复用 _close_browser_driver / TICKET_SEMAPHORE / 超时常量
 
@@ -244,12 +245,12 @@ def classify_harvest_outcome(
 
 # 导航后等页面有机 fire 完 capture 的盲等上限(ms):课表 POST(my-table-detail)+ 学期
 # 由 /workspace/curriculum 自动 fire,实测百毫秒级到齐;给足 8s 容瑞数当场重算/重定向。
-CAPTURE_WAIT_MS = 8000
+CAPTURE_WAIT_MS = browser_profile.CAPTURE_WAIT_MS
 CAPTURE_POLL_MS = 150
 # 单个 in-page fetch 的超时(ms):同源 GET 读豁免,正常亚秒级。
-INPAGE_FETCH_TIMEOUT_MS = 15000
+INPAGE_FETCH_TIMEOUT_MS = browser_profile.INPAGE_FETCH_TIMEOUT_MS
 # harvest 整段执行上限(秒):navigate 过瑞数 + 等 capture + 跑 fetch[]。复用取票 overall_timeout 量级。
-HARVEST_OVERALL_TIMEOUT = 45.0
+HARVEST_OVERALL_TIMEOUT = browser_profile.HARVEST_OVERALL_TIMEOUT_S
 
 
 async def harvest(state: dict, recipe: dict) -> dict:
@@ -300,7 +301,7 @@ async def harvest(state: dict, recipe: dict) -> dict:
         page = await ctx.new_page()
         page.on("response", lambda r: asyncio.create_task(_on_response(r)))
         try:
-            await page.goto(nav_url, wait_until="domcontentloaded", timeout=25000)
+            await page.goto(nav_url, wait_until="domcontentloaded", timeout=browser_profile.HARVEST_NAV_TIMEOUT_MS)
         except Exception:
             pass
         # 等 capture 齐(或超时):页面有机 fire 是异步的,轮询 captured 覆盖期望集即提前结束。

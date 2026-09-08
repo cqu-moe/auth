@@ -19,9 +19,11 @@ import asyncio
 import logging
 import time
 import urllib.parse
+import uuid
 
 from aiohttp import web
 
+import browser_profile  # 国内/Cloudflare 两套时限与运行标记
 import cqu_login  # 改造后的登录器, 暴露 run_login(...)
 import cqu_atrust  # 独立 aTrust 登录器, 只返回 storage_state
 import cqu_keepalive  # 国内节点浏览器水化探活, 暴露 probe_session_browser(...)
@@ -37,7 +39,22 @@ NODE_CAPABILITIES = [
     "code-permit",
     "reusable-code",
     "data-harvest",
+    "browser-route-v1",
+    "operation-deadline-v1",
 ]
+
+# 进程级启动标识:实例停止/崩溃/更新后 Event 字典即清空,DO 必须能识别"同一个容器 ID
+# 已经换了 Python 进程",不能把验证码投进没有原登录任务的新进程。仅出现在 health JSON,
+# 不加诊断 HTML/state 导出接口。
+BOOT_ID = uuid.uuid4().hex
+
+# CF profile 下全进程同一时刻只允许一个重型浏览器操作(basic 1 GiB;/run、/atrust-login、
+# /service-ticket、/keepalive、/data-harvest 共用)。health/code/permit 不取此锁。
+BROWSER_JOB_LOCK = asyncio.Lock()
+
+BOOT_HEADER = "X-Cqu-Expected-Boot-Id"
+MIN_OPERATION_TIMEOUT_MS = 1
+MAX_OPERATION_TIMEOUT_MS = 780_000
 
 
 # ── serviceUrl host 白名单(纵深第二层) ──────────────────────────────────────
@@ -151,6 +168,105 @@ class PermitWaitTimeout(Exception):
     """等待 DO 发放验证码租约 permit 超时。"""
 
 
+class BrowserBusyError(Exception):
+    """本进程已有重型浏览器任务在执行(CF profile 单任务互斥)。"""
+
+
+class BrowserDeadlineExceeded(Exception):
+    """operationTimeoutMs 预算耗尽:真实操作已被取消并清理。"""
+
+
+class InvalidOperationTimeout(Exception):
+    """operationTimeoutMs 入参非法(非整数/越界/该给未给)。"""
+
+
+def boot_guard_response(request: web.Request) -> web.Response | None:
+    """校验 X-Cqu-Expected-Boot-Id;不匹配返回 409 BROWSER_INSTANCE_REPLACED。
+
+    必须在修改任何 Event/码/permit 字典之前调用。CF profile 头必填;国内默认
+    profile 缺头仍按旧协议工作(仅当头存在且不匹配才拒绝)。
+    """
+    expected = request.headers.get(BOOT_HEADER)
+    if expected == BOOT_ID:
+        return None
+    if expected is None and not browser_profile.CLOUDFLARE_PROFILE:
+        return None
+    log.warning("boot id mismatch (header %s)", "missing" if expected is None else "stale")
+    return web.json_response(
+        {"ok": False, "error": "BROWSER_INSTANCE_REPLACED"}, status=409
+    )
+
+
+def parse_operation_timeout_ms(body: dict) -> int | None:
+    """解析并校验 operationTimeoutMs;缺失返回 None(国内旧协议)。
+
+    JSON 里 NaN/Infinity/小数/字符串/bool 都不是合法的有限整数毫秒,一律 400,
+    不做隐式钳制(调用方必须显式给出预算)。
+    """
+    value = body.get("operationTimeoutMs")
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise InvalidOperationTimeout("invalid operationTimeoutMs")
+    if not (MIN_OPERATION_TIMEOUT_MS <= value <= MAX_OPERATION_TIMEOUT_MS):
+        raise InvalidOperationTimeout("operationTimeoutMs out of range")
+    return value
+
+
+async def acquire_browser_job() -> bool:
+    """尝试占用本进程唯一的重型浏览器槽(仅 CF profile 生效)。
+
+    返回 True 表示本次请求实际获得锁,必须在 finally 调 release_browser_job(True);
+    返回 False 表示当前 profile 不启用进程级互斥(国内默认),无需释放。
+    被占用时抛 BrowserBusyError(→ 503 BROWSER_BUSY),不在 aiohttp 里排队。
+    """
+    if not browser_profile.CLOUDFLARE_PROFILE:
+        return False
+    if BROWSER_JOB_LOCK.locked():
+        raise BrowserBusyError()
+    await BROWSER_JOB_LOCK.acquire()
+    return True
+
+
+def release_browser_job(acquired: bool) -> None:
+    """只释放本请求实际获得的锁;参数校验失败/被拒的请求不得误释放他人锁。"""
+    if acquired:
+        BROWSER_JOB_LOCK.release()
+
+
+async def run_bounded(coro, timeout_ms: int | None):
+    """在 operationTimeoutMs 预算内执行真实操作;超时先取消协程并等其 finally
+    (关浏览器/清资源)真实执行完,再抛 BrowserDeadlineExceeded。不吞外层
+    CancelledError(客户端断连/处理器取消仍向上传播,且同样取消内层操作)。"""
+    if timeout_ms is None:
+        return await coro
+    # 不用 wait_for:它把「预算耗尽」与「内层自身抛的 TimeoutError」混成同一种异常,
+    # 会把 RUN_TOTAL_TIMEOUT 等业务超时误报成 BROWSER_DEADLINE。先 wait 再判 done。
+    task = asyncio.ensure_future(coro)
+    try:
+        done, _ = await asyncio.wait({task}, timeout=timeout_ms / 1000)
+    except BaseException:
+        # 外层被取消(客户端断连):同样要取消内层操作,不留后台浏览器继续跑。
+        task.cancel()
+        try:
+            await task
+        except BaseException:
+            pass
+        raise
+    if task not in done:
+        task.cancel()
+        try:
+            # 等取消落地:确保内层 finally(关浏览器/清资源)真实执行完再报 deadline。
+            await task
+        except asyncio.CancelledError:
+            if not task.cancelled():
+                raise
+        except Exception:  # noqa: BLE001 - 清理期异常不掩盖 deadline 事实
+            pass
+        raise BrowserDeadlineExceeded()
+    return await task
+
+
 def _sweep_stale_codes() -> None:
     """删除早于 CODE_WAIT_TIMEOUT 的孤儿 /code 存码(及其 Event), 防止明文码无界堆积/长期驻留。"""
     now = time.time()
@@ -197,6 +313,11 @@ async def _run_with_separate_permit_budget(
             )
         return await asyncio.wait_for(login_task, timeout=RUN_TOTAL_TIMEOUT)
     finally:
+        # 任何出口(含外层 operationTimeoutMs 取消/客户端断连)都必须终止 login_task,
+        # 否则 HTTP 已返回而后台浏览器协程仍在跑(继续发码/占资源)。
+        if not login_task.done():
+            login_task.cancel()
+            await asyncio.gather(login_task, return_exceptions=True)
         if not permit_task.done():
             permit_task.cancel()
         await asyncio.gather(permit_task, return_exceptions=True)
@@ -227,6 +348,18 @@ async def run_handler(request: web.Request) -> web.Response:
             status=400,
         )
 
+    boot_guard = boot_guard_response(request)
+    if boot_guard is not None:
+        return boot_guard
+    try:
+        operation_timeout_ms = parse_operation_timeout_ms(body)
+    except InvalidOperationTimeout as error:
+        return web.json_response({"ok": False, "error": str(error)}, status=400)
+    if operation_timeout_ms is None and browser_profile.CLOUDFLARE_PROFILE:
+        return web.json_response(
+            {"ok": False, "error": "operationTimeoutMs is required"}, status=400
+        )
+
     # H3 纵深第二层: /run 也是 CAS 铸 ST 入口, 与 /service-ticket /keepalive 对称——service host
     # 必须是 https 的 *.cqu.edu.cn(策略对齐 DO 侧 service-url.ts), 杜绝 CVE-2022-39369 式 ST-relay
     # (红线本只在上游 DO, 此为节点侧纵深防御: VPC 误配 / 将来新增直连本节点的调用方时仍兜得住)。
@@ -250,6 +383,15 @@ async def run_handler(request: web.Request) -> web.Response:
             return web.json_response(
                 {"ok": False, "error": f"qg proxy unavailable: {e}"}, status=502
             )
+
+    # 单任务互斥在所有参数/boot 校验之后、Event 注册之前:被拒请求不创建任何
+    # CODE_EVENTS,也不影响在途任务的锁。
+    job_acquired = False
+    try:
+        job_acquired = await acquire_browser_job()
+    except BrowserBusyError:
+        log.warning("run busy (another heavy browser job holds this instance)")
+        return web.json_response({"ok": False, "error": "BROWSER_BUSY"}, status=503)
 
     ev = asyncio.Event()
     CODE_EVENTS[session] = ev
@@ -322,23 +464,33 @@ async def run_handler(request: web.Request) -> web.Response:
 
     log.info("run start method=%s", method)
     try:
-        result = await _run_with_separate_permit_budget(
-            cqu_login.run_login(
-                student_id=student_id,
-                password=password,
-                service=service,
-                method=method,
-                code_provider=code_waiter,
-                reusable_code_provider=reusable_code_waiter,
-                permit_provider=permit_waiter,
-                proxy=proxy,
+        result = await run_bounded(
+            _run_with_separate_permit_budget(
+                cqu_login.run_login(
+                    student_id=student_id,
+                    password=password,
+                    service=service,
+                    method=method,
+                    code_provider=code_waiter,
+                    reusable_code_provider=reusable_code_waiter,
+                    permit_provider=permit_waiter,
+                    proxy=proxy,
+                ),
+                permit_claimed,
+                permit_phase_timeout,
             ),
-            permit_claimed,
-            permit_phase_timeout,
+            operation_timeout_ms,
         )
         # ticket 是 bearer 凭据, 不入日志(session 不是凭据可留); 对齐 DO 审计「绝不记录 ticket/cookies/密码」。
         log.info("run ok")
         return web.json_response({"ok": True, **result})
+    except BrowserDeadlineExceeded:
+        # operationTimeoutMs 预算耗尽:内层协程已被取消,其 finally 已关浏览器;
+        # 本 handler 的 finally 会清本 token 的全部 Event/Value 并释放重型锁。
+        log.warning("run deadline exceeded (operationTimeoutMs=%d)", operation_timeout_ms or -1)
+        return web.json_response(
+            {"ok": False, "error": "BROWSER_DEADLINE"}, status=503
+        )
     except CodeWaitTimeout:
         # 内层: 等码超时, 验证码始终没到(邮件未送达 / DO 未推码)。
         log.warning(
@@ -371,6 +523,7 @@ async def run_handler(request: web.Request) -> web.Response:
         REUSABLE_CODE_VALUES.pop(session, None)
         PERMIT_EVENTS.pop(session, None)
         PERMIT_VALUES.pop(session, None)
+        release_browser_job(job_acquired)
 
 
 async def atrust_login_handler(request: web.Request) -> web.Response:
@@ -398,6 +551,18 @@ async def atrust_login_handler(request: web.Request) -> web.Response:
             status=400,
         )
 
+    boot_guard = boot_guard_response(request)
+    if boot_guard is not None:
+        return boot_guard
+    try:
+        operation_timeout_ms = parse_operation_timeout_ms(body)
+    except InvalidOperationTimeout as error:
+        return web.json_response({"ok": False, "error": str(error)}, status=400)
+    if operation_timeout_ms is None and browser_profile.CLOUDFLARE_PROFILE:
+        return web.json_response(
+            {"ok": False, "error": "operationTimeoutMs is required"}, status=400
+        )
+
     proxy = None
     if should_use_proxy("login"):
         try:
@@ -407,6 +572,13 @@ async def atrust_login_handler(request: web.Request) -> web.Response:
             return web.json_response(
                 {"ok": False, "error": "ATRUST_TRANSIENT"}, status=502
             )
+
+    job_acquired = False
+    try:
+        job_acquired = await acquire_browser_job()
+    except BrowserBusyError:
+        log.warning("atrust-login busy (another heavy browser job holds this instance)")
+        return web.json_response({"ok": False, "error": "BROWSER_BUSY"}, status=503)
 
     code_event = asyncio.Event()
     reusable_code_event = asyncio.Event()
@@ -469,21 +641,29 @@ async def atrust_login_handler(request: web.Request) -> web.Response:
 
     log.info("atrust-login start method=%s", method)
     try:
-        result = await _run_with_separate_permit_budget(
-            cqu_atrust.run_atrust_login(
-                student_id=student_id,
-                password=password,
-                method=method,
-                code_provider=code_waiter,
-                reusable_code_provider=reusable_code_waiter,
-                permit_provider=permit_waiter,
-                proxy=proxy,
+        result = await run_bounded(
+            _run_with_separate_permit_budget(
+                cqu_atrust.run_atrust_login(
+                    student_id=student_id,
+                    password=password,
+                    method=method,
+                    code_provider=code_waiter,
+                    reusable_code_provider=reusable_code_waiter,
+                    permit_provider=permit_waiter,
+                    proxy=proxy,
+                ),
+                permit_claimed,
+                permit_phase_timeout,
             ),
-            permit_claimed,
-            permit_phase_timeout,
+            operation_timeout_ms,
         )
         log.info("atrust-login ok")
         return web.json_response({"ok": True, **result})
+    except BrowserDeadlineExceeded:
+        log.warning("atrust-login deadline exceeded (operationTimeoutMs=%d)", operation_timeout_ms or -1)
+        return web.json_response(
+            {"ok": False, "error": "BROWSER_DEADLINE"}, status=503
+        )
     except cqu_atrust.AtrustPasswordRejectedError:
         log.warning("atrust-login password rejected")
         return web.json_response(
@@ -506,6 +686,7 @@ async def atrust_login_handler(request: web.Request) -> web.Response:
         REUSABLE_CODE_VALUES.pop(session, None)
         PERMIT_EVENTS.pop(session, None)
         PERMIT_VALUES.pop(session, None)
+        release_browser_job(job_acquired)
 
 
 async def code_handler(request: web.Request) -> web.Response:
@@ -513,6 +694,10 @@ async def code_handler(request: web.Request) -> web.Response:
         body = await request.json()
     except Exception:
         return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
+
+    boot_guard = boot_guard_response(request)
+    if boot_guard is not None:
+        return boot_guard
 
     session = body.get("session") or "default"
     code = body.get("code")
@@ -549,6 +734,10 @@ async def code_permit_handler(request: web.Request) -> web.Response:
         return web.json_response(
             {"ok": False, "error": "invalid JSON body"}, status=400
         )
+
+    boot_guard = boot_guard_response(request)
+    if boot_guard is not None:
+        return boot_guard
     session = body.get("session")
     if not session:
         return web.json_response(
@@ -597,10 +786,34 @@ async def service_ticket_handler(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "serviceUrl not allowed"}, status=400)
 
     try:
-        ticket = await cqu_ticket_browser.fetch_service_ticket_browser(canonical_url, state)
+        operation_timeout_ms = parse_operation_timeout_ms(body)
+    except InvalidOperationTimeout as error:
+        return web.json_response({"ok": False, "error": str(error)}, status=400)
+    if operation_timeout_ms is None and browser_profile.CLOUDFLARE_PROFILE:
+        return web.json_response(
+            {"ok": False, "error": "operationTimeoutMs is required"}, status=400
+        )
+
+    job_acquired = False
+    try:
+        job_acquired = await acquire_browser_job()
+    except BrowserBusyError:
+        log.warning("service-ticket busy (another heavy browser job holds this instance)")
+        return web.json_response({"ok": False, "error": "BROWSER_BUSY"}, status=503)
+
+    try:
+        ticket = await run_bounded(
+            cqu_ticket_browser.fetch_service_ticket_browser(canonical_url, state),
+            operation_timeout_ms,
+        )
         # ST 是 bearer 凭据, 只记长度供诊断, 绝不打值。
         log.info("service-ticket ok (len=%d)", len(ticket))
         return web.json_response({"ok": True, "ticket": ticket})
+    except BrowserDeadlineExceeded:
+        log.warning("service-ticket deadline exceeded (operationTimeoutMs=%d)", operation_timeout_ms or -1)
+        return web.json_response(
+            {"ok": False, "error": "BROWSER_DEADLINE"}, status=503
+        )
     except cqu_ticket_browser.ExpiredError as e:
         # 落回 CAS 登录页 = 会话过期 → 409(客户端态, 交 DO 重登)。HTTP 状态码(409)是 DO
         # classifyNodeTicketResponse 分类的唯一依据, body.error 不参与分类——故 error 只回稳定
@@ -613,6 +826,8 @@ async def service_ticket_handler(request: web.Request) -> web.Response:
         # 状态码语义(502)不变 → DO 据状态码分类, 不依赖 body 文案。
         log.warning("service-ticket transient: %s", type(e).__name__)
         return web.json_response({"ok": False, "error": type(e).__name__}, status=502)
+    finally:
+        release_browser_job(job_acquired)
 
 
 async def keepalive_handler(request: web.Request) -> web.Response:
@@ -629,14 +844,40 @@ async def keepalive_handler(request: web.Request) -> web.Response:
     if not isinstance(state, dict):
         return web.json_response(
             {"ok": False, "error": "missing required field: state (object)"}, status=400)
+
     try:
-        result = await cqu_keepalive.probe_session_browser(state)
+        operation_timeout_ms = parse_operation_timeout_ms(body)
+    except InvalidOperationTimeout as error:
+        return web.json_response({"ok": False, "error": str(error)}, status=400)
+    if operation_timeout_ms is None and browser_profile.CLOUDFLARE_PROFILE:
+        return web.json_response(
+            {"ok": False, "error": "operationTimeoutMs is required"}, status=400
+        )
+
+    job_acquired = False
+    try:
+        job_acquired = await acquire_browser_job()
+    except BrowserBusyError:
+        log.warning("keepalive busy (another heavy browser job holds this instance)")
+        return web.json_response({"ok": False, "error": "BROWSER_BUSY"}, status=503)
+    try:
+        result = await run_bounded(
+            cqu_keepalive.probe_session_browser(state), operation_timeout_ms
+        )
+    except BrowserDeadlineExceeded:
+        # deadline 是稳定瞬态基础设施错误,不能被下面的 unreachable 兜底吞成 200。
+        log.warning("keepalive deadline exceeded (operationTimeoutMs=%d)", operation_timeout_ms or -1)
+        return web.json_response(
+            {"ok": False, "error": "BROWSER_DEADLINE"}, status=503
+        )
     except Exception as e:  # noqa: BLE001 - 纵深兜底, 探活对 DO 永远只返回探测事实(200)
         # M9: detail(body)与 log 都只记 type(e).__name__, 不拼 str(e): 异常 message 可能含
         # state/cookie 片段, 经 200 body 回传 DO 并落 CF observability(下游 sanitizeNodeDetail
         # 只截断不脱敏, 救不了)。补齐"body 防了 log 没防"的不一致。
         log.warning("keepalive probe unexpected error (→ unreachable): %s", type(e).__name__)
         result = {"status": "unreachable", "state": state, "detail": type(e).__name__}
+    finally:
+        release_browser_job(job_acquired)
     log.info("keepalive status=%s detail=%s", result["status"], (result.get("detail", "") or "")[:80])
     return web.json_response({"ok": True, **result})
 
@@ -670,11 +911,35 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "recipe not allowed"}, status=400)
 
     try:
-        result = await cqu_data_harvest.harvest(state, recipe)
+        operation_timeout_ms = parse_operation_timeout_ms(body)
+    except InvalidOperationTimeout as error:
+        return web.json_response({"ok": False, "error": str(error)}, status=400)
+    if operation_timeout_ms is None and browser_profile.CLOUDFLARE_PROFILE:
+        return web.json_response(
+            {"ok": False, "error": "operationTimeoutMs is required"}, status=400
+        )
+
+    job_acquired = False
+    try:
+        job_acquired = await acquire_browser_job()
+    except BrowserBusyError:
+        log.warning("data-harvest busy (another heavy browser job holds this instance)")
+        return web.json_response({"ok": False, "error": "BROWSER_BUSY"}, status=503)
+
+    try:
+        result = await run_bounded(
+            cqu_data_harvest.harvest(state, recipe), operation_timeout_ms
+        )
         # captures/fetches 不记日志(可能含课表/学籍数据); 只记计数供诊断。
         log.info("data-harvest ok (captures=%d fetches=%d)",
                  len(result.get("captures", [])), len(result.get("fetches", [])))
         return web.json_response({"ok": True, **result})
+    except BrowserDeadlineExceeded:
+        # 稳定 deadline 码优先于 harvest 业务分类,绝不能被包装成 HARVEST_TRANSIENT。
+        log.warning("data-harvest deadline exceeded (operationTimeoutMs=%d)", operation_timeout_ms or -1)
+        return web.json_response(
+            {"ok": False, "error": "BROWSER_DEADLINE"}, status=503
+        )
     except cqu_data_harvest.AtrustHarvestExpiredError:
         # aTrust 状态与普通 CAS 独立；用受控 marker 让 DO 只清理并恢复 aTrust。
         log.warning("data-harvest expired (aTrust session) → 409")
@@ -696,6 +961,8 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
     except Exception as e:  # noqa: BLE001 - 浏览器崩/超时 → 502 瞬态, 让上游退避
         log.warning("data-harvest transient: %s", type(e).__name__)
         return web.json_response({"ok": False, "error": type(e).__name__}, status=502)
+    finally:
+        release_browser_job(job_acquired)
 
 
 async def health_handler(_request: web.Request) -> web.Response:
@@ -704,6 +971,13 @@ async def health_handler(_request: web.Request) -> web.Response:
             "ok": True,
             "apiVersion": NODE_API_VERSION,
             "capabilities": NODE_CAPABILITIES,
+            "bootId": BOOT_ID,
+            # 动态取当前 profile,与请求路径的判定同源(测试可注入)。
+            "browserProfile": (
+                "cloudflare"
+                if browser_profile.CLOUDFLARE_PROFILE
+                else browser_profile.PROFILE_NAME
+            ),
         }
     )
 

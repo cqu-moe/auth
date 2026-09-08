@@ -1,6 +1,7 @@
 """临时浏览器水化完整 storage_state 取票(替代 httpx,过瑞数 JS 挑战)。"""
 import asyncio
 import urllib.parse
+import browser_profile
 from patchright.async_api import async_playwright
 import cqu_login  # UA / SSO / install_ticket_sniffer / extract_ticket
 
@@ -129,7 +130,7 @@ async def _close_browser_driver(browser, pw) -> None:
 
 
 async def _hydrate_navigate(service_url: str, state: dict, *, capture_state: bool = False,
-                            overall_timeout: float = 45.0) -> tuple[str, str, dict | None]:
+                            overall_timeout: float | None = None) -> tuple[str, str, dict | None]:
     """水化完整 storage_state 起临时浏览器 navigate /login?service=X。
 
     ST 事实源是 sniffer 从 CAS 302 的 `Location` 头抓取(install_ticket_sniffer)+ route 收集带
@@ -149,6 +150,8 @@ async def _hydrate_navigate(service_url: str, state: dict, *, capture_state: boo
     """
     url = build_login_url(service_url)
     service_host = service_host_of(service_url)
+    if overall_timeout is None:
+        overall_timeout = browser_profile.HYDRATE_OVERALL_TIMEOUT_S
     # 句柄提到外层:_run 被外层 overall_timeout 取消时,仍能在 release 后于 finally 里清理
     # (M3:start() 握手期被取消、pw 仍 None 时,_close_browser_driver 对 None 也安全跳过)。
     handles: dict = {"pw": None, "browser": None}
@@ -162,7 +165,7 @@ async def _hydrate_navigate(service_url: str, state: dict, *, capture_state: boo
         handles["pw"] = pw
         browser = await pw.chromium.launch(headless=True, args=[
             "--headless=new", "--disable-blink-features=AutomationControlled",
-            "--no-sandbox", "--disable-dev-shm-usage"], timeout=30000)
+            "--no-sandbox", "--disable-dev-shm-usage"], timeout=browser_profile.TICKET_LAUNCH_TIMEOUT_MS)
         handles["browser"] = browser
         ctx = await browser.new_context(
             storage_state=state, user_agent=cqu_login.UA,
@@ -188,7 +191,7 @@ async def _hydrate_navigate(service_url: str, state: dict, *, capture_state: boo
         page = await ctx.new_page()
         cqu_login.install_ticket_sniffer(page, tickets)  # 事实源:从 CAS 302 Location 抓 ST
         try:
-            await page.goto(url, wait_until="domcontentloaded", timeout=25000)
+            await page.goto(url, wait_until="domcontentloaded", timeout=browser_profile.TICKET_NAV_TIMEOUT_MS)
             await _wait_for_ticket(page, tickets)
         except Exception:
             pass

@@ -8,6 +8,7 @@ is consumed by the aTrust passport and is never returned to callers.
 import asyncio
 import urllib.parse
 
+import browser_profile
 from patchright.async_api import async_playwright
 
 import cqu_login
@@ -63,8 +64,8 @@ def classify_first_factor_failure(verdict: str) -> str:
 
 async def click_unified_identity(page) -> None:
     """Open the fixed entry and select the exact visible CAS option."""
-    await page.goto(ATRUST_APP_URL, wait_until="domcontentloaded", timeout=40_000)
-    for _ in range(40):
+    await page.goto(ATRUST_APP_URL, wait_until="domcontentloaded", timeout=browser_profile.ATRUST_NAV_TIMEOUT_MS)
+    for _ in range(browser_profile.ATRUST_PORTAL_POLLS):
         candidates = page.locator("li.server-container .server-name")
         for index in range(await candidates.count()):
             candidate = candidates.nth(index)
@@ -80,7 +81,7 @@ async def click_unified_identity(page) -> None:
 
 
 async def wait_for_rewritten_sso(page) -> None:
-    for _ in range(40):
+    for _ in range(browser_profile.ATRUST_SSO_POLLS):
         if is_rewritten_sso_url(page.url) and await page.locator(
             "#login-croypto"
         ).count():
@@ -90,15 +91,17 @@ async def wait_for_rewritten_sso(page) -> None:
 
 
 async def wait_for_atrust_app(page) -> None:
-    for _ in range(60):
+    for _ in range(browser_profile.ATRUST_APP_POLLS):
         if is_atrust_login_done(page.url):
             return
         await page.wait_for_timeout(500)
     raise RuntimeError("ATRUST_APP_NOT_REACHED")
 
 
-async def verify_atrust_app_ready(page, timeout_seconds: float = 25) -> None:
+async def verify_atrust_app_ready(page, timeout_seconds: float | None = None) -> None:
     """Require a real curriculum API response before persisting the session."""
+    if timeout_seconds is None:
+        timeout_seconds = browser_profile.ATRUST_APP_READY_TIMEOUT_S
     ready = asyncio.Event()
 
     async def inspect_response(response) -> None:
@@ -128,7 +131,7 @@ async def verify_atrust_app_ready(page, timeout_seconds: float = 25) -> None:
         await page.goto(
             ATRUST_APP_URL,
             wait_until="domcontentloaded",
-            timeout=40_000,
+            timeout=browser_profile.ATRUST_NAV_TIMEOUT_MS,
         )
         await asyncio.wait_for(ready.wait(), timeout=timeout_seconds)
         if not is_atrust_login_done(page.url):
@@ -168,7 +171,7 @@ async def run_atrust_login(
                 "--disable-dev-shm-usage",
             ],
             proxy=proxy,
-            timeout=30_000,
+            timeout=browser_profile.BROWSER_LAUNCH_TIMEOUT_MS,
         )
         context = await browser.new_context(
             user_agent=cqu_login.UA,

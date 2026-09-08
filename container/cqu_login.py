@@ -53,6 +53,7 @@ import sys
 import time
 import urllib.parse
 
+import browser_profile
 from patchright.async_api import async_playwright
 
 SSO = "https://sso.cqu.edu.cn"
@@ -74,11 +75,11 @@ async def load_login_page(pg, url):
     """正常全量加载登录页(Angular 完整), 返回 (croypto, flowkey) 或 (None, None)。"""
     for i in range(6):
         try:
-            await (pg.goto(url, wait_until="networkidle", timeout=25000) if i == 0
-                   else pg.reload(wait_until="networkidle", timeout=25000))
+            await (pg.goto(url, wait_until="networkidle", timeout=browser_profile.LOGIN_NAV_TIMEOUT_MS) if i == 0
+                   else pg.reload(wait_until="networkidle", timeout=browser_profile.LOGIN_NAV_TIMEOUT_MS))
         except Exception:
             pass
-        await pg.wait_for_timeout(1500)
+        await pg.wait_for_timeout(browser_profile.LOGIN_RENDER_WAIT_MS)
         if await pg.locator("#login-croypto").count():
             break
     else:
@@ -91,8 +92,10 @@ async def load_login_page(pg, url):
         return None, None
 
 
-async def formnav_submit(pg, url, fields, wait_until="networkidle", timeout=25000):
+async def formnav_submit(pg, url, fields, wait_until="networkidle", timeout=None):
     """注入原始 <form> 走【文档导航式】提交(过瑞数的关键; 非 Angular XHR)。"""
+    if timeout is None:
+        timeout = browser_profile.FORMNAV_TIMEOUT_MS
     try:
         async with pg.expect_navigation(wait_until=wait_until, timeout=timeout):
             await pg.evaluate("""(a) => {
@@ -166,7 +169,7 @@ async def do_first_factor(pg, url, username, password, debug_screenshot=True):
               "geolocation": "", "username": username,
               "password": aes_encrypt_password(croypto, password), "croypto": croypto}
     await formnav_submit(pg, url, fields)
-    await pg.wait_for_timeout(2500)
+    await pg.wait_for_timeout(browser_profile.POST_SUBMIT_WAIT_MS)
     if "ticket=ST-" in pg.url:
         return "success"
     body = (await pg.locator("body").inner_text()) if await pg.locator("body").count() else ""
@@ -198,15 +201,15 @@ async def switch_2fa_tab(pg, method):
     """2FA 页切到短信/邮件 tab(等 Angular 渲染齐 tab)。"""
     tab_text = METHOD[method]["tab"]
     for _ in range(12):
-        await pg.wait_for_timeout(1500)
+        await pg.wait_for_timeout(browser_profile.TAB_POLL_WAIT_MS)
         if await pg.locator(".ant-tabs-tab").filter(has_text=tab_text).count() or \
            await pg.locator("input[placeholder='请输入验证码']").count():
             break
     t = pg.locator(".ant-tabs-tab").filter(has_text=tab_text)
     if await t.count():
         try:
-            await t.first.click(timeout=4000)
-            await pg.wait_for_timeout(1500)
+            await t.first.click(timeout=browser_profile.TAB_CLICK_TIMEOUT_MS)
+            await pg.wait_for_timeout(browser_profile.TAB_POLL_WAIT_MS)
         except Exception:
             pass
 
@@ -216,7 +219,7 @@ async def request_code(pg, sms_state):
     for sel in [".font-class-text-button", "button:has-text('获取验证码')", "span:has-text('获取验证码')"]:
         if await pg.locator(sel).count():
             try:
-                await pg.locator(sel).first.click(timeout=4000)
+                await pg.locator(sel).first.click(timeout=browser_profile.TAB_CLICK_TIMEOUT_MS)
                 await pg.wait_for_timeout(3500)
                 return True
             except Exception:
@@ -266,8 +269,8 @@ async def submit_code(pg, url, username, code, method):
         flowkey = ""
     fields = {"username": username, "password": code, "type": METHOD[method]["login_type"],
               "execution": flowkey, "_eventId": "submit", "trustDevice": "false"}
-    await formnav_submit(pg, url, fields, timeout=20000)
-    await pg.wait_for_timeout(2500)
+    await formnav_submit(pg, url, fields, timeout=browser_profile.FORMNAV_TIMEOUT_MS)
+    await pg.wait_for_timeout(browser_profile.POST_SUBMIT_WAIT_MS)
 
 
 def install_ticket_sniffer(page, tickets):
@@ -384,7 +387,7 @@ async def run_login(
                 "--disable-dev-shm-usage",
             ],
             proxy=proxy,
-            timeout=30000,
+            timeout=browser_profile.BROWSER_LAUNCH_TIMEOUT_MS,
         )
         ctx = await browser.new_context(user_agent=UA, viewport={"width": 1440, "height": 900},
                                         locale="zh-CN", timezone_id="Asia/Shanghai")
@@ -437,7 +440,7 @@ async def run_login(
             await submit_code(page, url, student_id, code, method)
             tk = extract_ticket(tickets + [page.url])
             if not tk:
-                await page.wait_for_timeout(2500)
+                await page.wait_for_timeout(browser_profile.POST_SUBMIT_WAIT_MS)
                 tk = extract_ticket(tickets + [page.url])
             if not tk:
                 raise RuntimeError(f"未捕获 ST ticket(验证码可能错误/过期), final_url={page.url[:80]}")
@@ -461,7 +464,7 @@ async def run(args):
             args=["--headless=new", "--disable-blink-features=AutomationControlled",
                   "--no-sandbox", "--disable-dev-shm-usage"]
             if not args.headed else ["--disable-blink-features=AutomationControlled"],
-            timeout=30000)
+            timeout=browser_profile.BROWSER_LAUNCH_TIMEOUT_MS)
         ctx = await browser.new_context(user_agent=UA, viewport={"width": 1440, "height": 900},
                                         locale="zh-CN", timezone_id="Asia/Shanghai")
         page = await ctx.new_page()
@@ -507,7 +510,7 @@ async def run(args):
 
             tk = extract_ticket(tickets + [page.url])
             if not tk:
-                await page.wait_for_timeout(2500)
+                await page.wait_for_timeout(browser_profile.POST_SUBMIT_WAIT_MS)
                 tk = extract_ticket(tickets + [page.url])
             await ctx.storage_state(path=args.out)
             if tk:

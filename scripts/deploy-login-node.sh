@@ -7,6 +7,7 @@ release_root="/opt/cqu-login/releases"
 expected_api_version="atrust-harvest-v1"
 runtime_files=(
   server.py
+  browser_profile.py
   cqu_login.py
   cqu_atrust.py
   qg_proxy.py

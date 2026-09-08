@@ -48,3 +48,7 @@ def test_local_rsync_is_compatible_with_macos_rsync_2_6():
 def test_remote_health_and_import_checks_run_as_the_service_account():
     assert SCRIPT.count("sudo -u cqulogin") >= 5
     assert 'sudo -u cqulogin env PYTHONPATH="$release_dir"' in SCRIPT
+
+
+def test_runtime_files_include_browser_profile_for_domestic_deploys():
+    assert "browser_profile.py" in SCRIPT
