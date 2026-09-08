@@ -486,8 +486,14 @@ export class CquSessionDO extends DurableObject<Env> {
             navUrl: string;
             capture: string[];
             fetch: { method?: string; url: string }[];
+            deadlineAt?: number;
           }>();
-          const result = await this.dataHarvest({ recipe, clientId, source });
+          const result = await this.dataHarvest({
+            recipe,
+            clientId,
+            source,
+            deadlineAt: recipe.deadlineAt,
+          });
           return Response.json(result);
         }
         case "deposit-code": {
@@ -851,8 +857,12 @@ export class CquSessionDO extends DurableObject<Env> {
     recipe: { navUrl: string; capture: string[]; fetch: { method?: string; url: string }[] };
     clientId: string | null;
     source: string;
+    deadlineAt?: number;
   }): Promise<{ captures: HarvestCapture[]; fetches: HarvestFetch[] }> {
     await this.loadState();
+    // RPC 传入的绝对截止时间在此归一化(非法/已过期按 Task 02 受控失败);
+    // 整个 harvest(含唯一一次恢复登录与重试)共用这一条预算。
+    const deadlineAt = resolveBrowserDeadline(arg.deadlineAt, Date.now());
     const status = await this.getStatus();
     if (!this.state) {
       throw new CquSsoError("SESSION_INACTIVE", "CQU session not active");
@@ -936,6 +946,9 @@ export class CquSessionDO extends DurableObject<Env> {
     // 不被直连 CAS 的 expired/relogging/needs_reauth 状态阻断。
     let atrustSession: AtrustSessionRecord | null = null;
     let atrustGeneration: string | null = null;
+    // backend 快照:hostKind 验证后取一次,首次采集、会话缺失登录、唯一一次恢复
+    // 与重试全程使用同一后端,不在两个后端间切换或重试同一次登录。
+    const harvestRoute = this.currentBrowserRoute();
     if (hostKind === "direct") {
       if (status !== "active") {
         if (status === "needs_reauth") {
@@ -1009,9 +1022,11 @@ export class CquSessionDO extends DurableObject<Env> {
       if (hostKind === "direct") {
         attempts = 1;
         try {
-          result = await this.harvestViaNode(
+          result = await this.harvestViaBrowser(
             sessionState.storageState,
-            canonicalRecipe
+            canonicalRecipe,
+            harvestRoute,
+            deadlineAt
           );
         } catch (error) {
           if (
@@ -1032,12 +1047,14 @@ export class CquSessionDO extends DurableObject<Env> {
         let activeAtrust =
           atrustSession?.status === "active" && atrustSession.storageState
             ? atrustSession
-            : await this.getAtrustSessionForHarvest(atrustGeneration);
+            : await this.getAtrustSessionForHarvest(atrustGeneration, deadlineAt);
         attempts = 1;
         try {
-          result = await this.harvestViaNode(
+          result = await this.harvestViaBrowser(
             activeAtrust.storageState,
-            canonicalRecipe
+            canonicalRecipe,
+            harvestRoute,
+            deadlineAt
           );
           await this.assertAtrustOperationCurrent(atrustGeneration);
         } catch (error) {
@@ -1049,12 +1066,17 @@ export class CquSessionDO extends DurableObject<Env> {
             throw error;
           }
           atrustGeneration = await this.resetAtrustAuthState();
-          activeAtrust = await this.containerAtrustLogin(atrustGeneration);
+          activeAtrust = await this.containerAtrustLogin(
+            atrustGeneration,
+            deadlineAt
+          );
           attempts = 2;
           try {
-            result = await this.harvestViaNode(
+            result = await this.harvestViaBrowser(
               activeAtrust.storageState,
-              canonicalRecipe
+              canonicalRecipe,
+              harvestRoute,
+              deadlineAt
             );
             await this.assertAtrustOperationCurrent(atrustGeneration);
             recovered = true;
@@ -1103,20 +1125,33 @@ export class CquSessionDO extends DurableObject<Env> {
     }
   }
 
-  private async harvestViaNode(
+  private async harvestViaBrowser(
     state: CquStorageState | null,
-    recipe: { navUrl: string; capture: string[]; fetch: { method?: string; url: string }[] }
+    recipe: { navUrl: string; capture: string[]; fetch: { method?: string; url: string }[] },
+    route: BrowserRoute,
+    deadlineAt: number
   ): Promise<{ captures: HarvestCapture[]; fetches: HarvestFetch[] }> {
+    const budget = this.browserOperationBudget(route, deadlineAt);
+    const requestBody: Record<string, unknown> = { state, ...recipe };
+    if (route.backend === "cloudflare" && budget.operationTimeoutMs) {
+      requestBody.operationTimeoutMs = budget.operationTimeoutMs;
+    }
     let res: Response;
     try {
-      res = await this.env.LOGIN_NODE.fetch(
+      res = await fetchBrowser(
+        this.env,
+        route,
         new Request(`${LOGIN_NODE_BASE}/data-harvest`, {
           method: "POST",
-          body: JSON.stringify({ state, ...recipe }),
-          signal: AbortSignal.timeout(NODE_DEADLINE_MS),
+          body: JSON.stringify(requestBody),
+          signal: AbortSignal.timeout(budget.fetchTimeoutMs),
         })
       );
     } catch (e) {
+      // 稳定浏览器错误(容量/实例替换/预算)原样透传,不包装成 WAF_CHALLENGE。
+      if (e instanceof CquSsoError && STABLE_BROWSER_CODES.has(e.code)) {
+        throw e;
+      }
       throw new CquSsoError("WAF_CHALLENGE", `LOGIN_NODE /data-harvest fetch failed: ${errMsg(e)}`);
     }
     let body: NodeHarvestBody | null;
@@ -1126,6 +1161,13 @@ export class CquSessionDO extends DurableObject<Env> {
       body = null;
     }
     const c = classifyNodeHarvestResponse(res.status, body);
+    if (c.kind === "instance_replaced") {
+      // 不能清 CAS/aTrust 会话:这是浏览器进程替换的瞬态错误。
+      throw new CquSsoError(
+        "BROWSER_INSTANCE_REPLACED",
+        "browser instance replaced during harvest"
+      );
+    }
     if (c.kind === "expired") {
       throw new CquSsoError("TGT_EXPIRED", `CQU session expired (${c.detail ?? "node /data-harvest"})`);
     }
@@ -2111,7 +2153,8 @@ export class CquSessionDO extends DurableObject<Env> {
   }
 
   private async getAtrustSessionForHarvest(
-    expectedGeneration: string
+    expectedGeneration: string,
+    deadlineAt?: number
   ): Promise<AtrustSessionRecord> {
     await this.assertAtrustOperationCurrent(expectedGeneration);
     const existing =
@@ -2126,7 +2169,7 @@ export class CquSessionDO extends DurableObject<Env> {
     if (existing?.status === "active" && existing.storageState) {
       return existing;
     }
-    return this.containerAtrustLogin(expectedGeneration);
+    return this.containerAtrustLogin(expectedGeneration, deadlineAt);
   }
 
   private async recordAtrustPasswordRejection(
@@ -2174,8 +2217,11 @@ export class CquSessionDO extends DurableObject<Env> {
    * 仅在验证码阶段通过 codeLease 与其他登录互斥。
    */
   private async containerAtrustLogin(
-    expectedGeneration: string
+    expectedGeneration: string,
+    deadlineAt?: number
   ): Promise<AtrustSessionRecord> {
+    const operationDeadline =
+      deadlineAt ?? resolveBrowserDeadline(undefined, Date.now());
     await this.assertAtrustOperationCurrent(expectedGeneration);
     const currentSession =
       (await this.ctx.storage.get<AtrustSessionRecord>("atrustSession")) ??
@@ -2235,8 +2281,8 @@ export class CquSessionDO extends DurableObject<Env> {
       // 锁获取跨 await:重新核对 generation,防旧请求在换绑/撤销后点火新登录。
       await this.assertAtrustOperationCurrent(expectedGeneration);
       await this.cleanupExpiredBrowserRoutes();
-      // 预热成功后 bootId 已写入持久 route;正式登录 transport 切换在后续任务统一落地。
-      await this.prepareLoginRoute(
+      // 预热成功后返回带 bootId 的 route;正式 /atrust-login 走集中 transport。
+      const loginRoute = await this.prepareLoginRoute(
         token,
         acquired.route,
         "atrustLoginInFlight",
@@ -2255,19 +2301,35 @@ export class CquSessionDO extends DurableObject<Env> {
         throw error;
       }
       runAbort = new AbortController();
-      const runRequest = this.env.LOGIN_NODE.fetch(
-        new Request(`${LOGIN_NODE_BASE}/atrust-login`, {
-          method: "POST",
-          signal: runAbort.signal,
-          body: JSON.stringify({
-            studentId: this.state?.studentId ?? "",
-            password,
-            method: "mail",
-            session: token,
-            queuedPermit: permitRole === "queued",
-          }),
-        })
+      // 与 CAS /run 相同的预算/取消契约:剩余 invocation 时间(减 20s 清理余量),
+      // AbortSignal 覆盖外层 fetch;CF 携带预热 bootId 头。
+      const remainingMs = remainingBrowserBudget(operationDeadline, Date.now());
+      const atrustTimeoutMs = Math.max(
+        1,
+        remainingMs - BROWSER_CLEANUP_MARGIN_MS
       );
+      const runBody: Record<string, unknown> = {
+        studentId: this.state?.studentId ?? "",
+        password,
+        method: "mail",
+        session: token,
+        queuedPermit: permitRole === "queued",
+      };
+      if (loginRoute.backend === "cloudflare") {
+        runBody.operationTimeoutMs = atrustTimeoutMs;
+      }
+      const runHttpRequest = new Request(`${LOGIN_NODE_BASE}/atrust-login`, {
+        method: "POST",
+        signal: AbortSignal.any([
+          runAbort.signal,
+          AbortSignal.timeout(remainingMs),
+        ]),
+        body: JSON.stringify(runBody),
+      });
+      if (loginRoute.backend === "cloudflare" && loginRoute.bootId) {
+        runHttpRequest.headers.set("X-Cqu-Expected-Boot-Id", loginRoute.bootId);
+      }
+      const runRequest = fetchBrowser(this.env, loginRoute, runHttpRequest);
 
       const response = await runRequest;
       await this.assertAtrustOperationCurrent(expectedGeneration);

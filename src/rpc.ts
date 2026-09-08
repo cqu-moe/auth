@@ -13,6 +13,8 @@ import { hashOAuthClientSecret } from "./utils/oauth-secret";
 import { oauthClientCquScopes } from "./db/schema";
 import { requiredScopeForTarget } from "./services/required-scope";
 import type { HarvestCapture, HarvestFetch } from "./services/cqu-node-protocol";
+import { resolveBrowserDeadline } from "./services/cqu-browser-budget";
+import { CquSsoError } from "./services/cqu-sso";
 import type { Env } from "./types";
 
 // 纯 scope 映射在 services/required-scope.ts(单独成模块以便 Node-pool 单测);此处再导出。
@@ -217,6 +219,8 @@ export class AuthService extends WorkerEntrypoint<Env> {
     navUrl: string;
     capture?: string[];
     fetch?: { method?: string; url: string }[];
+    /** 可选绝对截止时间(ms epoch):auth 钳制到当前时间+13min,整次 harvest 共用。 */
+    deadlineAt?: number;
   }): Promise<
     | { captures: HarvestCapture[]; fetches: HarvestFetch[] }
     | { error: string }
@@ -224,6 +228,14 @@ export class AuthService extends WorkerEntrypoint<Env> {
     if (!args.userId) return { error: "INVALID_CLIENT" };
     if (!(await this.authenticateClient(args.clientId, args.clientSecret))) {
       return { error: "INVALID_CLIENT" };
+    }
+    let deadlineAt: number;
+    try {
+      deadlineAt = resolveBrowserDeadline(args.deadlineAt, Date.now());
+    } catch (e) {
+      return {
+        error: e instanceof CquSsoError ? e.code : "INVALID_BROWSER_DEADLINE",
+      };
     }
 
     const doId = this.env.CQU_SESSION.idFromName(args.userId);
@@ -239,6 +251,7 @@ export class AuthService extends WorkerEntrypoint<Env> {
           navUrl: args.navUrl,
           capture: args.capture ?? [],
           fetch: args.fetch ?? [],
+          deadlineAt,
         }),
       })
     );

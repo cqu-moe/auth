@@ -86,6 +86,9 @@ export function classifyLoginFailure(
   if (s.includes("credential_rejected:")) return "credential";
   if (s.includes("transient:")) return "transient";
   const transientMarkers = [
+    "BROWSER_BUSY",
+    "BROWSER_INSTANCE_REPLACED",
+    "BROWSER_DEADLINE",
     "回到登录页",
     "未判定",
     "登录页未渲染",

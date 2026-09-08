@@ -1328,6 +1328,99 @@ describe("cloudflare CAS migration", () => {
     expect(alarm).not.toBeNull();
     expect(alarm!).toBeGreaterThan(Date.now() - 1000);
   });
+
+  it("browser capacity failure during aTrust harvest keeps the session and returns BROWSER_BUSY", async () => {
+    const stub = freshStub("cf-harvest-busy");
+    await seedSession(stub, { status: "active" });
+    await seedSession(stub, {
+      status: "active",
+      extra: {
+        atrustSession: {
+          status: "active",
+          storageState: validAtrustStorageState(),
+          loginAt: Date.now(),
+          lastUsedAt: Date.now(),
+          consecutiveFailures: 0,
+        },
+      },
+    });
+    const nodeFetch = spyLoginNode({
+      "/data-harvest": () => {
+        throw new Error("cloudflare harvest must not hit LOGIN_NODE");
+      },
+    });
+    vi.spyOn(env.CQU_LOGIN, "get").mockReturnValue({
+      fetch: vi.fn(() => Promise.resolve(new Response("capacity", { status: 503 }))),
+    } as never);
+    vi.spyOn(env.CQU_LOGIN, "idFromName").mockReturnValue("cf-id" as never);
+
+    const response = await withCloudflareBackend(() =>
+      stub.fetch("https://do/data-harvest", {
+        method: "POST",
+        body: JSON.stringify({
+          navUrl: "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/workspace/curriculum",
+          capture: ["my-table-detail"],
+          fetch: [],
+          deadlineAt: Date.now() + 13 * 60_000,
+        }),
+      })
+    );
+
+    expect(nodeFetch).not.toHaveBeenCalled();
+    expect(response.status).toBe(503);
+    const payload = (await response.json()) as { code?: string };
+    expect(payload.code).toBe("BROWSER_BUSY");
+    const atrust = await readStorage<{
+      status?: string;
+      consecutiveFailures?: number;
+    }>(stub, "atrustSession");
+    expect(atrust?.status).toBe("active");
+    expect(atrust?.consecutiveFailures).toBe(0);
+  });
+
+  it("boot-replaced 409 during harvest is transient and never clears the aTrust session", async () => {
+    const stub = freshStub("cf-harvest-boot-replaced");
+    await seedSession(stub, {
+      status: "active",
+      extra: {
+        atrustSession: {
+          status: "active",
+          storageState: validAtrustStorageState(),
+          loginAt: Date.now(),
+          lastUsedAt: Date.now(),
+          consecutiveFailures: 0,
+        },
+      },
+    });
+    vi.spyOn(env.CQU_LOGIN, "get").mockReturnValue({
+      fetch: vi.fn(() =>
+        Promise.resolve(
+          Response.json(
+            { ok: false, error: "BROWSER_INSTANCE_REPLACED" },
+            { status: 409 }
+          )
+        )
+      ),
+    } as never);
+    vi.spyOn(env.CQU_LOGIN, "idFromName").mockReturnValue("cf-id" as never);
+
+    const response = await withCloudflareBackend(() =>
+      stub.fetch("https://do/data-harvest", {
+        method: "POST",
+        body: JSON.stringify({
+          navUrl: "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/workspace/curriculum",
+          capture: ["my-table-detail"],
+          fetch: [],
+        }),
+      })
+    );
+
+    expect(response.status).toBe(503);
+    const payload = (await response.json()) as { code?: string };
+    expect(payload.code).toBe("BROWSER_INSTANCE_REPLACED");
+    const atrust = await readStorage<{ status?: string }>(stub, "atrustSession");
+    expect(atrust?.status).toBe("active");
+  });
 });
 
 function pathsOf(spy: ReturnType<typeof spyLoginNode>): string[] {

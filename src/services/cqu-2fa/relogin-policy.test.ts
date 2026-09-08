@@ -157,6 +157,11 @@ describe("shouldRequireReauth", () => {
 });
 
 describe("nextKeepaliveDelayMs", () => {
+  it("classifies browser infrastructure codes as transient", () => {
+    expect(classifyLoginFailure("BROWSER_BUSY")).toBe("transient");
+    expect(classifyLoginFailure("BROWSER_INSTANCE_REPLACED")).toBe("transient");
+    expect(classifyLoginFailure("BROWSER_DEADLINE")).toBe("transient");
+  });
   const opts = {
     fastRetries: 5,
     fastMs: 60_000, // 60s

@@ -469,6 +469,15 @@ describe("classifyNodeHarvestResponse", () => {
     ).toBe("atrust_expired");
   });
 
+  it("409 with the browser boot marker → instance_replaced, never session expiry", () => {
+    expect(
+      classifyNodeHarvestResponse(409, {
+        ok: false,
+        error: "BROWSER_INSTANCE_REPLACED",
+      }).kind
+    ).toBe("instance_replaced");
+  });
+
   it("409 with any unrecognized error remains direct-session expired", () => {
     expect(
       classifyNodeHarvestResponse(409, {
