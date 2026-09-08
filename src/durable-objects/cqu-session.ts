@@ -12,7 +12,15 @@ import {
   type CquStatus,
   type CquEvent,
 } from "../services/cqu-2fa/state-machine";
-import { shouldStartLogin } from "../services/cqu-2fa/single-flight";
+import {
+  LOGIN_LOCK_TTL_MS,
+  shouldStartLogin,
+} from "../services/cqu-2fa/single-flight";
+import {
+  selectBrowserBackend,
+  type BrowserRoute,
+  type LoginRouteRecord,
+} from "../services/cqu-browser-routing";
 import {
   acquireCodeLease,
   pruneCodeLease,
@@ -119,6 +127,8 @@ interface StoredCredentials {
 interface LoginInFlight {
   token: string;
   startedAt: number;
+  /** 新格式:该锁与 browserRoute:<token> 持久记录成对出现(部署前旧锁无此字段)。 */
+  browserRouteVersion?: 1;
 }
 
 // 绑定确认码暂存(kind=bind_confirm)。Phase 6 经 WS 推浏览器后清除。
@@ -198,6 +208,9 @@ function buildCodeMessage(
     remainingMs: Math.max(0, CODE_VALIDITY_MS - (Date.now() - ts)),
   };
 }
+
+// 登录 token 的持久 route 记录键前缀:锁删除后投码/outbox 恢复仍按它寻址。
+const BROWSER_ROUTE_PREFIX = "browserRoute:";
 
 export class CquSessionDO extends DurableObject<Env> {
   private state: SessionState | null = null;
@@ -1995,7 +2008,7 @@ export class CquSessionDO extends DurableObject<Env> {
     }
     const next = acquireCodeLease(
       current,
-      { token, kind, queuedAt: now },
+      { token, kind, queuedAt: now, browserRouteVersion: 1 },
       now
     );
     await this.persistCodeLeaseTransition(current, next);
@@ -2145,15 +2158,25 @@ export class CquSessionDO extends DurableObject<Env> {
       );
     }
 
-    const token = crypto.randomUUID();
-    await this.ctx.storage.put("atrustLoginInFlight", {
-      token,
-      startedAt: Date.now(),
-    } satisfies LoginInFlight);
+    // 原子写锁 + 持久 route(transaction 内无网络);失败时锁/route 都不落。
+    const acquired = await this.acquireRoutedLoginLock(
+      "atrustLoginInFlight",
+      "atrust"
+    );
+    if (!acquired) {
+      throw new CquSsoError(
+        "ATRUST_LOGIN_IN_FLIGHT",
+        "aTrust login already in flight"
+      );
+    }
+    const token = acquired.token;
 
     let runAbort: AbortController | null = null;
     let leaseAcquired = false;
     try {
+      // 锁获取跨 await:重新核对 generation,防旧请求在换绑/撤销后点火新登录。
+      await this.assertAtrustOperationCurrent(expectedGeneration);
+      await this.cleanupExpiredBrowserRoutes();
       const password = await decrypt(
         credentials.encryptedPassword,
         credentials.iv,
@@ -2302,13 +2325,29 @@ export class CquSessionDO extends DurableObject<Env> {
       await this.setStatus(nextStatus(status, startEvent));
     }
 
-    const token = crypto.randomUUID();
-    const lock: LoginInFlight = { token, startedAt: Date.now() };
-    await this.ctx.storage.put("loginInFlight", lock);
+    // 原子写锁 + 持久 route:并发发起者只有一个能同时写入两者(无 route 不发 permit,
+    // 无锁不点火第二个登录)。transaction 内无网络操作。
+    const acquired = await this.acquireRoutedLoginLock("loginInFlight", "cas");
+    if (!acquired) return "in_flight";
+    const token = acquired.token;
     let runAbort: AbortController | null = null;
     let leaseAcquired = false;
 
     try {
+      // 锁获取跨 await:再核对绑定与状态,撤销/解绑已落地时不点火、不复位状态机。
+      // 注意首登(initSession)的占位 state 尚未落盘:storage 无 state 属正常,不据此拦截;
+      // 只在已落盘且 userId 不匹配(换绑)或状态已 revoked 时受控退出。
+      const [storedState, currentStatus] = await Promise.all([
+        this.ctx.storage.get<SessionState>("state"),
+        this.getStatus(),
+      ]);
+      if (
+        (storedState !== undefined && storedState.userId !== state.userId) ||
+        currentStatus === "revoked"
+      ) {
+        return "failed";
+      }
+      await this.cleanupExpiredBrowserRoutes();
       const password = await decrypt(
         creds.encryptedPassword,
         creds.iv,
@@ -2425,7 +2464,13 @@ export class CquSessionDO extends DurableObject<Env> {
           `[CquSession] failed to rotate verification-code permit: ${errMsg(error)}`
         );
       }
-      await this.ctx.storage.delete("loginInFlight");
+      // 只删自己的锁(route 记录保留:迟到邮件/outbox 恢复仍按 token 寻址,
+      // 由 expiresAt 与引用清理兜底)。
+      const latestLock =
+        (await this.ctx.storage.get<LoginInFlight>("loginInFlight")) ?? null;
+      if (latestLock?.token === token) {
+        await this.ctx.storage.delete("loginInFlight");
+      }
     }
   }
 
@@ -2444,6 +2489,88 @@ export class CquSessionDO extends DurableObject<Env> {
   private getLoginContainer(userId: string): DurableObjectStub {
     const id = this.env.CQU_LOGIN.idFromName(userId);
     return this.env.CQU_LOGIN.get(id);
+  }
+
+  private browserRouteKey(token: string): string {
+    return `${BROWSER_ROUTE_PREFIX}${token}`;
+  }
+
+  /**
+   * 原子获取登录锁并写入该 token 的持久 route 记录(锁删除后投码/outbox 恢复仍可寻址)。
+   *
+   * transaction 内只做 storage 与纯函数:并发发起者只有一个能把活锁与 route 一起写入;
+   * 解密、容器预热、浏览器调用等网络准备都在返回之后由调用方进行。
+   * route 的 backend 取全局配置快照(准备版本为 node,最终切换后为 cloudflare),
+   * 之后所有该 token 的 /run、/code、/code-permit 都固定用这条 route。
+   */
+  private async acquireRoutedLoginLock(
+    lockKey: "loginInFlight" | "atrustLoginInFlight",
+    kind: "cas" | "atrust"
+  ): Promise<{ token: string; route: BrowserRoute } | null> {
+    const token = crypto.randomUUID();
+    const now = Date.now();
+    const route: BrowserRoute = {
+      version: 1,
+      backend: selectBrowserBackend(this.env.CQU_BROWSER_BACKEND),
+      userId: this.state?.userId ?? "",
+    };
+    const record: LoginRouteRecord = {
+      token,
+      kind,
+      route,
+      createdAt: now,
+      expiresAt: now + LOGIN_LOCK_TTL_MS + 60_000,
+    };
+    let acquired = false;
+    await this.ctx.storage.transaction(async (tx) => {
+      const existing = await tx.get<LoginInFlight>(lockKey);
+      if (!shouldStartLogin(existing ?? null, now)) return;
+      await tx.put({
+        [lockKey]: { token, startedAt: now, browserRouteVersion: 1 },
+        [this.browserRouteKey(token)]: record,
+      });
+      acquired = true;
+    });
+    return acquired ? { token, route } : null;
+  }
+
+  /**
+   * 小范围清理 browserRoute 记录:只删已过期,且不被任一活锁、codeLease owner/queue、
+   * codePermitPending 引用的条目。不覆盖业务 alarm,不批量 deleteAll。
+   */
+  private async cleanupExpiredBrowserRoutes(): Promise<void> {
+    const now = Date.now();
+    const records = await this.ctx.storage.list<LoginRouteRecord>({
+      prefix: BROWSER_ROUTE_PREFIX,
+    });
+    if (records.size === 0) return;
+    const [casLock, atrustLock, lease, permitPending] = await Promise.all([
+      this.ctx.storage.get<LoginInFlight>("loginInFlight"),
+      this.ctx.storage.get<LoginInFlight>("atrustLoginInFlight"),
+      this.ctx.storage.get<CodeLease>("codeLease"),
+      this.ctx.storage.get<string>("codePermitPending"),
+    ]);
+    const referenced = new Set<string>();
+    if (casLock && !shouldStartLogin(casLock, now)) {
+      referenced.add(casLock.token);
+    }
+    if (atrustLock && !shouldStartLogin(atrustLock, now)) {
+      referenced.add(atrustLock.token);
+    }
+    if (lease) {
+      referenced.add(lease.ownerToken);
+      for (const entry of lease.queue) referenced.add(entry.token);
+    }
+    if (permitPending) referenced.add(permitPending);
+    const doomed: string[] = [];
+    for (const [key, record] of records) {
+      if (record.expiresAt > now) continue;
+      if (referenced.has(record.token)) continue;
+      doomed.push(key);
+    }
+    if (doomed.length > 0) {
+      await this.ctx.storage.delete(doomed);
+    }
   }
 }
 

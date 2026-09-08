@@ -3,6 +3,7 @@ import { LOGIN_LOCK_TTL_MS } from "./single-flight";
 import {
   acquireCodeLease,
   pruneCodeLease,
+  resolveControlRoute,
   releaseCodeLease,
   type CodeLeaseEntry,
 } from "./code-lease";
@@ -93,5 +94,81 @@ describe("verification-code lease", () => {
     // The node may spend up to 780s reaching/claiming permit and then 660s
     // completing the owner run. The old 720s lease could overlap a successor.
     expect(pruneCodeLease(lease, 1_440_000)).toEqual(lease);
+  });
+
+  it("copies a route version from a new entry to the fresh owner", () => {
+    const entry: CodeLeaseEntry = {
+      ...cas("cas-v1", 10),
+      browserRouteVersion: 1,
+    };
+    expect(acquireCodeLease(null, entry, 10)).toEqual({
+      ownerToken: "cas-v1",
+      ownerKind: "cas",
+      acquiredAt: 10,
+      queue: [],
+      ownerBrowserRouteVersion: 1,
+    });
+  });
+
+  it("keeps a queued entry's route version and promotes it to the owner on FIFO rotation", () => {
+    const queued: CodeLeaseEntry = {
+      ...atrust("atrust-v1", 20),
+      browserRouteVersion: 1,
+    };
+    let lease = acquireCodeLease(null, cas("cas-old", 10), 10);
+    lease = acquireCodeLease(lease, queued, 20);
+    expect(lease.queue).toEqual([queued]);
+    const promoted = releaseCodeLease(lease, "cas-old", 40);
+    expect(promoted?.ownerToken).toBe("atrust-v1");
+    expect(promoted?.ownerBrowserRouteVersion).toBe(1);
+  });
+
+  it("keeps old records without a route version unchanged and promotes without inventing one", () => {
+    let lease = acquireCodeLease(null, cas("cas-old", 10), 10);
+    lease = acquireCodeLease(lease, atrust("atrust-old", 20), 20);
+    const promoted = releaseCodeLease(lease, "cas-old", 30);
+    expect(promoted).toEqual({
+      ownerToken: "atrust-old",
+      ownerKind: "atrust",
+      acquiredAt: 30,
+      queue: [],
+    });
+  });
+
+  it("resolves control routing from a persistent route without consulting the global backend", () => {
+    expect(
+      resolveControlRoute({
+        routeRecord: {
+          token: "tok",
+          kind: "cas",
+          route: { version: 1, backend: "cloudflare", userId: "u1", bootId: "b" },
+          createdAt: 1,
+          expiresAt: 2,
+        },
+        routeVersioned: false,
+        legacyRecord: false,
+      })
+    ).toEqual({
+      outcome: "route",
+      route: { version: 1, backend: "cloudflare", userId: "u1", bootId: "b" },
+    });
+  });
+
+  it("falls back to node only for legacy records without a route version", () => {
+    expect(
+      resolveControlRoute({ routeRecord: null, routeVersioned: false, legacyRecord: true })
+    ).toEqual({ outcome: "legacy-node" });
+  });
+
+  it("rejects a versioned record whose route is missing instead of guessing node", () => {
+    expect(
+      resolveControlRoute({ routeRecord: null, routeVersioned: true, legacyRecord: true })
+    ).toEqual({ outcome: "reject" });
+  });
+
+  it("rejects unknown tokens with no lock or lease record", () => {
+    expect(
+      resolveControlRoute({ routeRecord: null, routeVersioned: false, legacyRecord: false })
+    ).toEqual({ outcome: "reject" });
   });
 });

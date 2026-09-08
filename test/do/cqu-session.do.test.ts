@@ -19,7 +19,9 @@
 //     input-gate 真交错, 而是让 keepalive spy 往【同一 state.storage】写 revoked(同 DO 上下文)
 //     来复现「探活在途 status 被改写」的因果, 断言写回分支命中撤销守卫。
 import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:test";
 import { describe, it, expect, afterEach, vi } from "vitest";
+import { encrypt } from "../../src/services/crypto";
 import {
   freshStub,
   validStorageState,
@@ -632,6 +634,204 @@ describe("verification-code lease orchestration", () => {
       }
     }
   );
+});
+
+describe("persistent browser route records", () => {
+  it("a second initiator against a live lock returns in_flight without new backend calls", async () => {
+    const stub = freshStub("route-lock-race");
+    const encrypted = await encrypt("test-password", env.ENCRYPTION_KEY);
+    // 模拟发起者 A:活锁 + 成对 route 已落盘(在途)。workerd 的跨 DO I/O 隔离
+    // 不允许把 mock 挂起后二次进入同一 DO,故用种子锁复现"同 kind 活锁在途"窗口。
+    await seedSession(stub, {
+      status: "binding",
+      extra: {
+        loginInFlight: {
+          token: "tok-a",
+          startedAt: Date.now(),
+          browserRouteVersion: 1,
+        },
+        "browserRoute:tok-a": {
+          token: "tok-a",
+          kind: "cas",
+          route: { version: 1, backend: "node", userId: "u1" },
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 60_000,
+        },
+      },
+    });
+    const fetchSpy = spyLoginNode({
+      "/run": () => {
+        throw new Error("second initiator must not start another /run");
+      },
+      "/code-permit": () => {
+        throw new Error("second initiator must not send another permit");
+      },
+    });
+
+    const response = await stub.fetch("https://do/init", {
+      method: "POST",
+      body: JSON.stringify({
+        userId: "u1",
+        studentId: "2020000001",
+        encryptedPassword: encrypted.ciphertext,
+        iv: encrypted.iv,
+      }),
+    });
+    const result = (await response.json()) as { success: boolean; error?: string };
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("正在进行中");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const lockAfter = await readStorage(stub, "loginInFlight");
+    expect(lockAfter).toMatchObject({ token: "tok-a", browserRouteVersion: 1 });
+  });
+
+  it("lock and route land atomically and exactly one permit is sent for the routed token", async () => {
+    const stub = freshStub("route-atomic");
+    const encrypted = await encrypt("test-password", env.ENCRYPTION_KEY);
+
+    const runBodies: Array<{ session: string }> = [];
+    const permitBodies: Array<{ session: string }> = [];
+    spyLoginNode({
+      "/run": async (request) => {
+        runBodies.push(await request.json());
+        return Response.json({
+          ok: false,
+          error: "code wait timed out",
+        });
+      },
+      "/code-permit": async (request) => {
+        permitBodies.push(await request.json());
+        return Response.json({ ok: true });
+      },
+    });
+
+    await stub.fetch("https://do/init", {
+      method: "POST",
+      body: JSON.stringify({
+        userId: "u1",
+        studentId: "2020000001",
+        encryptedPassword: encrypted.ciphertext,
+        iv: encrypted.iv,
+      }),
+    });
+
+    expect(runBodies).toHaveLength(1);
+    expect(permitBodies).toHaveLength(1);
+    const [runBody] = runBodies;
+    const [permitBody] = permitBodies;
+    expect(permitBody.session).toBe(runBody.session);
+    const [lock, route] = await runInDurableObject(stub, async (_inst, state) => {
+      const lock = await state.storage.get<{
+        token: string;
+        browserRouteVersion?: number;
+      }>("loginInFlight");
+      const route = await state.storage.get<{
+        token: string;
+        kind: string;
+        route: { version: number; backend: string; userId: string };
+      }>(`browserRoute:${runBody.session}`);
+      return [lock, route];
+    });
+    // 登录尝试已结束:finally 删除自己的锁,但 route 记录保留(迟到邮件/outbox
+    // 恢复仍按 token 寻址,由 expiresAt 与引用清理兜底)。
+    expect(lock).toBeUndefined();
+    // route 原子成对:拿到锁的 token 一定曾与锁一起写入(否则不发 permit)。
+    expect(route?.token).toBe(runBody.session);
+    expect(route?.kind).toBe("cas");
+    expect(route?.route.version).toBe(1);
+    expect(["node", "cloudflare"]).toContain(route?.route.backend);
+    expect(route?.route.userId).toBe("u1");
+  });
+
+  it("keeps expired routes referenced by a live lock, lease owner or outbox, drops the rest", async () => {
+    const stub = freshStub("route-cleanup");
+    const now = Date.now();
+    await seedSession(stub, {
+      status: "active",
+      extra: {
+        loginInFlight: {
+          token: "tok-live-lock",
+          startedAt: now,
+          browserRouteVersion: 1,
+        },
+        codeLease: {
+          ownerToken: "tok-lease-owner",
+          ownerKind: "atrust",
+          acquiredAt: now,
+          queue: [
+            { token: "tok-queued", kind: "cas", queuedAt: now, browserRouteVersion: 1 },
+          ],
+          ownerBrowserRouteVersion: 1,
+        },
+        codePermitPending: "tok-outbox",
+        "browserRoute:tok-live-lock": {
+          token: "tok-live-lock",
+          kind: "cas",
+          route: { version: 1, backend: "node", userId: "u1" },
+          createdAt: 0,
+          expiresAt: now - 1000,
+        },
+        "browserRoute:tok-lease-owner": {
+          token: "tok-lease-owner",
+          kind: "atrust",
+          route: { version: 1, backend: "node", userId: "u1" },
+          createdAt: 0,
+          expiresAt: now - 1000,
+        },
+        "browserRoute:tok-queued": {
+          token: "tok-queued",
+          kind: "cas",
+          route: { version: 1, backend: "node", userId: "u1" },
+          createdAt: 0,
+          expiresAt: now - 1000,
+        },
+        "browserRoute:tok-outbox": {
+          token: "tok-outbox",
+          kind: "cas",
+          route: { version: 1, backend: "node", userId: "u1" },
+          createdAt: 0,
+          expiresAt: now - 1000,
+        },
+        "browserRoute:tok-dead": {
+          token: "tok-dead",
+          kind: "cas",
+          route: { version: 1, backend: "node", userId: "u1" },
+          createdAt: 0,
+          expiresAt: now - 1000,
+        },
+        "browserRoute:tok-fresh": {
+          token: "tok-fresh",
+          kind: "cas",
+          route: { version: 1, backend: "node", userId: "u1" },
+          createdAt: now,
+          expiresAt: now + 60_000,
+        },
+      },
+    });
+
+    await runInDurableObject(stub, async (inst) => {
+      await (
+        inst as unknown as {
+          cleanupExpiredBrowserRoutes: () => Promise<void>;
+        }
+      ).cleanupExpiredBrowserRoutes();
+    });
+
+    const keys = await runInDurableObject(stub, async (_inst, state) => {
+      const all = await state.storage.list({ prefix: "browserRoute:" });
+      return [...all.keys()];
+    });
+    expect(new Set(keys)).toEqual(
+      new Set([
+        "browserRoute:tok-live-lock",
+        "browserRoute:tok-lease-owner",
+        "browserRoute:tok-queued",
+        "browserRoute:tok-outbox",
+        "browserRoute:tok-fresh",
+      ])
+    );
+    expect(keys).not.toContain("browserRoute:tok-dead");
+  });
 });
 
 function pathsOf(spy: ReturnType<typeof spyLoginNode>): string[] {
