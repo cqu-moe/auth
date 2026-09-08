@@ -14,5 +14,13 @@ import type { Env } from "../types";
  */
 export class CquLoginContainer extends Container<Env> {
   defaultPort = 8080;
-  sleepAfter = "20s";
+  // 30s 空闲即睡: 保留足够窗口让保活/取票复用刚登录完的浏览器进程, 又不为空转付费。
+  // 容器生命周期仍由 SDK 的请求计数驱动, 不自行写定时 stop。
+  sleepAfter = "30s";
+  // Task 03 约定的 Cloudflare 运行 profile: 实测加长时限; QG_ENABLED=0 关掉青果
+  // 住宅代理(海外出口不需要, 也连不上国内代理入口), 容器内全部直连。
+  envVars = {
+    CQU_BROWSER_PROFILE: "cloudflare",
+    QG_ENABLED: "0",
+  };
 }

@@ -8,7 +8,12 @@
   "placement": { "hostname": "sso.cqu.edu.cn" },
 
   "vars": {
-    "BIND_EMAIL_DOMAIN": "cquotp.com"
+    "BIND_EMAIL_DOMAIN": "cquotp.com",
+    // 全局浏览器后端开关(名称与 src/types.ts Env.CQU_BROWSER_BACKEND 逐字一致)。
+    // 准备版本固定 node: 新登录/取票/保活/采集仍走国内节点; Task 11 单独一次发布
+    // 把它改为 cloudflare 对全部用户启用 APAC(不做用户灰度)。已建立的持久 route
+    // 不受此值影响, 仍按各自 route 完成。
+    "CQU_BROWSER_BACKEND": "node"
   },
 
   "assets": {
@@ -58,10 +63,9 @@
     "image": "./container/Dockerfile",
     "max_instances": 5,
     "instance_type": "basic",
-    // 容器登录默认就近请求来源(近中国)→ 踩 CQU 间歇封锁的近机房 CF 出口 IP。
-    // 钉到北美西部(海外干净 IP, 实测海外可登)绕开封锁; 登录异步重型(2FA 邮件主导),
-    // 跨洋延迟可忽略。先观测几天, 不行再换区(如 WEUR)。
-    "constraints": { "regions": ["WNAM"] }
+    // 全量迁移目标区域: APAC(实测 CAS/aTrust 全链路可用, 见 docs 实测报告)。
+    // max_instances=5 只是本地示例值, 生产定值由 Task 10 按实际负载计算后调整。
+    "constraints": { "regions": ["APAC"] }
   }],
 
   // Workers VPC Service binding (beta): DO 经此私有连回国内 VPS 登录节点上的
