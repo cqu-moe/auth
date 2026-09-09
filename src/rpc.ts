@@ -10,7 +10,7 @@ import {
 } from "./services/entitlements";
 import { scopeSatisfies } from "./middleware/scope";
 import { hashOAuthClientSecret } from "./utils/oauth-secret";
-import { oauthClientCquScopes } from "./db/schema";
+import { oauthClientCquScopes, cquBindAddresses } from "./db/schema";
 import { requiredScopeForTarget } from "./services/required-scope";
 import type { HarvestCapture, HarvestFetch } from "./services/cqu-node-protocol";
 import { resolveBrowserDeadline } from "./services/cqu-browser-budget";
@@ -27,6 +27,9 @@ interface OAuthClientSecretRow {
   clientSecret?: string | null;
   disabled?: boolean | null;
 }
+
+/** CQU 统一身份认证绑定状态(cqu_bind_addresses.status;无绑定行 = "unbound")。 */
+export type CquBindStatus = "pending" | "active" | "revoked" | "unbound";
 
 // 定长比较:逐字符 XOR 累加,避免 secret 哈希比较的早退时序泄漏。长度不等直接 false。
 // 两侧都是 base64url(SHA-256) 的定长串,timing-safe 是廉价的纵深防御。
@@ -57,7 +60,11 @@ export class AuthService extends WorkerEntrypoint<Env> {
    */
   async verifySession(
     cookieHeader: string | null
-  ): Promise<{ user: Record<string, unknown>; caps: Caps } | null> {
+  ): Promise<{
+    user: Record<string, unknown>;
+    caps: Caps;
+    cquBindStatus: CquBindStatus;
+  } | null> {
     if (!cookieHeader) return null;
     const auth = createAuth(
       this.env,
@@ -70,8 +77,17 @@ export class AuthService extends WorkerEntrypoint<Env> {
     });
     if (!s?.user) return null;
     const caps = await resolveCaps(this.env.DATABASE, s.user.id);
-    // s.user / caps 均为普通对象,可直接 structured clone 跨 RPC 边界返回。
-    return { user: s.user as Record<string, unknown>, caps };
+    // 绑定状态随会话一起下发,让子系统(如 schedule)能在用户操作前就给出
+    // 「请先绑定统一身份认证」的引导,而不是等同步失败后再报错。
+    // 单次 indexed point-read,与 resolveCaps 同级开销;无绑定行 = "unbound"。
+    const bind = await drizzle(this.env.DATABASE)
+      .select({ status: cquBindAddresses.status })
+      .from(cquBindAddresses)
+      .where(eq(cquBindAddresses.userId, s.user.id))
+      .get();
+    const cquBindStatus = (bind?.status ?? "unbound") as CquBindStatus;
+    // s.user / caps / cquBindStatus 均为普通值,可直接 structured clone 跨 RPC 边界返回。
+    return { user: s.user as Record<string, unknown>, caps, cquBindStatus };
   }
 
   /**
