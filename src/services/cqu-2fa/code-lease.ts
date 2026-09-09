@@ -84,28 +84,26 @@ export function acquireCodeLease(
 
 export type ControlRouteResolution =
   | { outcome: "route"; route: BrowserRoute }
-  | { outcome: "legacy-node" }
   | { outcome: "reject" };
 
 /**
  * 验证码/permit 控制请求的后端解析(纯函数,设计 4.2 的顺序):
  *   ① 有持久 browserRoute 记录 → 固定用它的 route,不看当前全局开关;
  *   ② 无 route 但记录带 route version(新格式)→ 受控拒绝,绝不降级猜 node;
- *   ③ 无 route 且是不带 version 的旧格式锁/lease(部署前记录)→ 兼容 node;
+ *   ③ 无 route 且是不带 version 的旧格式锁/lease(部署前记录)→ 拒绝;
+ *      (腾讯云节点已停用;旧记录不再外送,取受控失败)
  *   ④ 无任何记录的未知 token → 拒绝投递。
  */
 export function resolveControlRoute(input: {
   routeRecord: LoginRouteRecord | null;
   routeVersioned: boolean;
-  legacyRecord: boolean;
 }): ControlRouteResolution {
-  const { routeRecord, routeVersioned, legacyRecord } = input;
+  const { routeRecord, routeVersioned } = input;
   if (routeRecord) {
     if (routeRecord.route.version !== 1) return { outcome: "reject" };
     return { outcome: "route", route: routeRecord.route };
   }
   if (routeVersioned) return { outcome: "reject" };
-  if (legacyRecord) return { outcome: "legacy-node" };
   return { outcome: "reject" };
 }
 

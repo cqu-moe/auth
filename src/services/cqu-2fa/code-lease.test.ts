@@ -146,7 +146,6 @@ describe("verification-code lease", () => {
           expiresAt: 2,
         },
         routeVersioned: false,
-        legacyRecord: false,
       })
     ).toEqual({
       outcome: "route",
@@ -154,21 +153,21 @@ describe("verification-code lease", () => {
     });
   });
 
-  it("falls back to node only for legacy records without a route version", () => {
+  it("rejects legacy records without a route version (node retired)", () => {
     expect(
-      resolveControlRoute({ routeRecord: null, routeVersioned: false, legacyRecord: true })
-    ).toEqual({ outcome: "legacy-node" });
+      resolveControlRoute({ routeRecord: null, routeVersioned: false })
+    ).toEqual({ outcome: "reject" });
   });
 
-  it("rejects a versioned record whose route is missing instead of guessing node", () => {
+  it("rejects a versioned record whose route is missing instead of guessing backend", () => {
     expect(
-      resolveControlRoute({ routeRecord: null, routeVersioned: true, legacyRecord: true })
+      resolveControlRoute({ routeRecord: null, routeVersioned: true })
     ).toEqual({ outcome: "reject" });
   });
 
   it("rejects unknown tokens with no lock or lease record", () => {
     expect(
-      resolveControlRoute({ routeRecord: null, routeVersioned: false, legacyRecord: false })
+      resolveControlRoute({ routeRecord: null, routeVersioned: false })
     ).toEqual({ outcome: "reject" });
   });
 });

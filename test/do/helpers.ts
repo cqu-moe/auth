@@ -188,19 +188,23 @@ export async function captureSetAlarm(
 }
 
 /**
- * spy 掉 env.LOGIN_NODE.fetch, 按出站请求 path 路由到 handlers[path]。
+ * spy 掉容器 DO 出站(env.CQU_LOGIN stub fetch), 按出站请求 path 路由到 handlers[path]。
  * 未声明 path → 抛, 暴露漏设桩。返回 spy 供断言调用次数。
+ * 腾讯云节点已停用: DO 全部浏览器出站都走 CF 容器, 测试只拦截容器这一条路。
  */
-export function spyLoginNode(
+export function spyBrowserFetch(
   handlers: Record<string, (req: Request) => Response | Promise<Response>>
 ): MockInstance {
-  return vi
-    .spyOn(env.LOGIN_NODE, "fetch")
-    .mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      const req = input instanceof Request ? input : new Request(input as string | URL, init);
-      const path = new URL(req.url).pathname;
-      const h = handlers[path];
-      if (!h) throw new Error(`unstubbed LOGIN_NODE path: ${path}`);
-      return Promise.resolve(h(req));
-    }) as unknown as MockInstance;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const req = input instanceof Request ? input : new Request(input as string | URL, init);
+    const path = new URL(req.url).pathname;
+    const h = handlers[path];
+    if (!h) throw new Error(`unstubbed browser path: ${path}`);
+    return h(req);
+  });
+  vi.spyOn(env.CQU_LOGIN, "get").mockReturnValue({
+    fetch: fetchMock,
+  } as never);
+  vi.spyOn(env.CQU_LOGIN, "idFromName").mockReturnValue("container-user-u1" as never);
+  return fetchMock as unknown as MockInstance;
 }

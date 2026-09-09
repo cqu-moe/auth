@@ -1,35 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  fetchBrowser,
-  selectBrowserBackend,
-  type BrowserRoute,
-} from "./cqu-browser-routing";
-
-describe("selectBrowserBackend", () => {
-  it("defaults to node for undefined, empty string and 'node'", () => {
-    expect(selectBrowserBackend(undefined)).toBe("node");
-    expect(selectBrowserBackend("")).toBe("node");
-    expect(selectBrowserBackend("node")).toBe("node");
-  });
-
-  it("selects cloudflare only for the exact 'cloudflare' value", () => {
-    expect(selectBrowserBackend("cloudflare")).toBe("cloudflare");
-  });
-
-  it("rejects any other non-empty value as a controlled config error", () => {
-    expect(() => selectBrowserBackend("nginx")).toThrow(/CQU_BROWSER_BACKEND/i);
-    expect(() => selectBrowserBackend("Cloudflare")).toThrow(/CQU_BROWSER_BACKEND/i);
-    expect(() => selectBrowserBackend(" ")).toThrow(/CQU_BROWSER_BACKEND/i);
-  });
-});
+import { fetchBrowser, type BrowserRoute } from "./cqu-browser-routing";
 
 describe("fetchBrowser transport", () => {
   const nodeRoute: BrowserRoute = { version: 1, backend: "node", userId: "user-a" };
   const cfRoute: BrowserRoute = { version: 1, backend: "cloudflare", userId: "user-a" };
 
-  function makeEnv(nodeFetch: unknown, containerFetch: unknown, idFromName = vi.fn(() => "stable-id")) {
+  function makeEnv(containerFetch: unknown, idFromName = vi.fn(() => "stable-id")) {
     return {
-      LOGIN_NODE: { fetch: nodeFetch },
       CQU_LOGIN: {
         idFromName,
         get: vi.fn().mockReturnValue({ fetch: containerFetch }),
@@ -37,21 +14,19 @@ describe("fetchBrowser transport", () => {
     };
   }
 
-  it("routes node traffic through LOGIN_NODE without touching CQU_LOGIN", async () => {
-    const nodeFetch = vi.fn().mockResolvedValue(new Response("node ok"));
-    const env = makeEnv(nodeFetch, vi.fn());
-    const request = new Request("http://login-node.internal/run", { method: "POST" });
+  it("returns a controlled terminal response for stale node routes without touching CQU_LOGIN", async () => {
+    const env = makeEnv(vi.fn());
+    const request = new Request("http://cqu-login.internal/run", { method: "POST" });
     const response = await fetchBrowser(env as never, nodeRoute, request);
-    expect(await response.text()).toBe("node ok");
-    expect(nodeFetch).toHaveBeenCalledTimes(1);
-    expect(nodeFetch).toHaveBeenCalledWith(request);
+    expect(response.status).toBe(410);
+    expect(await response.json()).toMatchObject({ ok: false, error: "NODE_RETIRED" });
     expect((env as { CQU_LOGIN: { idFromName: unknown } }).CQU_LOGIN.idFromName).not.toHaveBeenCalled();
   });
 
   it("addresses the same user container across repeated calls and separates users", async () => {
     const containerFetch = vi.fn().mockResolvedValue(new Response("cf ok"));
     const idFromName = vi.fn((userId: string) => `id:${userId}`);
-    const env = makeEnv(vi.fn(), containerFetch, idFromName);
+    const env = makeEnv(containerFetch, idFromName);
     const stubs = (env as never as { CQU_LOGIN: { get: ReturnType<typeof vi.fn> } }).CQU_LOGIN.get;
     await fetchBrowser(env as never, cfRoute, new Request("http://cqu-login.internal/run"));
     await fetchBrowser(env as never, cfRoute, new Request("http://cqu-login.internal/keepalive"));
@@ -62,16 +37,16 @@ describe("fetchBrowser transport", () => {
   });
 
   it("preserves method, body and signal on the forwarded request", async () => {
-    const nodeFetch = vi.fn().mockResolvedValue(new Response("ok"));
-    const env = makeEnv(nodeFetch, vi.fn());
+    const containerFetch = vi.fn().mockResolvedValue(new Response("ok"));
+    const env = makeEnv(containerFetch);
     const controller = new AbortController();
     const request = new Request("http://login-node.internal/code", {
       method: "POST",
       body: JSON.stringify({ token: "tok", code: "123456" }),
       signal: controller.signal,
     });
-    await fetchBrowser(env as never, nodeRoute, request);
-    const forwarded = nodeFetch.mock.calls[0][0] as Request;
+    await fetchBrowser(env as never, cfRoute, request);
+    const forwarded = containerFetch.mock.calls[0][0] as Request;
     expect(forwarded).toBe(request);
     expect(forwarded.method).toBe("POST");
     // Request 构造会派生依赖 signal;断言 abort 语义而非对象同一性。
@@ -83,18 +58,16 @@ describe("fetchBrowser transport", () => {
   });
 
   it("does not fall back to node when the container reports capacity exhaustion", async () => {
-    const nodeFetch = vi.fn();
     const busyFetch = vi.fn().mockResolvedValue(new Response("capacity", { status: 503 }));
-    const env = makeEnv(nodeFetch, busyFetch);
+    const env = makeEnv(busyFetch);
     await expect(
       fetchBrowser(env as never, cfRoute, new Request("http://cqu-login.internal/data-harvest", { method: "POST" }))
     ).rejects.toMatchObject({ code: "BROWSER_BUSY" });
-    expect(nodeFetch).not.toHaveBeenCalled();
     expect(busyFetch).toHaveBeenCalledTimes(1);
   });
 
   it("treats a 429 platform response as capacity pressure", async () => {
-    const env = makeEnv(vi.fn(), vi.fn().mockResolvedValue(new Response("slow down", { status: 429 })));
+    const env = makeEnv(vi.fn().mockResolvedValue(new Response("slow down", { status: 429 })));
     await expect(
       fetchBrowser(env as never, cfRoute, new Request("http://cqu-login.internal/run", { method: "POST" }))
     ).rejects.toMatchObject({ code: "BROWSER_BUSY" });
@@ -102,7 +75,6 @@ describe("fetchBrowser transport", () => {
 
   it("preserves a known stable protocol error code from a capacity response", async () => {
     const env = makeEnv(
-      vi.fn(),
       vi.fn().mockResolvedValue(
         new Response(JSON.stringify({ ok: false, error: "BROWSER_DEADLINE" }), {
           status: 503,
@@ -117,7 +89,6 @@ describe("fetchBrowser transport", () => {
 
   it("maps a protocol-shaped response with an unknown error to BROWSER_BUSY without echoing it", async () => {
     const env = makeEnv(
-      vi.fn(),
       vi.fn().mockResolvedValue(
         new Response(JSON.stringify({ ok: false, error: "TOTALLY_NEW_PLATFORM_CODE" }), {
           status: 429,
@@ -144,7 +115,7 @@ describe("fetchBrowser transport", () => {
         cancelled = true;
       },
     });
-    const env = makeEnv(vi.fn(), vi.fn().mockResolvedValue(new Response(stream, { status: 503 })));
+    const env = makeEnv(vi.fn().mockResolvedValue(new Response(stream, { status: 503 })));
     await expect(
       fetchBrowser(env as never, cfRoute, new Request("http://cqu-login.internal/run", { method: "POST" }))
     ).rejects.toMatchObject({ code: "BROWSER_BUSY" });
@@ -156,7 +127,7 @@ describe("fetchBrowser transport", () => {
       JSON.stringify({ ok: false, error: "BROWSER_INSTANCE_REPLACED" }),
       { status: 409, headers: { "content-type": "application/json" } }
     );
-    const env = makeEnv(vi.fn(), vi.fn().mockResolvedValue(bootMismatch));
+    const env = makeEnv(vi.fn().mockResolvedValue(bootMismatch));
     const response = await fetchBrowser(
       env as never,
       cfRoute,

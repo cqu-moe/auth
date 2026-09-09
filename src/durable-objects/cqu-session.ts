@@ -17,7 +17,6 @@ import {
   shouldStartLogin,
 } from "../services/cqu-2fa/single-flight";
 import {
-  selectBrowserBackend,
   type BrowserRoute,
   type LoginRouteRecord,
 } from "../services/cqu-browser-routing";
@@ -66,7 +65,6 @@ import {
   classifyNodeTicketResponse,
   ticketFromClassification,
   sanitizeNodeDetail,
-  NODE_DEADLINE_MS,
   serializedStateBytes,
   stateExceedsHardLimit,
   STORAGE_STATE_WARN_BYTES,
@@ -98,12 +96,11 @@ const KEEPALIVE_MAX_BACKOFF_MS = 6 * 60 * 60 * 1000;
 const PROACTIVE_RELOGIN_MS = 7 * 60 * 60 * 1000;
 const DUMMY_SERVICE = "https://my.cqu.edu.cn/authserver/authentication/cas";
 
-// Workers VPC binding(env.LOGIN_NODE)的内部占位 host。运行时由 VPC service 路由到
-// 国内登录节点(container/server.py);host 内容不被校验, 仅作合法 URL 的占位(传输安全
-// 由 VPC service 私有隧道保证, http:// scheme 仅为构造合法 Request 所需)。
-// 「连 CQU」四处出站(/run /service-ticket /keepalive /code)均经此前缀发到国内节点
-// (节点本地用青果代理连 CQU)。Phase 2 四处出站迁移已完成。
-const LOGIN_NODE_BASE = "http://cqu-login.internal";
+// CF 容器 stub 的占位 host。所有浏览器出站(/run /service-ticket /keepalive /code
+// /data-harvest /atrust-login)经 DO 容器 stub fetch 转发,host 内容不被校验,
+// 仅作构造合法 Request 的占位(http:// scheme 仅为 URL 合法所需; 真实目标由
+// env.CQU_LOGIN.get(id).fetch 覆盖)。腾讯云节点绑定已随 2026-09-09 清理移除。
+const BROWSER_BASE = "http://cqu-login.internal";
 // Cloudflare 登录路由预热预算:容器冷启动 + health 就绪,最多 30s。
 const LOGIN_ROUTE_PREPARE_BUDGET_MS = 30_000;
 // 单次 health 请求超时(冷启动握手交给 SDK,这里只防单次请求悬挂)。
@@ -236,8 +233,7 @@ export class CquSessionDO extends DurableObject<Env> {
   // 熔断: containerLogin 把本次失败原因(credential/transient)暂存于此, 供同一
   // relogin 调用链读取。DO 单线程, 仅在一次 alarm→relogin→containerLogin 链内有效。
   private lastLoginFailReason: "credential" | "transient" = "transient";
-  // Phase 2 后已无调用方(登录/取票/keepalive 均改走 LOGIN_NODE 国内节点);仅作回滚窗口
-  // 保留(应急可手改 DO 出站切回此直连路径), 随 CF 容器在 Phase 4 一并移除。
+  // 全部浏览器出站均经 CF 容器 stub;此直连客户端仅作历史回滚窗口保留。
   private ssoClient = new CquSsoClient();
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -808,10 +804,7 @@ export class CquSessionDO extends DurableObject<Env> {
     deadlineAt?: number
   ): Promise<string> {
     const route = this.currentBrowserRoute();
-    const budget = this.browserOperationBudget(
-      route,
-      deadlineAt ?? resolveBrowserDeadline(undefined, Date.now())
-    );
+    const budget = this.browserOperationBudget(deadlineAt ?? resolveBrowserDeadline(undefined, Date.now()));
     const requestBody: Record<string, unknown> = { serviceUrl, state };
     if (route.backend === "cloudflare" && budget.operationTimeoutMs) {
       requestBody.operationTimeoutMs = budget.operationTimeoutMs;
@@ -821,7 +814,7 @@ export class CquSessionDO extends DurableObject<Env> {
       res = await fetchBrowser(
         this.env,
         route,
-        new Request(`${LOGIN_NODE_BASE}/service-ticket`, {
+        new Request(`${BROWSER_BASE}/service-ticket`, {
           method: "POST",
           body: JSON.stringify(requestBody),
           // 出站 deadline:node 90s(略大于节点最坏 ~80s);CF 为 210s 单操作上限与
@@ -837,7 +830,7 @@ export class CquSessionDO extends DurableObject<Env> {
       // VPC/网络层异常 + AbortError(超时)= 瞬态(WAF_CHALLENGE), 让 DO 退避而非误判过期。
       throw new CquSsoError(
         "WAF_CHALLENGE",
-        `LOGIN_NODE /service-ticket fetch failed: ${errMsg(e)}`
+        `browser /service-ticket fetch failed: ${errMsg(e)}`
       );
     }
     // body 解析失败(非 JSON)传 null 给分类器 → transient。409 由分类器先于 body 判(语义最明确)。
@@ -1010,7 +1003,7 @@ export class CquSessionDO extends DurableObject<Env> {
       );
     }
 
-    // ⑤ 出站节点 /data-harvest(套 NODE_DEADLINE_MS)。直连 409 只排 alarm；
+    // ⑤ 出站 /data-harvest(套容器 deadline)。直连 409 只排 alarm；
     // aTrust 409 只清理 aTrust state，按需重登后最多重试一次。
     // 从限频记账完成起统一进入 try/finally：无论成功、登录失败还是二次 harvest 失败，
     // 每个逻辑调用都只留一条最终脱敏审计。
@@ -1131,7 +1124,7 @@ export class CquSessionDO extends DurableObject<Env> {
     route: BrowserRoute,
     deadlineAt: number
   ): Promise<{ captures: HarvestCapture[]; fetches: HarvestFetch[] }> {
-    const budget = this.browserOperationBudget(route, deadlineAt);
+    const budget = this.browserOperationBudget(deadlineAt);
     const requestBody: Record<string, unknown> = { state, ...recipe };
     if (route.backend === "cloudflare" && budget.operationTimeoutMs) {
       requestBody.operationTimeoutMs = budget.operationTimeoutMs;
@@ -1141,7 +1134,7 @@ export class CquSessionDO extends DurableObject<Env> {
       res = await fetchBrowser(
         this.env,
         route,
-        new Request(`${LOGIN_NODE_BASE}/data-harvest`, {
+        new Request(`${BROWSER_BASE}/data-harvest`, {
           method: "POST",
           body: JSON.stringify(requestBody),
           signal: AbortSignal.timeout(budget.fetchTimeoutMs),
@@ -1152,7 +1145,7 @@ export class CquSessionDO extends DurableObject<Env> {
       if (e instanceof CquSsoError && STABLE_BROWSER_CODES.has(e.code)) {
         throw e;
       }
-      throw new CquSsoError("WAF_CHALLENGE", `LOGIN_NODE /data-harvest fetch failed: ${errMsg(e)}`);
+      throw new CquSsoError("WAF_CHALLENGE", `browser /data-harvest fetch failed: ${errMsg(e)}`);
     }
     let body: NodeHarvestBody | null;
     try {
@@ -1178,7 +1171,7 @@ export class CquSessionDO extends DurableObject<Env> {
       );
     }
     if (c.kind === "transient") {
-      throw new CquSsoError("WAF_CHALLENGE", `LOGIN_NODE /data-harvest ${c.detail ?? "transient"}`);
+      throw new CquSsoError("WAF_CHALLENGE", `browser /data-harvest ${c.detail ?? "transient"}`);
     }
     return { captures: c.captures ?? [], fetches: c.fetches ?? [] };
   }
@@ -1275,21 +1268,21 @@ export class CquSessionDO extends DurableObject<Env> {
         // 不读全局开关,不向两个后端广播。
         const res = await this.fetchLoginControl(
           lease.ownerToken,
-          new Request(`${LOGIN_NODE_BASE}/code`, {
+          new Request(`${BROWSER_BASE}/code`, {
             method: "POST",
             body: JSON.stringify({ session: lease.ownerToken, code }),
           })
         );
         if (!res.ok) {
           console.error(
-            `[CquSession] LOGIN_NODE /code returned non-ok status=${res.status}`
+            `[CquSession] browser /code returned non-ok status=${res.status}`
           );
           return false;
         }
         return true;
       } catch (e) {
         console.error(
-          `[CquSession] failed to push login_2fa code to LOGIN_NODE: ${errMsg(e)}`
+          `[CquSession] failed to push login_2fa code to browser backend: ${errMsg(e)}`
         );
         return false;
       }
@@ -1508,7 +1501,7 @@ export class CquSessionDO extends DurableObject<Env> {
     const outcome = await this.runKeepAlive(deadlineAt);
 
     if (outcome === "active") {
-      // M7 防复活: runKeepAlive 的 LOGIN_NODE.fetch(最长 90s)await 期间 input gate 打开,
+      // M7 防复活: runKeepAlive 的浏览器出站(最长 90s)await 期间 input gate 打开,
       // 期间 admin revoke/unbind 可能把 status 改成撤销/解绑/需重登。此处写回 active 前重查
       // status, 命中撤销/终态即放弃本轮(不 setStatus active / 不 putState / 不 setAlarm),
       // 否则会把已撤销会话复活。
@@ -1601,10 +1594,7 @@ export class CquSessionDO extends DurableObject<Env> {
     let res: Response;
     try {
       const route = this.currentBrowserRoute();
-      const budget = this.browserOperationBudget(
-        route,
-        deadlineAt ?? resolveBrowserDeadline(undefined, Date.now())
-      );
+      const budget = this.browserOperationBudget(deadlineAt ?? resolveBrowserDeadline(undefined, Date.now()));
       const body: Record<string, unknown> = { state: state.storageState };
       if (route.backend === "cloudflare" && budget.operationTimeoutMs) {
         body.operationTimeoutMs = budget.operationTimeoutMs;
@@ -1612,7 +1602,7 @@ export class CquSessionDO extends DurableObject<Env> {
       res = await fetchBrowser(
         this.env,
         route,
-        new Request(`${LOGIN_NODE_BASE}/keepalive`, {
+        new Request(`${BROWSER_BASE}/keepalive`, {
           method: "POST",
           body: JSON.stringify(body),
           // 出站 deadline(同取票路径):探活也在节点侧排队持槽,无超时则 backlog 时
@@ -1842,7 +1832,7 @@ export class CquSessionDO extends DurableObject<Env> {
       try {
         const response = await this.fetchLoginControl(
           token,
-          new Request(`${LOGIN_NODE_BASE}/code-permit`, {
+          new Request(`${BROWSER_BASE}/code-permit`, {
             method: "POST",
             body: JSON.stringify({ session: token }),
             signal: AbortSignal.timeout(10_000),
@@ -1858,13 +1848,13 @@ export class CquSessionDO extends DurableObject<Env> {
         if (await this.isCodePermitProven(token)) return;
         if (attempt === 3) {
           console.error(
-            `[CquSession] LOGIN_NODE /code-permit failed after ${attempt} attempts (${error instanceof Error ? error.name : "unknown"})`
+            `[CquSession] browser /code-permit failed after ${attempt} attempts (${error instanceof Error ? error.name : "unknown"})`
           );
         }
       }
     }
     throw new Error(
-      `LOGIN_NODE /code-permit failed after 3 attempts (status=${lastStatus})`
+      `browser /code-permit failed after 3 attempts (status=${lastStatus})`
     );
   }
 
@@ -1900,7 +1890,7 @@ export class CquSessionDO extends DurableObject<Env> {
       try {
         const response = await this.fetchLoginControl(
           token,
-          new Request(`${LOGIN_NODE_BASE}/code`, {
+          new Request(`${BROWSER_BASE}/code`, {
             method: "POST",
             body: JSON.stringify({ session: token, code: pending.code }),
           })
@@ -2018,7 +2008,7 @@ export class CquSessionDO extends DurableObject<Env> {
       try {
         const response = await this.fetchLoginControl(
           token,
-          new Request(`${LOGIN_NODE_BASE}/code`, {
+          new Request(`${BROWSER_BASE}/code`, {
             method: "POST",
             body: JSON.stringify({
               session: token,
@@ -2318,7 +2308,7 @@ export class CquSessionDO extends DurableObject<Env> {
       if (loginRoute.backend === "cloudflare") {
         runBody.operationTimeoutMs = atrustTimeoutMs;
       }
-      const runHttpRequest = new Request(`${LOGIN_NODE_BASE}/atrust-login`, {
+      const runHttpRequest = new Request(`${BROWSER_BASE}/atrust-login`, {
         method: "POST",
         signal: AbortSignal.any([
           runAbort.signal,
@@ -2499,7 +2489,7 @@ export class CquSessionDO extends DurableObject<Env> {
         creds.iv,
         this.env.ENCRYPTION_KEY
       );
-      // /run 走集中 transport(按登录 route:node→LOGIN_NODE,CF→用户容器并带 boot 头)。
+      // /run 走集中 transport(按登录 route:CF→用户容器并带 boot 头)。
       // 先点火 /run，让 CAS 与 aTrust 可以并行完成密码一因子；节点会在
       // 真正请求验证码前等待 /code-permit。租约未授予时用 AbortSignal 中止在途请求，
       // 避免留下无人 await 的悬空 Promise。
@@ -2530,7 +2520,7 @@ export class CquSessionDO extends DurableObject<Env> {
       if (loginRoute.backend === "cloudflare") {
         runBody.operationTimeoutMs = runTimeoutMs;
       }
-      const runHttpRequest = new Request(`${LOGIN_NODE_BASE}/run`, {
+      const runHttpRequest = new Request(`${BROWSER_BASE}/run`, {
         method: "POST",
         signal: runSignal,
         body: JSON.stringify(runBody),
@@ -2646,9 +2636,7 @@ export class CquSessionDO extends DurableObject<Env> {
     await this.ctx.storage.delete("loginInFlight");
   }
 
-  // Phase 2 后已无调用方(2FA 投码已改走 LOGIN_NODE 国内节点 /code);仅作回滚窗口保留 ——
-  // 它是 CQU_LOGIN 容器 binding 的访问器, 随容器在 Phase 4 一并移除。
-  /** 取该用户的浏览器登录器容器实例(寻址镜像 CQU_SESSION: idFromName → get)。 */
+  /** 取该用户的浏览器登录器容器实例(寻址 CQU_LOGIN 容器 DO: idFromName → get)。 */
   private getLoginContainer(userId: string): DurableObjectStub {
     const id = this.env.CQU_LOGIN.idFromName(userId);
     return this.env.CQU_LOGIN.get(id);
@@ -2659,29 +2647,25 @@ export class CquSessionDO extends DurableObject<Env> {
   }
 
   /**
-   * 非登录类浏览器操作(取票/保活/采集)的 route:按全局配置快照 + 当前绑定用户。
+   * 非登录类浏览器操作(取票/保活/采集)的 route:固定 cloudflare + 当前绑定用户。
    * 这些操作不绑定登录 token(无 boot 头契约),但同样按用户固定容器 ID。
    */
   private currentBrowserRoute(): BrowserRoute {
     return {
       version: 1,
-      backend: selectBrowserBackend(this.env.CQU_BROWSER_BACKEND),
+      backend: "cloudflare",
       userId: this.state?.userId ?? "",
     };
   }
 
   /**
-   * 单阶段浏览器操作的出站预算:node 保留原 90s;CF 取 210s 单操作上限与
-   * 剩余 invocation 时间中较小者(减去 DO 清理余量后作为 Python operationTimeoutMs)。
+   * 单阶段浏览器操作的出站预算:CF 取 210s 单操作上限与剩余 invocation 时间中
+   * 较小者(减去 DO 清理余量后作为 Python operationTimeoutMs)。
    * 剩余不足 30s 时受控抛 BROWSER_DEADLINE,不启动注定做不完的操作。
    */
   private browserOperationBudget(
-    route: BrowserRoute,
     deadlineAt: number
   ): { fetchTimeoutMs: number; operationTimeoutMs?: number } {
-    if (route.backend !== "cloudflare") {
-      return { fetchTimeoutMs: NODE_DEADLINE_MS };
-    }
     const remaining = remainingBrowserBudget(deadlineAt, Date.now());
     const fetchTimeoutMs = Math.min(CONTAINER_BROWSER_DEADLINE_MS, remaining);
     return {
@@ -2697,7 +2681,7 @@ export class CquSessionDO extends DurableObject<Env> {
    * 验证码/permit 控制请求的唯一出口(设计 4.2 的解析顺序):
    *   ① 重新核对 lease.ownerToken 仍是本 token(被替换则停止投递,交调用点原语义);
    *   ② 读持久 browserRoute:<token>,存在则固定用该 route,不看当前全局开关;
-   *   ③ 无 route 的旧格式锁/lease(部署前记录)→ 兼容送 LOGIN_NODE(不带 boot 头);
+   *   ③ 无 route 的旧格式锁/lease(部署前记录)→ 受控失败(腾讯云节点已停用,不外送);
    *   ④ 新格式(version 标记)缺 route / route 用户不匹配 / 缺 bootId → 受控失败,不猜后端;
    * Cloudflare 控制请求携带该 token 预热时的 bootId 头;绝不把同一验证码广播到两个后端。
    */
@@ -2728,17 +2712,12 @@ export class CquSessionDO extends DurableObject<Env> {
     const resolution = resolveControlRoute({
       routeRecord: record ?? null,
       routeVersioned,
-      legacyRecord: casLockIsToken || atrustLockIsToken || lease !== null,
     });
     if (resolution.outcome === "reject") {
       throw new CquSsoError(
         "CODE_ROUTE_UNAVAILABLE",
         "verification code route unavailable"
       );
-    }
-    if (resolution.outcome === "legacy-node") {
-      // 部署前的旧记录:维持原国内契约,不带新 boot 头。
-      return this.env.LOGIN_NODE.fetch(request);
     }
     const boundUserId = this.state?.userId ?? null;
     if (!boundUserId || resolution.route.userId !== boundUserId) {
@@ -2780,7 +2759,7 @@ export class CquSessionDO extends DurableObject<Env> {
     for (;;) {
       try {
         const response = await stub.fetch(
-          new Request(`${LOGIN_NODE_BASE}/health`, {
+          new Request(`${BROWSER_BASE}/health`, {
             signal: AbortSignal.timeout(LOGIN_ROUTE_HEALTH_TIMEOUT_MS),
           })
         );
@@ -2841,8 +2820,8 @@ export class CquSessionDO extends DurableObject<Env> {
    *
    * transaction 内只做 storage 与纯函数:并发发起者只有一个能把活锁与 route 一起写入;
    * 解密、容器预热、浏览器调用等网络准备都在返回之后由调用方进行。
-   * route 的 backend 取全局配置快照(准备版本为 node,最终切换后为 cloudflare),
-   * 之后所有该 token 的 /run、/code、/code-permit 都固定用这条 route。
+ * route 的 backend 固定为 cloudflare(腾讯云节点已停用),之后所有该 token 的
+ * /run、/code、/code-permit 都固定用这条 route。
    */
   private async acquireRoutedLoginLock(
     lockKey: "loginInFlight" | "atrustLoginInFlight",
@@ -2852,7 +2831,7 @@ export class CquSessionDO extends DurableObject<Env> {
     const now = Date.now();
     const route: BrowserRoute = {
       version: 1,
-      backend: selectBrowserBackend(this.env.CQU_BROWSER_BACKEND),
+      backend: "cloudflare",
       userId: this.state?.userId ?? "",
     };
     const record: LoginRouteRecord = {

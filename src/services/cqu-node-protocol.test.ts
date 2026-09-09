@@ -6,7 +6,6 @@ import {
   classifyNodeTicketResponse,
   ticketFromClassification,
   sanitizeNodeDetail,
-  NODE_DEADLINE_MS,
   serializedStateBytes,
   stateExceedsHardLimit,
   STATE_HARD_LIMIT_BYTES,
@@ -237,12 +236,6 @@ describe("sanitizeNodeDetail", () => {
     const out = sanitizeNodeDetail(long);
     expect(out.length).toBeLessThanOrEqual(121); // 120 + …
     expect(out.endsWith("…")).toBe(true);
-  });
-});
-
-describe("NODE_DEADLINE_MS", () => {
-  it("略大于节点最坏 ~80s", () => {
-    expect(NODE_DEADLINE_MS).toBeGreaterThan(80_000);
   });
 });
 

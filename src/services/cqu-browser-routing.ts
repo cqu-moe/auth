@@ -1,5 +1,6 @@
 import { CquSsoError } from "./cqu-sso";
 
+/** 持久 route 可能仍带旧 "node" 值(切换前排空期记录);新记录只写 "cloudflare"。 */
 export type BrowserBackend = "node" | "cloudflare";
 
 export interface BrowserRoute {
@@ -18,20 +19,7 @@ export interface LoginRouteRecord {
   expiresAt: number;
 }
 
-type BrowserEnv = Pick<import("../types").Env, "LOGIN_NODE" | "CQU_LOGIN">;
-
-/**
- * 解析全局后端配置。缺失/空串按旧部署兼容为 node;非法非空值受控报错,
- * 不能误开 Cloudflare,也不存在用户白名单。
- */
-export function selectBrowserBackend(value?: string): BrowserBackend {
-  if (value === undefined || value === "" || value === "node") return "node";
-  if (value === "cloudflare") return "cloudflare";
-  throw new CquSsoError(
-    "INVALID_BROWSER_CONFIG",
-    `Invalid CQU_BROWSER_BACKEND: ${value.trim() === "" ? "whitespace" : "unexpected value"}`
-  );
-}
+type BrowserEnv = Pick<import("../types").Env, "CQU_LOGIN">;
 
 /** 本项目 JSON 协议里可透传的稳定错误码(设计第 7.1 节)。 */
 const STABLE_PROTOCOL_ERRORS = new Set([
@@ -43,7 +31,7 @@ const STABLE_PROTOCOL_ERRORS = new Set([
 ]);
 
 /**
- * 集中浏览器 transport:node 走 LOGIN_NODE;cloudflare 按用户固定容器 ID。
+ * 集中浏览器 transport:cloudflare 按用户固定容器 ID。
  *
  * 容量类状态(429/503)先识别本项目 JSON 协议中的稳定错误并保留 code
  * (尤其不能把 BROWSER_DEADLINE 改成 BUSY);平台非 JSON 或不符合协议的响应
@@ -55,7 +43,21 @@ export async function fetchBrowser(
   route: BrowserRoute,
   request: Request
 ): Promise<Response> {
-  if (route.backend === "node") return env.LOGIN_NODE.fetch(request);
+  // 腾讯云节点已于 2026-09-09 停用并移除绑定。旧持久 route 若异常出现,
+  // 返回受控终态(410),绝不改投 CF 容器(验证码 owner/lease 归属不可跨后端迁移)。
+  if (route.backend === "node") {
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        error: "NODE_RETIRED",
+        message: "node browser backend has been retired",
+      }),
+      {
+        status: 410,
+        headers: { "content-type": "application/json" },
+      }
+    );
+  }
   const id = env.CQU_LOGIN.idFromName(route.userId);
   const response = await env.CQU_LOGIN.get(id).fetch(request);
   if (response.status === 429 || response.status === 503) {

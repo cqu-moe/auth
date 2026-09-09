@@ -1,16 +1,9 @@
-// 国内登录节点(container/server.py)出站协议的纯函数判定层 —— 无 `cloudflare:*`/DO 依赖,
+// 浏览器容器(container/server.py)出站协议的纯函数判定层 —— 无 `cloudflare:*`/DO 依赖,
 // 只 import 类型, 故可在 vitest 的 Node pool 直接 import 单测(DO 本体因 `cloudflare:workers`
 // import 在 Node pool 测不了, 把可判定逻辑下沉到此)。镜像 cqu-2fa/relogin-policy 的分工:
 // 纯判定集中在本文件, DO 只负责 storage 读写 + 出站 fetch + 调用这些纯函数。
 import { CquSsoError, type CquStorageState, type CasCookies } from "./cqu-sso";
 import type { CquStatus } from "./cqu-2fa/state-machine";
-
-// DO 侧 LOGIN_NODE.fetch 的出站 deadline。节点单请求最坏总时长 ≈ QUEUE_WAIT(排队 35s)+
-// overall_timeout(持槽 45s)≈ 80s(见 container/cqu_ticket_browser.py 顶部注释)。取 90s 略大于
-// 80s 留余量, 让节点能先返回自己的 409/502 语义而非被 DO 中途 abort; 仍兜住「节点 backlog 时
-// DO 被无限拖住」(DO 单线程串行, 长 fetch 阻塞该用户后续请求)。**不套在 /run 上**(登录含
-// 2FA 邮件往返可达数分钟, 见 containerLogin)。
-export const NODE_DEADLINE_MS = 90_000;
 
 /**
  * 从完整 storageState 取 TGT(SOURCEID_TGC cookie 值)。
@@ -179,17 +172,17 @@ export function ticketFromClassification(c: NodeTicketClassification): string {
   if (c.kind === "ok") {
     // 防御: 分类器已保证 ok 时 ticket 存在, 但显式兜底避免返回 undefined。
     if (c.ticket) return c.ticket;
-    throw new CquSsoError("WAF_CHALLENGE", "LOGIN_NODE /service-ticket ok but no ticket");
+    throw new CquSsoError("WAF_CHALLENGE", "browser /service-ticket ok but no ticket");
   }
   if (c.kind === "expired") {
     throw new CquSsoError(
       "TGT_EXPIRED",
-      `CQU session expired (${c.detail ?? "node /service-ticket"})`
+      `CQU session expired (${c.detail ?? "browser /service-ticket"})`
     );
   }
   throw new CquSsoError(
     "WAF_CHALLENGE",
-    `LOGIN_NODE /service-ticket ${c.detail ?? "transient"}`
+    `browser /service-ticket ${c.detail ?? "transient"}`
   );
 }
 
@@ -248,7 +241,7 @@ export function stateExceedsHardLimit(bytes: number): boolean {
 }
 
 // ── M7: keepalive/relogin 写回 active 前的防复活守卫 ───────────────────────
-// runKeepAlive 的 LOGIN_NODE.fetch(最长 90s)await 期间 input gate 打开, admin
+// runKeepAlive 的浏览器出站 await 期间 input gate 打开, admin
 // revoke/unbind 可能把 status 改成撤销/解绑/需重登。fetch 返回 active 后若无条件
 // setStatus("active")+putState+setAlarm 会**复活已撤销会话**。所有写回 active 的分支
 // (alarm active / expired→relogin / proactive-relogin)在写回前重查 status, 命中下列

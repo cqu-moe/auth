@@ -36,17 +36,53 @@ import {
   readStorage,
   readStMintLog,
   captureSetAlarm,
-  spyLoginNode,
+  spyBrowserFetch,
 } from "./helpers";
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/**
+ * lease 组种子专用:为 codeLease/登录锁涉及的 token 补 CF 容器 route 记录与
+ * version 标记(腾讯云节点停用后, fetchLoginControl 只认 cloudflare 持久 route)。
+ */
+async function seedLease(
+  stub: DurableObjectStub,
+  opts: {
+    status?: string;
+    extra?: Record<string, unknown>;
+  }
+): Promise<void> {
+  const extra = { ...(opts.extra ?? {}) };
+  const lease = extra.codeLease as
+    | { ownerToken?: string; queue?: Array<{ token: string }> }
+    | undefined;
+  const tokens = new Set<string>();
+  if (lease) {
+    if (lease.ownerToken) tokens.add(lease.ownerToken);
+    for (const entry of lease.queue ?? []) tokens.add(entry.token);
+  }
+  for (const key of ["loginInFlight", "atrustLoginInFlight"]) {
+    const lock = extra[key] as { token?: string } | undefined;
+    if (lock?.token) tokens.add(lock.token);
+  }
+  for (const token of tokens) {
+    const kind: "cas" | "atrust" = token.startsWith("atrust") ? "atrust" : "cas";
+    Object.assign(extra, cfRouteRecord(token, kind));
+  }
+  if (lease) lease.ownerBrowserRouteVersion = 1;
+  for (const key of ["loginInFlight", "atrustLoginInFlight"]) {
+    const lock = extra[key] as { browserRouteVersion?: number } | undefined;
+    if (lock) lock.browserRouteVersion = 1;
+  }
+  return seedSession(stub, { ...opts, extra });
+}
+
 describe("verification-code lease orchestration", () => {
   it("deposit-code sends the code only to the lease owner token", async () => {
     const stub = freshStub("code-lease-owner");
-    await seedSession(stub, {
+    await seedLease(stub, {
       status: "active",
       extra: {
         loginInFlight: { token: "cas-1", startedAt: Date.now() },
@@ -61,7 +97,7 @@ describe("verification-code lease orchestration", () => {
     });
 
     const delivered: Array<{ session: string; code: string }> = [];
-    spyLoginNode({
+    spyBrowserFetch({
       "/code": async (request) => {
         delivered.push(await request.json());
         return Response.json({ ok: true });
@@ -79,7 +115,7 @@ describe("verification-code lease orchestration", () => {
 
   it("releasing the owner promotes FIFO head and grants only it a fresh permit", async () => {
     const stub = freshStub("code-lease-promote");
-    await seedSession(stub, {
+    await seedLease(stub, {
       status: "active",
       extra: {
         codeLease: {
@@ -94,7 +130,7 @@ describe("verification-code lease orchestration", () => {
     });
 
     const permits: Array<{ session: string }> = [];
-    spyLoginNode({
+    spyBrowserFetch({
       "/code-permit": async (request) => {
         permits.push(await request.json());
         return Response.json({ ok: true });
@@ -117,7 +153,7 @@ describe("verification-code lease orchestration", () => {
 
   it("retries a transient permit failure before handing the promoted owner control", async () => {
     const stub = freshStub("code-lease-permit-retry");
-    await seedSession(stub, {
+    await seedLease(stub, {
       status: "active",
       extra: {
         codeLease: {
@@ -132,7 +168,7 @@ describe("verification-code lease orchestration", () => {
     });
 
     let attempts = 0;
-    spyLoginNode({
+    spyBrowserFetch({
       "/code-permit": async () => {
         attempts += 1;
         return Response.json(
@@ -157,7 +193,7 @@ describe("verification-code lease orchestration", () => {
 
   it("keeps a promoted owner fenced when every permit acknowledgement is lost", async () => {
     const stub = freshStub("code-lease-permit-terminal-failure");
-    await seedSession(stub, {
+    await seedLease(stub, {
       status: "active",
       extra: {
         codeLease: {
@@ -170,7 +206,7 @@ describe("verification-code lease orchestration", () => {
         },
       },
     });
-    spyLoginNode({
+    spyBrowserFetch({
       "/code-permit": async () =>
         Response.json({ ok: false }, { status: 502 }),
     });
@@ -193,7 +229,7 @@ describe("verification-code lease orchestration", () => {
 
   it("never promotes a successor when the node accepted a permit but every response was lost", async () => {
     const stub = freshStub("code-lease-permit-accepted-response-lost");
-    await seedSession(stub, {
+    await seedLease(stub, {
       status: "active",
       extra: {
         codeLease: {
@@ -208,7 +244,7 @@ describe("verification-code lease orchestration", () => {
       },
     });
     const accepted: string[] = [];
-    spyLoginNode({
+    spyBrowserFetch({
       "/code-permit": async (request) => {
         const body = await request.json<{ session: string }>();
         accepted.push(body.session);
@@ -234,7 +270,7 @@ describe("verification-code lease orchestration", () => {
 
   it("does not release an uncertain owner when permit acquisition never completed", async () => {
     const stub = freshStub("code-lease-pending-release");
-    await seedSession(stub, {
+    await seedLease(stub, {
       status: "active",
       extra: {
         codeLease: {
@@ -248,7 +284,7 @@ describe("verification-code lease orchestration", () => {
         codePermitPending: "atrust-1",
       },
     });
-    const permit = spyLoginNode({
+    const permit = spyBrowserFetch({
       "/code-permit": async () => Response.json({ ok: true }),
     });
 
@@ -271,7 +307,7 @@ describe("verification-code lease orchestration", () => {
 
   it("replays a persisted permit marker after activation and commits only its acknowledgement", async () => {
     const stub = freshStub("code-lease-pending-recovery");
-    await seedSession(stub, {
+    await seedLease(stub, {
       status: "active",
       extra: {
         codeLease: {
@@ -284,7 +320,7 @@ describe("verification-code lease orchestration", () => {
       },
     });
     const permits: Array<{ session: string }> = [];
-    spyLoginNode({
+    spyBrowserFetch({
       "/code-permit": async (request) => {
         permits.push(await request.json());
         return Response.json({ ok: true });
@@ -306,7 +342,7 @@ describe("verification-code lease orchestration", () => {
 
   it("same-owner acquire replays its durable permit marker without changing FIFO ownership", async () => {
     const stub = freshStub("code-lease-pending-acquire-replay");
-    await seedSession(stub, {
+    await seedLease(stub, {
       status: "active",
       extra: {
         codeLease: {
@@ -319,7 +355,7 @@ describe("verification-code lease orchestration", () => {
       },
     });
     const permits: string[] = [];
-    spyLoginNode({
+    spyBrowserFetch({
       "/code-permit": async (request) => {
         permits.push((await request.json<{ session: string }>()).session);
         return Response.json({ ok: true });
@@ -345,7 +381,7 @@ describe("verification-code lease orchestration", () => {
 
   it("same-owner release promotes FIFO after its permit replay is acknowledged", async () => {
     const stub = freshStub("code-lease-pending-release-replay");
-    await seedSession(stub, {
+    await seedLease(stub, {
       status: "active",
       extra: {
         codeLease: {
@@ -358,7 +394,7 @@ describe("verification-code lease orchestration", () => {
       },
     });
     const permits: string[] = [];
-    spyLoginNode({
+    spyBrowserFetch({
       "/code-permit": async (request) => {
         permits.push((await request.json<{ session: string }>()).session);
         return Response.json({ ok: true });
@@ -381,7 +417,7 @@ describe("verification-code lease orchestration", () => {
 
   it("treats code proof published during a lost acknowledgement as confirmed permit evidence", async () => {
     const stub = freshStub("code-lease-marker-proof-during-grant");
-    await seedSession(stub, {
+    await seedLease(stub, {
       status: "active",
       extra: {
         codeLease: {
@@ -395,7 +431,7 @@ describe("verification-code lease orchestration", () => {
     });
 
     await runInDurableObject(stub, async (instance, state) => {
-      spyLoginNode({
+      spyBrowserFetch({
         "/code-permit": async () => {
           await state.storage.put("codePermitProven", "atrust-1");
           throw new Error("response lost after code arrived");
@@ -413,7 +449,7 @@ describe("verification-code lease orchestration", () => {
 
   it("treats a received login code as proof that the pending owner consumed its permit", async () => {
     const stub = freshStub("code-lease-pending-code-proof");
-    await seedSession(stub, {
+    await seedLease(stub, {
       status: "active",
       extra: {
         codeLease: {
@@ -426,7 +462,7 @@ describe("verification-code lease orchestration", () => {
       },
     });
     const delivered: Array<{ session: string; code: string }> = [];
-    spyLoginNode({
+    spyBrowserFetch({
       "/code": async (request) => {
         delivered.push(await request.json());
         return Response.json({ ok: true });
@@ -446,7 +482,7 @@ describe("verification-code lease orchestration", () => {
 
   it("promoting a stale owner grants the new permit but never forwards the stale arrival", async () => {
     const stub = freshStub("code-lease-stale-deposit");
-    await seedSession(stub, {
+    await seedLease(stub, {
       status: "active",
       extra: {
         codeLease: {
@@ -462,7 +498,7 @@ describe("verification-code lease orchestration", () => {
 
     const permits: Array<{ session: string }> = [];
     const delivered: Array<{ session: string; code: string }> = [];
-    spyLoginNode({
+    spyBrowserFetch({
       "/code-permit": async (request) => {
         permits.push(await request.json());
         return Response.json({ ok: true });
@@ -487,7 +523,7 @@ describe("verification-code lease orchestration", () => {
   it("offers a still-valid pending code as reusable when FIFO promotes the next owner", async () => {
     const stub = freshStub("code-lease-reuse-pending");
     const now = Date.now();
-    await seedSession(stub, {
+    await seedLease(stub, {
       status: "active",
       extra: {
         pendingCode: {
@@ -509,7 +545,7 @@ describe("verification-code lease orchestration", () => {
 
     const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
     let reusableAttempts = 0;
-    spyLoginNode({
+    spyBrowserFetch({
       "/code-permit": async (request) => {
         calls.push({ path: "/code-permit", body: await request.json() });
         return Response.json({ ok: true });
@@ -549,7 +585,7 @@ describe("verification-code lease orchestration", () => {
 
   it("resetting aTrust removes only aTrust lease entries and preserves direct CAS", async () => {
     const stub = freshStub("code-lease-reset-atrust");
-    await seedSession(stub, {
+    await seedLease(stub, {
       extra: {
         atrustSession: {
           status: "active",
@@ -569,7 +605,7 @@ describe("verification-code lease orchestration", () => {
         },
       },
     });
-    const spy = spyLoginNode({});
+    const spy = spyBrowserFetch({});
 
     await runInDurableObject(stub, async (instance) => {
       await (instance as unknown as {
@@ -591,7 +627,7 @@ describe("verification-code lease orchestration", () => {
     "%s preserves an unexpired owner fence while invalidating login state",
     async (operation) => {
       const stub = freshStub(`code-lease-lifecycle-${operation}`);
-      await seedSession(stub, {
+      await seedLease(stub, {
         status: "active",
         extra: {
           atrustSession: {
@@ -653,13 +689,13 @@ describe("persistent browser route records", () => {
         "browserRoute:tok-a": {
           token: "tok-a",
           kind: "cas",
-          route: { version: 1, backend: "node", userId: "u1" },
+          route: { version: 1, backend: "cloudflare", userId: "u1", bootId: "boot-a" },
           createdAt: Date.now(),
           expiresAt: Date.now() + 60_000,
         },
       },
     });
-    const fetchSpy = spyLoginNode({
+    const fetchSpy = spyCfLogin({
       "/run": () => {
         throw new Error("second initiator must not start another /run");
       },
@@ -691,7 +727,7 @@ describe("persistent browser route records", () => {
 
     const runBodies: Array<{ session: string }> = [];
     const permitBodies: Array<{ session: string }> = [];
-    spyLoginNode({
+    spyCfLogin({
       "/run": async (request) => {
         runBodies.push(await request.json());
         return Response.json({
@@ -739,7 +775,8 @@ describe("persistent browser route records", () => {
     expect(route?.token).toBe(runBody.session);
     expect(route?.kind).toBe("cas");
     expect(route?.route.version).toBe(1);
-    expect(["node", "cloudflare"]).toContain(route?.route.backend);
+    expect(route?.route.backend).toBe("cloudflare");
+    expect((route?.route as { bootId?: string }).bootId).toBe("boot-1");
     expect(route?.route.userId).toBe("u1");
   });
 
@@ -893,7 +930,7 @@ describe("login control routing", () => {
   it("delivers a fresh code to the persisted cloudflare route with the boot header", async () => {
     const stub = freshStub("control-cf-code");
     await seedCloudflareLogin(stub, "tok-cf");
-    const nodeFetch = spyLoginNode({
+    const nodeFetch = spyBrowserFetch({
       "/code": () => {
         throw new Error("cloudflare-routed code must not reach LOGIN_NODE");
       },
@@ -921,7 +958,7 @@ describe("login control routing", () => {
     // 这正是"CF 登录在途时开关切回 node,码仍送 CF"的等价可观测形式。
     const stub = freshStub("control-route-pin");
     await seedCloudflareLogin(stub, "tok-pin");
-    spyLoginNode({
+    spyBrowserFetch({
       "/code": () => {
         throw new Error("must stay on the persisted route");
       },
@@ -937,7 +974,7 @@ describe("login control routing", () => {
   it("rejects a boot-replaced code without broadcasting to node or counting failures", async () => {
     const stub = freshStub("control-boot-replaced");
     await seedCloudflareLogin(stub, "tok-boot", "old-boot");
-    const nodeFetch = spyLoginNode({
+    const nodeFetch = spyBrowserFetch({
       "/code": () => {
         throw new Error("boot-replaced code must not fall back to node");
       },
@@ -977,7 +1014,7 @@ describe("login control routing", () => {
         },
       },
     });
-    const nodeFetch = spyLoginNode({
+    const nodeFetch = spyBrowserFetch({
       "/code": () => {
         throw new Error("missing route must not guess node");
       },
@@ -1021,7 +1058,7 @@ describe("login control routing", () => {
         },
       },
     });
-    const nodeFetch = spyLoginNode({
+    const nodeFetch = spyBrowserFetch({
       "/code-permit": () => {
         throw new Error("recovery must follow the persisted route");
       },
@@ -1222,7 +1259,7 @@ describe("cloudflare CAS migration", () => {
     });
     await seedCredentials(stub);
     const seen: Array<{ path: string; bootId: string | null; body: any }> = [];
-    const nodeFetch = spyLoginNode({
+    const nodeFetch = spyBrowserFetch({
       "/run": () => {
         throw new Error("cloudflare relogin must not hit LOGIN_NODE");
       },
@@ -1266,7 +1303,7 @@ describe("cloudflare CAS migration", () => {
       loginAt: Date.now() - 60 * 60 * 1000,
     });
     const seen: Array<{ path: string; body: any }> = [];
-    const nodeFetch = spyLoginNode({
+    const nodeFetch = spyBrowserFetch({
       "/keepalive": () => {
         throw new Error("cloudflare keepalive must not hit LOGIN_NODE");
       },
@@ -1306,7 +1343,7 @@ describe("cloudflare CAS migration", () => {
       status: "active",
       loginAt: Date.now() - 60 * 60 * 1000,
     });
-    const nodeFetch = spyLoginNode({
+    const nodeFetch = spyBrowserFetch({
       "/keepalive": () => {
         throw new Error("busy path must not fall back to node");
       },
@@ -1344,7 +1381,7 @@ describe("cloudflare CAS migration", () => {
         },
       },
     });
-    const nodeFetch = spyLoginNode({
+    const nodeFetch = spyBrowserFetch({
       "/data-harvest": () => {
         throw new Error("cloudflare harvest must not hit LOGIN_NODE");
       },
@@ -1423,12 +1460,53 @@ describe("cloudflare CAS migration", () => {
   });
 });
 
-function pathsOf(spy: ReturnType<typeof spyLoginNode>): string[] {
+function pathsOf(spy: ReturnType<typeof spyBrowserFetch>): string[] {
   return spy.mock.calls.map((c) => {
     const input = c[0] as RequestInfo | URL;
     const url = input instanceof Request ? input.url : String(input);
     return new URL(url).pathname;
   });
+}
+
+/** 组装 CF 登录 route 记录(容器后端,带 bootId;userId 固定为种子 u1)。 */
+function cfRouteRecord(
+  token: string,
+  kind: "cas" | "atrust" = "cas",
+  bootId = "boot-1"
+): Record<string, unknown> {
+  return {
+    [`browserRoute:${token}`]: {
+      token,
+      kind,
+      route: { version: 1, backend: "cloudflare", userId: "u1", bootId },
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 600_000,
+    },
+  };
+}
+
+/** CF 容器登录桩:GET /health 返回可预热 bootId,其余按 path 路由。 */
+function spyCfLogin(
+  handlers: Record<string, (req: Request) => Response | Promise<Response>>
+): MockInstance {
+  const withHealth: Record<string, (req: Request) => Response | Promise<Response>> = {
+    ...handlers,
+  };
+  if (!withHealth["/health"]) {
+    withHealth["/health"] = async () =>
+      Response.json({
+        ok: true,
+        bootId: "boot-1",
+        browserProfile: "cloudflare",
+        capabilities: [
+          "atrust-login",
+          "code-permit",
+          "browser-route-v1",
+          "operation-deadline-v1",
+        ],
+      });
+  }
+  return spyBrowserFetch(withHealth);
 }
 
 // ── 1. M7 防复活 ────────────────────────────────────────────────────────────
@@ -1440,7 +1518,7 @@ describe("M7 anti-resurrection", () => {
     await driveAlarmWith(stub, async (_inst, state) => {
       // keepalive 探活返回 alive, 但出站在途期间把 status 改成 revoked(同 DO 上下文写盘,
       // 模拟 admin revoke 在 alarm await LOGIN_NODE.fetch 期间落盘)。
-      spyLoginNode({
+      spyBrowserFetch({
         "/keepalive": async () => {
           await state.storage.put("status", "revoked");
           await state.storage.deleteAlarm();
@@ -1459,7 +1537,7 @@ describe("M7 anti-resurrection", () => {
     await seedSession(stub, { status: "active" });
 
     await driveAlarmWith(stub, async (_inst, state) => {
-      spyLoginNode({
+      spyBrowserFetch({
         "/keepalive": async () => {
           await state.storage.put("status", "needs_reauth");
           await state.storage.deleteAlarm();
@@ -1479,7 +1557,7 @@ describe("M7 anti-resurrection", () => {
     const stub = freshStub("m7-control");
     await seedSession(stub, { status: "active" });
 
-    const spy = spyLoginNode({
+    const spy = spyBrowserFetch({
       "/keepalive": async () =>
         Response.json({ ok: true, status: "alive" }, { status: 200 }),
     });
@@ -1506,7 +1584,7 @@ describe("H4/L1 service-ticket node 409", () => {
     // 先挂 setAlarm spy(确定性断言「排了即时 alarm」, 避开即时 alarm 自动触发的 getAlarm 竞态)。
     const setAlarmCalls = await captureSetAlarm(stub);
 
-    const spy = spyLoginNode({
+    const spy = spyBrowserFetch({
       "/service-ticket": async () =>
         Response.json({ ok: false, error: "cas-login" }, { status: 409 }),
       // 即时 alarm 触发后会跑一轮 keepalive; 桩成 alive 让它确定性收敛(不污染断言)。
@@ -1541,7 +1619,7 @@ describe("transient failures", () => {
     await seedSession(stub, { status: "active" });
     const setAlarmCalls = await captureSetAlarm(stub);
 
-    const spy = spyLoginNode({
+    const spy = spyBrowserFetch({
       "/service-ticket": async () => Response.json({ ok: false }, { status: 502 }),
     });
 
@@ -1566,7 +1644,7 @@ describe("transient failures", () => {
     await seedSession(stub, { status: "active" });
     const setAlarmCalls = await captureSetAlarm(stub);
 
-    const spy = spyLoginNode({
+    const spy = spyBrowserFetch({
       "/service-ticket": async () => {
         // 模拟 AbortSignal.timeout 触发 / VPC 网络层异常。
         throw new DOMException("The operation was aborted", "AbortError");
@@ -1590,7 +1668,7 @@ describe("transient failures", () => {
     const stub = freshStub("transient-keepalive");
     await seedSession(stub, { status: "active" });
 
-    const spy = spyLoginNode({
+    const spy = spyBrowserFetch({
       "/keepalive": async () => Response.json({ ok: false }, { status: 502 }),
     });
 
@@ -1625,7 +1703,7 @@ describe("H2 oversized refreshed state on keepalive", () => {
       ],
     };
 
-    const spy = spyLoginNode({
+    const spy = spyBrowserFetch({
       "/keepalive": async () =>
         Response.json(
           { ok: true, status: "alive", state: oversized },
@@ -1655,7 +1733,7 @@ describe("H2 oversized refreshed state on keepalive", () => {
     const stub = freshStub("h2-halfbaked");
     await seedSession(stub, { status: "active" });
 
-    spyLoginNode({
+    spyBrowserFetch({
       "/keepalive": async () =>
         Response.json(
           { ok: true, status: "alive", state: { cookies: [], origins: [] } },
@@ -1712,7 +1790,7 @@ describe("data-harvest action", () => {
     const stub = freshStub("harvest-ok");
     await seedSession(stub, { status: "active" });
 
-    spyLoginNode({
+    spyBrowserFetch({
       "/data-harvest": async () =>
         Response.json(
           {
@@ -1752,7 +1830,7 @@ describe("data-harvest action", () => {
     });
 
     let receivedState: unknown;
-    const spy = spyLoginNode({
+    const spy = spyBrowserFetch({
       "/data-harvest": async (request) => {
         receivedState = ((await request.json()) as { state?: unknown }).state;
         return Response.json({ ok: true, captures: [], fetches: [] });
@@ -1789,7 +1867,7 @@ describe("data-harvest action", () => {
     await seedCredentials(stub);
 
     let instanceState: DurableObjectState | null = null;
-    const spy = spyLoginNode({
+    const spy = spyBrowserFetch({
       "/data-harvest": async () => {
         await instanceState!.storage.put({
           status: "revoked",
@@ -1846,7 +1924,7 @@ describe("data-harvest action", () => {
     });
 
     let instanceState: DurableObjectState | null = null;
-    spyLoginNode({
+    spyBrowserFetch({
       "/data-harvest": async () => {
         await instanceState!.storage.put({
           atrustGeneration: "generation-new",
@@ -1901,7 +1979,7 @@ describe("data-harvest action", () => {
     });
     await seedCredentials(stub);
 
-    const spy = spyLoginNode({
+    const spy = spyCfLogin({
       "/atrust-login": async () =>
         Response.json({ ok: true, state: atrustState }),
       "/code-permit": async () => Response.json({ ok: true }),
@@ -1923,6 +2001,7 @@ describe("data-harvest action", () => {
     const response = await postAtrustHarvest(stub);
     expect(response.status).toBe(200);
     expect(pathsOf(spy)).toEqual([
+      "/health",
       "/code-permit",
       "/code",
       "/atrust-login",
@@ -1954,7 +2033,7 @@ describe("data-harvest action", () => {
     await seedCredentials(stub);
 
     let harvestAttempt = 0;
-    const spy = spyLoginNode({
+    const spy = spyCfLogin({
       "/data-harvest": async (request) => {
         harvestAttempt += 1;
         const state = ((await request.json()) as { state?: unknown }).state;
@@ -2001,7 +2080,7 @@ describe("data-harvest action", () => {
     });
     await seedCredentials(stub);
 
-    const spy = spyLoginNode({
+    const spy = spyCfLogin({
       "/data-harvest": async () =>
         Response.json(
           { ok: false, error: "ATRUST_SESSION_EXPIRED" },
@@ -2039,7 +2118,7 @@ describe("data-harvest action", () => {
         },
       },
     });
-    spyLoginNode({
+    spyBrowserFetch({
       "/data-harvest": async () =>
         Response.json({ ok: false, error: "HARVEST_TRANSIENT" }, { status: 502 }),
     });
@@ -2067,7 +2146,7 @@ describe("data-harvest action", () => {
     const stub = freshStub("atrust-password-breaker");
     await seedSession(stub, { status: "active" });
     await seedCredentials(stub);
-    const spy = spyLoginNode({
+    const spy = spyCfLogin({
       "/atrust-login": async () =>
         Response.json(
           { ok: false, error: "PASSWORD_REJECTED" },
@@ -2103,7 +2182,7 @@ describe("data-harvest action", () => {
   it("status not active (needs_reauth) → NEEDS_REAUTH error, no node call", async () => {
     const stub = freshStub("harvest-reauth");
     await seedSession(stub, { status: "needs_reauth" });
-    const spy = spyLoginNode({ "/data-harvest": async () => Response.json({}) });
+    const spy = spyBrowserFetch({ "/data-harvest": async () => Response.json({}) });
 
     const res = await postHarvest(stub);
     expect(res.status).toBe(409); // cquErrorHttpStatus(NEEDS_REAUTH)
@@ -2115,7 +2194,7 @@ describe("data-harvest action", () => {
   it("disallowed navUrl host → INVALID_HARVEST_URL, no node call", async () => {
     const stub = freshStub("harvest-badhost");
     await seedSession(stub, { status: "active" });
-    const spy = spyLoginNode({ "/data-harvest": async () => Response.json({}) });
+    const spy = spyBrowserFetch({ "/data-harvest": async () => Response.json({}) });
 
     const res = await stub.fetch("http://do/data-harvest?clientId=calendar&source=rpc", {
       method: "POST",
@@ -2130,7 +2209,7 @@ describe("data-harvest action", () => {
   it("non-GET fetch method → INVALID_HARVEST_URL (400) before rate-limit accounting, no node call, no ST mint", async () => {
     const stub = freshStub("harvest-nonget");
     await seedSession(stub, { status: "active" });
-    const spy = spyLoginNode({ "/data-harvest": async () => Response.json({}) });
+    const spy = spyBrowserFetch({ "/data-harvest": async () => Response.json({}) });
 
     const res = await stub.fetch("http://do/data-harvest?clientId=calendar&source=rpc", {
       method: "POST",
@@ -2152,7 +2231,7 @@ describe("data-harvest action", () => {
   it("capture not an array → INVALID_HARVEST_URL (400) before accounting, no node call, no ST mint", async () => {
     const stub = freshStub("harvest-capture-notarray");
     await seedSession(stub, { status: "active" });
-    const spy = spyLoginNode({ "/data-harvest": async () => Response.json({}) });
+    const spy = spyBrowserFetch({ "/data-harvest": async () => Response.json({}) });
 
     const res = await stub.fetch("http://do/data-harvest?clientId=calendar&source=rpc", {
       method: "POST",
@@ -2167,7 +2246,7 @@ describe("data-harvest action", () => {
   it("capture with a non-string entry → INVALID_HARVEST_URL (400), no node call, no ST mint", async () => {
     const stub = freshStub("harvest-capture-nonstring");
     await seedSession(stub, { status: "active" });
-    const spy = spyLoginNode({ "/data-harvest": async () => Response.json({}) });
+    const spy = spyBrowserFetch({ "/data-harvest": async () => Response.json({}) });
 
     const res = await stub.fetch("http://do/data-harvest?clientId=calendar&source=rpc", {
       method: "POST",
@@ -2182,7 +2261,7 @@ describe("data-harvest action", () => {
   it("fetch entry missing url → INVALID_HARVEST_URL (400) before accounting, no node call, no ST mint", async () => {
     const stub = freshStub("harvest-fetch-nourl");
     await seedSession(stub, { status: "active" });
-    const spy = spyLoginNode({ "/data-harvest": async () => Response.json({}) });
+    const spy = spyBrowserFetch({ "/data-harvest": async () => Response.json({}) });
 
     const res = await stub.fetch("http://do/data-harvest?clientId=calendar&source=rpc", {
       method: "POST",
@@ -2202,7 +2281,7 @@ describe("data-harvest action", () => {
     await seedSession(stub, { status: "active" });
 
     let received: { navUrl?: string; fetch?: { url?: string }[] } | null = null;
-    const spy = spyLoginNode({
+    const spy = spyBrowserFetch({
       "/data-harvest": async (req) => {
         received = (await req.json()) as { navUrl?: string; fetch?: { url?: string }[] };
         return Response.json(
@@ -2240,7 +2319,7 @@ describe("data-harvest action", () => {
     // 应是文档化的 400 客户端契约错(GET-only), 且在记账之前抛。
     const stub = freshStub("harvest-method-nonstring");
     await seedSession(stub, { status: "active" });
-    const spy = spyLoginNode({ "/data-harvest": async () => Response.json({}) });
+    const spy = spyBrowserFetch({ "/data-harvest": async () => Response.json({}) });
 
     const res = await stub.fetch("http://do/data-harvest?clientId=calendar&source=rpc", {
       method: "POST",
@@ -2261,7 +2340,7 @@ describe("data-harvest action", () => {
     const stub = freshStub("harvest-409");
     await seedSession(stub, { status: "active" });
     const setAlarmCalls = await captureSetAlarm(stub);
-    const spy = spyLoginNode({
+    const spy = spyBrowserFetch({
       "/data-harvest": async () => Response.json({ ok: false }, { status: 409 }),
       "/keepalive": async () => Response.json({ ok: true, status: "alive" }, { status: 200 }),
     });
@@ -2278,7 +2357,7 @@ describe("data-harvest action", () => {
   it("node 502 → WAF_CHALLENGE (500), status unchanged", async () => {
     const stub = freshStub("harvest-502");
     await seedSession(stub, { status: "active" });
-    spyLoginNode({
+    spyBrowserFetch({
       "/data-harvest": async () => Response.json({ ok: false }, { status: 502 }),
     });
     const res = await postHarvest(stub);
@@ -2295,7 +2374,7 @@ describe("data-harvest action", () => {
       ts: now, clientId: "calendar", host: "my.cqu.edu.cn", broad: false,
     }));
     await seedSession(stub, { status: "active", extra: { stMintLog: full } });
-    const spy = spyLoginNode({ "/data-harvest": async () => Response.json({}) });
+    const spy = spyBrowserFetch({ "/data-harvest": async () => Response.json({}) });
 
     const res = await postHarvest(stub);
     expect(res.status).toBe(429);
