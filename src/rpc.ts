@@ -10,7 +10,7 @@ import {
 } from "./services/entitlements";
 import { scopeSatisfies } from "./middleware/scope";
 import { hashOAuthClientSecret } from "./utils/oauth-secret";
-import { oauthClientCquScopes, cquBindAddresses } from "./db/schema";
+import { oauthClientCquScopes, cquBindAddresses, cquCredentials } from "./db/schema";
 import { requiredScopeForTarget } from "./services/required-scope";
 import type { HarvestCapture, HarvestFetch } from "./services/cqu-node-protocol";
 import { resolveBrowserDeadline } from "./services/cqu-browser-budget";
@@ -79,13 +79,25 @@ export class AuthService extends WorkerEntrypoint<Env> {
     const caps = await resolveCaps(this.env.DATABASE, s.user.id);
     // 绑定状态随会话一起下发,让子系统(如 schedule)能在用户操作前就给出
     // 「请先绑定统一身份认证」的引导,而不是等同步失败后再报错。
-    // 单次 indexed point-read,与 resolveCaps 同级开销;无绑定行 = "unbound"。
-    const bind = await drizzle(this.env.DATABASE)
-      .select({ status: cquBindAddresses.status })
-      .from(cquBindAddresses)
-      .where(eq(cquBindAddresses.userId, s.user.id))
-      .get();
-    const cquBindStatus = (bind?.status ?? "unbound") as CquBindStatus;
+    // 权威信号是 cqu_credentials(凭证行,解绑即删):cqu_bind_addresses 是后加的
+    // 邮件取码向导表且无历史回填,只看它会把「早已绑定、同步正常」的老用户
+    // 误判成 unbound。两次 indexed point-read,与 resolveCaps 同级开销。
+    const db = drizzle(this.env.DATABASE);
+    const [bind, creds] = await Promise.all([
+      db
+        .select({ status: cquBindAddresses.status })
+        .from(cquBindAddresses)
+        .where(eq(cquBindAddresses.userId, s.user.id))
+        .get(),
+      db
+        .select({ status: cquCredentials.status })
+        .from(cquCredentials)
+        .where(eq(cquCredentials.userId, s.user.id))
+        .get(),
+    ]);
+    const cquBindStatus: CquBindStatus = creds
+      ? (creds.status as CquBindStatus)
+      : ((bind?.status ?? "unbound") as CquBindStatus);
     // s.user / caps / cquBindStatus 均为普通值,可直接 structured clone 跨 RPC 边界返回。
     return { user: s.user as Record<string, unknown>, caps, cquBindStatus };
   }
