@@ -527,9 +527,9 @@ function Step2Direct({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-gray-900 mb-2">设置密保邮箱并等待验证码</h2>
+        <h2 className="text-xl font-semibold text-gray-900 mb-2">设置密保邮箱</h2>
         <p className="text-sm text-gray-500">
-          将下方专属地址设置为 CQU 自服务中心的密保邮箱，CQU 随后会向该地址发送验证码——验证码到达后将立即显示在本页面。
+          复制下方地址，在学校页面将密保邮箱改为该地址。
         </p>
       </div>
 
@@ -553,27 +553,18 @@ function Step2Direct({
         </div>
       ) : null}
 
-      {/* ── CQU operation steps ───────────────────────────────────────────── */}
       {bindAddress && (
-        <div className="space-y-2 text-sm text-gray-600">
-          <p className="font-medium text-gray-900">操作步骤：</p>
-          <ol className="space-y-2 list-decimal list-inside">
-            <li>
-              打开{" "}
-              <a
-                href="https://self.cqu.edu.cn"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-600 hover:text-blue-700 font-medium underline underline-offset-2"
-              >
-                self.cqu.edu.cn
-              </a>
-              {" "}并登录
-            </li>
-            <li>进入「安全设置」→「绑定密保邮箱」</li>
-            <li>将密保邮箱设置为上方地址并保存</li>
-            <li>CQU 将发送一封验证邮件到该地址，验证码将自动显示在下方</li>
-          </ol>
+        <div className="space-y-2">
+          <a
+            href="https://self.cqu.edu.cn/cas-success/safe-center/email-bind-way/rebind"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-h-11 items-center justify-center rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-900 hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+          >
+            前往修改密保邮箱
+            <span className="sr-only">（在新标签页打开）</span>
+          </a>
+          <p className="text-xs text-gray-500">发送验证邮件后，回到这里查看验证码。</p>
         </div>
       )}
 

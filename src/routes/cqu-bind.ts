@@ -9,6 +9,7 @@ import { CQU_SENDER } from "../services/cqu-2fa/sender-auth";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, sql } from "drizzle-orm";
 import { verifyAccessToken } from "better-auth/oauth2";
+import { getCquBinding } from "../services/cqu-binding";
 
 // CQU 绑定资源路由（RESTful 重构）。
 //
@@ -155,17 +156,11 @@ cquBinding.post("/", async (c) => {
 
 // GET /api/cqu/binding （← 原 GET /status）
 // 返回 { address?, bindStatus, sessionStatus }：
-//   - bindStatus / address 来自 cqu_bind_addresses 行（地址用 token + 域名重建）
+//   - bindStatus 优先取凭证状态；address 用邮箱绑定 token + 域名重建
 //   - sessionStatus 来自 DO 的 status action
 cquBinding.get("/", async (c) => {
   const user = c.get("user") as { id: string };
-  const db = drizzle(c.env.DATABASE);
-
-  const bind = await db
-    .select()
-    .from(cquBindAddresses)
-    .where(eq(cquBindAddresses.userId, user.id))
-    .get();
+  const binding = await getCquBinding(c.env.DATABASE, user.id);
 
   const stub = c.env.CQU_SESSION.get(c.env.CQU_SESSION.idFromName(user.id));
   const resp = await stub.fetch(new Request("https://do/status"));
@@ -180,8 +175,8 @@ cquBinding.get("/", async (c) => {
 
   return c.json({
     // #7: bindStatus 始终返回，无绑定时为 "unbound"，让客户端能区分「无绑定」与「响应异常」。
-    address: bind ? `${bind.token}@${c.env.BIND_EMAIL_DOMAIN}` : undefined,
-    bindStatus: bind?.status ?? "unbound",
+    address: binding.token ? `${binding.token}@${c.env.BIND_EMAIL_DOMAIN}` : undefined,
+    bindStatus: binding.bindStatus,
     sessionStatus,
   });
 });
@@ -244,6 +239,9 @@ cquBinding.put("/credentials", async (c) => {
         studentId,
         encryptedPassword: ciphertext,
         iv,
+        // First login has not succeeded yet. The schema default remains active
+        // for legacy entry points, so this route must opt into pending explicitly.
+        status: "pending",
         // 显式写真实时间戳：即便列默认值损坏（历史遗留），新行也拿到正确时间。
         boundAt: sql`(datetime('now'))`,
       });
@@ -305,10 +303,16 @@ cquBinding.put("/credentials", async (c) => {
   // #4: 首登已成功、DO 已初始化。若这步置 active 的 D1 写抛错，返回独立的
   // 可重试错误而非裸 500——重试 /credentials 是安全的（重登 + 重置 active）。
   try {
-    await db
-      .update(cquBindAddresses)
-      .set({ status: "active" })
-      .where(eq(cquBindAddresses.userId, user.id));
+    await db.batch([
+      db
+        .update(cquBindAddresses)
+        .set({ status: "active" })
+        .where(eq(cquBindAddresses.userId, user.id)),
+      db
+        .update(cquCredentials)
+        .set({ status: "active" })
+        .where(eq(cquCredentials.userId, user.id)),
+    ]);
   } catch (err) {
     console.error("[cqu-binding] activate update failed after successful init", {
       userId: user.id,
