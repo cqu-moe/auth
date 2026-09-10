@@ -517,6 +517,15 @@ export class CquSessionDO extends DurableObject<Env> {
         case "quicklogin-binding": {
           return Response.json(await this.getQuickloginBindingEpoch());
         }
+        case "quicklogin-keepalive-mint": {
+          const body = await request.json<{
+            deviceId: string;
+            operationId: string;
+            mintedAt: number;
+          }>();
+          await this.recordQuickloginKeepaliveMint(body);
+          return Response.json({ success: true });
+        }
         case "deposit-code": {
           const body = await request.json<DepositCodePayload>();
           const delivered = await this.depositCode(body);
@@ -2026,6 +2035,33 @@ export class CquSessionDO extends DurableObject<Env> {
    * per-client 配额; host 取 PROBE 目标 host; broad=false(符号路径探针, 不计入 distinct-broad 告警)。
    * 绝不记录 ticket / cookies / state。
    */
+  private async recordQuickloginKeepaliveMint(input: {
+    deviceId: string;
+    operationId: string;
+    mintedAt: number;
+  }): Promise<void> {
+    if (
+      !input.deviceId ||
+      !input.operationId ||
+      !Number.isSafeInteger(input.mintedAt) ||
+      input.mintedAt < 0
+    ) {
+      throw new CquSsoError("INVALID_REQUEST", "invalid quicklogin mint");
+    }
+    const key = `quickloginMint:${input.operationId}`;
+    if (await this.ctx.storage.get(key)) return;
+    await this.ctx.storage.put(key, {
+      deviceId: input.deviceId,
+      mintedAt: input.mintedAt,
+    });
+    try {
+      await this.recordKeepaliveMint();
+    } catch (error) {
+      await this.ctx.storage.delete(key);
+      throw error;
+    }
+  }
+
   private async recordKeepaliveMint(): Promise<void> {
     const st = this.state;
     if (!st) return;

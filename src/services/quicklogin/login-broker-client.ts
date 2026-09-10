@@ -32,4 +32,22 @@ export class QuickloginLoginBrokerClient {
     if (!response.ok) return { bound: false, epoch: 0 };
     return response.json<{ bound: boolean; epoch: number }>();
   }
+
+  async recordQuickloginKeepaliveMint(
+    userId: string,
+    input: { deviceId: string; operationId: string; mintedAt: number }
+  ): Promise<void> {
+    const stub = this.env.CQU_SESSION.get(
+      this.env.CQU_SESSION.idFromName(userId)
+    );
+    const response = await stub.fetch(
+      "https://cqu-session/quicklogin-keepalive-mint",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input),
+      }
+    );
+    if (!response.ok) throw new Error("TEMPORARY_UNAVAILABLE");
+  }
 }

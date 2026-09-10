@@ -27,6 +27,7 @@ import {
 } from "../services/quicklogin/outbox";
 import { selectQuotaDevices, validateDeviceLimit } from "../services/quicklogin/policy";
 import { projectAccount } from "../services/quicklogin/projection";
+import { QuickloginDeviceClient } from "../services/quicklogin/device-client";
 
 const ACCOUNT_KEY = "account";
 const OWNER_KEY = "ownerUserId";
@@ -342,14 +343,24 @@ export class CquQuickloginAccountDO extends DurableObject<Env> {
   }
 
   private async dispatchOutbox(event: OutboxEvent): Promise<boolean> {
-    if (event.kind !== "projection") return false;
     const ownerUserId =
       this.ownerUserId ??
       (await this.ctx.storage.get<string>(OWNER_KEY)) ??
       null;
     if (!ownerUserId) return false;
-    await projectAccount(this.env, ownerUserId, await this.readAccount());
-    return true;
+    if (event.kind === "projection") {
+      await projectAccount(this.env, ownerUserId, await this.readAccount());
+      return true;
+    }
+    if (event.kind === "device-notify" && event.deviceId) {
+      const authority = getDeviceAuthorityFromState(
+        await this.readAccount(),
+        event.deviceId
+      );
+      await new QuickloginDeviceClient(this.env).notifyDevice(authority);
+      return true;
+    }
+    return false;
   }
 
   private async ensureOwner(ownerUserId: string): Promise<void> {

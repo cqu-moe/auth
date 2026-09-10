@@ -55,6 +55,10 @@
       {
         "name": "CQU_QUICKLOGIN_ACCOUNT",
         "class_name": "CquQuickloginAccountDO"
+      },
+      {
+        "name": "CQU_QUICKLOGIN_DEVICE",
+        "class_name": "CquQuickloginDeviceDO"
       }
     ]
   },
@@ -80,7 +84,7 @@
     },
     {
       "tag": "v3",
-      "new_sqlite_classes": ["CquQuickloginAccountDO"]
+      "new_sqlite_classes": ["CquQuickloginAccountDO", "CquQuickloginDeviceDO"]
     }
   ],
 

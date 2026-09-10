@@ -259,11 +259,27 @@ describe("CquQuickloginAccountDO", () => {
     }));
     expect(before.account).toMatchObject({ masterEnabled: true, deviceLimit: 1 });
     expect(before.outbox.length).toBeGreaterThan(0);
+    const unavailable: OutboxEvent = {
+      id: "synthetic-revoke-event",
+      kind: "revoke-oauth-family",
+      revision: before.account!.revision,
+      deviceId: record.deviceId,
+      generation: record.generation,
+      grantId: record.grantId,
+      attempts: 0,
+      nextAttemptAt: TEST_NOW,
+    };
 
     await runInDurableObject(stub, async (_instance, state) => {
       await state.storage.put(
         "outbox",
-        before.outbox.map((event) => ({ ...event, nextAttemptAt: TEST_NOW }))
+        [
+          ...before.outbox.map((event) => ({
+            ...event,
+            nextAttemptAt: TEST_NOW,
+          })),
+          unavailable,
+        ]
       );
       await state.storage.setAlarm(TEST_NOW);
     });
@@ -276,8 +292,11 @@ describe("CquQuickloginAccountDO", () => {
       outbox: (await state.storage.get<OutboxEvent[]>("outbox")) ?? [],
       alarm: await state.storage.getAlarm(),
     }));
-    expect(after.outbox.length).toBe(before.outbox.length);
-    expect(after.outbox.every((event) => event.attempts >= 1)).toBe(true);
+    const retained = after.outbox.find((event) => event.id === unavailable.id);
+    expect(retained).toMatchObject({
+      kind: "revoke-oauth-family",
+    });
+    expect(retained?.attempts).toBeGreaterThanOrEqual(1);
     expect(after.alarm).not.toBeNull();
   });
 
