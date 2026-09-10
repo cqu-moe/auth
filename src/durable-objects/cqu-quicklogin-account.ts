@@ -26,6 +26,7 @@ import {
   type OutboxEvent,
 } from "../services/quicklogin/outbox";
 import { selectQuotaDevices, validateDeviceLimit } from "../services/quicklogin/policy";
+import { projectAccount } from "../services/quicklogin/projection";
 
 const ACCOUNT_KEY = "account";
 const OWNER_KEY = "ownerUserId";
@@ -111,7 +112,8 @@ export class CquQuickloginAccountDO extends DurableObject<Env> {
     outboxDispatcher?: OutboxDispatcher
   ) {
     super(ctx, env);
-    this.outboxDispatcher = outboxDispatcher;
+    this.outboxDispatcher =
+      outboxDispatcher ?? ((event) => this.dispatchOutbox(event));
     ctx.blockConcurrencyWhile(async () => {
       this.ownerUserId = (await ctx.storage.get<string>(OWNER_KEY)) ?? null;
     });
@@ -337,6 +339,17 @@ export class CquQuickloginAccountDO extends DurableObject<Env> {
       { error: { code, message: code } },
       { status, headers: { "cache-control": "no-store" } }
     );
+  }
+
+  private async dispatchOutbox(event: OutboxEvent): Promise<boolean> {
+    if (event.kind !== "projection") return false;
+    const ownerUserId =
+      this.ownerUserId ??
+      (await this.ctx.storage.get<string>(OWNER_KEY)) ??
+      null;
+    if (!ownerUserId) return false;
+    await projectAccount(this.env, ownerUserId, await this.readAccount());
+    return true;
   }
 
   private async ensureOwner(ownerUserId: string): Promise<void> {

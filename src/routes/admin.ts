@@ -30,6 +30,17 @@ import {
   listRegistrationInvitations,
   revokeRegistrationInvitation,
 } from "../services/registration-invitations";
+import {
+  QuickloginAccountClient,
+  QuickloginAccountClientError,
+} from "../services/quicklogin/account-client";
+import {
+  assertGenericEntitlementWriteAllowed,
+  isQuickloginPolicyItem,
+  QuickloginQuotaAdminError,
+  routeQuickloginEntitlementWrite,
+  type EntitlementItem,
+} from "../services/quicklogin/quota-admin";
 
 const admin = new Hono<HonoEnv>();
 
@@ -55,6 +66,58 @@ function oauthClientError(c: Context<HonoEnv>, e: unknown) {
     );
   }
   return errorResponse(c, "INTERNAL_ERROR", "服务器内部错误", 500);
+}
+
+function quickloginQuotaError(c: Context<HonoEnv>, error: unknown) {
+  if (error instanceof QuickloginAccountClientError) {
+    if (error.code === "PREVIEW_CHANGED") {
+      return c.json(
+        {
+          error: { code: error.code, message: error.message },
+          preview: error.preview,
+        },
+        409
+      );
+    }
+    if (error.code === "DEVICE_LIMIT_REACHED") {
+      return errorResponse(c, error.code, error.message, 409);
+    }
+    if (error.code === "INVALID_REQUEST") {
+      return errorResponse(c, error.code, error.message, 422);
+    }
+    return errorResponse(c, error.code, error.message, 403);
+  }
+  if (error instanceof QuickloginQuotaAdminError) {
+    if (error.code === "FORBIDDEN") {
+      return errorResponse(c, error.code, error.message, 403);
+    }
+    if (error.code === "QUICKLOGIN_PREVIEW_REQUIRED") {
+      return errorResponse(c, error.code, error.message, 409);
+    }
+    return errorResponse(c, error.code, error.message, 422);
+  }
+  return errorResponse(c, "INTERNAL_ERROR", "服务器内部错误", 500);
+}
+
+function rejectGenericQuickloginPolicy(
+  c: Context<HonoEnv>,
+  incoming: EntitlementItem[],
+  existing: EntitlementItem[] = []
+): Response | null {
+  try {
+    assertGenericEntitlementWriteAllowed(incoming, existing);
+    return null;
+  } catch (error) {
+    if (error instanceof QuickloginQuotaAdminError) {
+      return errorResponse(
+        c,
+        error.code,
+        "QuickLogin 额度必须使用专用预览接口修改",
+        409
+      );
+    }
+    throw error;
+  }
 }
 
 // Map OAuth snake_case update fields to the oauthClient DB model (camelCase),
@@ -324,8 +387,13 @@ admin.post("/registration-invitations", async (c) => {
     .json<{ preset?: string | null }>()
     .catch(() => ({}) as { preset?: string | null });
   const preset = body.preset ?? null;
-  if (preset !== null && !(await getPresetItems(c.env.DATABASE, preset))) {
-    return errorResponse(c, "UNKNOWN_PRESET", "未知预设", 400);
+  if (preset !== null) {
+    const items = await getPresetItems(c.env.DATABASE, preset);
+    if (!items) {
+      return errorResponse(c, "UNKNOWN_PRESET", "未知预设", 400);
+    }
+    const policyError = rejectGenericQuickloginPolicy(c, items);
+    if (policyError) return policyError;
   }
   try {
     const invitation = await createRegistrationInvitation(
@@ -455,6 +523,75 @@ admin.patch("/users/:id/cqu-binding", async (c) => {
 
 // GET /api/admin/users/:id/entitlements - 列出某用户的全部 entitlement 原始行。
 // 读权限:admin.use("/*") 已 gate admin/superAdmin 角色,足够。
+admin.post("/users/:id/quicklogin-quota/preview", async (c) => {
+  const auth = createAuth(c.env, c.req.raw);
+  if (!(await hasEntitlementPermission(c, auth, "assign"))) {
+    return errorResponse(c, "FORBIDDEN", "需要权益写权限", 403);
+  }
+  const body = await c.req
+    .json<{ deviceLimit?: unknown }>()
+    .catch(() => ({}) as { deviceLimit?: unknown });
+  if (typeof body.deviceLimit !== "number") {
+    return errorResponse(c, "INVALID_REQUEST", "设备额度必须是非负整数", 422);
+  }
+  try {
+    const result = await routeQuickloginEntitlementWrite({
+      userId: c.req.param("id"),
+      actorId: c.get("user").id,
+      items: [
+        {
+          subsystem: "cqu",
+          capability: "quicklogin_device_limit",
+          value: String(body.deviceLimit),
+        },
+      ],
+      now: Date.now(),
+      coordinator: new QuickloginAccountClient(c.env),
+    });
+    if (result.kind !== "preview") {
+      return errorResponse(c, "INTERNAL_ERROR", "服务器内部错误", 500);
+    }
+    return c.json(result.preview);
+  } catch (error) {
+    return quickloginQuotaError(c, error);
+  }
+});
+
+admin.put("/users/:id/quicklogin-quota", async (c) => {
+  const auth = createAuth(c.env, c.req.raw);
+  if (!(await hasEntitlementPermission(c, auth, "assign"))) {
+    return errorResponse(c, "FORBIDDEN", "需要权益写权限", 403);
+  }
+  const body = await c.req
+    .json<{ token?: unknown; newLimit?: unknown }>()
+    .catch(() => ({}) as { token?: unknown; newLimit?: unknown });
+  if (typeof body.token !== "string" || typeof body.newLimit !== "number") {
+    return errorResponse(c, "INVALID_REQUEST", "预览令牌或设备额度无效", 422);
+  }
+  try {
+    const result = await routeQuickloginEntitlementWrite({
+      userId: c.req.param("id"),
+      actorId: c.get("user").id,
+      items: [
+        {
+          subsystem: "cqu",
+          capability: "quicklogin_device_limit",
+          value: String(body.newLimit),
+        },
+      ],
+      previewToken: body.token,
+      now: Date.now(),
+      coordinator: new QuickloginAccountClient(c.env),
+    });
+    if (result.kind !== "applied") {
+      return errorResponse(c, "INTERNAL_ERROR", "服务器内部错误", 500);
+    }
+    return c.json(result.list);
+  } catch (error) {
+    return quickloginQuotaError(c, error);
+  }
+});
+
 admin.get("/users/:id/entitlements", async (c) => {
   const userId = c.req.param("id");
   const rows = await drizzle(c.env.DATABASE)
@@ -485,6 +622,13 @@ admin.put("/users/:id/entitlements", async (c) => {
   if (invalid) return errorResponse(c, "INVALID_ENTITLEMENTS", invalid, 400);
 
   const db = drizzle(c.env.DATABASE);
+  const existing = await db
+    .select()
+    .from(userEntitlement)
+    .where(eq(userEntitlement.userId, userId))
+    .all();
+  const policyError = rejectGenericQuickloginPolicy(c, items!, existing);
+  if (policyError) return policyError;
   const del = db
     .delete(userEntitlement)
     .where(eq(userEntitlement.userId, userId));
@@ -530,6 +674,8 @@ admin.post("/users/:id/entitlements/preset", async (c) => {
   if (invalid) {
     return errorResponse(c, "INVALID_PRESET", `预设数据已失效：${invalid}`, 409);
   }
+  const policyError = rejectGenericQuickloginPolicy(c, items);
+  if (policyError) return policyError;
 
   const db = drizzle(c.env.DATABASE);
   // 仅删预设涵盖的 (subsystem,capability) 对（按 userId 限定），不动用户其它无关行。
@@ -591,6 +737,11 @@ admin.put("/entitlement-presets/:name", async (c) => {
     .catch(() => ({}) as { items?: unknown });
   const invalid = validateEntitlementItems(body.items as never);
   if (invalid) return errorResponse(c, "INVALID_ENTITLEMENTS", invalid, 400);
+  const policyError = rejectGenericQuickloginPolicy(
+    c,
+    body.items as EntitlementItem[]
+  );
+  if (policyError) return policyError;
   await upsertPreset(
     c.env.DATABASE,
     name,
@@ -631,9 +782,15 @@ admin.put("/entitlement-default", async (c) => {
     .catch(() => ({}) as { preset?: string | null });
   const preset = body.preset ?? null;
   if (preset !== null) {
-    if (typeof preset !== "string" || !(await getPresetItems(c.env.DATABASE, preset))) {
+    if (typeof preset !== "string") {
       return errorResponse(c, "UNKNOWN_PRESET", "未知预设", 400);
     }
+    const items = await getPresetItems(c.env.DATABASE, preset);
+    if (!items) {
+      return errorResponse(c, "UNKNOWN_PRESET", "未知预设", 400);
+    }
+    const policyError = rejectGenericQuickloginPolicy(c, items);
+    if (policyError) return policyError;
   }
   await setDefaultPresetName(c.env.DATABASE, preset);
   return c.json({ success: true, preset });
@@ -650,6 +807,14 @@ admin.delete("/users/:id/entitlements/:subsystem/:capability", async (c) => {
   const userId = c.req.param("id");
   const subsystem = c.req.param("subsystem");
   const capability = c.req.param("capability");
+  if (isQuickloginPolicyItem({ subsystem, capability, value: "" })) {
+    return errorResponse(
+      c,
+      "QUICKLOGIN_PREVIEW_REQUIRED",
+      "QuickLogin 额度必须使用专用预览接口修改",
+      409
+    );
+  }
   await drizzle(c.env.DATABASE)
     .delete(userEntitlement)
     .where(

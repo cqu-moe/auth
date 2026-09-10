@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { eq, sql } from "drizzle-orm";
 import { entitlementConfig, entitlementPreset, userEntitlement } from "../db/schema";
 import { CAPABILITIES, PRESETS, SUBSYSTEMS, type Subsystem } from "../capabilities";
+import { assertGenericEntitlementWriteAllowed } from "./quicklogin/quota-admin";
 
 type Row = { subsystem: string; capability: string; value: string };
 export type Caps = Record<string, Record<string, boolean | number | null>>;
@@ -99,8 +100,11 @@ export function validateEntitlementItems(items: Item[]): string | null {
       // 仅 /^\d+$/ 会放过任意长数字串,存下后 rowsToCaps 解析成 Infinity/失精 → 配额绕过。
       // 这里在写侧就拒掉溢出值,从源头杜绝。
       if (
-        value !== "" &&
-        (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)))
+        (subsystem === "cqu" &&
+          capability === "quicklogin_device_limit" &&
+          value === "") ||
+        (value !== "" &&
+          (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))))
       ) {
         return `能力 ${subsystem}.${capability} 是配额,值必须是非负整数或留空(无限),收到：${value}`;
       }
@@ -233,6 +237,7 @@ export async function upsertPreset(
   name: string,
   items: Item[]
 ): Promise<void> {
+  assertGenericEntitlementWriteAllowed(items);
   const d = drizzle(db);
   await d
     .insert(entitlementPreset)
@@ -302,6 +307,7 @@ export async function applyPresetEntitlements(
 ): Promise<number> {
   const items = await getPresetItems(db, name);
   if (!items || items.length === 0) return 0;
+  assertGenericEntitlementWriteAllowed(items);
   await drizzle(db)
     .insert(userEntitlement)
     .values(items.map((it) => ({ userId, ...it })));
