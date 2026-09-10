@@ -177,3 +177,25 @@ export type DeviceLoginResult =
     }
   | { kind: "temporary_unavailable"; retryAfterMs: number }
   | { kind: "cancelled" };
+
+export interface HeartbeatInput {
+  protocolVersion: 1;
+  appliedVersion: number | null;
+  generation: number;
+  browserVersion: string;
+}
+
+export interface QuotaPreview {
+  token: string;
+  expiresAt: number;
+  revision: number;
+  oldLimit: number;
+  newLimit: number;
+  kept: DeviceId[];
+  disabled: DeviceId[];
+}
+
+export interface QuotaApply {
+  token: string;
+  newLimit: number;
+}

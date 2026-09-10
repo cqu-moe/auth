@@ -4,6 +4,7 @@ export interface Env {
   RESEND_API_KEY: string;
   CQU_SESSION: DurableObjectNamespace;
   CQU_LOGIN: DurableObjectNamespace;
+  CQU_QUICKLOGIN_ACCOUNT: DurableObjectNamespace;
   ASSETS: Fetcher;
   ENCRYPTION_KEY: string;
   BETTER_AUTH_URL: string;

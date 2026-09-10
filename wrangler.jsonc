@@ -51,6 +51,10 @@
       {
         "name": "CQU_LOGIN",
         "class_name": "CquLoginContainer"
+      },
+      {
+        "name": "CQU_QUICKLOGIN_ACCOUNT",
+        "class_name": "CquQuickloginAccountDO"
       }
     ]
   },
@@ -73,6 +77,10 @@
     {
       "tag": "v2",
       "new_sqlite_classes": ["CquLoginContainer"]
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": ["CquQuickloginAccountDO"]
     }
   ],
 

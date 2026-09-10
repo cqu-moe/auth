@@ -89,6 +89,7 @@ export default {
 } satisfies ExportedHandler<Env>;
 export { CquSessionDO } from "./durable-objects/cqu-session";
 export { CquLoginContainer } from "./durable-objects/cqu-login-container";
+export { CquQuickloginAccountDO } from "./durable-objects/cqu-quicklogin-account";
 // Service Binding RPC 入口:第一方子系统经 services binding(entrypoint:"AuthService")
 // 调用 verifySession / getCquTicket。命名 entrypoint 随 Worker 自动暴露,auth 侧无需自绑定。
 export { AuthService } from "./rpc";
