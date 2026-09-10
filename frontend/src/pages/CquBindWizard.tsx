@@ -1,14 +1,25 @@
 import { useState, useEffect, useRef, useCallback, FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import Layout from "../components/Layout";
+import CquBindSuccess from "../components/CquBindSuccess";
+import { authClient } from "../lib/auth-client";
+import { bindingReturnTarget } from "../lib/cqu-bind-continuation";
+import {
+  bindScreen,
+  clearBindProgress,
+  parseBindingSnapshot,
+  readBindProgress,
+  writeBindProgress,
+  type BindingSnapshot,
+  type BindKind,
+  type BindScreen,
+} from "../lib/cqu-bind-progress";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
 // ────────────────────────────────────────────────────────────────────────────
 
 type Step = 1 | 2 | 3 | 4;
-
-type BindKind = "direct" | "forward";
 
 type WsState = "idle" | "connecting" | "open" | "closed" | "error";
 
@@ -17,15 +28,34 @@ interface BindAddressResponse {
   status: string;
 }
 
-interface BindStatusResponse {
-  address?: string;
-  bindStatus: "pending" | "active" | "revoked" | "unbound";
-  sessionStatus: unknown;
-}
-
 // ────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ────────────────────────────────────────────────────────────────────────────
+
+class BindingRequestError extends Error {
+  constructor(readonly status: number) {
+    super("Binding status request failed");
+  }
+}
+
+async function fetchBindingSnapshot(signal: AbortSignal): Promise<BindingSnapshot> {
+  const response = await fetch("/api/cqu/binding", {
+    credentials: "include",
+    signal,
+  });
+  if (!response.ok) throw new BindingRequestError(response.status);
+  return parseBindingSnapshot(await response.json());
+}
+
+function progressStorage(): Storage | null {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+const replaceLocation = (url: string) => window.location.replace(url);
 
 function buildWsUrl(): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -198,9 +228,9 @@ function Step1Intro({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-gray-900 mb-2">绑定 CQU 账户</h2>
+        <h2 className="text-xl font-semibold text-gray-900 mb-2">绑定重庆大学统一认证账号</h2>
         <p className="text-sm text-gray-500">
-          绑定后，本系统将代您持续维护与重庆大学统一认证（CAS）的会话，让第三方应用能以您的身份安全访问教务、图书馆等 CQU 系统。
+          绑定后，系统会安全维护统一认证会话，供已授权的校内服务使用。
         </p>
       </div>
 
@@ -830,7 +860,7 @@ function Step2AddressAndCode({
 // Step 3 — Enter CQU credentials
 // ────────────────────────────────────────────────────────────────────────────
 
-function Step3Credentials({ onSuccess }: { onSuccess: (studentId: string) => void }) {
+function Step3Credentials({ onSuccess }: { onSuccess: (studentId: string) => void | Promise<void> }) {
   const [studentId, setStudentId] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -866,7 +896,7 @@ function Step3Credentials({ onSuccess }: { onSuccess: (studentId: string) => voi
       };
 
       if (res.ok && data.success) {
-        onSuccess(studentId);
+        await onSuccess(studentId);
         return;
       }
 
@@ -895,7 +925,7 @@ function Step3Credentials({ onSuccess }: { onSuccess: (studentId: string) => voi
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-gray-900 mb-2">录入 CQU 凭证</h2>
+        <h2 className="text-xl font-semibold text-gray-900 mb-2">登录重庆大学统一认证账号</h2>
         <p className="text-sm text-gray-500">
           输入您的 CQU 统一身份认证账号和密码。系统将立即发起首次登录——由于需要等待 2FA 邮件，此过程可能需要几分钟，请耐心等待。
         </p>
@@ -970,101 +1000,232 @@ function Step3Credentials({ onSuccess }: { onSuccess: (studentId: string) => voi
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Step 4 — Done
-// ────────────────────────────────────────────────────────────────────────────
-
-function Step4Done({ studentId }: { studentId: string }) {
-  const [bindStatus, setBindStatus] = useState<BindStatusResponse | null>(null);
-
-  useEffect(() => {
-    fetch("/api/cqu/binding", { credentials: "include" })
-      .then((r) => r.ok ? r.json() as Promise<BindStatusResponse> : Promise.reject())
-      .then(setBindStatus)
-      .catch(() => {/* best-effort */});
-  }, []);
-
-  const isActive = bindStatus?.bindStatus === "active";
-
-  return (
-    <div className="space-y-6">
-      <div className="text-center py-4">
-        <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${isActive || !bindStatus ? "bg-green-100" : "bg-yellow-100"}`}>
-          {isActive || !bindStatus ? (
-            <svg className="w-8 h-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-          ) : (
-            <svg className="w-8 h-8 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-          )}
-        </div>
-        <h2 className="text-xl font-semibold text-gray-900 mb-1">
-          {isActive || !bindStatus ? "绑定成功！" : "绑定处理中…"}
-        </h2>
-        <p className="text-sm text-gray-500">
-          {isActive || !bindStatus
-            ? "CQU 账户已成功绑定，系统将自动维护您的 CQU 会话。"
-            : "首次登录仍在处理中，稍后请在账户设置中确认绑定状态。"}
-        </p>
-      </div>
-
-      {(isActive || !bindStatus) && (
-        <div className="p-4 bg-gray-50 rounded-xl text-sm space-y-2">
-          <p className="font-medium text-gray-900">绑定信息</p>
-          <div className="flex items-center justify-between py-1 border-b border-gray-200">
-            <span className="text-gray-500">统一身份认证账号</span>
-            <span className="font-medium text-gray-900">{studentId}</span>
-          </div>
-          {bindStatus?.bindStatus && (
-            <div className="flex items-center justify-between py-1">
-              <span className="text-gray-500">状态</span>
-              <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ${
-                bindStatus.bindStatus === "active"
-                  ? "bg-green-100 text-green-700"
-                  : "bg-yellow-100 text-yellow-700"
-              }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${bindStatus.bindStatus === "active" ? "bg-green-500" : "bg-yellow-500"}`} />
-                {bindStatus.bindStatus === "active" ? "已激活" : bindStatus.bindStatus}
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-800 space-y-1">
-        <p className="font-semibold">接下来需要注意：</p>
-        <ul className="list-disc list-inside space-y-1 text-xs">
-          <li>请改用<strong>短信验证码</strong>或<strong>微信</strong>方式自行登录 CQU</li>
-          <li>密保邮箱已由系统托管，验证码将被自动处理，请勿人工干预</li>
-          <li>系统每 15 分钟自动保活会话，无需您手动操作</li>
-        </ul>
-      </div>
-
-      <Link
-        to="/settings"
-        className="block w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors text-center"
-      >
-        返回账户设置
-      </Link>
-    </div>
-  );
-}
-
-// ────────────────────────────────────────────────────────────────────────────
 // Main wizard page
 // ────────────────────────────────────────────────────────────────────────────
 
-export default function CquBindWizard() {
-  const [step, setStep] = useState<Step>(1);
-  const [bindAddress, setBindAddress] = useState("");
-  const [boundStudentId, setBoundStudentId] = useState("");
+export interface CquBindWizardProps {
+  onReturn?: (url: string) => void;
+}
 
-  // Bind kind selection — lifted to wizard root so Step2 can access it
+const stepForScreen: Record<BindScreen, Step> = {
+  intro: 1,
+  address: 2,
+  credentials: 3,
+  waiting: 4,
+  complete: 4,
+};
+
+export default function CquBindWizard({ onReturn = replaceLocation }: CquBindWizardProps) {
+  const location = useLocation();
+  const { data: session } = authClient.useSession();
+  const userId = (session?.user as { id?: string } | undefined)?.id;
+  const search = new URLSearchParams(location.search);
+  const returnTo = bindingReturnTarget(search.get("redirect"), window.location.origin);
+  const repair = search.get("repair") === "1";
+
+  const [screen, setScreen] = useState<BindScreen | null>(null);
+  const [bootstrapError, setBootstrapError] = useState(false);
+  const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
+  const [bindAddress, setBindAddress] = useState("");
   const [bindKind, setBindKind] = useState<BindKind>("direct");
   const [forwardAddress, setForwardAddress] = useState("");
+  const [boundThisVisit, setBoundThisVisit] = useState(false);
+  const [waitTimedOut, setWaitTimedOut] = useState(false);
+  const [pollDelay, setPollDelay] = useState(3000);
+  const [pollVersion, setPollVersion] = useState(0);
+  const requestSequenceRef = useRef(0);
+  const requestControllerRef = useRef<AbortController | null>(null);
+  const waitStartedAtRef = useRef<number | null>(null);
 
-  const goNext = () => setStep((s) => Math.min(s + 1, 4) as Step);
+  const finishBinding = useCallback(() => {
+    const storage = progressStorage();
+    if (storage && userId) clearBindProgress(storage, userId);
+    setBoundThisVisit(true);
+    setWaitTimedOut(false);
+    waitStartedAtRef.current = null;
+    setScreen("complete");
+  }, [userId]);
+
+  const checkBindingConfirmation = useCallback(async () => {
+    if (!userId) return;
+    setScreen("waiting");
+    setWaitTimedOut(false);
+    if (waitStartedAtRef.current === null) waitStartedAtRef.current = Date.now();
+
+    requestControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
+    const requestSequence = ++requestSequenceRef.current;
+
+    try {
+      const snapshot = await fetchBindingSnapshot(controller.signal);
+      if (controller.signal.aborted || requestSequence !== requestSequenceRef.current) return;
+      if (snapshot.bindStatus === "active") {
+        finishBinding();
+        return;
+      }
+      setPollDelay(3000);
+      setPollVersion((value) => value + 1);
+    } catch (error) {
+      if (controller.signal.aborted || requestSequence !== requestSequenceRef.current) return;
+      const temporary = error instanceof BindingRequestError || error instanceof TypeError;
+      setPollDelay((value) => temporary ? Math.min(Math.max(value, 3000) * 2, 30000) : 3000);
+      setPollVersion((value) => value + 1);
+    }
+  }, [finishBinding, userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    setScreen(null);
+    setBootstrapError(false);
+    requestControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
+    const requestSequence = ++requestSequenceRef.current;
+
+    void fetchBindingSnapshot(controller.signal)
+      .then((snapshot) => {
+        if (controller.signal.aborted || requestSequence !== requestSequenceRef.current) return;
+        setBindAddress(snapshot.address ?? "");
+        if (snapshot.kind) setBindKind(snapshot.kind);
+        setForwardAddress(snapshot.forwardAddress ?? "");
+
+        const storage = progressStorage();
+        const saved = storage ? readBindProgress(storage, userId) : null;
+        const nextScreen = bindScreen(snapshot, saved, userId, repair);
+        if (nextScreen === "complete" && returnTo && !repair) {
+          onReturn(returnTo);
+          return;
+        }
+        if (nextScreen === "waiting") {
+          waitStartedAtRef.current = Date.now();
+          setPollDelay(3000);
+          setPollVersion((value) => value + 1);
+        }
+        setScreen(nextScreen);
+      })
+      .catch(() => {
+        if (controller.signal.aborted || requestSequence !== requestSequenceRef.current) return;
+        setBootstrapError(true);
+      });
+
+    return () => controller.abort();
+  }, [bootstrapAttempt, onReturn, repair, returnTo, userId]);
+
+  useEffect(() => {
+    if (screen !== "waiting" || waitTimedOut) return;
+    const startedAt = waitStartedAtRef.current ?? Date.now();
+    waitStartedAtRef.current = startedAt;
+    const remaining = 10 * 60 * 1000 - (Date.now() - startedAt);
+    if (remaining <= 0) {
+      setWaitTimedOut(true);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      if (Date.now() - startedAt >= 10 * 60 * 1000) {
+        setWaitTimedOut(true);
+        return;
+      }
+      void checkBindingConfirmation();
+    }, Math.min(pollDelay, remaining));
+    return () => window.clearTimeout(timer);
+  }, [checkBindingConfirmation, pollDelay, pollVersion, screen, waitTimedOut]);
+
+  useEffect(() => () => requestControllerRef.current?.abort(), []);
+
+  const continueToCredentials = () => {
+    if (userId && bindAddress) {
+      const storage = progressStorage();
+      if (storage) {
+        writeBindProgress(storage, {
+          userId,
+          address: bindAddress,
+          kind: bindKind,
+          step: 3,
+        });
+      }
+    }
+    setScreen("credentials");
+  };
+
+  const content = bootstrapError ? (
+    <div className="space-y-4 text-center">
+      <div>
+        <h2 className="text-xl font-semibold text-gray-900">暂时无法确认绑定状态</h2>
+        <p className="mt-2 text-sm text-gray-500">请检查网络连接后重试。</p>
+      </div>
+      <button
+        type="button"
+        onClick={() => setBootstrapAttempt((value) => value + 1)}
+        className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+      >
+        重试
+      </button>
+    </div>
+  ) : screen === null ? (
+    <div className="flex min-h-24 items-center justify-center gap-3 text-sm text-gray-500">
+      <Spinner size="sm" color="blue" />
+      正在确认绑定状态…
+    </div>
+  ) : screen === "intro" ? (
+    <Step1Intro
+      onNext={() => setScreen("address")}
+      bindKind={bindKind}
+      setBindKind={(kind) => {
+        setBindKind(kind);
+        setBindAddress("");
+      }}
+      forwardAddress={forwardAddress}
+      setForwardAddress={setForwardAddress}
+    />
+  ) : screen === "address" ? (
+    <Step2AddressAndCode
+      onNext={continueToCredentials}
+      bindAddress={bindAddress}
+      setBindAddress={setBindAddress}
+      bindKind={bindKind}
+      forwardAddress={forwardAddress}
+    />
+  ) : screen === "credentials" ? (
+    <Step3Credentials onSuccess={async () => {
+      waitStartedAtRef.current = Date.now();
+      setPollDelay(3000);
+      await checkBindingConfirmation();
+    }} />
+  ) : screen === "waiting" ? (
+    <div className="space-y-4 text-center">
+      <div className="flex justify-center"><Spinner size="lg" color="blue" /></div>
+      <div>
+        <h2 className="text-xl font-semibold text-gray-900">
+          {waitTimedOut ? "尚未确认绑定结果" : "正在确认绑定结果"}
+        </h2>
+        <p className="mt-2 text-sm text-gray-500">
+          {waitTimedOut ? "首次登录可能仍在处理，请重新检查。" : "首次登录可能需要几分钟。"}
+        </p>
+      </div>
+      {waitTimedOut && (
+        <button
+          type="button"
+          onClick={() => {
+            waitStartedAtRef.current = Date.now();
+            void checkBindingConfirmation();
+          }}
+          className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
+        >
+          重新检查
+        </button>
+      )}
+    </div>
+  ) : (
+    <CquBindSuccess
+      key={returnTo ?? "standalone"}
+      returnTo={returnTo}
+      autoReturn={boundThisVisit && Boolean(returnTo)}
+      onReturn={onReturn}
+    />
+  );
+
+  const currentStep = screen ? stepForScreen[screen] : null;
 
   return (
     <Layout>
@@ -1080,42 +1241,8 @@ export default function CquBindWizard() {
         </div>
 
         <div className="bg-white rounded-2xl border border-gray-200 p-6 sm:p-8">
-          <StepIndicator current={step} />
-
-          <div>
-            {step === 1 && (
-              <Step1Intro
-                onNext={goNext}
-                bindKind={bindKind}
-                setBindKind={(k) => {
-                  setBindKind(k);
-                  // Reset the fetched address when the user changes kind
-                  // so Step2 will re-fetch with the new parameters
-                  setBindAddress("");
-                }}
-                forwardAddress={forwardAddress}
-                setForwardAddress={setForwardAddress}
-              />
-            )}
-            {step === 2 && (
-              <Step2AddressAndCode
-                onNext={goNext}
-                bindAddress={bindAddress}
-                setBindAddress={setBindAddress}
-                bindKind={bindKind}
-                forwardAddress={forwardAddress}
-              />
-            )}
-            {step === 3 && (
-              <Step3Credentials
-                onSuccess={(sid) => {
-                  setBoundStudentId(sid);
-                  goNext();
-                }}
-              />
-            )}
-            {step === 4 && <Step4Done studentId={boundStudentId} />}
-          </div>
+          {currentStep && <StepIndicator current={currentStep} />}
+          <div>{content}</div>
         </div>
       </div>
     </Layout>

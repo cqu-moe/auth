@@ -13,7 +13,12 @@ vi.mock("../auth", () => ({
 const databases: DatabaseSync[] = [];
 afterEach(() => databases.splice(0).forEach((database) => database.close()));
 
-function bindingResponse(credentialsStatus: string | null, addressStatus: string | null) {
+function bindingResponse(
+  credentialsStatus: string | null,
+  addressStatus: string | null,
+  kind: "direct" | "forward" = "direct",
+  senderWhitelist = '["sso@cqu.edu.cn"]',
+) {
   const database = new DatabaseSync(":memory:");
   databases.push(database);
   database.exec(`
@@ -23,14 +28,18 @@ function bindingResponse(credentialsStatus: string | null, addressStatus: string
       status TEXT, bound_at TEXT, last_code_at TEXT
     );
     INSERT INTO cqu_credentials VALUES ('other-user', 'active');
+    INSERT INTO cqu_bind_addresses
+      (token, user_id, kind, sender_whitelist, status)
+      VALUES ('other-address', 'other-user', 'forward', '["private@other.test"]', 'active');
   `);
   if (credentialsStatus) {
     database.prepare("INSERT INTO cqu_credentials VALUES (?, ?)")
       .run("current-user", credentialsStatus);
   }
   if (addressStatus) {
-    database.prepare("INSERT INTO cqu_bind_addresses (token, user_id, status) VALUES (?, ?, ?)")
-      .run("test-address", "current-user", addressStatus);
+    database.prepare(
+      "INSERT INTO cqu_bind_addresses (token, user_id, kind, sender_whitelist, status) VALUES (?, ?, ?, ?, ?)"
+    ).run("test-address", "current-user", kind, senderWhitelist, addressStatus);
   }
 
   const env = {
@@ -73,7 +82,39 @@ describe("GET CQU binding status", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       ...(address ? { address: "test-address@example.test" } : {}),
+      ...(address ? { kind: "direct" } : {}),
       bindStatus: expected,
+      sessionStatus: { status: "idle" },
+    });
+  });
+
+  it("returns a validated forward recovery address without exposing another user", async () => {
+    const response = await bindingResponse(
+      null,
+      "pending",
+      "forward",
+      '["owner@example.com","sso@cqu.edu.cn"]',
+    );
+
+    expect(await response.json()).toEqual({
+      address: "test-address@example.test",
+      bindStatus: "pending",
+      kind: "forward",
+      forwardAddress: "owner@example.com",
+      sessionStatus: { status: "idle" },
+    });
+  });
+
+  it.each([
+    "not-json",
+    '{}',
+    '["owner@example.com",7]',
+  ])("omits an invalid forward recovery whitelist: %s", async (senderWhitelist) => {
+    const response = await bindingResponse(null, "pending", "forward", senderWhitelist);
+    expect(await response.json()).toEqual({
+      address: "test-address@example.test",
+      bindStatus: "pending",
+      kind: "forward",
       sessionStatus: { status: "idle" },
     });
   });

@@ -177,6 +177,8 @@ cquBinding.get("/", async (c) => {
     // #7: bindStatus 始终返回，无绑定时为 "unbound"，让客户端能区分「无绑定」与「响应异常」。
     address: binding.token ? `${binding.token}@${c.env.BIND_EMAIL_DOMAIN}` : undefined,
     bindStatus: binding.bindStatus,
+    kind: binding.token ? binding.kind : undefined,
+    forwardAddress: binding.token ? binding.forwardAddress : undefined,
     sessionStatus,
   });
 });
