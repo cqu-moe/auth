@@ -36,6 +36,26 @@ describe("fetchBrowser transport", () => {
     expect(containerFetch).toHaveBeenCalledTimes(3);
   });
 
+  it("addresses a quicklogin container by containerKey without changing route ownership", async () => {
+    const containerFetch = vi.fn().mockResolvedValue(new Response("cf ok"));
+    const idFromName = vi.fn((key: string) => `id:${key}`);
+    const env = makeEnv(containerFetch, idFromName);
+    const route: BrowserRoute = {
+      ...cfRoute,
+      userId: "user-a",
+      containerKey: "quicklogin:user-a:device-a",
+    };
+
+    await fetchBrowser(
+      env as never,
+      route,
+      new Request("http://cqu-login.internal/run")
+    );
+
+    expect(idFromName).toHaveBeenCalledWith("quicklogin:user-a:device-a");
+    expect(route.userId).toBe("user-a");
+  });
+
   it("preserves method, body and signal on the forwarded request", async () => {
     const containerFetch = vi.fn().mockResolvedValue(new Response("ok"));
     const env = makeEnv(containerFetch);
