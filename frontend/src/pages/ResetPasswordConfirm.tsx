@@ -1,11 +1,13 @@
 import { useState, FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
+import { sanitizePostLoginRedirect, withRedirectParam } from "../lib/post-login-redirect";
 
 export default function ResetPasswordConfirm() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token") ?? "";
+  const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
 
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -38,7 +40,7 @@ export default function ResetPasswordConfirm() {
     if (error) {
       setError(error.message ?? "重置失败，链接可能已过期");
     } else {
-      navigate("/login");
+      navigate(withRedirectParam("/login", postLoginRedirect));
     }
   };
 
@@ -117,7 +119,7 @@ export default function ResetPasswordConfirm() {
           </form>
 
           <p className="mt-6 text-center text-sm text-gray-500">
-            <Link to="/reset-password" className="text-blue-600 hover:text-blue-700 font-medium">
+            <Link to={withRedirectParam("/reset-password", postLoginRedirect)} className="text-blue-600 hover:text-blue-700 font-medium">
               重新发送重置链接
             </Link>
           </p>

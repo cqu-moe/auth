@@ -7,6 +7,7 @@ import {
   sanitizePostLoginRedirect,
   withRedirectParam,
 } from "../lib/post-login-redirect";
+import { isScheduleBindingContinuation } from "../lib/cqu-bind-continuation";
 
 function getPasswordStrength(password: string): { level: number; label: string; color: string } {
   if (!password) return { level: 0, label: "", color: "" };
@@ -28,6 +29,7 @@ export default function Register() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
+  const scheduleSource = isScheduleBindingContinuation(postLoginRedirect, window.location.origin);
   const [code, setCode] = useState(() =>
     (searchParams.get("code") ?? "").trim().toUpperCase().slice(0, 8)
   );
@@ -106,7 +108,10 @@ export default function Register() {
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-6">注册</h2>
+          <h2 className={`text-xl font-semibold text-gray-900 ${scheduleSource ? "mb-2" : "mb-6"}`}>注册</h2>
+          {scheduleSource && (
+            <p className="mb-6 text-sm text-gray-500">继续使用重庆大学课表</p>
+          )}
 
           {error && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">

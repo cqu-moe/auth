@@ -1,4 +1,8 @@
-import { sanitizePostLoginRedirect, withRedirectParam } from "./post-login-redirect";
+import {
+  hasUnsafeRedirectCharacters,
+  sanitizePostLoginRedirect,
+  withRedirectParam,
+} from "./post-login-redirect";
 
 const authPages = new Set(["/login", "/register", "/two-factor", "/verify-email"]);
 
@@ -14,7 +18,7 @@ export function verificationContinuation(pathname: string, search: string): stri
 }
 
 export function bindingReturnTarget(candidate: string | null, authOrigin: string): string | null {
-  if (!candidate || /[\u0000-\u0020\\]/.test(candidate)) return null;
+  if (!candidate || hasUnsafeRedirectCharacters(candidate)) return null;
   const safe = sanitizePostLoginRedirect(candidate);
   if (!safe || safe.startsWith("/")) return null;
   const url = new URL(safe);
@@ -22,4 +26,20 @@ export function bindingReturnTarget(candidate: string | null, authOrigin: string
   if (url.username || url.password || url.origin === authOrigin) return null;
   if (url.protocol !== "https:" && !(local && url.protocol === "http:")) return null;
   return url.toString();
+}
+
+export function isScheduleBindingContinuation(candidate: string | null, authOrigin: string): boolean {
+  const safe = sanitizePostLoginRedirect(candidate);
+  if (!safe?.startsWith("/")) return false;
+
+  const binding = new URL(safe, authOrigin);
+  if (binding.pathname !== "/cqu/bind") return false;
+  const service = bindingReturnTarget(binding.searchParams.get("redirect"), authOrigin);
+  if (!service) return false;
+
+  const hostname = new URL(service).hostname;
+  return hostname === "schedule.cqu.moe"
+    || hostname === "localhost"
+    || hostname === "127.0.0.1"
+    || hostname === "[::1]";
 }

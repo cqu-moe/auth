@@ -12,10 +12,12 @@ vi.mock("../components/Layout", () => ({
   default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
+const authState = vi.hoisted(() => ({ userId: "current-user" }));
+
 vi.mock("../lib/auth-client", () => ({
   authClient: {
     useSession: () => ({
-      data: { user: { id: "current-user" } },
+      data: { user: { id: authState.userId } },
       isPending: false,
     }),
   },
@@ -67,6 +69,7 @@ function setInput(input: HTMLInputElement, value: string) {
 }
 
 beforeEach(() => {
+  authState.userId = "current-user";
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -113,6 +116,9 @@ describe("CquBindWizard bootstrap", () => {
     expect(onReturn).toHaveBeenCalledOnce();
     expect(onReturn).toHaveBeenCalledWith("https://schedule.cqu.moe/dashboard?setup=1");
     expect(container.textContent).not.toContain("可以返回使用服务了。");
+    expect((fetch as ReturnType<typeof vi.fn>).mock.calls.some(([, init]) =>
+      (init as RequestInit | undefined)?.method === "PUT"
+    )).toBe(false);
   });
 
   it("keeps an active account on the repair flow", async () => {
@@ -171,6 +177,28 @@ describe("CquBindWizard bootstrap", () => {
 
     expect(container.querySelector("#bind-studentId")).toBeTruthy();
     expect(container.textContent).not.toContain("前往修改密保邮箱");
+  });
+
+  it("does not restore another account's saved credential step", async () => {
+    sessionStorage.setItem("cqu-bind-progress:current-user", JSON.stringify({
+      userId: "current-user",
+      address: "token@example.test",
+      kind: "forward",
+      step: 3,
+    }));
+    authState.userId = "other-user";
+    vi.stubGlobal("fetch", vi.fn(async () => json(snapshot({
+      address: "token@example.test",
+      bindStatus: "pending",
+      kind: "forward",
+      forwardAddress: "other@example.com",
+    }))));
+
+    await renderWizard();
+    await flush();
+
+    expect(container.querySelector("#bind-studentId")).toBeNull();
+    expect(container.textContent).toContain("设置邮件转发规则");
   });
 
   it("polls a durable-object binding state and only completes on active", async () => {

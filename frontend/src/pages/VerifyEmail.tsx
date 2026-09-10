@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
 import { getVerificationLinkErrorMessage } from "../lib/email-verification-routing";
 import { sanitizePostLoginRedirect, withRedirectParam } from "../lib/post-login-redirect";
+import { refetchOnReturn } from "../lib/refetch-on-return";
 
 type SendStatus = "idle" | "sending" | "sent" | "error";
 
@@ -10,11 +11,13 @@ export default function VerifyEmail() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
-  const { data: session } = authClient.useSession();
+  const { data: session, refetch: refetchSession } = authClient.useSession();
   const [sendStatus, setSendStatus] = useState<SendStatus>("idle");
   const [error, setError] = useState("");
   const user = session?.user as { email?: string } | undefined;
   const verificationError = getVerificationLinkErrorMessage(searchParams.get("error"));
+
+  useEffect(() => refetchOnReturn(() => refetchSession()), [refetchSession]);
 
   const handleResend = async () => {
     if (!user?.email) return;
@@ -37,7 +40,7 @@ export default function VerifyEmail() {
 
   const handleSignOut = async () => {
     await authClient.signOut();
-    navigate("/login", { replace: true });
+    navigate(withRedirectParam("/login", postLoginRedirect), { replace: true });
   };
 
   return (

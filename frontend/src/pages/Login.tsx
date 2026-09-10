@@ -7,11 +7,13 @@ import {
   sanitizePostLoginRedirect,
   withRedirectParam,
 } from "../lib/post-login-redirect";
+import { isScheduleBindingContinuation } from "../lib/cqu-bind-continuation";
 
 export default function Login() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
+  const scheduleSource = isScheduleBindingContinuation(postLoginRedirect, window.location.origin);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -48,7 +50,10 @@ export default function Login() {
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-6">登录</h2>
+          <h2 className={`text-xl font-semibold text-gray-900 ${scheduleSource ? "mb-2" : "mb-6"}`}>登录</h2>
+          {scheduleSource && (
+            <p className="mb-6 text-sm text-gray-500">继续使用重庆大学课表</p>
+          )}
 
           {error && (
             <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
@@ -91,7 +96,7 @@ export default function Login() {
 
             <div className="flex justify-end">
               <Link
-                to="/reset-password"
+                to={withRedirectParam("/reset-password", postLoginRedirect)}
                 className="text-sm text-blue-600 hover:text-blue-700"
               >
                 忘记密码？

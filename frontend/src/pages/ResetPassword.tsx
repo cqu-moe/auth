@@ -1,8 +1,11 @@
 import { useState, FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
+import { sanitizePostLoginRedirect, withRedirectParam } from "../lib/post-login-redirect";
 
 export default function ResetPassword() {
+  const [searchParams] = useSearchParams();
+  const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -15,7 +18,7 @@ export default function ResetPassword() {
 
     const { error } = await authClient.requestPasswordReset({
       email,
-      redirectTo: "/reset-password/confirm",
+      redirectTo: withRedirectParam("/reset-password/confirm", postLoginRedirect),
     });
 
     setLoading(false);
@@ -43,7 +46,7 @@ export default function ResetPassword() {
               请查收并点击链接重置密码。
             </p>
             <Link
-              to="/login"
+              to={withRedirectParam("/login", postLoginRedirect)}
               className="mt-6 inline-block text-sm text-blue-600 hover:text-blue-700 font-medium"
             >
               返回登录
@@ -105,7 +108,7 @@ export default function ResetPassword() {
 
           <p className="mt-6 text-center text-sm text-gray-500">
             想起密码了？{" "}
-            <Link to="/login" className="text-blue-600 hover:text-blue-700 font-medium">
+            <Link to={withRedirectParam("/login", postLoginRedirect)} className="text-blue-600 hover:text-blue-700 font-medium">
               返回登录
             </Link>
           </p>

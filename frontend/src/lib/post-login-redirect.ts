@@ -19,6 +19,14 @@ function isAllowedRedirectHost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
 }
 
+export function hasUnsafeRedirectCharacters(candidate: string): boolean {
+  for (const character of candidate) {
+    const codePoint = character.codePointAt(0);
+    if (character === "\\" || (codePoint !== undefined && codePoint <= 0x20)) return true;
+  }
+  return false;
+}
+
 /**
  * Only same-app relative paths and http(s) URLs on cqu.moe (or loopback for
  * development) may be used as post-login targets. Everything else — including
@@ -28,7 +36,7 @@ function isAllowedRedirectHost(hostname: string): boolean {
 export function sanitizePostLoginRedirect(
   candidate: string | null | undefined
 ): string | null {
-  if (!candidate || /[\u0000-\u0020\\]/.test(candidate) || /%(?![0-9A-Fa-f]{2})/.test(candidate)) {
+  if (!candidate || hasUnsafeRedirectCharacters(candidate) || /%(?![0-9A-Fa-f]{2})/.test(candidate)) {
     return null;
   }
 

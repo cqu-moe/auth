@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bindingReturnTarget,
+  isScheduleBindingContinuation,
   protectedLoginUrl,
   verificationContinuation,
 } from "./cqu-bind-continuation";
@@ -44,5 +45,22 @@ describe("CQU binding continuation", () => {
 
   it("accepts the intended service", () => {
     expect(bindingReturnTarget(service, "https://auth.cqu.moe")).toBe(service);
+  });
+
+  it("identifies only a binding route with a valid nested Schedule target", () => {
+    expect(isScheduleBindingContinuation(binding, "https://auth.cqu.moe")).toBe(true);
+    expect(isScheduleBindingContinuation(service, "https://auth.cqu.moe")).toBe(false);
+    expect(isScheduleBindingContinuation(
+      `/oauth/authorize?redirect=${encodeURIComponent(service)}`,
+      "https://auth.cqu.moe",
+    )).toBe(false);
+    expect(isScheduleBindingContinuation(
+      withRedirectParam("/cqu/bind", "https://docs.cqu.moe/"),
+      "https://auth.cqu.moe",
+    )).toBe(false);
+    expect(isScheduleBindingContinuation(
+      withRedirectParam("/cqu/bind", "https://evil.example/"),
+      "https://auth.cqu.moe",
+    )).toBe(false);
   });
 });
