@@ -68,7 +68,12 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
         operation: string;
         ownerUserId: string;
         deviceId: string;
-        payload?: { authority?: DeviceAuthority };
+        payload?: {
+          authority?: DeviceAuthority;
+          kind?: "status" | "export" | "refresh";
+          limit?: number;
+          now?: number;
+        };
       }>();
       await this.ensureOwner(body.ownerUserId, body.deviceId);
       let result: unknown;
@@ -89,6 +94,18 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
           if (!body.payload?.authority) throw new DeviceDoError("INVALID_REQUEST");
           result = await this.exportCookies(body.payload.authority);
           break;
+        case "rate":
+          if (!body.payload?.kind ||
+              !Number.isSafeInteger(body.payload.limit) ||
+              !Number.isSafeInteger(body.payload.now)) {
+            throw new DeviceDoError("INVALID_REQUEST");
+          }
+          await this.consumeRateLimit(
+            body.payload.kind,
+            body.payload.limit as number,
+            body.payload.now as number
+          );
+          break;
         default:
           throw new DeviceDoError("INVALID_REQUEST");
       }
@@ -97,7 +114,9 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       const code = error instanceof DeviceDoError
         ? error.code
         : "TEMPORARY_UNAVAILABLE";
-      const status = code === "PREPARING" ? 409 : code === "INVALID_REQUEST" ? 422 : 403;
+      const status = code === "RATE_LIMITED" ? 429 :
+        code === "PREPARING" ? 409 :
+        code === "INVALID_REQUEST" ? 422 : 403;
       return Response.json({ error: { code, message: code } }, { status });
     }
   }
@@ -147,6 +166,22 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     const session = await this.ctx.storage.get<StoredDeviceSession>(SESSION_KEY);
     if (!session) throw new DeviceDoError("PREPARING");
     return session;
+  }
+
+  private async consumeRateLimit(
+    kind: "status" | "export" | "refresh",
+    limit: number,
+    now: number
+  ): Promise<void> {
+    if (limit <= 0 || now < 0) throw new DeviceDoError("INVALID_REQUEST");
+    const key = `rate:${kind}`;
+    const bucket = Math.floor(now / 60_000);
+    const current =
+      (await this.ctx.storage.get<{ bucket: number; count: number }>(key)) ??
+      null;
+    const count = current?.bucket === bucket ? current.count : 0;
+    if (count >= limit) throw new DeviceDoError("RATE_LIMITED");
+    await this.ctx.storage.put(key, { bucket, count: count + 1 });
   }
 
   private async recordTransient(session: StoredDeviceSession): Promise<void> {

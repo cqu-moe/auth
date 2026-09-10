@@ -9,6 +9,7 @@ import {
 import { cqu } from "./routes/cqu";
 import { cquBinding } from "./routes/cqu-bind";
 import { cquQuicklogin } from "./routes/cqu-quicklogin";
+import { cquQuickloginDevices } from "./routes/cqu-quicklogin-devices";
 import { admin } from "./routes/admin";
 import { handleEmail } from "./email-handler";
 import type { Env } from "./types";
@@ -60,6 +61,7 @@ app.all("/api/auth/*", async (c) => {
 // （session-only，绝不接受 Bearer，故意不挂在 cqu.ts 的 /api/cqu/* 子树下）；
 // cqu.ts（仅剩 service-ticket）挂在 /api/cqu。三者在 Hono trie 中是独立节点，互不遮蔽（与挂载顺序无关）。
 app.route("/api/cqu/binding", cquBinding);
+app.route("/api/cqu/quicklogin/devices", cquQuickloginDevices);
 app.route("/api/cqu/quicklogin", cquQuicklogin);
 app.route("/api/cqu", cqu);
 app.route("/api/admin", admin);

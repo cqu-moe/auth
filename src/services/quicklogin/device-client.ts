@@ -48,4 +48,14 @@ export class QuickloginDeviceClient {
   exportDeviceCookies(authority: DeviceAuthority): Promise<CookieEnvelope> {
     return this.call(authority.ownerUserId, authority.deviceId, "export", { authority });
   }
+
+  consumeRateLimit(
+    userId: string,
+    deviceId: string,
+    kind: "status" | "export" | "refresh",
+    limit: number,
+    now: number
+  ): Promise<void> {
+    return this.call(userId, deviceId, "rate", { kind, limit, now });
+  }
 }

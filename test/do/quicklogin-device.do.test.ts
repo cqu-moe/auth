@@ -165,4 +165,27 @@ describe("CquQuickloginDeviceDO", () => {
         generation: authority.generation + 1,
       });
   });
+
+  it("enforces per-device minute buckets", async () => {
+    const { userId, device } = await setupDevice();
+    const devices = new QuickloginDeviceClient(env);
+    for (let count = 0; count < 3; count += 1) {
+      await devices.consumeRateLimit(
+        userId,
+        device.deviceId,
+        "refresh",
+        3,
+        1_800_000_000_000
+      );
+    }
+    await expect(
+      devices.consumeRateLimit(
+        userId,
+        device.deviceId,
+        "refresh",
+        3,
+        1_800_000_000_000
+      )
+    ).rejects.toMatchObject({ code: "RATE_LIMITED" });
+  });
 });

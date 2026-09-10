@@ -2,9 +2,12 @@ import { Hono } from "hono";
 import type { HonoEnv } from "../types";
 import { createAuth } from "../auth";
 import { errorResponse } from "../utils/error";
-import { userEntitlement } from "../db/schema";
-import { drizzle } from "drizzle-orm/d1";
-import { eq, and } from "drizzle-orm";
+import { QuickloginAccountClient } from "../services/quicklogin/account-client";
+import {
+  parseEnabled,
+  QuickloginHttpError,
+  readJson,
+} from "../services/quicklogin/http";
 
 // 用户自助快捷登录开关 /api/cqu/quicklogin。
 //
@@ -26,14 +29,10 @@ import { eq, and } from "drizzle-orm";
 //     (userId, "cqu", "quicklogin") 这一条 entitlement,绝不触及他人或其它能力。
 const cquQuicklogin = new Hono<HonoEnv>();
 
-const SUBSYSTEM = "cqu";
-const CAPABILITY = "quicklogin";
-const ACCESS_CAPABILITY = "quicklogin_access";
-const VALUE_ON = "1";
-
 // session-only 鉴权中间件。无有效 Better Auth session → 401。
 // 故意不解析 Authorization: Bearer —— 见上方安全契约。
 cquQuicklogin.use("/*", async (c, next) => {
+  c.header("Cache-Control", "no-store");
   const auth = createAuth(c.env, c.req.raw);
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!session?.user) return errorResponse(c, "UNAUTHORIZED", "未登录", 401);
@@ -41,96 +40,40 @@ cquQuicklogin.use("/*", async (c, next) => {
   return next();
 });
 
-// 读调用者自己的一条 cqu entitlement 行;行缺失返回 undefined(约定:缺失 = 关/未授予)。
-async function getOwnFlag(
-  db: ReturnType<typeof drizzle>,
-  userId: string,
-  capability: string
-) {
-  return db
-    .select()
-    .from(userEntitlement)
-    .where(
-      and(
-        eq(userEntitlement.userId, userId),
-        eq(userEntitlement.subsystem, SUBSYSTEM),
-        eq(userEntitlement.capability, capability)
-      )
-    )
-    .get();
-}
-
-// GET /api/cqu/quicklogin → { eligible: boolean, enabled: boolean }
-// eligible = 有 cqu.quicklogin_access(功能对该用户开放;设置页据此决定显隐);
-// enabled = cqu.quicklogin === "1"(用户本人的同意开关,行缺失视为关)。
+// GET /api/cqu/quicklogin 返回账号协调器的权威总开关和额度状态。
 cquQuicklogin.get("/", async (c) => {
   const user = c.get("user") as { id: string };
-  const db = drizzle(c.env.DATABASE);
-  const [access, consent] = await Promise.all([
-    getOwnFlag(db, user.id, ACCESS_CAPABILITY),
-    getOwnFlag(db, user.id, CAPABILITY),
-  ]);
+  const list = await new QuickloginAccountClient(c.env)
+    .listDevices(user.id, Date.now());
   return c.json({
-    eligible: access?.value === VALUE_ON,
-    enabled: consent?.value === VALUE_ON,
+    masterEnabled: list.masterEnabled,
+    deviceLimit: list.deviceLimit,
+    used: list.used,
   });
 });
 
-// PUT /api/cqu/quicklogin  body { enabled: boolean } → { enabled }
-// 开:upsert 该行 value="1"(onConflictDoUpdate 按复合主键)。关:按复合主键删行(幂等)。
-// 只动调用者自己的这一条 entitlement。
+// PUT 只接受同源网站 session，并由账号协调器串行修改总开关。
 cquQuicklogin.put("/", async (c) => {
   const user = c.get("user") as { id: string };
-
-  const db = drizzle(c.env.DATABASE);
-
-  // 功能开放闸:无 cqu.quicklogin_access 的用户连自助开关都不能碰(与设置页显隐同源)。
-  const access = await getOwnFlag(db, user.id, ACCESS_CAPABILITY);
-  if (access?.value !== VALUE_ON) {
-    return errorResponse(c, "FORBIDDEN", "未开放浏览器插件快捷登录功能", 403);
-  }
-
-  let body: { enabled?: unknown };
   try {
-    body = await c.req.json<{ enabled?: unknown }>();
-  } catch {
-    return errorResponse(c, "INVALID_BODY", "请求体不是合法 JSON", 400);
+    const origin = c.req.header("Origin");
+    if (!origin || origin !== new URL(c.env.BETTER_AUTH_URL).origin) {
+      return errorResponse(c, "FORBIDDEN", "禁止访问", 403);
+    }
+    const enabled = parseEnabled(await readJson(c.req.raw));
+    const list = await new QuickloginAccountClient(c.env)
+      .setMasterEnabled(user.id, enabled);
+    return c.json({
+      masterEnabled: list.masterEnabled,
+      deviceLimit: list.deviceLimit,
+      used: list.used,
+    });
+  } catch (error) {
+    if (error instanceof QuickloginHttpError) {
+      return errorResponse(c, error.code, error.code, error.status);
+    }
+    throw error;
   }
-  if (typeof body.enabled !== "boolean") {
-    return errorResponse(c, "INVALID_BODY", "enabled 必须是布尔值", 400);
-  }
-
-  if (body.enabled) {
-    // 开启:存在则更新 value,不存在则插入。复合主键 (user_id, subsystem, capability)。
-    await db
-      .insert(userEntitlement)
-      .values({
-        userId: user.id,
-        subsystem: SUBSYSTEM,
-        capability: CAPABILITY,
-        value: VALUE_ON,
-      })
-      .onConflictDoUpdate({
-        target: [
-          userEntitlement.userId,
-          userEntitlement.subsystem,
-          userEntitlement.capability,
-        ],
-        set: { value: VALUE_ON },
-      });
-  } else {
-    // 关闭:删行(约定:行缺失 = 关)。幂等 —— 删不存在的行是安全 no-op。
-    await db
-      .delete(userEntitlement)
-      .where(
-        and(
-          eq(userEntitlement.userId, user.id),
-          eq(userEntitlement.subsystem, SUBSYSTEM),
-          eq(userEntitlement.capability, CAPABILITY)
-        )
-      );
-  }
-  return c.json({ enabled: body.enabled });
 });
 
 export { cquQuicklogin };
