@@ -28,16 +28,19 @@ function isAllowedRedirectHost(hostname: string): boolean {
 export function sanitizePostLoginRedirect(
   candidate: string | null | undefined
 ): string | null {
-  if (!candidate) return null;
+  if (!candidate || /[\u0000-\u0020\\]/.test(candidate) || /%(?![0-9A-Fa-f]{2})/.test(candidate)) {
+    return null;
+  }
 
   if (candidate.startsWith("/")) {
-    if (candidate.startsWith("//") || candidate.startsWith("/\\")) return null;
+    if (/^\/(?:\/|\\|%2f|%5c)/i.test(candidate)) return null;
     return candidate;
   }
 
   try {
     const url = new URL(candidate);
     if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    if (url.username || url.password) return null;
     return isAllowedRedirectHost(url.hostname) ? url.toString() : null;
   } catch {
     return null;

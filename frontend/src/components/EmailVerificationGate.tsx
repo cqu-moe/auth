@@ -5,7 +5,9 @@ import { getEmailVerificationRedirect } from "../lib/email-verification-routing"
 import {
   isExternalHttpTarget,
   postLoginRedirectFromSearch,
+  withRedirectParam,
 } from "../lib/post-login-redirect";
+import { verificationContinuation } from "../lib/cqu-bind-continuation";
 
 interface EmailVerificationGateProps {
   children: ReactNode;
@@ -44,8 +46,8 @@ export default function EmailVerificationGate({ children }: EmailVerificationGat
 
   if (redirect) {
     if (redirect === "/verify-email") {
-      // Keep ?redirect=... so the return target survives the gate bounce.
-      return <Navigate to={{ pathname: "/verify-email", search: location.search }} replace />;
+      const target = verificationContinuation(location.pathname, location.search);
+      return <Navigate to={withRedirectParam("/verify-email", target)} replace />;
     }
     if (redirect === "/settings") {
       // A verified user leaving the verification page continues the round

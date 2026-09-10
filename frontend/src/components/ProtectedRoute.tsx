@@ -1,7 +1,8 @@
 import { ReactNode } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
 import { canAccessAdmin } from "../../../src/user-roles";
+import { protectedLoginUrl } from "../lib/cqu-bind-continuation";
 
 interface ProtectedRouteProps {
   children: ReactNode;
@@ -10,6 +11,7 @@ interface ProtectedRouteProps {
 
 export default function ProtectedRoute({ children, requireAdmin = false }: ProtectedRouteProps) {
   const { data: session, isPending } = authClient.useSession();
+  const location = useLocation();
 
   if (isPending) {
     return (
@@ -20,7 +22,7 @@ export default function ProtectedRoute({ children, requireAdmin = false }: Prote
   }
 
   if (!session) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to={protectedLoginUrl(location.pathname, location.search)} replace />;
   }
 
   if (requireAdmin) {

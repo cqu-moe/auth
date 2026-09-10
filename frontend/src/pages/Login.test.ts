@@ -4,6 +4,7 @@ import {
   getPostAuthNavigationDestination,
   shouldSkipPostLoginNavigation,
 } from "../lib/login-routing";
+import { withRedirectParam } from "../lib/post-login-redirect";
 
 describe("password login routing", () => {
   it("does not navigate while the native two-factor plugin owns the redirect", () => {
@@ -28,6 +29,14 @@ describe("password login routing", () => {
         "https://schedule.cqu.moe/dashboard"
       )
     ).toBe("https://schedule.cqu.moe/dashboard");
+  });
+
+  it("keeps the CQU binding route around its nested Schedule target", () => {
+    const binding = withRedirectParam(
+      "/cqu/bind",
+      "https://schedule.cqu.moe/dashboard?setup=1"
+    );
+    expect(getLoginNavigationDestination({ user: { emailVerified: true } }, binding)).toBe(binding);
   });
 
   it("keeps unverified users in the verification flow while preserving the return target", () => {
