@@ -9,6 +9,7 @@
 
   "vars": {
     "BIND_EMAIL_DOMAIN": "cquotp.com",
+    "QUICKLOGIN_DEVICE_MODE": "off",
     // 浏览器后端已固定为 Cloudflare APAC Containers(2026-09-08 全量切换,
     // 2026-09-09 移除腾讯云节点绑定 LOGIN_NODE 与 node 回退路径)。
   },

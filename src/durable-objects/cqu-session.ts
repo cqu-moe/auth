@@ -84,6 +84,7 @@ import type {
 } from "../services/quicklogin/contracts";
 import { quickloginBrowserRoute } from "../services/quicklogin/browser-routing";
 import { QuickloginAccountClient } from "../services/quicklogin/account-client";
+import { quickloginDeviceModeEnabled } from "../services/quicklogin/mode";
 
 // keepalive 每个探针经国内节点提取 1 个青果 IP(连 CQU 出站经青果)。频率直接决定青果消耗:
 // 15min→96 个/天, 60min→24 个/天 —— 取 60min 省青果(单账号够用)。代价: 会话若在两次探针
@@ -729,8 +730,7 @@ export class CquSessionDO extends DurableObject<Env> {
     // quicklogin flag 永远不是「取票闸」本身(出票的权威校验在 host 校验 + scope),
     // 它只表达「用户是否同意插件替他用任意广路径取 ST」—— 未同意则广路径直接拒。
     if (broad) {
-      const deviceMode = (this.env as Env & { QUICKLOGIN_DEVICE_MODE?: string })
-        .QUICKLOGIN_DEVICE_MODE === "on";
+      const deviceMode = quickloginDeviceModeEnabled(this.env);
       const enabled = deviceMode
         ? await new QuickloginAccountClient(this.env)
           .getQuickloginTicketEligibility(this.state.userId)

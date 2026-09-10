@@ -3,6 +3,10 @@ import type { HonoEnv } from "../types";
 import { createAuth } from "../auth";
 import { errorResponse } from "../utils/error";
 import { QuickloginAccountClient } from "../services/quicklogin/account-client";
+import { userEntitlement } from "../db/schema";
+import { drizzle } from "drizzle-orm/d1";
+import { and, eq } from "drizzle-orm";
+import { quickloginDeviceModeEnabled } from "../services/quicklogin/mode";
 import {
   parseEnabled,
   QuickloginHttpError,
@@ -29,6 +33,21 @@ import {
 //     (userId, "cqu", "quicklogin") 这一条 entitlement,绝不触及他人或其它能力。
 const cquQuicklogin = new Hono<HonoEnv>();
 
+const LEGACY_ACCESS = "quicklogin_access";
+const LEGACY_MASTER = "quicklogin";
+
+async function readLegacyFlag(env: HonoEnv["Bindings"], userId: string, capability: string) {
+  return drizzle(env.DATABASE)
+    .select()
+    .from(userEntitlement)
+    .where(and(
+      eq(userEntitlement.userId, userId),
+      eq(userEntitlement.subsystem, "cqu"),
+      eq(userEntitlement.capability, capability)
+    ))
+    .get();
+}
+
 // session-only 鉴权中间件。无有效 Better Auth session → 401。
 // 故意不解析 Authorization: Bearer —— 见上方安全契约。
 cquQuicklogin.use("/*", async (c, next) => {
@@ -43,6 +62,13 @@ cquQuicklogin.use("/*", async (c, next) => {
 // GET /api/cqu/quicklogin 返回账号协调器的权威总开关和额度状态。
 cquQuicklogin.get("/", async (c) => {
   const user = c.get("user") as { id: string };
+  if (!quickloginDeviceModeEnabled(c.env)) {
+    const [access, master] = await Promise.all([
+      readLegacyFlag(c.env, user.id, LEGACY_ACCESS),
+      readLegacyFlag(c.env, user.id, LEGACY_MASTER),
+    ]);
+    return c.json({ eligible: access?.value === "1", enabled: master?.value === "1" });
+  }
   const list = await new QuickloginAccountClient(c.env)
     .listDevices(user.id, Date.now());
   return c.json({
@@ -61,6 +87,35 @@ cquQuicklogin.put("/", async (c) => {
       return errorResponse(c, "FORBIDDEN", "禁止访问", 403);
     }
     const enabled = parseEnabled(await readJson(c.req.raw));
+    if (!quickloginDeviceModeEnabled(c.env)) {
+      const access = await readLegacyFlag(c.env, user.id, LEGACY_ACCESS);
+      if (access?.value !== "1") {
+        return errorResponse(c, "FORBIDDEN", "未开放浏览器插件快捷登录功能", 403);
+      }
+      const db = drizzle(c.env.DATABASE);
+      if (enabled) {
+        await db.insert(userEntitlement).values({
+          userId: user.id,
+          subsystem: "cqu",
+          capability: LEGACY_MASTER,
+          value: "1",
+        }).onConflictDoUpdate({
+          target: [
+            userEntitlement.userId,
+            userEntitlement.subsystem,
+            userEntitlement.capability,
+          ],
+          set: { value: "1" },
+        });
+      } else {
+        await db.delete(userEntitlement).where(and(
+          eq(userEntitlement.userId, user.id),
+          eq(userEntitlement.subsystem, "cqu"),
+          eq(userEntitlement.capability, LEGACY_MASTER)
+        ));
+      }
+      return c.json({ enabled });
+    }
     const list = await new QuickloginAccountClient(c.env)
       .setMasterEnabled(user.id, enabled);
     return c.json({

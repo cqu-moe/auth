@@ -12,6 +12,7 @@ export interface Env {
   BETTER_AUTH_SECRET: string;
   QUICKLOGIN_CLIENT_ID: string;
   QUICKLOGIN_EXTENSION_ORIGIN: string;
+  QUICKLOGIN_DEVICE_MODE?: "off" | "on";
   BIND_EMAIL_DOMAIN: string;
 }
 

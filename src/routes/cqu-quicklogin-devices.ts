@@ -24,6 +24,7 @@ import {
   readJson,
 } from "../services/quicklogin/http";
 import type { DeviceAuthority, DeviceStatus, ErrorCode } from "../services/quicklogin/contracts";
+import { quickloginDeviceModeEnabled } from "../services/quicklogin/mode";
 
 const router = new Hono<HonoEnv>();
 
@@ -32,6 +33,10 @@ function apiError(c: Context<HonoEnv>, code: ErrorCode, status: number) {
 }
 
 router.use("*", async (c, next) => {
+  if (!quickloginDeviceModeEnabled(c.env)) {
+    c.header("Cache-Control", "no-store");
+    return apiError(c, "TEMPORARY_UNAVAILABLE", 503);
+  }
   const origin = c.req.header("Origin");
   c.header("Cache-Control", "no-store");
   await next();
@@ -245,12 +250,16 @@ router.post("/:id/status", async (c) => {
       getTrustedClientIp(c.req.raw),
       Date.now()
     );
-    return c.json(
-      await statusFor(
-        c,
-        await accounts.getDeviceAuthority(principal.userId, principal.deviceId!)
-      )
+    const currentAuthority = await accounts.getDeviceAuthority(
+      principal.userId,
+      principal.deviceId!
     );
+    let status = await statusFor(c, currentAuthority);
+    if (currentAuthority.allowed && status.state === "paused") {
+      await new QuickloginDeviceClient(c.env).notifyDevice(currentAuthority);
+      status = await statusFor(c, currentAuthority);
+    }
+    return c.json(status);
   } catch (error) {
     return routeError(c, error);
   }

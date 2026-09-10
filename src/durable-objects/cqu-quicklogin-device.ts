@@ -12,6 +12,7 @@ import type {
   StoredDeviceSession,
 } from "../services/quicklogin/contracts";
 import { QuickloginLoginBrokerClient } from "../services/quicklogin/login-broker-client";
+import { quickloginDeviceModeEnabled } from "../services/quicklogin/mode";
 import { nextDeviceAction } from "../services/quicklogin/maintenance";
 import { fetchBrowser } from "../services/cqu-browser-routing";
 import { quickloginBrowserRoute } from "../services/quicklogin/browser-routing";
@@ -122,6 +123,10 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
   }
 
   async alarm(): Promise<void> {
+    if (!quickloginDeviceModeEnabled(this.env)) {
+      await this.ctx.storage.deleteAlarm();
+      return;
+    }
     if (!this.owner) return;
     const session = await this.ctx.storage.get<StoredDeviceSession>(SESSION_KEY);
     if (!session) return;
@@ -325,6 +330,12 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       emptySession(authority);
     if (authority.generation < current.generation) return;
     const next = { ...current, generation: authority.generation };
+    if (!quickloginDeviceModeEnabled(this.env)) {
+      next.state = authority.enabled ? "paused" : "disabled";
+      await this.ctx.storage.put(SESSION_KEY, next);
+      await this.ctx.storage.deleteAlarm();
+      return;
+    }
     if (authority.reason === "DEVICE_REVOKED") {
       next.state = "revoked";
       next.storageState = null;

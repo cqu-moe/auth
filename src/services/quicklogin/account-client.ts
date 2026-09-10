@@ -23,6 +23,7 @@ type AccountOperation =
   | "list_devices"
   | "heartbeat"
   | "notify_binding_changed"
+  | "initialize_policy"
   | "preview_quota"
   | "apply_quota";
 
@@ -165,6 +166,13 @@ export class QuickloginAccountClient {
       masterEnabled: list.masterEnabled,
       deviceLimit: list.deviceLimit,
     };
+  }
+
+  async initializeQuickloginPolicy(
+    userId: string,
+    input: { migrationId: string; deviceLimit: number; masterEnabled: boolean }
+  ): Promise<void> {
+    await this.call(userId, "initialize_policy", { input });
   }
 
   previewQuota(

@@ -35,6 +35,7 @@ const OWNER_KEY = "ownerUserId";
 const OUTBOX_KEY = "outbox";
 const PREVIEW_PREFIX = "quotaPreview:";
 const RESULT_PREFIX = "quotaResult:";
+const MIGRATION_KEY = "policyMigration";
 const PREVIEW_TTL_MS = 5 * 60_000;
 
 interface StoredQuotaResult {
@@ -265,6 +266,17 @@ export class CquQuickloginAccountDO extends DurableObject<Env> {
             Date.now()
           );
           break;
+        case "initialize_policy": {
+          if (!isRecord(payload.input)) {
+            throw new QuickloginAccountError("INVALID_REQUEST");
+          }
+          result = await this.initializePolicy({
+            migrationId: readString(payload.input.migrationId),
+            deviceLimit: validateDeviceLimit(payload.input.deviceLimit),
+            masterEnabled: readBoolean(payload.input.masterEnabled),
+          });
+          break;
+        }
         case "preview_quota":
           result = await this.previewQuota(
             validateDeviceLimit(payload.limit),
@@ -401,6 +413,46 @@ export class CquQuickloginAccountDO extends DurableObject<Env> {
       (await this.ctx.storage.get<AccountState>(ACCOUNT_KEY)) ??
       emptyAccountState()
     );
+  }
+
+  private async initializePolicy(input: {
+    migrationId: string;
+    deviceLimit: number;
+    masterEnabled: boolean;
+  }): Promise<void> {
+    await this.ctx.storage.transaction(async (tx) => {
+      const previous = await tx.get<typeof input>(MIGRATION_KEY);
+      if (previous) {
+        if (previous.migrationId !== input.migrationId ||
+            previous.deviceLimit !== input.deviceLimit ||
+            previous.masterEnabled !== input.masterEnabled) {
+          throw new QuickloginAccountError("INVALID_REQUEST");
+        }
+        return;
+      }
+      let state = (await tx.get<AccountState>(ACCOUNT_KEY)) ?? emptyAccountState();
+      const outbox = (await tx.get<OutboxEvent[]>(OUTBOX_KEY)) ?? [];
+      const master = reduceAccount(
+        state,
+        { type: "set_master_enabled", enabled: input.masterEnabled },
+        Date.now()
+      );
+      state = master.state;
+      const quota = reduceAccount(
+        state,
+        { type: "apply_quota", limit: input.deviceLimit },
+        Date.now()
+      );
+      state = quota.state;
+      const nextOutbox = [...outbox, ...master.events, ...quota.events];
+      await tx.put({
+        [ACCOUNT_KEY]: state,
+        [OUTBOX_KEY]: nextOutbox,
+        [MIGRATION_KEY]: input,
+      });
+      const alarm = nextOutboxAlarm(nextOutbox);
+      if (alarm !== null) await tx.setAlarm(alarm);
+    });
   }
 
   private async mutate(command: AccountCommand, now: number): Promise<unknown> {
