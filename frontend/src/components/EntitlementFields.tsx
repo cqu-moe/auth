@@ -11,9 +11,11 @@ import { SUBSYSTEM_LABELS, type EntitlementForm } from "./entitlement-form";
 export function EntitlementMatrix({
   form,
   onChange,
+  quickloginQuotaReadOnly = false,
 }: {
   form: EntitlementForm;
   onChange: (next: EntitlementForm) => void;
+  quickloginQuotaReadOnly?: boolean;
 }) {
   const setFlag = (key: string, flag: boolean) =>
     onChange({ ...form, [key]: { ...form[key], flag } });
@@ -40,6 +42,14 @@ export function EntitlementMatrix({
               {Object.keys(caps).map((capability) => {
                 const def = caps[capability];
                 const key = `${subsystem}.${capability}`;
+                if (quickloginQuotaReadOnly && key === "cqu.quicklogin_device_limit") {
+                  return (
+                    <div key={key} className="flex flex-wrap items-center gap-2 p-2 text-sm text-gray-600">
+                      <span>{def.label}</span>
+                      <span className="text-xs text-gray-400">请使用下方专用额度编辑器</span>
+                    </div>
+                  );
+                }
                 if (def.type === "flag") {
                   return (
                     <label

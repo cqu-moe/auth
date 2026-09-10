@@ -10,6 +10,8 @@ import {
   type EntitlementItem,
 } from "../components/entitlement-form";
 import { USER_ROLE_OPTIONS } from "../../../src/user-roles";
+import { authClient } from "../lib/auth-client";
+import QuotaEditor from "../components/quicklogin/QuotaEditor";
 
 // --- Types ---
 interface User {
@@ -185,7 +187,7 @@ function RoleSelect({
 }
 
 // --- Users Section ---
-function UsersSection() {
+function UsersSection({ canEditQuota }: { canEditQuota: boolean }) {
   const [users, setUsers] = useState<User[]>([]);
   const [pagination, setPagination] = useState({ page: 1, total: 0, totalPages: 1 });
   const [loading, setLoading] = useState(true);
@@ -354,6 +356,7 @@ function UsersSection() {
       {entitlementUser && (
         <EntitlementPanel
           user={entitlementUser}
+          canEditQuota={canEditQuota}
           onClose={() => setEntitlementUser(null)}
         />
       )}
@@ -526,9 +529,11 @@ function Modal({
 // 预设从 GET /api/admin/entitlement-presets 读(管理台「权益预设」页可编辑)。
 function EntitlementPanel({
   user,
+  canEditQuota,
   onClose,
 }: {
   user: User;
+  canEditQuota: boolean;
   onClose: () => void;
 }) {
   const [form, setForm] = useState<EntitlementForm>({});
@@ -696,8 +701,15 @@ function EntitlementPanel({
 
             {/* --- 按子系统分组的能力 --- */}
             <div className="border-t border-gray-100 pt-4">
-              <EntitlementMatrix form={form} onChange={setForm} />
+              <EntitlementMatrix
+                form={form}
+                onChange={setForm}
+                quickloginQuotaReadOnly
+              />
             </div>
+            {canEditQuota && (
+              <QuotaEditor userId={user.id} onSaved={() => void load()} />
+            )}
           </>
         )}
       </div>
@@ -2248,6 +2260,8 @@ type Tab = "users" | "presets" | "invitations" | "oauth";
 
 export default function Admin() {
   const [activeTab, setActiveTab] = useState<Tab>("users");
+  const { data: session } = authClient.useSession();
+  const canEditQuota = (session?.user as { role?: string } | undefined)?.role === "superAdmin";
 
   const tabs: { key: Tab; label: string }[] = [
     { key: "users", label: "用户管理" },
@@ -2278,7 +2292,7 @@ export default function Admin() {
         </div>
 
         <div className="bg-white rounded-2xl border border-gray-200 p-6">
-          {activeTab === "users" && <UsersSection />}
+          {activeTab === "users" && <UsersSection canEditQuota={canEditQuota} />}
           {activeTab === "presets" && <PresetsSection />}
           {activeTab === "invitations" && <RegistrationInvitationsSection />}
           {activeTab === "oauth" && <OAuthClientsSection />}
