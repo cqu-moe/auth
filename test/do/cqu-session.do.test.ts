@@ -56,7 +56,11 @@ async function seedLease(
 ): Promise<void> {
   const extra = { ...(opts.extra ?? {}) };
   const lease = extra.codeLease as
-    | { ownerToken?: string; queue?: Array<{ token: string }> }
+    | {
+        ownerToken?: string;
+        ownerBrowserRouteVersion?: number;
+        queue?: Array<{ token: string }>;
+      }
     | undefined;
   const tokens = new Set<string>();
   if (lease) {
