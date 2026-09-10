@@ -5,3 +5,5 @@ import type { Env } from "../types";
 // export so dependent Durable Objects remain deployable without restoring its
 // binding or Quicklogin behavior, and without deleting historical state.
 export class CquQuickloginAccountDO extends DurableObject<Env> {}
+
+export class CquQuickloginDeviceDO extends DurableObject<Env> {}
