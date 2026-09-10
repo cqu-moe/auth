@@ -11,6 +11,13 @@ import { Resend } from "resend";
 import type { Env } from "./types";
 import { resolveCaps, subsystemForAccessToken } from "./services/entitlements";
 import { isCquMoeHost } from "./utils/cookie-domain";
+import { DEVICE_SCOPE } from "./services/quicklogin/contracts";
+import {
+  assertQuickloginRefreshAllowed,
+  createQuickloginConsentReference,
+  quickloginAccessTokenClaims,
+  QuickloginOAuthError,
+} from "./services/quicklogin/oauth-grants";
 
 // Must spread the admin plugin's defaultStatements: its built-in endpoints
 // (listUsers/setRole/banUser/...) authorize against actions like
@@ -57,6 +64,7 @@ export const OAUTH_SCOPES = [
   "cqu:ticket:library",
   "cqu:ticket:card",
   "cqu:ticket:any",
+  DEVICE_SCOPE,
 ];
 
 const currentEmailOtpPaths = new Set([
@@ -66,6 +74,7 @@ const currentEmailOtpPaths = new Set([
 
 export function createAuth(env: Env, request: Request) {
   const getResend = () => new Resend(env.RESEND_API_KEY);
+  const quickloginConsentReference = createQuickloginConsentReference(env);
 
   return betterAuth({
     baseURL: env.BETTER_AUTH_URL,
@@ -91,6 +100,30 @@ export function createAuth(env: Env, request: Request) {
         },
         hooks: {
           before: createAuthMiddleware(async (ctx) => {
+            if (ctx.path === "/oauth2/token") {
+              const body = ctx.body as
+                | {
+                    grant_type?: unknown;
+                    client_id?: unknown;
+                    refresh_token?: unknown;
+                  }
+                | undefined;
+              try {
+                await assertQuickloginRefreshAllowed(env, ctx.context.adapter, {
+                  grantType: body?.grant_type,
+                  clientId: body?.client_id,
+                  refreshToken: body?.refresh_token,
+                });
+              } catch (error) {
+                if (error instanceof QuickloginOAuthError) {
+                  throw new APIError("BAD_REQUEST", {
+                    code: "INVALID_GRANT",
+                    message: "invalid refresh token",
+                  });
+                }
+                throw error;
+              }
+            }
             if (!currentEmailOtpPaths.has(ctx.path)) return;
             const session = await getSessionFromCtx(ctx);
             const body = ctx.body as { email?: string; type?: string } | undefined;
@@ -134,19 +167,44 @@ export function createAuth(env: Env, request: Request) {
             defaultRole: "user",
             adminRoles: ["admin", "superAdmin"],
           }),
-          jwt(),
+          jwt({ jwt: { issuer: env.BETTER_AUTH_URL } }),
           oauthProvider({
             loginPage: "/login",
             consentPage: "/oauth/authorize",
             scopes: OAUTH_SCOPES,
+            validAudiences: [env.BETTER_AUTH_URL],
+            postLogin: {
+              page: "/oauth/authorize",
+              shouldRedirect: async () => false,
+              consentReferenceId: quickloginConsentReference,
+            },
             // 按 client→subsystem 只盖该片 caps(最小披露);拿不到映射则盖空 {},绝不盖全量。
             // 用 customAccessTokenClaims(oauth-provider)而非 jwt.definePayload:
             // 已核实 OAuth access token 不经 definePayload,且 definePayload 入参无 client_id。
             customAccessTokenClaims: async (info) => {
+              const claims: Record<string, unknown> = {};
               const sub = subsystemForAccessToken(info);
-              if (!sub) return {};
-              const caps = await resolveCaps(env.DATABASE, info.user!.id, sub);
-              return { caps };
+              if (sub) {
+                claims.caps = await resolveCaps(
+                  env.DATABASE,
+                  info.user!.id,
+                  sub
+                );
+              }
+              try {
+                return {
+                  ...claims,
+                  ...(await quickloginAccessTokenClaims(env, info)),
+                };
+              } catch (error) {
+                if (error instanceof QuickloginOAuthError) {
+                  throw new APIError("FORBIDDEN", {
+                    code: error.code,
+                    message: error.code,
+                  });
+                }
+                throw error;
+              }
             },
             silenceWarnings: {
               oauthAuthServerConfig: true,
