@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   getEmailVerificationRedirect,
   getPostAuthDestination,
-  getVerificationLinkErrorMessage,
 } from "../frontend/src/lib/email-verification-routing";
 
 describe("email verification routing", () => {
@@ -58,18 +57,5 @@ describe("email verification routing", () => {
   it("sends successful registration and login to the correct account home", () => {
     expect(getPostAuthDestination(false)).toBe("/verify-email");
     expect(getPostAuthDestination(true)).toBe("/settings");
-  });
-
-  it("turns failed verification callbacks into actionable Chinese messages", () => {
-    expect(getVerificationLinkErrorMessage("TOKEN_EXPIRED")).toBe(
-      "验证链接已过期，请重新发送验证邮件。"
-    );
-    expect(getVerificationLinkErrorMessage("INVALID_TOKEN")).toBe(
-      "验证链接无效，请重新发送验证邮件。"
-    );
-    expect(getVerificationLinkErrorMessage("UNEXPECTED_ERROR")).toBe(
-      "邮箱验证失败，请重新发送验证邮件。"
-    );
-    expect(getVerificationLinkErrorMessage(null)).toBeNull();
   });
 });

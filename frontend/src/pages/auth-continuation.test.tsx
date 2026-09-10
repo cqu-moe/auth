@@ -145,7 +145,7 @@ describe("VerifyEmail return handling", () => {
     window.dispatchEvent(new Event("focus"));
     await Promise.resolve();
     expect(authMocks.refetch).toHaveBeenCalledTimes(1);
-    expect(container.textContent).toContain("重新发送验证邮件");
+    expect(container.textContent).toContain("重新发送验证码");
 
     act(() => root.unmount());
     window.dispatchEvent(new Event("focus"));
@@ -157,7 +157,7 @@ describe("VerifyEmail return handling", () => {
   it("preserves the binding target when signing out from verification", async () => {
     await renderPage(createElement(VerifyEmail), withRedirectParam("/verify-email", binding));
     const signOut = Array.from(container.querySelectorAll("button"))
-      .find((button) => button.textContent === "退出登录");
+      .find((button) => button.textContent === "退出当前账户");
     await act(async () => {
       signOut?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await Promise.resolve();

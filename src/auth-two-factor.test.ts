@@ -109,7 +109,7 @@ describe("native two-factor authentication", () => {
     vi.useRealTimers();
   });
 
-  it("enables Better Auth two-factor and native email-change OTP", () => {
+  it("enables Better Auth two-factor and native email verification OTP", () => {
     const { auth, database } = authForTest();
     const plugins = auth.options.plugins ?? [];
     const pluginIds = plugins.map((plugin) => plugin.id);
@@ -125,7 +125,7 @@ describe("native two-factor authentication", () => {
       "/email-otp/request-password-reset",
       "/forget-password/email-otp",
       "/email-otp/reset-password",
-      "/email-otp/verify-email",
+      "/verify-email",
     ]);
     expect(plugins.at(-1)?.id).toBe("custom-session");
     expect(emailOtp.options).toMatchObject({
@@ -135,6 +135,7 @@ describe("native two-factor authentication", () => {
       storeOTP: "hashed",
       resendStrategy: "rotate",
       disableSignUp: true,
+      overrideDefaultEmailVerification: true,
       changeEmail: { enabled: true, verifyCurrentEmail: true },
     });
     expect(twoFactor.options).toMatchObject({
@@ -166,6 +167,7 @@ describe("native two-factor authentication", () => {
         "/two-factor/verify-backup-code": { window: 60, max: 5 },
         "/email-otp/send-verification-otp": { window: 60, max: 3 },
         "/email-otp/check-verification-otp": { window: 60, max: 5 },
+        "/email-otp/verify-email": { window: 60, max: 5 },
         "/email-otp/request-email-change": { window: 60, max: 5 },
         "/email-otp/change-email": { window: 60, max: 5 },
       },
@@ -180,7 +182,6 @@ describe("native two-factor authentication", () => {
       ["/email-otp/request-password-reset", { email: "user@example.com" }],
       ["/forget-password/email-otp", { email: "user@example.com" }],
       ["/email-otp/reset-password", { email: "user@example.com", otp: "000000", password: "new-password123" }],
-      ["/email-otp/verify-email", { email: "user@example.com", otp: "000000" }],
     ] as const;
 
     for (const [path, body] of blockedRequests) {
@@ -189,6 +190,57 @@ describe("native two-factor authentication", () => {
     }
 
     expect(sendEmail).not.toHaveBeenCalled();
+    database.close();
+  });
+
+  it("sends a six-digit OTP instead of a verification link after sign-up", async () => {
+    const { auth, database } = authForTest();
+    const { runMigrations } = await getMigrations(auth.options);
+    await runMigrations();
+
+    await signUp(auth);
+
+    const html = sendEmail.mock.calls.at(-1)?.[0]?.html as string | undefined;
+    expect(html).toMatch(/>\d{6}</);
+    expect(html).not.toContain("href=");
+    expect(html).not.toContain("/api/auth/verify-email");
+    database.close();
+  });
+
+  it("verifies a sign-up email OTP exactly once and rejects legacy links", async () => {
+    const { auth, database } = authForTest();
+    const { runMigrations } = await getMigrations(auth.options);
+    await runMigrations();
+    const headers = await signUp(auth);
+    sendEmail.mockClear();
+
+    const sent = await post(auth, "/email-otp/send-verification-otp", headers, {
+      email: "user@example.com",
+      type: "email-verification",
+    });
+    expect(sent.status).toBe(200);
+    const otp = otpFromEmail();
+
+    const verified = await post(auth, "/email-otp/verify-email", headers, {
+      email: "user@example.com",
+      otp,
+    });
+    expect(verified.status).toBe(200);
+    expect(await verified.json()).toMatchObject({
+      status: true,
+      user: { email: "user@example.com", emailVerified: true },
+    });
+
+    const reused = await post(auth, "/email-otp/verify-email", headers, {
+      email: "user@example.com",
+      otp,
+    });
+    expect(reused.status).toBe(400);
+
+    const legacy = await auth.handler(
+      new Request("http://localhost:8787/api/auth/verify-email?token=legacy")
+    );
+    expect(legacy.status).toBe(404);
     database.close();
   });
 
@@ -323,6 +375,7 @@ describe("native two-factor authentication", () => {
       ["/two-factor/verify-backup-code", 5],
       ["/email-otp/send-verification-otp", 3],
       ["/email-otp/check-verification-otp", 5],
+      ["/email-otp/verify-email", 5],
       ["/email-otp/request-email-change", 5],
       ["/email-otp/change-email", 5],
     ] as const;

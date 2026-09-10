@@ -77,7 +77,6 @@ export default function Register() {
       password,
       name,
       code,
-      callbackURL: withRedirectParam("/verify-email?verified=1", postLoginRedirect),
     } as Parameters<
       typeof authClient.signUp.email
     >[0] & { code: string };

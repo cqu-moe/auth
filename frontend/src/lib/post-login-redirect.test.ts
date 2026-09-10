@@ -64,21 +64,21 @@ describe("postLoginRedirectFromSearch", () => {
 describe("withRedirectParam", () => {
   it("strictly encodes values that better-auth relative callback URLs accept", () => {
     const target = "https://schedule.cqu.moe/订阅?title=Hi!~*'()";
-    const callbackURL = withRedirectParam("/verify-email?verified=1", target);
+    const callbackURL = withRedirectParam("/verify-email?mode=otp", target);
 
     expect(callbackURL).toMatch(
-      /^\/verify-email\?verified=1&redirect=[\w\-.%]+$/
+      /^\/verify-email\?mode=otp&redirect=[\w\-.%]+$/
     );
     expect(callbackURL).toMatch(betterAuthRelativeCallbackPattern);
   });
 
   it("joins onto an existing query and preserves the target verbatim when decoded", () => {
     const callbackURL = withRedirectParam(
-      "/verify-email?verified=1",
+      "/verify-email?mode=otp",
       "https://schedule.cqu.moe/dashboard"
     );
     expect(callbackURL).toBe(
-      "/verify-email?verified=1&redirect=https%3A%2F%2Fschedule.cqu.moe%2Fdashboard"
+      "/verify-email?mode=otp&redirect=https%3A%2F%2Fschedule.cqu.moe%2Fdashboard"
     );
     expect(
       new URLSearchParams(callbackURL.split("?")[1]).get("redirect")

@@ -110,14 +110,6 @@ export function createAuth(env: Env, request: Request) {
         emailVerification: {
           sendOnSignUp: true,
           autoSignInAfterVerification: true,
-          sendVerificationEmail: async ({ user, url }) => {
-            await getResend().emails.send({
-              from: "auth.cqu.moe <noreply@cqu.moe>",
-              to: user.email,
-              subject: "验证你的邮箱 - auth.cqu.moe",
-              html: `<p>点击链接验证邮箱：<a href="${url}">${url}</a></p>`,
-            });
-          },
         },
         disabledPaths: [
           "/token",
@@ -125,7 +117,7 @@ export function createAuth(env: Env, request: Request) {
           "/email-otp/request-password-reset",
           "/forget-password/email-otp",
           "/email-otp/reset-password",
-          "/email-otp/verify-email",
+          "/verify-email",
         ],
         plugins: [
           admin({
@@ -161,8 +153,8 @@ export function createAuth(env: Env, request: Request) {
                     intro: "请输入以下验证码，完成登录邮箱更换。",
                   }
                 : {
-                    subject: "确认当前登录邮箱 - auth.cqu.moe",
-                    intro: "请输入以下验证码，确认是你本人在更换登录邮箱。",
+                    subject: "验证你的邮箱 - auth.cqu.moe",
+                    intro: "请输入以下验证码，完成邮箱验证。",
                   };
 
               await getResend().emails.send({
@@ -178,6 +170,7 @@ export function createAuth(env: Env, request: Request) {
             storeOTP: "hashed",
             resendStrategy: "rotate",
             disableSignUp: true,
+            overrideDefaultEmailVerification: true,
             changeEmail: { enabled: true, verifyCurrentEmail: true },
           }),
           twoFactor({
@@ -246,6 +239,7 @@ export function createAuth(env: Env, request: Request) {
             "/two-factor/verify-backup-code": { window: 60, max: 5 },
             "/email-otp/send-verification-otp": { window: 60, max: 3 },
             "/email-otp/check-verification-otp": { window: 60, max: 5 },
+            "/email-otp/verify-email": { window: 60, max: 5 },
             "/email-otp/request-email-change": { window: 60, max: 5 },
             "/email-otp/change-email": { window: 60, max: 5 },
           },
