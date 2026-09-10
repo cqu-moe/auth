@@ -111,3 +111,9 @@
 - Local Schedule validation commits: `1e91562` and `543d0f1` on top of Task 10.
 - Full results and unverified real-service boundaries: `acceptance-results.md`.
 - Release boundary: no push, deploy, production migration, production Queue action, or real-account path was performed.
+
+## Release — Auth Durable Object migration history repair
+
+- Red deployment evidence: GitHub Actions run `34496282836` passed backend/frontend checks, build, and production D1 migrations, then Cloudflare rejected Worker deployment with code `10074`: the published script had migration tag `v3`, which was absent from `wrangler.jsonc`, so Wrangler attempted to replay `v1` against the existing `CquSessionDO` class.
+- Mechanical difference: production previously received the Quicklogin `v3` Durable Object namespace, while the later local rollback removed its migration-history entry along with the feature. Restored only the historical `v3` declaration so the legacy migration chain matches production. No Quicklogin binding, export, or behavior was restored.
+- Safety boundary: did not add a `deleted_classes` migration because that would permanently delete the existing `CquQuickloginAccountDO` namespace and is outside this onboarding release.

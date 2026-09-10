@@ -73,6 +73,10 @@
     {
       "tag": "v2",
       "new_sqlite_classes": ["CquLoginContainer"]
+    },
+    {
+      "tag": "v3",
+      "new_sqlite_classes": ["CquQuickloginAccountDO"]
     }
   ],
 
