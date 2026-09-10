@@ -78,6 +78,11 @@ import {
   type HarvestFetch,
 } from "../services/cqu-node-protocol";
 import type { Env } from "../types";
+import type {
+  DeviceLoginRequest,
+  DeviceLoginResult,
+} from "../services/quicklogin/contracts";
+import { quickloginBrowserRoute } from "../services/quicklogin/browser-routing";
 
 // keepalive 每个探针经国内节点提取 1 个青果 IP(连 CQU 出站经青果)。频率直接决定青果消耗:
 // 15min→96 个/天, 60min→24 个/天 —— 取 60min 省青果(单账号够用)。代价: 会话若在两次探针
@@ -145,6 +150,17 @@ interface LoginInFlight {
   startedAt: number;
   /** 新格式:该锁与 browserRoute:<token> 持久记录成对出现(部署前旧锁无此字段)。 */
   browserRouteVersion?: 1;
+}
+
+interface QuickloginLoginInFlight extends LoginInFlight {
+  deviceId: string;
+  generation: number;
+  bindingEpoch: number;
+}
+
+interface QuickloginCachedLoginResult {
+  result: Extract<DeviceLoginResult, { kind: "success" }>;
+  expiresAt: number;
 }
 
 // 绑定确认码暂存(kind=bind_confirm)。Phase 6 经 WS 推浏览器后清除。
@@ -235,6 +251,7 @@ export class CquSessionDO extends DurableObject<Env> {
   private lastLoginFailReason: "credential" | "transient" = "transient";
   // 全部浏览器出站均经 CF 容器 stub;此直连客户端仅作历史回滚窗口保留。
   private ssoClient = new CquSsoClient();
+  private quickloginFlights = new Map<string, Promise<DeviceLoginResult>>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -436,6 +453,7 @@ export class CquSessionDO extends DurableObject<Env> {
             encryptedPassword: string;
             iv: string;
           }>();
+          await this.bumpQuickloginBindingEpoch();
           // 凭据更新后旧 aTrust 会话与在途登录不再可信，只清理 aTrust 轨道。
           await this.resetAtrustAuthState();
           await this.ctx.storage.put<StoredCredentials>("credentials", {
@@ -491,6 +509,13 @@ export class CquSessionDO extends DurableObject<Env> {
             deadlineAt: recipe.deadlineAt,
           });
           return Response.json(result);
+        }
+        case "quicklogin-login": {
+          const body = await request.json<DeviceLoginRequest>();
+          return Response.json(await this.quickloginLogin(body));
+        }
+        case "quicklogin-binding": {
+          return Response.json(await this.getQuickloginBindingEpoch());
         }
         case "deposit-code": {
           const body = await request.json<DepositCodePayload>();
@@ -1340,6 +1365,307 @@ export class CquSessionDO extends DurableObject<Env> {
    * 凭据更新/撤销时清理 aTrust 专有轨道。先删 lock，使在途响应回来后的
    * token 复核失败、不会复活会话；再释放验证码租约。
    */
+  private quickloginLockKey(deviceId: string): string {
+    return `quickloginLogin:${deviceId}`;
+  }
+
+  private quickloginResultKey(deviceId: string, generation: number): string {
+    return `quickloginResult:${deviceId}:${generation}`;
+  }
+
+  private async bumpQuickloginBindingEpoch(): Promise<number> {
+    const current =
+      (await this.ctx.storage.get<number>("quickloginBindingEpoch")) ?? 0;
+    const next =
+      Number.isSafeInteger(current) && current >= 0
+        ? Math.min(current + 1, Number.MAX_SAFE_INTEGER)
+        : 1;
+    const [locks, results] = await Promise.all([
+      this.ctx.storage.list<QuickloginLoginInFlight>({
+        prefix: "quickloginLogin:",
+      }),
+      this.ctx.storage.list<QuickloginCachedLoginResult>({
+        prefix: "quickloginResult:",
+      }),
+    ]);
+    const keys = [...locks.keys(), ...results.keys()];
+    for (const lock of locks.values()) {
+      keys.push(this.browserRouteKey(lock.token));
+    }
+    if (keys.length > 0) await this.ctx.storage.delete(keys);
+    await this.ctx.storage.put("quickloginBindingEpoch", next);
+    this.quickloginFlights.clear();
+    try {
+      await this.clearVerificationCodeLeasesByKind("quicklogin");
+    } catch {
+      // A live owner remains fenced until its normal finally/TTL path.
+    }
+    return next;
+  }
+
+  private async getQuickloginBindingEpoch(): Promise<{
+    bound: boolean;
+    epoch: number;
+  }> {
+    await this.loadState();
+    const [storedEpoch, status, credentials] = await Promise.all([
+      this.ctx.storage.get<number>("quickloginBindingEpoch"),
+      this.getStatus(),
+      this.ctx.storage.get<StoredCredentials>("credentials"),
+    ]);
+    const epoch =
+      Number.isSafeInteger(storedEpoch) && (storedEpoch ?? -1) >= 0
+        ? storedEpoch!
+        : 0;
+    return {
+      bound:
+        this.state !== null &&
+        credentials !== undefined &&
+        status !== "unbound" &&
+        status !== "revoked",
+      epoch,
+    };
+  }
+
+  private async quickloginLogin(
+    input: DeviceLoginRequest
+  ): Promise<DeviceLoginResult> {
+    if (
+      !input.ownerUserId ||
+      !input.deviceId ||
+      input.deviceId.includes(":") ||
+      !Number.isSafeInteger(input.generation) ||
+      input.generation < 0
+    ) {
+      return { kind: "cancelled" };
+    }
+    const key = `${input.deviceId}:${input.generation}`;
+    const resultKey = this.quickloginResultKey(
+      input.deviceId,
+      input.generation
+    );
+    const cached =
+      (await this.ctx.storage.get<QuickloginCachedLoginResult>(resultKey)) ??
+      null;
+    if (cached?.expiresAt && cached.expiresAt > Date.now()) {
+      return cached.result;
+    }
+    if (cached) await this.ctx.storage.delete(resultKey);
+    const existing = this.quickloginFlights.get(key);
+    if (existing) return existing;
+
+    const flight = this.runQuickloginLogin(input);
+    this.quickloginFlights.set(key, flight);
+    try {
+      const result = await flight;
+      if (result.kind === "success") {
+        await this.ctx.storage.put(resultKey, {
+          result,
+          expiresAt: Date.now() + 60_000,
+        } satisfies QuickloginCachedLoginResult);
+      }
+      return result;
+    } finally {
+      if (this.quickloginFlights.get(key) === flight) {
+        this.quickloginFlights.delete(key);
+      }
+    }
+  }
+
+  private async runQuickloginLogin(
+    input: DeviceLoginRequest
+  ): Promise<DeviceLoginResult> {
+    await this.loadState();
+    const binding = await this.getQuickloginBindingEpoch();
+    const status = await this.getStatus();
+    const credentials =
+      (await this.ctx.storage.get<StoredCredentials>("credentials")) ?? null;
+    if (
+      !binding.bound ||
+      !this.state ||
+      this.state.userId !== input.ownerUserId ||
+      !credentials ||
+      status === "unbound" ||
+      status === "revoked"
+    ) {
+      return { kind: "needs_reauth", reason: "unbound" };
+    }
+
+    const lockKey = this.quickloginLockKey(input.deviceId);
+    const token = crypto.randomUUID();
+    const route = quickloginBrowserRoute(input.ownerUserId, input.deviceId);
+    const now = Date.now();
+    let acquired = false;
+    let staleGeneration = false;
+    await this.ctx.storage.transaction(async (tx) => {
+      const current =
+        (await tx.get<QuickloginLoginInFlight>(lockKey)) ?? null;
+      if (current && now - current.startedAt <= LOGIN_LOCK_TTL_MS) {
+        if (current.generation > input.generation) staleGeneration = true;
+        return;
+      }
+      if (current) await tx.delete(this.browserRouteKey(current.token));
+      const lock: QuickloginLoginInFlight = {
+        token,
+        deviceId: input.deviceId,
+        generation: input.generation,
+        bindingEpoch: binding.epoch,
+        startedAt: now,
+        browserRouteVersion: 1,
+      };
+      const record: LoginRouteRecord = {
+        token,
+        kind: "quicklogin",
+        route,
+        createdAt: now,
+        expiresAt: now + LOGIN_LOCK_TTL_MS + 60_000,
+      };
+      await tx.put({
+        [lockKey]: lock,
+        [this.browserRouteKey(token)]: record,
+      });
+      acquired = true;
+    });
+    await this.ctx.storage.sync();
+    if (!acquired) {
+      return staleGeneration
+        ? { kind: "cancelled" }
+        : { kind: "temporary_unavailable", retryAfterMs: 1_000 };
+    }
+
+    let leaseAcquired = false;
+    let runAbort: AbortController | null = null;
+    const recheck = async () => {
+      const [latestState, latestStatus, latestEpoch, latestLock] =
+        await Promise.all([
+          this.ctx.storage.get<SessionState>("state"),
+          this.getStatus(),
+          this.ctx.storage.get<number>("quickloginBindingEpoch"),
+          this.ctx.storage.get<QuickloginLoginInFlight>(lockKey),
+        ]);
+      if (
+        !latestState ||
+        latestState.userId !== input.ownerUserId ||
+        latestStatus === "unbound" ||
+        latestStatus === "revoked" ||
+        (latestEpoch ?? 0) !== binding.epoch ||
+        latestLock?.token !== token ||
+        latestLock.generation !== input.generation
+      ) {
+        throw new CquSsoError(
+          "LOGIN_BINDING_CHANGED",
+          "quicklogin binding changed"
+        );
+      }
+    };
+
+    try {
+      await recheck();
+      const loginRoute = await this.prepareLoginRoute(
+        token,
+        route,
+        lockKey,
+        recheck
+      );
+      const password = await decrypt(
+        credentials.encryptedPassword,
+        credentials.iv,
+        this.env.ENCRYPTION_KEY
+      );
+      const permitRole = await this.acquireVerificationCodeLease(
+        token,
+        "quicklogin"
+      );
+      leaseAcquired = true;
+      const deadline = resolveBrowserDeadline(undefined, Date.now());
+      const remainingMs = remainingBrowserBudget(deadline, Date.now());
+      runAbort = new AbortController();
+      const runBody: Record<string, unknown> = {
+        studentId: this.state.studentId,
+        password,
+        service: DUMMY_SERVICE,
+        method: "mail",
+        session: token,
+        queuedPermit: permitRole === "queued",
+      };
+      if (loginRoute.backend === "cloudflare") {
+        runBody.operationTimeoutMs = Math.max(
+          1,
+          remainingMs - BROWSER_CLEANUP_MARGIN_MS
+        );
+      }
+      const request = new Request(`${BROWSER_BASE}/run`, {
+        method: "POST",
+        signal: AbortSignal.any([
+          runAbort.signal,
+          AbortSignal.timeout(remainingMs),
+        ]),
+        body: JSON.stringify(runBody),
+      });
+      if (loginRoute.bootId) {
+        request.headers.set("X-Cqu-Expected-Boot-Id", loginRoute.bootId);
+      }
+      const response = await fetchBrowser(this.env, loginRoute, request);
+      const result = await response
+        .json<ContainerRunResult>()
+        .catch(() => null);
+      await recheck();
+
+      if (result?.error === "PASSWORD_REJECTED") {
+        return {
+          kind: "needs_reauth",
+          reason: "credentials_rejected",
+        };
+      }
+      if (
+        !response.ok ||
+        !result?.ok ||
+        !result.state ||
+        !hasValidTgt(result.state)
+      ) {
+        return { kind: "temporary_unavailable", retryAfterMs: 60_000 };
+      }
+      await this.clearConsumedLoginCode();
+      return {
+        kind: "success",
+        storageState: JSON.stringify(result.state),
+        loginAt: Date.now(),
+        bindingEpoch: binding.epoch,
+      };
+    } catch (error) {
+      const code =
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        typeof error.code === "string"
+          ? error.code
+          : null;
+      if (
+        code === "LOGIN_BINDING_CHANGED" ||
+        code === "CODE_OWNER_REPLACED" ||
+        code === "CODE_ROUTE_UNAVAILABLE"
+      ) {
+        return { kind: "cancelled" };
+      }
+      return { kind: "temporary_unavailable", retryAfterMs: 60_000 };
+    } finally {
+      runAbort?.abort();
+      try {
+        await this.releaseVerificationCodeLease(token, leaseAcquired);
+      } catch {
+        // The persisted owner fence remains authoritative until its TTL.
+      }
+      const current =
+        (await this.ctx.storage.get<QuickloginLoginInFlight>(lockKey)) ?? null;
+      if (current?.token === token) {
+        await this.ctx.storage.delete([
+          lockKey,
+          this.browserRouteKey(token),
+        ]);
+      }
+    }
+  }
+
   private async resetAtrustAuthState(): Promise<string> {
     const generation = await this.rotateAtrustGeneration();
     await this.ctx.storage.delete("atrustLoginInFlight");
@@ -1396,13 +1722,21 @@ export class CquSessionDO extends DurableObject<Env> {
 
   private async destroy(): Promise<void> {
     const fence = await this.snapshotLiveCodeLeaseOwner();
+    const previousEpoch =
+      (await this.ctx.storage.get<number>("quickloginBindingEpoch")) ?? 0;
+    const nextEpoch =
+      Number.isSafeInteger(previousEpoch) && previousEpoch >= 0
+        ? Math.min(previousEpoch + 1, Number.MAX_SAFE_INTEGER)
+        : 1;
     await this.ctx.storage.deleteAll();
     this.state = null;
+    this.quickloginFlights.clear();
     // deleteAll 已清掉 status/loginInFlight/pendingCode/state/credentials/reloginAttempts/reloginFailures;
     // 显式回到 unbound, 让后续 status 查询语义清晰(而非依赖默认值)。
     await this.ctx.storage.put({
       status: "unbound" satisfies CquStatus,
       atrustGeneration: crypto.randomUUID(),
+      quickloginBindingEpoch: nextEpoch,
     });
     await this.restoreCodeLeaseOwnerFence(fence);
   }
@@ -1418,6 +1752,7 @@ export class CquSessionDO extends DurableObject<Env> {
    */
   private async revoke(): Promise<void> {
     const fence = await this.snapshotLiveCodeLeaseOwner();
+    await this.bumpQuickloginBindingEpoch();
     // 刻意直写 setStatus("revoked") 而非走 nextStatus 状态机: 撤销要从任意状态(含空/
     // unbound 的 DO, admin 端点对未初始化的 DO 也会发 revoke)强制置位; 状态机表里
     // unbound 无 REVOKE 转移, 走表会停在 unbound 而漏置墓碑。勿"修回"成走表。
@@ -2748,13 +3083,13 @@ export class CquSessionDO extends DurableObject<Env> {
   private async prepareLoginRoute(
     token: string,
     route: BrowserRoute,
-    lockKey: "loginInFlight" | "atrustLoginInFlight",
+    lockKey: string,
     recheck: () => Promise<void>,
     budgetMs: number = LOGIN_ROUTE_PREPARE_BUDGET_MS
   ): Promise<BrowserRoute> {
     if (route.backend !== "cloudflare") return route;
     const deadline = Date.now() + budgetMs;
-    const stub = this.getLoginContainer(route.userId);
+    const stub = this.getLoginContainer(route.containerKey ?? route.userId);
     let bootId: string | null = null;
     for (;;) {
       try {
