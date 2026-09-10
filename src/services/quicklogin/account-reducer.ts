@@ -39,6 +39,7 @@ export type AccountCommand =
   | { type: "set_device_enabled"; deviceId: string; enabled: boolean }
   | { type: "set_master_enabled"; enabled: boolean }
   | { type: "revoke_device"; deviceId: string }
+  | { type: "notify_binding_changed" }
   | {
       type: "heartbeat";
       deviceId: string;
@@ -380,6 +381,20 @@ export function reduceAccount(
       eventSeeds.push({ kind: "projection" });
       break;
     }
+    case "notify_binding_changed": {
+      for (const device of Object.values(state.devices)) {
+        if (device.revokedAt !== null) continue;
+        device.generation = increment(device.generation);
+        changed = true;
+        eventSeeds.push({
+          kind: "device-notify",
+          deviceId: device.deviceId,
+          generation: device.generation,
+        });
+      }
+      if (changed) eventSeeds.push({ kind: "projection" });
+      break;
+    }
     case "apply_quota": {
       validateDeviceLimit(command.limit);
       const selection = selectQuotaDevices(
@@ -436,6 +451,7 @@ export function reduceAccount(
       break;
     case "revoke_device":
     case "heartbeat":
+    case "notify_binding_changed":
       result = undefined;
       break;
   }

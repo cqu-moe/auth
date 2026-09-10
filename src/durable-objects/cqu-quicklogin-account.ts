@@ -28,6 +28,7 @@ import {
 import { selectQuotaDevices, validateDeviceLimit } from "../services/quicklogin/policy";
 import { projectAccount } from "../services/quicklogin/projection";
 import { QuickloginDeviceClient } from "../services/quicklogin/device-client";
+import { revokeProviderGrantFamily } from "../services/quicklogin/oauth-grants";
 
 const ACCOUNT_KEY = "account";
 const OWNER_KEY = "ownerUserId";
@@ -258,6 +259,12 @@ export class CquQuickloginAccountDO extends DurableObject<Env> {
           );
           break;
         }
+        case "notify_binding_changed":
+          result = await this.mutate(
+            { type: "notify_binding_changed" },
+            Date.now()
+          );
+          break;
         case "preview_quota":
           result = await this.previewQuota(
             validateDeviceLimit(payload.limit),
@@ -358,6 +365,15 @@ export class CquQuickloginAccountDO extends DurableObject<Env> {
         event.deviceId
       );
       await new QuickloginDeviceClient(this.env).notifyDevice(authority);
+      return true;
+    }
+    if (event.kind === "revoke-oauth-family" && event.grantId) {
+      await revokeProviderGrantFamily(
+        this.env,
+        ownerUserId,
+        this.env.QUICKLOGIN_CLIENT_ID,
+        event.grantId
+      );
       return true;
     }
     return false;

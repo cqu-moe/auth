@@ -22,6 +22,7 @@ type AccountOperation =
   | "assert_grant"
   | "list_devices"
   | "heartbeat"
+  | "notify_binding_changed"
   | "preview_quota"
   | "apply_quota";
 
@@ -149,6 +150,21 @@ export class QuickloginAccountClient {
     now: number
   ): Promise<void> {
     await this.call(userId, "heartbeat", { deviceId, input, ip, now });
+  }
+
+  async notifyBindingChanged(userId: string): Promise<void> {
+    await this.call(userId, "notify_binding_changed", {});
+  }
+
+  async getQuickloginTicketEligibility(userId: string): Promise<{
+    masterEnabled: boolean;
+    deviceLimit: number;
+  }> {
+    const list = await this.listDevices(userId, Date.now());
+    return {
+      masterEnabled: list.masterEnabled,
+      deviceLimit: list.deviceLimit,
+    };
   }
 
   previewQuota(

@@ -83,6 +83,7 @@ import type {
   DeviceLoginResult,
 } from "../services/quicklogin/contracts";
 import { quickloginBrowserRoute } from "../services/quicklogin/browser-routing";
+import { QuickloginAccountClient } from "../services/quicklogin/account-client";
 
 // keepalive 每个探针经国内节点提取 1 个青果 IP(连 CQU 出站经青果)。频率直接决定青果消耗:
 // 15min→96 个/天, 60min→24 个/天 —— 取 60min 省青果(单账号够用)。代价: 会话若在两次探针
@@ -453,7 +454,7 @@ export class CquSessionDO extends DurableObject<Env> {
             encryptedPassword: string;
             iv: string;
           }>();
-          await this.bumpQuickloginBindingEpoch();
+          await this.bumpQuickloginBindingEpoch(body.userId);
           // 凭据更新后旧 aTrust 会话与在途登录不再可信，只清理 aTrust 轨道。
           await this.resetAtrustAuthState();
           await this.ctx.storage.put<StoredCredentials>("credentials", {
@@ -728,14 +729,18 @@ export class CquSessionDO extends DurableObject<Env> {
     // quicklogin flag 永远不是「取票闸」本身(出票的权威校验在 host 校验 + scope),
     // 它只表达「用户是否同意插件替他用任意广路径取 ST」—— 未同意则广路径直接拒。
     if (broad) {
-      const caps = await resolveCaps(this.env.DATABASE, this.state.userId, "cqu");
-      // 两道 flag 都要:quicklogin_access = admin 授予的功能开放闸(灰度/准入,可整体撤销);
-      // quicklogin = 用户本人 opt-in 同意。缺任一即拒 —— 撤销 access 后不能留有
-      // 「设置页已隐藏、插件却仍能取票」的失控状态。
-      if (
-        caps.cqu?.quicklogin_access !== true ||
-        caps.cqu?.quicklogin !== true
-      ) {
+      const deviceMode = (this.env as Env & { QUICKLOGIN_DEVICE_MODE?: string })
+        .QUICKLOGIN_DEVICE_MODE === "on";
+      const enabled = deviceMode
+        ? await new QuickloginAccountClient(this.env)
+          .getQuickloginTicketEligibility(this.state.userId)
+          .then((policy) => policy.masterEnabled && policy.deviceLimit > 0)
+        : await resolveCaps(this.env.DATABASE, this.state.userId, "cqu")
+          .then((caps) =>
+            caps.cqu?.quicklogin_access === true &&
+            caps.cqu?.quicklogin === true
+          );
+      if (!enabled) {
         throw new CquSsoError(
           "QUICKLOGIN_NOT_ENABLED",
           "未开启浏览器插件快捷登录"
@@ -1382,7 +1387,7 @@ export class CquSessionDO extends DurableObject<Env> {
     return `quickloginResult:${deviceId}:${generation}`;
   }
 
-  private async bumpQuickloginBindingEpoch(): Promise<number> {
+  private async bumpQuickloginBindingEpoch(ownerUserId?: string): Promise<number> {
     const current =
       (await this.ctx.storage.get<number>("quickloginBindingEpoch")) ?? 0;
     const next =
@@ -1408,6 +1413,10 @@ export class CquSessionDO extends DurableObject<Env> {
       await this.clearVerificationCodeLeasesByKind("quicklogin");
     } catch {
       // A live owner remains fenced until its normal finally/TTL path.
+    }
+    if (ownerUserId) {
+      await new QuickloginAccountClient(this.env)
+        .notifyBindingChanged(ownerUserId);
     }
     return next;
   }
@@ -1730,6 +1739,8 @@ export class CquSessionDO extends DurableObject<Env> {
   }
 
   private async destroy(): Promise<void> {
+    await this.loadState();
+    const ownerUserId = this.state?.userId;
     const fence = await this.snapshotLiveCodeLeaseOwner();
     const previousEpoch =
       (await this.ctx.storage.get<number>("quickloginBindingEpoch")) ?? 0;
@@ -1748,6 +1759,10 @@ export class CquSessionDO extends DurableObject<Env> {
       quickloginBindingEpoch: nextEpoch,
     });
     await this.restoreCodeLeaseOwnerFence(fence);
+    if (ownerUserId) {
+      await new QuickloginAccountClient(this.env)
+        .notifyBindingChanged(ownerUserId);
+    }
   }
 
   /**
@@ -1760,8 +1775,9 @@ export class CquSessionDO extends DurableObject<Env> {
    * cqu_bind_addresses.status=revoked 承载; 这里不 deleteAll, 故 revoked 是可逆禁用而非彻底清除。
    */
   private async revoke(): Promise<void> {
+    await this.loadState();
     const fence = await this.snapshotLiveCodeLeaseOwner();
-    await this.bumpQuickloginBindingEpoch();
+    await this.bumpQuickloginBindingEpoch(this.state?.userId);
     // 刻意直写 setStatus("revoked") 而非走 nextStatus 状态机: 撤销要从任意状态(含空/
     // unbound 的 DO, admin 端点对未初始化的 DO 也会发 revoke)强制置位; 状态机表里
     // unbound 无 REVOKE 转移, 走表会停在 unbound 而漏置墓碑。勿"修回"成走表。
