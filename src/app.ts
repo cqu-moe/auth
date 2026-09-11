@@ -17,6 +17,7 @@ import { problem } from "./api/problem";
 import { createAuthApi } from "./api/v1/auth";
 import { AUTH_BASE_PATH } from "../shared/api-paths";
 import { buildOpenApiDocument } from "./api/openapi/document";
+import { getBetterAuthOpenApi, mergeBetterAuthOpenApi } from "./api/openapi/auth";
 
 export function createApp() {
   const app = new Hono<HonoEnv>();
@@ -68,9 +69,11 @@ export function createApp() {
   app.route("/api/cqu", cqu);
   app.route("/api/admin", admin);
 
-  app.get("/api/v1/openapi.json", (c) =>
-    c.json(buildOpenApiDocument(listHttpOperations(app)))
-  );
+  app.get("/api/v1/openapi.json", async (c) => {
+    const base = buildOpenApiDocument(listHttpOperations(app));
+    const authDocument = await getBetterAuthOpenApi(c.env, c.req.raw);
+    return c.json(mergeBetterAuthOpenApi(base, authDocument));
+  });
 
   const operations = listHttpOperations(app);
   const apiFallback = (c: Parameters<typeof problem>[0]) => {

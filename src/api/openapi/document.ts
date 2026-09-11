@@ -44,14 +44,84 @@ function successSchemaFor(operation: HttpOperation): Record<string, unknown> | u
   return undefined;
 }
 
+const entitlementItemRef = { $ref: "#/components/schemas/EntitlementItem" };
+
+function requestSchemaFor(operation: HttpOperation): Record<string, unknown> | undefined {
+  const path = operation.path.replace(/^\/api\/(?:v1\/)?admin/, "/admin");
+  if (operation.path === "/api/v1/cqu/service-tickets" && operation.method === "POST") {
+    return { oneOf: [
+      { type: "object", additionalProperties: false, required: ["service"], properties: { service: { type: "string", enum: ["jwxt", "jxpj", "library", "card"] } } },
+      { type: "object", additionalProperties: false, required: ["serviceUrl"], properties: { serviceUrl: { type: "string", format: "uri" } } },
+    ] };
+  }
+  if (operation.path.endsWith("/cqu/binding") && operation.method === "POST") {
+    return { type: "object", additionalProperties: false, properties: { kind: { type: "string", enum: ["direct", "forward"] } } };
+  }
+  if (operation.path.endsWith("/cqu/binding/credentials") && operation.method === "PUT") {
+    return { type: "object", additionalProperties: false, required: ["studentId", "password"], properties: { studentId: { type: "string", minLength: 1 }, password: { type: "string", minLength: 1, writeOnly: true } } };
+  }
+  if (operation.path.endsWith("/cqu/quicklogin") && operation.method === "PUT") {
+    return { type: "object", additionalProperties: false, required: ["enabled"], properties: { enabled: { type: "boolean" } } };
+  }
+  if (/^\/admin\/users\/:id$/.test(path) && operation.method === "PATCH") {
+    return operation.path.startsWith("/api/v1")
+      ? { oneOf: [
+          { type: "object", additionalProperties: false, required: ["banned"], properties: { banned: { type: "boolean" } } },
+          { type: "object", additionalProperties: false, required: ["role"], properties: { role: { type: "string", enum: ["user", "admin", "superAdmin"] } } },
+        ] }
+      : { type: "object", additionalProperties: false, properties: { action: { type: "string", enum: ["ban", "unban"] }, role: { type: "string", enum: ["user", "admin", "superAdmin"] } } };
+  }
+  if (path.endsWith("/cqu-binding") && operation.method === "PATCH") {
+    return { type: "object", additionalProperties: false, required: ["status"], properties: { status: { type: "string", enum: ["active", "revoked"] } } };
+  }
+  if (path === "/admin/registration-invitations" && operation.method === "POST") {
+    return { type: "object", additionalProperties: false, properties: { preset: { type: ["string", "null"] } } };
+  }
+  if (path === "/admin/registration-settings" && operation.method === "PUT") {
+    return { type: "object", additionalProperties: false, required: ["invitationRequired"], properties: { invitationRequired: { type: "boolean" } } };
+  }
+  if (path.endsWith("/entitlements") && operation.method === "PUT") {
+    return { type: "object", additionalProperties: false, required: ["items"], properties: { items: { type: "array", items: entitlementItemRef } } };
+  }
+  if (path.endsWith("/entitlements") && operation.method === "PATCH") {
+    return { type: "object", additionalProperties: false, required: ["preset"], properties: { preset: { type: "string", minLength: 1 } } };
+  }
+  if (path.endsWith("/entitlements/preset") && operation.method === "POST") {
+    return { type: "object", additionalProperties: false, required: ["preset"], properties: { preset: { type: "string", minLength: 1 } } };
+  }
+  if (path.includes("/entitlement-presets/") && operation.method === "PUT") {
+    return { type: "object", additionalProperties: false, required: ["items"], properties: { items: { type: "array", items: entitlementItemRef } } };
+  }
+  if (path === "/admin/entitlement-default" && operation.method === "PUT") {
+    return { type: "object", additionalProperties: false, required: operation.path.startsWith("/api/v1") ? ["preset"] : [], properties: { preset: { type: ["string", "null"] } } };
+  }
+  if (path.endsWith("/scopes") && operation.method === "PUT") {
+    return { type: "object", additionalProperties: false, required: ["scopes"], properties: { scopes: { type: "array", uniqueItems: true, items: { type: "string", pattern: "^cqu:ticket:[\\w*]+$" } } } };
+  }
+  return undefined;
+}
+
 export function buildOpenApiDocument(operations: readonly HttpOperation[]) {
   const paths: Record<string, Record<string, unknown>> = {};
   for (const operation of operations) {
     const path = openApiPath(operation.path);
-    const parameters = [...path.matchAll(/\{([^}]+)\}/g)].map((match) => ({
+    const parameters: Array<Record<string, unknown>> = [...path.matchAll(/\{([^}]+)\}/g)].map((match) => ({
       name: match[1], in: "path", required: true, schema: { type: "string" },
     }));
+    if (operation.path === "/api/cqu/service-ticket" && operation.method === "GET") {
+      parameters.push(
+        { name: "service", in: "query", required: false, schema: { type: "string" } },
+        { name: "serviceUrl", in: "query", required: false, schema: { type: "string", format: "uri" } }
+      );
+    }
+    if (operation.path.endsWith("/admin/users") && operation.method === "GET") {
+      parameters.push(
+        { name: "page", in: "query", required: false, schema: { type: "integer", minimum: 1 } },
+        { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 100 } }
+      );
+    }
     const successSchema = successSchemaFor(operation);
+    const requestSchema = requestSchemaFor(operation);
     const entry: Record<string, unknown> = {
       operationId: operationId(operation),
       summary: `${operation.method} ${operation.path}`,
@@ -68,6 +138,24 @@ export function buildOpenApiDocument(operations: readonly HttpOperation[]) {
         },
       },
     };
+    if (requestSchema) {
+      entry.requestBody = {
+        required: !(
+          operation.path.endsWith("/cqu/binding") ||
+          operation.path.endsWith("/registration-invitations") ||
+          operation.path.endsWith("/secrets")
+        ),
+        content: { "application/json": { schema: requestSchema } },
+      };
+    }
+    if (operation.path.includes("/entitlements") && operation.method !== "GET") {
+      entry["x-required-permissions"] = operation.method === "DELETE"
+        ? ["entitlement:revoke"]
+        : ["entitlement:assign"];
+    }
+    if (operation.path.includes("/oauth-clients/") && operation.path.endsWith("/scopes") && operation.method === "PUT") {
+      entry["x-required-permissions"] = ["cquScope:assign", "cquScope:revoke"];
+    }
     paths[path] ??= {};
     paths[path][operation.method.toLowerCase()] = entry;
   }

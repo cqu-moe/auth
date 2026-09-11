@@ -5,7 +5,11 @@ import { createApp } from "../src/app";
 import { listHttpOperations } from "../src/api/operations";
 import { buildOpenApiDocument } from "../src/api/openapi/document";
 import { buildCloudflareSchema } from "../src/api/openapi/cloudflare";
+import { DatabaseSync } from "node:sqlite";
+import { getBetterAuthOpenApi, mergeBetterAuthOpenApi } from "../src/api/openapi/auth";
+import type { Env } from "../src/types";
 
+async function main() {
 const root = resolve(process.env.API_OUTPUT_ROOT ?? process.cwd());
 const docsDir = resolve(root, "docs/api");
 const sharedDir = resolve(root, "shared");
@@ -13,7 +17,21 @@ mkdirSync(docsDir, { recursive: true });
 mkdirSync(sharedDir, { recursive: true });
 
 const operations = listHttpOperations(createApp());
-const document = buildOpenApiDocument(operations);
+const database = new DatabaseSync(":memory:");
+const values = new Map<string, string>();
+const env = {
+  DATABASE: database,
+  KV: { get: async (key: string) => values.get(key) ?? null, put: async (key: string, value: string) => values.set(key, value), delete: async (key: string) => values.delete(key) },
+  BETTER_AUTH_URL: "https://auth.cqu.moe",
+  BETTER_AUTH_SECRET: "local-openapi-generation-secret-only-123456789",
+  RESEND_API_KEY: "re_local_generation",
+} as unknown as Env;
+const authDocument = await getBetterAuthOpenApi(env, new Request("https://auth.cqu.moe"));
+const document = mergeBetterAuthOpenApi(
+  buildOpenApiDocument(operations) as unknown as Record<string, any>,
+  authDocument as unknown as Record<string, any>
+);
+database.close();
 const cloudflare = buildCloudflareSchema(document as unknown as Record<string, unknown>);
 const kind = (path: string) => path.includes("/binding/events")
   ? "websocket"
@@ -45,3 +63,6 @@ execFileSync(
   [resolve(docsDir, "openapi.json"), "-o", resolve(sharedDir, "api-types.generated.ts")],
   { stdio: "inherit" }
 );
+}
+
+void main();

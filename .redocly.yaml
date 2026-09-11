@@ -5,3 +5,4 @@ rules:
   operation-operationId-unique: error
   path-parameters-defined: error
   security-defined: error
+  operation-2xx-response: off

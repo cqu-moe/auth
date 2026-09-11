@@ -14,12 +14,16 @@ async function ensureMigrations() {
   migrated = true;
 }
 
-function requestContext(): ExecutionContext {
+function requestContext() {
+  const pending: Promise<unknown>[] = [];
   return {
-    waitUntil() {},
-    passThroughOnException() {},
-    props: {},
-  } as ExecutionContext;
+    context: {
+      waitUntil(promise: Promise<unknown>) { pending.push(promise); },
+      passThroughOnException() {},
+      props: {},
+    } as ExecutionContext,
+    drain: () => Promise.all(pending),
+  };
 }
 
 function cookieHeader(headers: Headers): string {
@@ -40,7 +44,9 @@ async function withFakeResend<T>(run: () => Promise<T>): Promise<T> {
     return Response.json({ id: "local-mail" });
   });
   try {
-    return await run();
+    const result = await run();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return result;
   } finally {
     fetchSpy.mockRestore();
   }
@@ -51,11 +57,16 @@ export async function createApiFixture() {
   const origin = env.BETTER_AUTH_URL;
 
   async function request(path: string, init?: RequestInit) {
-    return withFakeResend(() => Promise.resolve(worker.fetch(
-      new Request(new URL(path, origin), init),
-      env,
-      requestContext()
-    )));
+    return withFakeResend(async () => {
+      const execution = requestContext();
+      const response = await worker.fetch(
+        new Request(new URL(path, origin), init),
+        env,
+        execution.context
+      );
+      await execution.drain();
+      return response;
+    });
   }
 
   async function signIn(role: TestRole): Promise<Headers> {

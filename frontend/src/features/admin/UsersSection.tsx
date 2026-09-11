@@ -154,7 +154,34 @@ export function UsersSection() {
         </div>
       )}
 
-      <div className="overflow-x-auto">
+      <div className="space-y-3 sm:hidden">
+        {users.map((user) => (
+          <div key={user.id} className="rounded-xl border border-gray-200 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-medium text-gray-900">{user.name}</div>
+                <div className="truncate text-xs text-gray-400">{user.email}</div>
+              </div>
+              <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${user.banned ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${user.banned ? "bg-red-500" : "bg-green-500"}`} />
+                {user.banned ? "已封禁" : "正常"}
+              </span>
+            </div>
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <RoleSelect value={user.role} disabled={actionLoading === user.id} onChange={(role) => updateUser(user.id, { role })} ariaLabel={`${user.name} 的角色`} />
+              <span className="text-xs text-gray-500">{new Date(user.createdAt).toLocaleDateString("zh-CN")}</span>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button onClick={() => setEntitlementUser(user)} className="min-h-11 rounded-lg border border-gray-200 px-3 text-sm font-medium hover:bg-gray-50">权益</button>
+              <button onClick={() => updateUser(user.id, { action: user.banned ? "unban" : "ban" })} disabled={actionLoading === user.id} className={`min-h-11 rounded-lg px-3 text-sm font-medium disabled:opacity-50 ${user.banned ? "bg-green-100 text-green-700 hover:bg-green-200" : "bg-red-100 text-red-700 hover:bg-red-200"}`}>
+                {actionLoading === user.id ? <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" /> : user.banned ? "解封" : "封禁"}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="hidden overflow-x-auto sm:block">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-200">

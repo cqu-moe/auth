@@ -35,6 +35,14 @@ describe("complete API document", () => {
       expect(body.openapi).toBe("3.1.1");
       expect(body).toHaveProperty("paths");
       expect(body).not.toHaveProperty("data");
+      const paths = body.paths as Record<string, any>;
+      expect(Object.keys(paths["/api/v1/auth/get-session"])).toEqual(["get"]);
+      expect(paths["/api/v1/auth/get-session"].get.responses["200"].content["application/json"].schema.properties)
+        .toHaveProperty("caps");
+      expect(paths["/api/v1/auth/sign-up/email"].post.requestBody.content["application/json"].schema.properties.code)
+        .toMatchObject({ type: "string", pattern: "^[A-Z0-9]{8}$" });
+      expect(paths["/api/v1/auth/error"].get.responses).toHaveProperty("302");
+      expect(JSON.stringify(body)).not.toContain('"nullable"');
     } finally {
       await fixture.close();
     }
