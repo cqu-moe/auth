@@ -31,6 +31,7 @@
   "dependencies": {
     "@better-auth/oauth-provider": "^1.6.11",
     "@cloudflare/containers": "^0.3.7",
+    "@hono/zod-openapi": "1.6.3",
     "better-auth": "^1.6.11",
     "better-auth-cloudflare": "^0.3.0",
     "drizzle-orm": "^0.45.2",
