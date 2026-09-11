@@ -5,6 +5,10 @@ import { createCquBindingApi } from "./cqu-binding";
 import { createCquServiceTicketsApi } from "./cqu-service-tickets";
 import { createCquQuickloginApi } from "./cqu-quicklogin";
 import { createAdminUsersApi } from "./admin/users";
+import {
+  createAdminInvitationsApi,
+  createPublicRegistrationSettingsApi,
+} from "./admin/invitations";
 
 const Health = z.object({
   data: z.object({
@@ -34,5 +38,7 @@ export function createV1Api() {
   api.route("/cqu/service-tickets", createCquServiceTicketsApi());
   api.route("/cqu/quicklogin", createCquQuickloginApi());
   api.route("/admin/users", createAdminUsersApi());
+  api.route("/admin", createAdminInvitationsApi());
+  api.route("/registration-settings", createPublicRegistrationSettingsApi());
   return api;
 }
