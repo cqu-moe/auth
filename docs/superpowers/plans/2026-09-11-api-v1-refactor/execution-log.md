@@ -1,0 +1,39 @@
+# API v1 重构执行日志
+
+基线：`225d1c66d9b15ae13b9c710227649c1d47516aa4`（2026-09-11 fetch 后的 `origin/main`）
+
+工作区：`/Users/uu/Developer/cqu-moe/auth/.worktrees/api-v1-refactor`
+
+分支：`codex/api-v1-refactor`
+
+Node/npm：`v22.22.3` / `10.9.8`
+
+| 任务ID | 状态 | 改动文件 | red命令/失败原因 | green命令/结果 | 关联验收ID | commit或未提交原因 |
+| --- | --- | --- | --- | --- | --- | --- |
+| T00 | 通过 | 四份执行输入、`src/test-utils/{auth,http}.ts`、`test/do/api-fixture.ts`、auth元数据刻画 | 迁移前刻画不伪造red；基线 `typecheck:do` 因既有 `ownerBrowserRouteVersion` 类型错误 exit 2；沙箱内 Workers 测试监听127.0.0.1为EPERM | `npm ci` exit 0；`npm --prefix frontend ci` exit 0；`npm run typecheck` exit 0；`npm test` 53 files/506 tests exit 0；获准本地监听后 `npm run test:do` 3 files/89 tests exit 0（保留既有Containers警告）；frontend `tsc -b`/lint/build均exit 0；`npm test -- src/auth-metadata.test.ts` 2/2；`npm run test:do -- test/do/api-fixture.test.ts` 1/1 | BASE-01–BASE-04 | 待提交 |
+| T01 | 未开始 | — | — | — | CLEAN-01、CLEAN-02、RPC-01 | — |
+| T02 | 未开始 | — | — | — | HTTP-05–HTTP-09 | — |
+| T03 | 未开始 | — | — | — | AUTH-01–AUTH-06、RPC-01 | — |
+| T04 | 未开始 | — | — | — | HTTP-01–HTTP-04、HTTP-10、LEG-01–LEG-04 | — |
+| T05 | 未开始 | — | — | — | AUTH-07–AUTH-18、LEG-05–LEG-08、OAS-02、OAS-03 | — |
+| T06 | 未开始 | — | — | — | CQU-01–CQU-10、LEG-02、LEG-03 | — |
+| T07 | 未开始 | — | — | — | CQU-11–CQU-18、AUTH-01–AUTH-06、LEG-04 | — |
+| T08 | 未开始 | — | — | — | ADMIN-01–ADMIN-05、LEG-09 | — |
+| T09 | 未开始 | — | — | — | ADMIN-06–ADMIN-10、AUTH-13、OAS-04 | — |
+| T10 | 未开始 | — | — | — | ADMIN-11–ADMIN-18、LEG-10 | — |
+| T11 | 未开始 | — | — | — | ADMIN-19–ADMIN-28、LEG-11、LEG-12 | — |
+| T12 | 未开始 | — | — | — | OAS-01–OAS-14、CLEAN-02 | — |
+| T13 | 未开始 | — | — | — | WEB-01–WEB-08、AUTH-13–AUTH-18、CLEAN-01 | — |
+| T14 | 未开始 | — | — | — | WEB-09–WEB-13、ADMIN-19–ADMIN-28、CLEAN-03 | — |
+| T15 | 未开始 | — | — | — | WEB-14–WEB-18、CQU-07–CQU-10、CLEAN-04 | — |
+| T16 | 未开始 | — | — | — | CLEAN-01–CLEAN-08、GATE-01 | — |
+| T17 | 未开始 | — | — | — | RPC-01–RPC-03、GATE-01–GATE-05 | — |
+
+## T00 元数据附件
+
+- Better Auth 1.6.11：80个非SERVER_ONLY、未禁用endpoint定义，81个实际HTTP操作；精确集合由 `src/auth-metadata.test.ts` 固定。
+- `GET /get-session` 是唯一实际方法；生成器额外的POST不属于运行时。
+- 禁用后缀6个：`/token`、`/sign-in/email-otp`、`/email-otp/request-password-reset`、`/forget-password/email-otp`、`/email-otp/reset-password`、`/verify-email`。
+- SERVER_ONLY 4个：两个discovery helper、`adminCreateOAuthClient`、`adminUpdateOAuthClient`。
+- 迁移前issuer/baseURL：`https://auth.cqu.moe/api/auth`。Cookie只记录名称与属性，不记录值。
+- 本轮没有访问生产D1/KV、真实凭据或邮件；没有push、部署、上传schema或修改Cloudflare规则。
