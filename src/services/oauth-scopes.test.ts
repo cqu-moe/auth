@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { scopeSatisfies } from "./scope";
+import { scopeSatisfies } from "./oauth-scopes";
 
 describe("scopeSatisfies", () => {
   it("精确匹配同名 scope → true", () => {

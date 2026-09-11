@@ -8,7 +8,7 @@ import {
   type Caps,
   type CalendarCaps,
 } from "./services/entitlements";
-import { scopeSatisfies } from "./middleware/scope";
+import { scopeSatisfies } from "./services/oauth-scopes";
 import { hashOAuthClientSecret } from "./utils/oauth-secret";
 import { oauthClientCquScopes } from "./db/schema";
 import { getCquBinding, type CquBindStatus } from "./services/cqu-binding";

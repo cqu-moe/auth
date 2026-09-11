@@ -1,10 +1,10 @@
 import { Hono } from "hono";
 import type { HonoEnv } from "../types";
-import { createAuth } from "../auth";
 import { errorResponse } from "../utils/error";
 import { userEntitlement } from "../db/schema";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, and } from "drizzle-orm";
+import { requireSession } from "../middleware/authentication";
 
 // 用户自助快捷登录开关 /api/cqu/quicklogin。
 //
@@ -33,13 +33,7 @@ const VALUE_ON = "1";
 
 // session-only 鉴权中间件。无有效 Better Auth session → 401。
 // 故意不解析 Authorization: Bearer —— 见上方安全契约。
-cquQuicklogin.use("/*", async (c, next) => {
-  const auth = createAuth(c.env, c.req.raw);
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  if (!session?.user) return errorResponse(c, "UNAUTHORIZED", "未登录", 401);
-  c.set("user", session.user);
-  return next();
-});
+cquQuicklogin.use("/*", requireSession);
 
 // 读调用者自己的一条 cqu entitlement 行;行缺失返回 undefined(约定:缺失 = 关/未授予)。
 async function getOwnFlag(

@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import type { HonoEnv } from "../types";
-import { createAuth } from "../auth";
 import { encrypt } from "../services/crypto";
 import { errorResponse } from "../utils/error";
 import { cquBindAddresses, cquCredentials } from "../db/schema";
@@ -8,8 +7,8 @@ import { genAddressToken } from "../services/cqu-2fa/token";
 import { CQU_SENDER } from "../services/cqu-2fa/sender-auth";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, sql } from "drizzle-orm";
-import { verifyAccessToken } from "better-auth/oauth2";
 import { getCquBinding } from "../services/cqu-binding";
+import { requireSessionOrBearer } from "../middleware/authentication";
 
 // CQU 绑定资源路由（RESTful 重构）。
 //
@@ -25,32 +24,7 @@ import { getCquBinding } from "../services/cqu-binding";
 // `cqu.ts` 完全一致（Bearer JWT 优先，回退 Better Auth session）。
 const cquBinding = new Hono<HonoEnv>();
 
-cquBinding.use("/*", async (c, next) => {
-  const authHeader = c.req.header("Authorization");
-
-  if (authHeader?.startsWith("Bearer ")) {
-    const token = authHeader.substring(7);
-    try {
-      const payload = await verifyAccessToken(token, {
-        verifyOptions: {
-          issuer: c.env.BETTER_AUTH_URL,
-          audience: c.env.BETTER_AUTH_URL,
-        },
-        jwksUrl: `${c.env.BETTER_AUTH_URL}/api/auth/jwks`,
-      });
-      c.set("user", { id: payload.sub as string });
-      return next();
-    } catch {
-      return errorResponse(c, "UNAUTHORIZED", "无效的访问令牌", 401);
-    }
-  }
-
-  const auth = createAuth(c.env, c.req.raw);
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  if (!session?.user) return errorResponse(c, "UNAUTHORIZED", "未登录", 401);
-  c.set("user", session.user);
-  return next();
-});
+cquBinding.use("/*", requireSessionOrBearer);
 
 // 基础邮箱格式校验（仅 forward 模式登记用户转发地址时使用）。不追求 RFC 完整性——只挡明显畸形，
 // 真正的可达性由后续真实转发邮件的 envelope 校验背书。

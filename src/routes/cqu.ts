@@ -1,46 +1,14 @@
 import { Hono } from "hono";
 import type { HonoEnv } from "../types";
-import { createAuth } from "../auth";
 import { errorResponse } from "../utils/error";
 import { requireCquScope } from "../middleware/scope";
 import { validateCquServiceUrl } from "../services/service-url";
 import { pickServiceTicketMode } from "../services/service-ticket-mode";
-import { verifyAccessToken } from "better-auth/oauth2";
+import { requireBearer } from "../middleware/authentication";
 
 const cqu = new Hono<HonoEnv>();
 
-cqu.use("/*", async (c, next) => {
-  const authHeader = c.req.header("Authorization");
-
-  if (authHeader?.startsWith("Bearer ")) {
-    const token = authHeader.substring(7);
-    try {
-      const payload = await verifyAccessToken(token, {
-        verifyOptions: {
-          issuer: c.env.BETTER_AUTH_URL,
-          audience: c.env.BETTER_AUTH_URL,
-        },
-        jwksUrl: `${c.env.BETTER_AUTH_URL}/api/auth/jwks`,
-      });
-      c.set("user", { id: payload.sub as string });
-      // 取票客户端身份: OAuth 标准用 azp(authorized party), 兼容 client_id。
-      // 转发给 DO 做 per-client 限频与审计(无则 DO 视为 null)。
-      c.set(
-        "clientId",
-        (payload.azp ?? payload.client_id) as string | undefined
-      );
-      return next();
-    } catch {
-      return errorResponse(c, "UNAUTHORIZED", "无效的访问令牌", 401);
-    }
-  }
-
-  const auth = createAuth(c.env, c.req.raw);
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  if (!session?.user) return errorResponse(c, "UNAUTHORIZED", "未登录", 401);
-  c.set("user", session.user);
-  return next();
-});
+cqu.use("/*", requireBearer);
 
 // GET /api/cqu/service-ticket — OAuth 客户端凭 cqu:ticket:* scope 取 CAS Service Ticket。
 // 两种模式(均需带 cqu:ticket:* scope 的 Bearer 令牌):

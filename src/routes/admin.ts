@@ -30,6 +30,7 @@ import {
   listRegistrationInvitations,
   revokeRegistrationInvitation,
 } from "../services/registration-invitations";
+import { requireAdmin } from "../middleware/authentication";
 
 const admin = new Hono<HonoEnv>();
 
@@ -219,20 +220,7 @@ async function hasEntitlementPermission(
 }
 
 // Middleware: require admin or superAdmin role
-admin.use("/*", async (c, next) => {
-  const auth = createAuth(c.env, c.req.raw);
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  if (!session?.user) return errorResponse(c, "UNAUTHORIZED", "未登录", 401);
-
-  // Better Auth admin plugin stores role in user object
-  const userRole = (session.user as { role?: string }).role;
-  if (userRole !== "admin" && userRole !== "superAdmin") {
-    return errorResponse(c, "FORBIDDEN", "需要管理员权限", 403);
-  }
-
-  c.set("user", session.user);
-  return next();
-});
+admin.use("/*", requireAdmin);
 
 // GET /api/admin/users - List users (paginated)
 admin.get("/users", async (c) => {
