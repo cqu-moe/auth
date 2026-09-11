@@ -8,6 +8,7 @@ import {
   withRedirectParam,
 } from "../lib/post-login-redirect";
 import { isScheduleBindingContinuation } from "../lib/cqu-bind-continuation";
+import { getRegistrationSettings } from "../lib/api/registration";
 
 function getPasswordStrength(password: string): { level: number; label: string; color: string } {
   if (!password) return { level: 0, label: "", color: "" };
@@ -45,10 +46,9 @@ export default function Register() {
   const [invitationRequired, setInvitationRequired] = useState(true);
 
   useEffect(() => {
-    fetch("/api/auth/registration-settings")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { invitationRequired?: boolean } | null) => {
-        if (typeof data?.invitationRequired === "boolean") {
+    getRegistrationSettings()
+      .then((data) => {
+        if (typeof data.invitationRequired === "boolean") {
           setInvitationRequired(data.invitationRequired);
         }
       })

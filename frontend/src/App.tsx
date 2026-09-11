@@ -14,6 +14,7 @@ import TwoFactorChallenge from "./pages/TwoFactorChallenge";
 import TwoFactorSettings from "./pages/TwoFactorSettings";
 import ProtectedRoute from "./components/ProtectedRoute";
 import EmailVerificationGate from "./components/EmailVerificationGate";
+import AuthError from "./pages/AuthError";
 
 function RootRedirect() {
   const { data: session, isPending } = authClient.useSession();
@@ -41,6 +42,7 @@ export default function App() {
           <Route path="/reset-password/confirm" element={<ResetPasswordConfirm />} />
           <Route path="/verify-email" element={<VerifyEmail />} />
           <Route path="/two-factor" element={<TwoFactorChallenge />} />
+          <Route path="/auth/error" element={<AuthError />} />
           <Route
             path="/settings"
             element={

@@ -1,6 +1,12 @@
 import { useState, ReactNode, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
+import {
+  deleteBinding,
+  getBinding,
+  getQuicklogin,
+  updateQuicklogin,
+} from "../lib/api/cqu";
 import Layout from "../components/Layout";
 import AccountProfileSection from "../components/AccountProfileSection";
 import SecuritySection from "../components/SecuritySection";
@@ -14,7 +20,7 @@ interface CquSessionStatus {
   error?: boolean;
 }
 
-// GET /api/cqu/binding 的响应形状。
+// GET /api/v1/cqu/binding 的响应形状。
 interface CquBindStatus {
   address?: string;
   bindStatus: "pending" | "active" | "revoked" | "unbound";
@@ -85,7 +91,7 @@ interface LiveCode {
 
 function buildWsUrl(): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/api/cqu/binding/events`;
+  return `${protocol}//${window.location.host}/api/v1/cqu/binding/events`;
 }
 
 function formatTime(ts: number): string {
@@ -430,7 +436,7 @@ function LiveCodeSection() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // QuickLoginSection — 浏览器插件快捷登录的用户自助 opt-in 开关
-// GET /api/cqu/quicklogin 读当前状态；PUT 切换。后端仅认 session（绝不接受 Bearer），
+// GET /api/v1/cqu/quicklogin 读当前状态；PUT 切换。后端仅认 session（绝不接受 Bearer），
 // 故只能由登录用户本人操作自己的 cqu.quicklogin entitlement。
 // 显隐由 cqu.quicklogin_access（admin 授予的功能开放闸）决定：
 // GET 返回 eligible=false（或未登录/失败）时整张卡片不渲染，无权益用户看不到该功能。
@@ -446,15 +452,7 @@ function QuickLoginSection() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/cqu/quicklogin", { credentials: "include" });
-        if (!res.ok) {
-          setEligible(false);
-          return;
-        }
-        const data = (await res.json()) as {
-          eligible?: boolean;
-          enabled?: boolean;
-        };
+        const data = await getQuicklogin();
         setEligible(data.eligible === true);
         setEnabled(data.enabled === true);
       } catch {
@@ -469,18 +467,8 @@ function QuickLoginSection() {
     setError("");
     setSaving(true);
     try {
-      const res = await fetch("/api/cqu/quicklogin", {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: next }),
-      });
-      if (res.ok) {
-        const data = (await res.json()) as { enabled?: boolean };
-        setEnabled(data.enabled === true);
-      } else {
-        setError("保存失败，请稍后重试");
-      }
+      const data = await updateQuicklogin(next);
+      setEnabled(data.enabled === true);
     } catch {
       setError("请求失败，请检查网络连接后重试");
     } finally {
@@ -541,13 +529,7 @@ function CquBindingSection() {
     setStatusLoading(true);
     setStatusError(false);
     try {
-      const res = await fetch("/api/cqu/binding", { credentials: "include" });
-      if (res.ok) {
-        const data = await res.json() as CquBindStatus;
-        setStatus(data);
-      } else {
-        setStatusError(true);
-      }
+      setStatus(await getBinding() as CquBindStatus);
     } catch {
       setStatusError(true);
     } finally {
@@ -572,19 +554,9 @@ function CquBindingSection() {
     setUnbindLoading(true);
 
     try {
-      const res = await fetch("/api/cqu/binding", {
-        method: "DELETE",
-        credentials: "include",
-      });
-      if (res.ok) {
-        setActionSuccess("已成功解除 CQU 账户绑定");
-        await fetchStatus();
-      } else {
-        const data = await res.json().catch(() => ({})) as {
-          detail?: { error?: { message?: string } };
-        };
-        setActionError(data.detail?.error?.message ?? "解绑失败，请稍后重试");
-      }
+      await deleteBinding();
+      setActionSuccess("已成功解除 CQU 账户绑定");
+      await fetchStatus();
     } catch {
       setActionError("请求失败，请检查网络连接后重试");
     } finally {

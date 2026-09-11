@@ -27,7 +27,8 @@ let container: HTMLDivElement;
 let root: Root;
 
 function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
+  const payload = status >= 200 && status < 300 ? { data: body } : body;
+  return new Response(JSON.stringify(payload), {
     status,
     headers: { "content-type": "application/json" },
   });
@@ -334,7 +335,7 @@ describe("CquBindWizard completion confirmation", () => {
     expect(container.textContent).toContain("正在确认绑定结果");
     expect(container.textContent).not.toContain("绑定成功");
     expect(fetchMock.mock.calls.filter(([url, init]) =>
-      url === "/api/cqu/binding/credentials" && (init as RequestInit | undefined)?.method === "PUT"
+      url === "/api/v1/cqu/binding/credentials" && (init as RequestInit | undefined)?.method === "PUT"
     )).toHaveLength(1);
 
     resolveConfirmation(json(snapshot({

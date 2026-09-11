@@ -4,6 +4,8 @@ import Layout from "../components/Layout";
 import CquBindSuccess from "../components/CquBindSuccess";
 import { authClient } from "../lib/auth-client";
 import { bindingReturnTarget } from "../lib/cqu-bind-continuation";
+import { createBinding, getBinding, updateCredentials } from "../lib/api/cqu";
+import { ApiError } from "../lib/api/http";
 import {
   bindScreen,
   clearBindProgress,
@@ -23,11 +25,6 @@ type Step = 1 | 2 | 3 | 4;
 
 type WsState = "idle" | "connecting" | "open" | "closed" | "error";
 
-interface BindAddressResponse {
-  address: string;
-  status: string;
-}
-
 // ────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ────────────────────────────────────────────────────────────────────────────
@@ -39,12 +36,12 @@ class BindingRequestError extends Error {
 }
 
 async function fetchBindingSnapshot(signal: AbortSignal): Promise<BindingSnapshot> {
-  const response = await fetch("/api/cqu/binding", {
-    credentials: "include",
-    signal,
-  });
-  if (!response.ok) throw new BindingRequestError(response.status);
-  return parseBindingSnapshot(await response.json());
+  try {
+    return parseBindingSnapshot(await getBinding(signal));
+  } catch (error) {
+    if (error instanceof ApiError) throw new BindingRequestError(error.status);
+    throw error;
+  }
 }
 
 function progressStorage(): Storage | null {
@@ -59,7 +56,7 @@ const replaceLocation = (url: string) => window.location.replace(url);
 
 function buildWsUrl(): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/api/cqu/binding/events`;
+  return `${protocol}//${window.location.host}/api/v1/cqu/binding/events`;
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -506,19 +503,7 @@ function Step2Direct({
   useEffect(() => {
     if (bindAddress) return; // already fetched (e.g. user navigated back)
     setAddrLoading(true);
-    fetch("/api/cqu/binding", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind: "direct" }),
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({})) as { detail?: { error?: { message?: string } } };
-          throw new Error(data.detail?.error?.message ?? "获取地址失败，请稍后重试");
-        }
-        return res.json() as Promise<BindAddressResponse>;
-      })
+    createBinding("direct")
       .then((data) => {
         setBindAddress(data.address);
       })
@@ -713,23 +698,7 @@ function Step2Forward({
   useEffect(() => {
     if (bindAddress) return; // already fetched (e.g. user navigated back)
     setAddrLoading(true);
-    fetch("/api/cqu/binding", {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind: "forward", forwardAddress }),
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({})) as { detail?: { error?: { message?: string; code?: string } } };
-          const errCode = data.detail?.error?.code;
-          if (errCode === "INVALID_FORWARD_ADDRESS") {
-            throw new Error("转发邮箱地址格式不合法，请刷新页面后重新填写");
-          }
-          throw new Error(data.detail?.error?.message ?? "获取地址失败，请稍后重试");
-        }
-        return res.json() as Promise<BindAddressResponse>;
-      })
+    createBinding("forward")
       .then((data) => {
         setBindAddress(data.address);
       })
@@ -880,26 +849,12 @@ function Step3Credentials({ onSuccess }: { onSuccess: (studentId: string) => voi
     abortRef.current = new AbortController();
 
     try {
-      const res = await fetch("/api/cqu/binding/credentials", {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ studentId, password }),
-        // Long-lived request: backend triggers first CQU login which can take several minutes.
-        // We intentionally do not set a short timeout — let it complete.
-        signal: abortRef.current.signal,
-      });
-
-      const data = await res.json() as {
-        success?: boolean;
-        detail?: { error?: { code?: string; message?: string } };
-      };
-
-      if (res.ok && data.success) {
-        await onSuccess(studentId);
-        return;
-      }
-
+      await updateCredentials(studentId, password, abortRef.current.signal);
+      await onSuccess(studentId);
+      return;
+    } catch (err) {
+      if ((err as { name?: string }).name === "AbortError") return;
+      const apiError = err instanceof ApiError ? err : null;
       const codeMessages: Record<string, string> = {
         CQU_LOGIN_FAILED: "CQU 登录失败，请检查统一身份认证账号和密码是否正确",
         NO_BIND_ADDRESS: "尚未完成密保邮箱设置，请刷新页面后重新开始",
@@ -907,16 +862,7 @@ function Step3Credentials({ onSuccess }: { onSuccess: (studentId: string) => voi
         BIND_ACTIVATE_FAILED: "首次登录成功，但激活状态写入失败，请稍后重试",
         MISSING_FIELDS: "请填写统一身份认证账号和密码",
       };
-      const errCode = data.detail?.error?.code;
-      const errMessage = data.detail?.error?.message;
-      setError(
-        (errCode && codeMessages[errCode])
-          ? codeMessages[errCode]
-          : errMessage ?? "绑定失败，请检查统一身份认证账号和密码"
-      );
-    } catch (err) {
-      if ((err as { name?: string }).name === "AbortError") return;
-      setError("请求失败，请检查网络连接后重试");
+      setError(apiError ? codeMessages[apiError.code] ?? apiError.message : "请求失败，请检查网络连接后重试");
     } finally {
       setLoading(false);
     }
