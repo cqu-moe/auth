@@ -1,0 +1,1668 @@
+[
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/health",
+    "operationId": "get_api_v1_health",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/cqu/binding",
+    "operationId": "post_api_v1_cqu_binding",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/cqu/binding",
+    "operationId": "get_api_v1_cqu_binding",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PUT",
+    "path": "/api/v1/cqu/binding/credentials",
+    "operationId": "put_api_v1_cqu_binding_credentials",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/cqu/binding/events",
+    "operationId": "get_api_v1_cqu_binding_events",
+    "kind": "websocket"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "DELETE",
+    "path": "/api/v1/cqu/binding",
+    "operationId": "delete_api_v1_cqu_binding",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/cqu/service-tickets",
+    "operationId": "post_api_v1_cqu_service_tickets",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/cqu/quicklogin",
+    "operationId": "get_api_v1_cqu_quicklogin",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PUT",
+    "path": "/api/v1/cqu/quicklogin",
+    "operationId": "put_api_v1_cqu_quicklogin",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/admin/users",
+    "operationId": "get_api_v1_admin_users",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/admin/users/{id}",
+    "operationId": "get_api_v1_admin_users_id",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PATCH",
+    "path": "/api/v1/admin/users/{id}",
+    "operationId": "patch_api_v1_admin_users_id",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PATCH",
+    "path": "/api/v1/admin/users/{id}/cqu-binding",
+    "operationId": "patch_api_v1_admin_users_id_cqu_binding",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/admin/registration-invitations",
+    "operationId": "get_api_v1_admin_registration_invitations",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/admin/registration-invitations",
+    "operationId": "post_api_v1_admin_registration_invitations",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "DELETE",
+    "path": "/api/v1/admin/registration-invitations/{code}",
+    "operationId": "delete_api_v1_admin_registration_invitations_code",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/admin/registration-settings",
+    "operationId": "get_api_v1_admin_registration_settings",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PUT",
+    "path": "/api/v1/admin/registration-settings",
+    "operationId": "put_api_v1_admin_registration_settings",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/admin/users/{id}/entitlements",
+    "operationId": "get_api_v1_admin_users_id_entitlements",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PUT",
+    "path": "/api/v1/admin/users/{id}/entitlements",
+    "operationId": "put_api_v1_admin_users_id_entitlements",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PATCH",
+    "path": "/api/v1/admin/users/{id}/entitlements",
+    "operationId": "patch_api_v1_admin_users_id_entitlements",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "DELETE",
+    "path": "/api/v1/admin/users/{id}/entitlements/{subsystem}/{capability}",
+    "operationId": "delete_api_v1_admin_users_id_entitlements_subsystem_capability",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/admin/entitlement-presets",
+    "operationId": "get_api_v1_admin_entitlement_presets",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PUT",
+    "path": "/api/v1/admin/entitlement-presets/{name}",
+    "operationId": "put_api_v1_admin_entitlement_presets_name",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "DELETE",
+    "path": "/api/v1/admin/entitlement-presets/{name}",
+    "operationId": "delete_api_v1_admin_entitlement_presets_name",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/admin/entitlement-default",
+    "operationId": "get_api_v1_admin_entitlement_default",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PUT",
+    "path": "/api/v1/admin/entitlement-default",
+    "operationId": "put_api_v1_admin_entitlement_default",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/admin/oauth-clients",
+    "operationId": "get_api_v1_admin_oauth_clients",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/admin/oauth-clients",
+    "operationId": "post_api_v1_admin_oauth_clients",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PATCH",
+    "path": "/api/v1/admin/oauth-clients/{id}",
+    "operationId": "patch_api_v1_admin_oauth_clients_id",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "DELETE",
+    "path": "/api/v1/admin/oauth-clients/{id}",
+    "operationId": "delete_api_v1_admin_oauth_clients_id",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/admin/oauth-clients/{id}/scopes",
+    "operationId": "get_api_v1_admin_oauth_clients_id_scopes",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PUT",
+    "path": "/api/v1/admin/oauth-clients/{id}/scopes",
+    "operationId": "put_api_v1_admin_oauth_clients_id_scopes",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/admin/oauth-clients/{id}/secrets",
+    "operationId": "post_api_v1_admin_oauth_clients_id_secrets",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/registration-settings",
+    "operationId": "get_api_v1_registration_settings",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/health",
+    "operationId": "get_api_health",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/.well-known/oauth-authorization-server",
+    "operationId": "get_well_known_oauth_authorization_server",
+    "kind": "discovery"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/.well-known/openid-configuration",
+    "operationId": "get_well_known_openid_configuration",
+    "kind": "discovery"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/.well-known/openid-configuration",
+    "operationId": "get_api_auth_well_known_openid_configuration",
+    "kind": "discovery"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/.well-known/oauth-authorization-server",
+    "operationId": "get_api_auth_well_known_oauth_authorization_server",
+    "kind": "discovery"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/.well-known/oauth-authorization-server/api/auth",
+    "operationId": "get_well_known_oauth_authorization_server_api_auth",
+    "kind": "discovery"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/account-info",
+    "operationId": "get_api_v1_auth_account_info",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/admin/ban-user",
+    "operationId": "post_api_v1_auth_admin_ban_user",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/admin/create-user",
+    "operationId": "post_api_v1_auth_admin_create_user",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/admin/get-user",
+    "operationId": "get_api_v1_auth_admin_get_user",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/admin/has-permission",
+    "operationId": "post_api_v1_auth_admin_has_permission",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/admin/impersonate-user",
+    "operationId": "post_api_v1_auth_admin_impersonate_user",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/admin/list-user-sessions",
+    "operationId": "post_api_v1_auth_admin_list_user_sessions",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/admin/list-users",
+    "operationId": "get_api_v1_auth_admin_list_users",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/admin/remove-user",
+    "operationId": "post_api_v1_auth_admin_remove_user",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/admin/revoke-user-session",
+    "operationId": "post_api_v1_auth_admin_revoke_user_session",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/admin/revoke-user-sessions",
+    "operationId": "post_api_v1_auth_admin_revoke_user_sessions",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/admin/set-role",
+    "operationId": "post_api_v1_auth_admin_set_role",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/admin/set-user-password",
+    "operationId": "post_api_v1_auth_admin_set_user_password",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/admin/stop-impersonating",
+    "operationId": "post_api_v1_auth_admin_stop_impersonating",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/admin/unban-user",
+    "operationId": "post_api_v1_auth_admin_unban_user",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/admin/update-user",
+    "operationId": "post_api_v1_auth_admin_update_user",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/callback/{id}",
+    "operationId": "get_api_v1_auth_callback_id",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/callback/{id}",
+    "operationId": "post_api_v1_auth_callback_id",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/change-email",
+    "operationId": "post_api_v1_auth_change_email",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/change-password",
+    "operationId": "post_api_v1_auth_change_password",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/cloudflare/geolocation",
+    "operationId": "get_api_v1_auth_cloudflare_geolocation",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/delete-user",
+    "operationId": "post_api_v1_auth_delete_user",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/delete-user/callback",
+    "operationId": "get_api_v1_auth_delete_user_callback",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/email-otp/change-email",
+    "operationId": "post_api_v1_auth_email_otp_change_email",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/email-otp/check-verification-otp",
+    "operationId": "post_api_v1_auth_email_otp_check_verification_otp",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/email-otp/request-email-change",
+    "operationId": "post_api_v1_auth_email_otp_request_email_change",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/email-otp/send-verification-otp",
+    "operationId": "post_api_v1_auth_email_otp_send_verification_otp",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/email-otp/verify-email",
+    "operationId": "post_api_v1_auth_email_otp_verify_email",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/error",
+    "operationId": "get_api_v1_auth_error",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/get-access-token",
+    "operationId": "post_api_v1_auth_get_access_token",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/get-session",
+    "operationId": "get_api_v1_auth_get_session",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/jwks",
+    "operationId": "get_api_v1_auth_jwks",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/link-social",
+    "operationId": "post_api_v1_auth_link_social",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/list-accounts",
+    "operationId": "get_api_v1_auth_list_accounts",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/list-sessions",
+    "operationId": "get_api_v1_auth_list_sessions",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/authorize",
+    "operationId": "get_api_v1_auth_oauth2_authorize",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/client/rotate-secret",
+    "operationId": "post_api_v1_auth_oauth2_client_rotate_secret",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/consent",
+    "operationId": "post_api_v1_auth_oauth2_consent",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/continue",
+    "operationId": "post_api_v1_auth_oauth2_continue",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/create-client",
+    "operationId": "post_api_v1_auth_oauth2_create_client",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/delete-client",
+    "operationId": "post_api_v1_auth_oauth2_delete_client",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/delete-consent",
+    "operationId": "post_api_v1_auth_oauth2_delete_consent",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/end-session",
+    "operationId": "get_api_v1_auth_oauth2_end_session",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/get-client",
+    "operationId": "get_api_v1_auth_oauth2_get_client",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/get-clients",
+    "operationId": "get_api_v1_auth_oauth2_get_clients",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/get-consent",
+    "operationId": "get_api_v1_auth_oauth2_get_consent",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/get-consents",
+    "operationId": "get_api_v1_auth_oauth2_get_consents",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/introspect",
+    "operationId": "post_api_v1_auth_oauth2_introspect",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/public-client",
+    "operationId": "get_api_v1_auth_oauth2_public_client",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/public-client-prelogin",
+    "operationId": "post_api_v1_auth_oauth2_public_client_prelogin",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/register",
+    "operationId": "post_api_v1_auth_oauth2_register",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/revoke",
+    "operationId": "post_api_v1_auth_oauth2_revoke",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/token",
+    "operationId": "post_api_v1_auth_oauth2_token",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/update-client",
+    "operationId": "post_api_v1_auth_oauth2_update_client",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/update-consent",
+    "operationId": "post_api_v1_auth_oauth2_update_consent",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/userinfo",
+    "operationId": "get_api_v1_auth_oauth2_userinfo",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/ok",
+    "operationId": "get_api_v1_auth_ok",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/refresh-token",
+    "operationId": "post_api_v1_auth_refresh_token",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/request-password-reset",
+    "operationId": "post_api_v1_auth_request_password_reset",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/reset-password",
+    "operationId": "post_api_v1_auth_reset_password",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/reset-password/{token}",
+    "operationId": "get_api_v1_auth_reset_password_token",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/revoke-other-sessions",
+    "operationId": "post_api_v1_auth_revoke_other_sessions",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/revoke-session",
+    "operationId": "post_api_v1_auth_revoke_session",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/revoke-sessions",
+    "operationId": "post_api_v1_auth_revoke_sessions",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/send-verification-email",
+    "operationId": "post_api_v1_auth_send_verification_email",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/sign-in/email",
+    "operationId": "post_api_v1_auth_sign_in_email",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/sign-in/social",
+    "operationId": "post_api_v1_auth_sign_in_social",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/sign-out",
+    "operationId": "post_api_v1_auth_sign_out",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/sign-up/email",
+    "operationId": "post_api_v1_auth_sign_up_email",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/disable",
+    "operationId": "post_api_v1_auth_two_factor_disable",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/enable",
+    "operationId": "post_api_v1_auth_two_factor_enable",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/generate-backup-codes",
+    "operationId": "post_api_v1_auth_two_factor_generate_backup_codes",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/get-totp-uri",
+    "operationId": "post_api_v1_auth_two_factor_get_totp_uri",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/send-otp",
+    "operationId": "post_api_v1_auth_two_factor_send_otp",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/verify-backup-code",
+    "operationId": "post_api_v1_auth_two_factor_verify_backup_code",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/verify-otp",
+    "operationId": "post_api_v1_auth_two_factor_verify_otp",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/verify-totp",
+    "operationId": "post_api_v1_auth_two_factor_verify_totp",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/unlink-account",
+    "operationId": "post_api_v1_auth_unlink_account",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/update-session",
+    "operationId": "post_api_v1_auth_update_session",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/update-user",
+    "operationId": "post_api_v1_auth_update_user",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/verify-password",
+    "operationId": "post_api_v1_auth_verify_password",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/registration-settings",
+    "operationId": "get_api_auth_registration_settings",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/account-info",
+    "operationId": "get_api_auth_account_info",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/admin/ban-user",
+    "operationId": "post_api_auth_admin_ban_user",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/admin/create-user",
+    "operationId": "post_api_auth_admin_create_user",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/admin/get-user",
+    "operationId": "get_api_auth_admin_get_user",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/admin/has-permission",
+    "operationId": "post_api_auth_admin_has_permission",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/admin/impersonate-user",
+    "operationId": "post_api_auth_admin_impersonate_user",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/admin/list-user-sessions",
+    "operationId": "post_api_auth_admin_list_user_sessions",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/admin/list-users",
+    "operationId": "get_api_auth_admin_list_users",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/admin/remove-user",
+    "operationId": "post_api_auth_admin_remove_user",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/admin/revoke-user-session",
+    "operationId": "post_api_auth_admin_revoke_user_session",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/admin/revoke-user-sessions",
+    "operationId": "post_api_auth_admin_revoke_user_sessions",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/admin/set-role",
+    "operationId": "post_api_auth_admin_set_role",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/admin/set-user-password",
+    "operationId": "post_api_auth_admin_set_user_password",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/admin/stop-impersonating",
+    "operationId": "post_api_auth_admin_stop_impersonating",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/admin/unban-user",
+    "operationId": "post_api_auth_admin_unban_user",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/admin/update-user",
+    "operationId": "post_api_auth_admin_update_user",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/callback/{id}",
+    "operationId": "get_api_auth_callback_id",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/callback/{id}",
+    "operationId": "post_api_auth_callback_id",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/change-email",
+    "operationId": "post_api_auth_change_email",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/change-password",
+    "operationId": "post_api_auth_change_password",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/cloudflare/geolocation",
+    "operationId": "get_api_auth_cloudflare_geolocation",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/delete-user",
+    "operationId": "post_api_auth_delete_user",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/delete-user/callback",
+    "operationId": "get_api_auth_delete_user_callback",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/email-otp/change-email",
+    "operationId": "post_api_auth_email_otp_change_email",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/email-otp/check-verification-otp",
+    "operationId": "post_api_auth_email_otp_check_verification_otp",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/email-otp/request-email-change",
+    "operationId": "post_api_auth_email_otp_request_email_change",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/email-otp/send-verification-otp",
+    "operationId": "post_api_auth_email_otp_send_verification_otp",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/email-otp/verify-email",
+    "operationId": "post_api_auth_email_otp_verify_email",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/error",
+    "operationId": "get_api_auth_error",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/get-access-token",
+    "operationId": "post_api_auth_get_access_token",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/get-session",
+    "operationId": "get_api_auth_get_session",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/jwks",
+    "operationId": "get_api_auth_jwks",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/link-social",
+    "operationId": "post_api_auth_link_social",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/list-accounts",
+    "operationId": "get_api_auth_list_accounts",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/list-sessions",
+    "operationId": "get_api_auth_list_sessions",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/oauth2/authorize",
+    "operationId": "get_api_auth_oauth2_authorize",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/oauth2/client/rotate-secret",
+    "operationId": "post_api_auth_oauth2_client_rotate_secret",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/oauth2/consent",
+    "operationId": "post_api_auth_oauth2_consent",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/oauth2/continue",
+    "operationId": "post_api_auth_oauth2_continue",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/oauth2/create-client",
+    "operationId": "post_api_auth_oauth2_create_client",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/oauth2/delete-client",
+    "operationId": "post_api_auth_oauth2_delete_client",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/oauth2/delete-consent",
+    "operationId": "post_api_auth_oauth2_delete_consent",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/oauth2/end-session",
+    "operationId": "get_api_auth_oauth2_end_session",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/oauth2/get-client",
+    "operationId": "get_api_auth_oauth2_get_client",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/oauth2/get-clients",
+    "operationId": "get_api_auth_oauth2_get_clients",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/oauth2/get-consent",
+    "operationId": "get_api_auth_oauth2_get_consent",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/oauth2/get-consents",
+    "operationId": "get_api_auth_oauth2_get_consents",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/oauth2/introspect",
+    "operationId": "post_api_auth_oauth2_introspect",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/oauth2/public-client",
+    "operationId": "get_api_auth_oauth2_public_client",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/oauth2/public-client-prelogin",
+    "operationId": "post_api_auth_oauth2_public_client_prelogin",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/oauth2/register",
+    "operationId": "post_api_auth_oauth2_register",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/oauth2/revoke",
+    "operationId": "post_api_auth_oauth2_revoke",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/oauth2/token",
+    "operationId": "post_api_auth_oauth2_token",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/oauth2/update-client",
+    "operationId": "post_api_auth_oauth2_update_client",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/oauth2/update-consent",
+    "operationId": "post_api_auth_oauth2_update_consent",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/oauth2/userinfo",
+    "operationId": "get_api_auth_oauth2_userinfo",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/ok",
+    "operationId": "get_api_auth_ok",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/refresh-token",
+    "operationId": "post_api_auth_refresh_token",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/request-password-reset",
+    "operationId": "post_api_auth_request_password_reset",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/reset-password",
+    "operationId": "post_api_auth_reset_password",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/auth/reset-password/{token}",
+    "operationId": "get_api_auth_reset_password_token",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/revoke-other-sessions",
+    "operationId": "post_api_auth_revoke_other_sessions",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/revoke-session",
+    "operationId": "post_api_auth_revoke_session",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/revoke-sessions",
+    "operationId": "post_api_auth_revoke_sessions",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/send-verification-email",
+    "operationId": "post_api_auth_send_verification_email",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/sign-in/email",
+    "operationId": "post_api_auth_sign_in_email",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/sign-in/social",
+    "operationId": "post_api_auth_sign_in_social",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/sign-out",
+    "operationId": "post_api_auth_sign_out",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/sign-up/email",
+    "operationId": "post_api_auth_sign_up_email",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/two-factor/disable",
+    "operationId": "post_api_auth_two_factor_disable",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/two-factor/enable",
+    "operationId": "post_api_auth_two_factor_enable",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/two-factor/generate-backup-codes",
+    "operationId": "post_api_auth_two_factor_generate_backup_codes",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/two-factor/get-totp-uri",
+    "operationId": "post_api_auth_two_factor_get_totp_uri",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/two-factor/send-otp",
+    "operationId": "post_api_auth_two_factor_send_otp",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/two-factor/verify-backup-code",
+    "operationId": "post_api_auth_two_factor_verify_backup_code",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/two-factor/verify-otp",
+    "operationId": "post_api_auth_two_factor_verify_otp",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/two-factor/verify-totp",
+    "operationId": "post_api_auth_two_factor_verify_totp",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/unlink-account",
+    "operationId": "post_api_auth_unlink_account",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/update-session",
+    "operationId": "post_api_auth_update_session",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/update-user",
+    "operationId": "post_api_auth_update_user",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/auth/verify-password",
+    "operationId": "post_api_auth_verify_password",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/cqu/binding",
+    "operationId": "post_api_cqu_binding",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/cqu/binding",
+    "operationId": "get_api_cqu_binding",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PUT",
+    "path": "/api/cqu/binding/credentials",
+    "operationId": "put_api_cqu_binding_credentials",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/cqu/binding/events",
+    "operationId": "get_api_cqu_binding_events",
+    "kind": "websocket"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "DELETE",
+    "path": "/api/cqu/binding",
+    "operationId": "delete_api_cqu_binding",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/cqu/quicklogin",
+    "operationId": "get_api_cqu_quicklogin",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PUT",
+    "path": "/api/cqu/quicklogin",
+    "operationId": "put_api_cqu_quicklogin",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/cqu/service-ticket",
+    "operationId": "get_api_cqu_service_ticket",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/admin/users",
+    "operationId": "get_api_admin_users",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/admin/users/{id}",
+    "operationId": "get_api_admin_users_id",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PATCH",
+    "path": "/api/admin/users/{id}",
+    "operationId": "patch_api_admin_users_id",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/admin/registration-invitations",
+    "operationId": "get_api_admin_registration_invitations",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/admin/registration-invitations",
+    "operationId": "post_api_admin_registration_invitations",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/admin/registration-settings",
+    "operationId": "get_api_admin_registration_settings",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PUT",
+    "path": "/api/admin/registration-settings",
+    "operationId": "put_api_admin_registration_settings",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "DELETE",
+    "path": "/api/admin/registration-invitations/{code}",
+    "operationId": "delete_api_admin_registration_invitations_code",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PATCH",
+    "path": "/api/admin/users/{id}/cqu-binding",
+    "operationId": "patch_api_admin_users_id_cqu_binding",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/admin/users/{id}/entitlements",
+    "operationId": "get_api_admin_users_id_entitlements",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PUT",
+    "path": "/api/admin/users/{id}/entitlements",
+    "operationId": "put_api_admin_users_id_entitlements",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/admin/users/{id}/entitlements/preset",
+    "operationId": "post_api_admin_users_id_entitlements_preset",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/admin/entitlement-presets",
+    "operationId": "get_api_admin_entitlement_presets",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PUT",
+    "path": "/api/admin/entitlement-presets/{name}",
+    "operationId": "put_api_admin_entitlement_presets_name",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "DELETE",
+    "path": "/api/admin/entitlement-presets/{name}",
+    "operationId": "delete_api_admin_entitlement_presets_name",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/admin/entitlement-default",
+    "operationId": "get_api_admin_entitlement_default",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PUT",
+    "path": "/api/admin/entitlement-default",
+    "operationId": "put_api_admin_entitlement_default",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "DELETE",
+    "path": "/api/admin/users/{id}/entitlements/{subsystem}/{capability}",
+    "operationId": "delete_api_admin_users_id_entitlements_subsystem_capability",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/admin/oauth-clients",
+    "operationId": "get_api_admin_oauth_clients",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PUT",
+    "path": "/api/admin/oauth-clients/{id}/scopes",
+    "operationId": "put_api_admin_oauth_clients_id_scopes",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/admin/oauth-clients/{id}/scopes",
+    "operationId": "get_api_admin_oauth_clients_id_scopes",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/admin/oauth-clients",
+    "operationId": "post_api_admin_oauth_clients",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "PATCH",
+    "path": "/api/admin/oauth-clients/{id}",
+    "operationId": "patch_api_admin_oauth_clients_id",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/admin/oauth-clients/{id}/rotate-secret",
+    "operationId": "post_api_admin_oauth_clients_id_rotate_secret",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "DELETE",
+    "path": "/api/admin/oauth-clients/{id}",
+    "operationId": "delete_api_admin_oauth_clients_id",
+    "kind": "legacy"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/openapi.json",
+    "operationId": "get_api_v1_openapi_json",
+    "kind": "canonical"
+  }
+]

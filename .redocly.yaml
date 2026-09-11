@@ -1,0 +1,7 @@
+extends:
+  - minimal
+rules:
+  no-unresolved-refs: error
+  operation-operationId-unique: error
+  path-parameters-defined: error
+  security-defined: error

@@ -10,7 +10,9 @@ export function listHttpOperations(
   authEndpoints: readonly HttpOperation[] = []
 ): HttpOperation[] {
   const operations = app.routes
-    .filter((route) => route.method !== "ALL" && route.path.startsWith("/api"))
+    .filter((route) => route.method !== "ALL" && (
+      route.path.startsWith("/api") || route.path.startsWith("/.well-known")
+    ))
     .map((route) => ({ method: route.method, path: route.path }));
   const seen = new Set<string>();
   return [...operations, ...authEndpoints].filter((operation) => {

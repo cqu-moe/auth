@@ -1,0 +1,1430 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/v1/health",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/cqu/binding",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/cqu/binding",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/cqu/binding/credentials",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/cqu/binding/events",
+    "requestBody": "websocket-message-not-validated",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/cqu/binding",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/cqu/service-tickets",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/cqu/quicklogin",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/cqu/quicklogin",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/admin/users",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/admin/users/{id}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/v1/admin/users/{id}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/v1/admin/users/{id}/cqu-binding",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/admin/registration-invitations",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/admin/registration-invitations",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/admin/registration-invitations/{code}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/admin/registration-settings",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/admin/registration-settings",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/admin/users/{id}/entitlements",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/admin/users/{id}/entitlements",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/v1/admin/users/{id}/entitlements",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/admin/users/{id}/entitlements/{subsystem}/{capability}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/admin/entitlement-presets",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/admin/entitlement-presets/{name}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/admin/entitlement-presets/{name}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/admin/entitlement-default",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/admin/entitlement-default",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/admin/oauth-clients",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/admin/oauth-clients",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/v1/admin/oauth-clients/{id}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/admin/oauth-clients/{id}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/admin/oauth-clients/{id}/scopes",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/admin/oauth-clients/{id}/scopes",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/admin/oauth-clients/{id}/secrets",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/registration-settings",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/health",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/.well-known/oauth-authorization-server",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/.well-known/openid-configuration",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/.well-known/openid-configuration",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/.well-known/oauth-authorization-server",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/.well-known/oauth-authorization-server/api/auth",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/account-info",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/ban-user",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/create-user",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/admin/get-user",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/has-permission",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/impersonate-user",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/list-user-sessions",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/admin/list-users",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/remove-user",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/revoke-user-session",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/revoke-user-sessions",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/set-role",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/set-user-password",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/stop-impersonating",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/unban-user",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/update-user",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/callback/{id}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/callback/{id}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/change-email",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/change-password",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/cloudflare/geolocation",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/delete-user",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/delete-user/callback",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/email-otp/change-email",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/email-otp/check-verification-otp",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/email-otp/request-email-change",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/email-otp/send-verification-otp",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/email-otp/verify-email",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/error",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/get-access-token",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/get-session",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/jwks",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/link-social",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/list-accounts",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/list-sessions",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/authorize",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/client/rotate-secret",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/consent",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/continue",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/create-client",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/delete-client",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/delete-consent",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/end-session",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/get-client",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/get-clients",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/get-consent",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/get-consents",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/introspect",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/public-client",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/public-client-prelogin",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/register",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/revoke",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/token",
+    "requestBody": "form-not-validated-by-cloudflare",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/update-client",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/update-consent",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/userinfo",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/ok",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/refresh-token",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/request-password-reset",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/reset-password",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/reset-password/{token}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/revoke-other-sessions",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/revoke-session",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/revoke-sessions",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/send-verification-email",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/sign-in/email",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/sign-in/social",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/sign-out",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/sign-up/email",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/disable",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/enable",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/generate-backup-codes",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/get-totp-uri",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/send-otp",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/verify-backup-code",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/verify-otp",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/verify-totp",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/unlink-account",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/update-session",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/update-user",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/verify-password",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/registration-settings",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/account-info",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/admin/ban-user",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/admin/create-user",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/admin/get-user",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/admin/has-permission",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/admin/impersonate-user",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/admin/list-user-sessions",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/admin/list-users",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/admin/remove-user",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/admin/revoke-user-session",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/admin/revoke-user-sessions",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/admin/set-role",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/admin/set-user-password",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/admin/stop-impersonating",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/admin/unban-user",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/admin/update-user",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/callback/{id}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/callback/{id}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/change-email",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/change-password",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/cloudflare/geolocation",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/delete-user",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/delete-user/callback",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/email-otp/change-email",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/email-otp/check-verification-otp",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/email-otp/request-email-change",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/email-otp/send-verification-otp",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/email-otp/verify-email",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/error",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/get-access-token",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/get-session",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/jwks",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/link-social",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/list-accounts",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/list-sessions",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/oauth2/authorize",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/oauth2/client/rotate-secret",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/oauth2/consent",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/oauth2/continue",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/oauth2/create-client",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/oauth2/delete-client",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/oauth2/delete-consent",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/oauth2/end-session",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/oauth2/get-client",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/oauth2/get-clients",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/oauth2/get-consent",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/oauth2/get-consents",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/oauth2/introspect",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/oauth2/public-client",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/oauth2/public-client-prelogin",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/oauth2/register",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/oauth2/revoke",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/oauth2/token",
+    "requestBody": "form-not-validated-by-cloudflare",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/oauth2/update-client",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/oauth2/update-consent",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/oauth2/userinfo",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/ok",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/refresh-token",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/request-password-reset",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/reset-password",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/reset-password/{token}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/revoke-other-sessions",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/revoke-session",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/revoke-sessions",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/send-verification-email",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/sign-in/email",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/sign-in/social",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/sign-out",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/sign-up/email",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/two-factor/disable",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/two-factor/enable",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/two-factor/generate-backup-codes",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/two-factor/get-totp-uri",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/two-factor/send-otp",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/two-factor/verify-backup-code",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/two-factor/verify-otp",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/two-factor/verify-totp",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/unlink-account",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/update-session",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/update-user",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/verify-password",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cqu/binding",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/cqu/binding",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/cqu/binding/credentials",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/cqu/binding/events",
+    "requestBody": "websocket-message-not-validated",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/cqu/binding",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/cqu/quicklogin",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/cqu/quicklogin",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/cqu/service-ticket",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/users",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/users/{id}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/admin/users/{id}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/registration-invitations",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/registration-invitations",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/registration-settings",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/admin/registration-settings",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/admin/registration-invitations/{code}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/admin/users/{id}/cqu-binding",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/users/{id}/entitlements",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/admin/users/{id}/entitlements",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/users/{id}/entitlements/preset",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/entitlement-presets",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/admin/entitlement-presets/{name}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/admin/entitlement-presets/{name}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/entitlement-default",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/admin/entitlement-default",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/admin/users/{id}/entitlements/{subsystem}/{capability}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/oauth-clients",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/admin/oauth-clients/{id}/scopes",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/admin/oauth-clients/{id}/scopes",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/oauth-clients",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/admin/oauth-clients/{id}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "POST",
+    "path": "/api/admin/oauth-clients/{id}/rotate-secret",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/admin/oauth-clients/{id}",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/openapi.json",
+    "requestBody": "documented",
+    "responseValidation": "not-supported-by-cloudflare"
+  }
+]

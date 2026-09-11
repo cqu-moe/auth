@@ -16,6 +16,7 @@ import { allowedMethods, listHttpOperations } from "./api/operations";
 import { problem } from "./api/problem";
 import { createAuthApi } from "./api/v1/auth";
 import { AUTH_BASE_PATH } from "../shared/api-paths";
+import { buildOpenApiDocument } from "./api/openapi/document";
 
 export function createApp() {
   const app = new Hono<HonoEnv>();
@@ -66,6 +67,10 @@ export function createApp() {
   app.route("/api/cqu/quicklogin", cquQuicklogin);
   app.route("/api/cqu", cqu);
   app.route("/api/admin", admin);
+
+  app.get("/api/v1/openapi.json", (c) =>
+    c.json(buildOpenApiDocument(listHttpOperations(app)))
+  );
 
   const operations = listHttpOperations(app);
   const apiFallback = (c: Parameters<typeof problem>[0]) => {
