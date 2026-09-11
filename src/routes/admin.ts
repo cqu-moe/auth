@@ -219,6 +219,17 @@ async function hasEntitlementPermission(
   return res.success === true;
 }
 
+async function hasCquScopePermission(
+  c: Context<HonoEnv>,
+  auth: ReturnType<typeof createAuth>
+): Promise<boolean> {
+  const res = await auth.api.userHasPermission({
+    headers: c.req.raw.headers,
+    body: { permissions: { cquScope: ["assign", "revoke"] } },
+  });
+  return res.success === true;
+}
+
 // Middleware: require admin or superAdmin role
 admin.use("/*", requireAdmin);
 
@@ -755,6 +766,10 @@ admin.get("/oauth-clients", async (c) => {
 
 // PUT /api/admin/oauth-clients/:id/scopes - Configure CQU scopes for an OAuth client
 admin.put("/oauth-clients/:id/scopes", async (c) => {
+  const auth = createAuth(c.env, c.req.raw);
+  if (!(await hasCquScopePermission(c, auth))) {
+    return errorResponse(c, "FORBIDDEN", "需要 CQU scope 写权限", 403);
+  }
   const clientId = c.req.param("id");
   const { scopes } = await c.req.json<{ scopes: string[] }>();
 
@@ -764,6 +779,9 @@ admin.put("/oauth-clients/:id/scopes", async (c) => {
 
   // Validate scope format: cqu:ticket:<service> or cqu:ticket:*
   const validPattern = /^cqu:ticket:([\w*]+)$/;
+  if (new Set(scopes).size !== scopes.length) {
+    return errorResponse(c, "INVALID_SCOPES", "scopes 不能重复", 400);
+  }
   for (const scope of scopes) {
     if (!validPattern.test(scope)) {
       return errorResponse(c, "INVALID_SCOPE", `无效的 scope: ${scope}`, 400);
@@ -772,16 +790,16 @@ admin.put("/oauth-clients/:id/scopes", async (c) => {
 
   const db = drizzle(c.env.DATABASE);
 
-  // Replace all scopes for this client atomically
-  await db
+  const del = db
     .delete(oauthClientCquScopes)
     .where(eq(oauthClientCquScopes.clientId, clientId));
 
   if (scopes.length > 0) {
-    await db
+    const ins = db
       .insert(oauthClientCquScopes)
       .values(scopes.map((scope) => ({ clientId, scope })));
-  }
+    await db.batch([del, ins]);
+  } else await del;
 
   return c.json({ success: true, clientId, scopes });
 });

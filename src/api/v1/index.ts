@@ -10,6 +10,7 @@ import {
   createPublicRegistrationSettingsApi,
 } from "./admin/invitations";
 import { createAdminEntitlementsApi } from "./admin/entitlements";
+import { createAdminOAuthClientsApi } from "./admin/oauth-clients";
 
 const Health = z.object({
   data: z.object({
@@ -41,6 +42,7 @@ export function createV1Api() {
   api.route("/admin/users", createAdminUsersApi());
   api.route("/admin", createAdminInvitationsApi());
   api.route("/admin", createAdminEntitlementsApi());
+  api.route("/admin/oauth-clients", createAdminOAuthClientsApi());
   api.route("/registration-settings", createPublicRegistrationSettingsApi());
   return api;
 }
