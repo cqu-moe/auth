@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DeviceAuthority, StoredDeviceSession } from "./contracts";
-import { nextDeviceAction } from "./maintenance";
+import { nextDeviceAction, nextQuickloginRetryDelayMs } from "./maintenance";
 
 const now = 1_800_000_000_000;
 const authority: DeviceAuthority = {
@@ -13,7 +13,7 @@ const session: StoredDeviceSession = {
   bindingEpoch: 0, sessionVersion: 1, state: "ready",
   loginAt: now - 60_000, lastKeepAliveAt: now - 30 * 60_000,
   storageState: "{}", exportDigest: "digest", transientFailures: 0,
-  fastRetries: 0, nextAttemptAt: null,
+  transientStartedAt: null, fastRetries: 0, nextAttemptAt: null,
 };
 
 describe("nextDeviceAction", () => {
@@ -25,5 +25,31 @@ describe("nextDeviceAction", () => {
   it("does not relogin needs_reauth and stops denied authority", () => {
     expect(nextDeviceAction({ ...session, state: "needs_reauth" }, authority, now)).toBe("wait");
     expect(nextDeviceAction(session, { ...authority, allowed: false, reason: "DEVICE_REVOKED" }, now)).toBe("stop");
+  });
+});
+
+describe("nextQuickloginRetryDelayMs", () => {
+  const minute = 60_000;
+  const firstFailureAt = now;
+
+  it.each([
+    [0, 1],
+    [5 * minute - 1, 1],
+    [5 * minute, 3],
+    [30 * minute - 1, 3],
+    [30 * minute, 5],
+    [2 * 60 * minute - 1, 5],
+    [2 * 60 * minute, 10],
+    [2 * 60 * minute + 10 * minute, 20],
+    [2 * 60 * minute + 30 * minute, 30],
+    [3 * 60 * minute + 10 * minute, 30],
+    [12 * 60 * minute + 30 * minute, 30],
+  ])("after %d ms returns a %d-minute delay", (elapsed, delayMinutes) => {
+    expect(nextQuickloginRetryDelayMs(firstFailureAt, firstFailureAt + elapsed))
+      .toBe(delayMinutes * minute);
+  });
+
+  it("treats a future first-failure timestamp as a new failure window", () => {
+    expect(nextQuickloginRetryDelayMs(now + minute, now)).toBe(minute);
   });
 });

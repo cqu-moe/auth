@@ -154,6 +154,7 @@ export interface StoredDeviceSession {
   storageState: string | null;
   exportDigest: string | null;
   transientFailures: number;
+  transientStartedAt: EpochMs | null;
   fastRetries: number;
   nextAttemptAt: EpochMs | null;
 }

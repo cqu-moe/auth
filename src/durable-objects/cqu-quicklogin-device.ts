@@ -13,10 +13,12 @@ import type {
 } from "../services/quicklogin/contracts";
 import { QuickloginLoginBrokerClient } from "../services/quicklogin/login-broker-client";
 import { quickloginDeviceModeEnabled } from "../services/quicklogin/mode";
-import { nextDeviceAction } from "../services/quicklogin/maintenance";
+import {
+  nextDeviceAction,
+  nextQuickloginRetryDelayMs,
+} from "../services/quicklogin/maintenance";
 import { fetchBrowser } from "../services/cqu-browser-routing";
 import { quickloginBrowserRoute } from "../services/quicklogin/browser-routing";
-import { nextKeepaliveDelayMs } from "../services/cqu-2fa/relogin-policy";
 
 const SESSION_KEY = "session";
 const OWNER_KEY = "owner";
@@ -48,6 +50,7 @@ function emptySession(authority: DeviceAuthority): StoredDeviceSession {
     storageState: null,
     exportDigest: null,
     transientFailures: 0,
+    transientStartedAt: null,
     fastRetries: 0,
     nextAttemptAt: null,
   };
@@ -190,15 +193,12 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
   }
 
   private async recordTransient(session: StoredDeviceSession): Promise<void> {
+    const now = Date.now();
     session.state = "temporary_unavailable";
     session.transientFailures += 1;
-    const delay = nextKeepaliveDelayMs(session.transientFailures, {
-      fastRetries: 2,
-      fastMs: 60_000,
-      baseMs: KEEPALIVE_MS,
-      capMs: 6 * KEEPALIVE_MS,
-    });
-    session.nextAttemptAt = Date.now() + delay;
+    session.transientStartedAt ??= now;
+    const delay = nextQuickloginRetryDelayMs(session.transientStartedAt, now);
+    session.nextAttemptAt = now + delay;
     await this.ctx.storage.put(SESSION_KEY, session);
     await this.ctx.storage.setAlarm(session.nextAttemptAt);
   }
@@ -267,6 +267,7 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     session.lastKeepAliveAt = Date.now();
     session.state = "ready";
     session.transientFailures = 0;
+    session.transientStartedAt = null;
     session.fastRetries = 0;
     session.nextAttemptAt = null;
     await this.ctx.storage.put(SESSION_KEY, session);
@@ -295,16 +296,14 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       session.state = "needs_reauth";
       session.storageState = null;
       session.exportDigest = null;
+      session.transientFailures = 0;
+      session.transientStartedAt = null;
       await this.ctx.storage.put(SESSION_KEY, session);
       await this.ctx.storage.deleteAlarm();
       return;
     }
     if (result.kind !== "success") {
-      session.state = "temporary_unavailable";
-      session.transientFailures += 1;
-      session.nextAttemptAt = Date.now() + 60_000;
-      await this.ctx.storage.put(SESSION_KEY, session);
-      await this.ctx.storage.setAlarm(session.nextAttemptAt);
+      await this.recordTransient(session);
       return;
     }
     const cookies = extractSsoCookies(result.storageState, Date.now());
@@ -317,6 +316,7 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     session.lastKeepAliveAt = result.loginAt;
     session.state = "ready";
     session.transientFailures = 0;
+    session.transientStartedAt = null;
     session.fastRetries = 0;
     session.nextAttemptAt = null;
     await this.ctx.storage.put(SESSION_KEY, session);

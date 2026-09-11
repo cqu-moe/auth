@@ -1,5 +1,5 @@
 import { env, runInDurableObject } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { QuickloginAccountClient } from "../../src/services/quicklogin/account-client";
 import { QuickloginDeviceClient } from "../../src/services/quicklogin/device-client";
 import { QuickloginLoginBrokerClient } from "../../src/services/quicklogin/login-broker-client";
@@ -111,6 +111,84 @@ describe("CquQuickloginDeviceDO", () => {
     const mintLog =
       (await readStorage<unknown[]>(sessionStub, "stMintLog")) ?? [];
     expect(mintLog).toHaveLength(2);
+  });
+
+  it("uses the elapsed failure window and resets it after recovery", async () => {
+    const minute = 60_000;
+    let currentTime = 1_800_000_000_000;
+    vi.spyOn(Date, "now").mockImplementation(() => currentTime);
+    const { userId, authority } = await setupDevice();
+    const sessionStub = env.CQU_SESSION.get(env.CQU_SESSION.idFromName(userId));
+    await seedSession(sessionStub, { status: "active" });
+    await seedCredentials(sessionStub);
+    await runInDurableObject(sessionStub, async (_instance, state) => {
+      const current = await state.storage.get<Record<string, unknown>>("state");
+      await state.storage.put("state", { ...current, userId });
+    });
+    let keepaliveSucceeds = false;
+    spyBrowserFetch({
+      "/health": () => Response.json({
+        ok: true,
+        bootId: "retry-window-boot",
+        browserProfile: "cloudflare",
+        capabilities: ["browser-route-v1", "operation-deadline-v1"],
+      }),
+      "/code-permit": () => Response.json({ ok: true }),
+      "/run": () => Response.json({ ok: true, state: exportableStorageState() }),
+      "/keepalive": () => keepaliveSucceeds
+        ? Response.json({
+            ok: true,
+            status: "alive",
+            state: exportableStorageState("-recovered"),
+          })
+        : new Response(null, { status: 503 }),
+    });
+    const devices = new QuickloginDeviceClient(env);
+    await devices.notifyDevice(authority);
+    const stub = env.CQU_QUICKLOGIN_DEVICE.get(
+      env.CQU_QUICKLOGIN_DEVICE.idFromName(`${userId}:${authority.deviceId}`)
+    );
+    await runInDurableObject(stub, async (instance) => {
+      await (instance as unknown as { alarm(): Promise<void> }).alarm();
+    });
+    const ready = await devices.readDeviceSession(userId, authority.deviceId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      await state.storage.put("session", { ...ready, lastKeepAliveAt: 0 });
+    });
+
+    await runInDurableObject(stub, async (instance) => {
+      await (instance as unknown as { alarm(): Promise<void> }).alarm();
+    });
+    await expect(devices.readDeviceSession(userId, authority.deviceId))
+      .resolves.toMatchObject({
+        state: "temporary_unavailable",
+        transientFailures: 1,
+        transientStartedAt: currentTime,
+        nextAttemptAt: currentTime + minute,
+      });
+
+    currentTime += 5 * minute;
+    await runInDurableObject(stub, async (instance) => {
+      await (instance as unknown as { alarm(): Promise<void> }).alarm();
+    });
+    await expect(devices.readDeviceSession(userId, authority.deviceId))
+      .resolves.toMatchObject({
+        transientFailures: 2,
+        transientStartedAt: currentTime - 5 * minute,
+        nextAttemptAt: currentTime + 3 * minute,
+      });
+
+    keepaliveSucceeds = true;
+    currentTime += 3 * minute;
+    await runInDurableObject(stub, async (instance) => {
+      await (instance as unknown as { alarm(): Promise<void> }).alarm();
+    });
+    await expect(devices.readDeviceSession(userId, authority.deviceId))
+      .resolves.toMatchObject({
+        state: "ready",
+        transientFailures: 0,
+        transientStartedAt: null,
+      });
   });
 
   it("ignores stale notification and rejects export after revocation", async () => {

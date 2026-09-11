@@ -3,6 +3,9 @@ import { INACTIVE_MS } from "./contracts";
 
 const KEEPALIVE_MS = 60 * 60_000;
 const RELOGIN_MS = 7 * 60 * 60_000;
+const MINUTE_MS = 60_000;
+const QUICKLOGIN_RETRY_BACKOFF_AT_MS = 2 * 60 * MINUTE_MS;
+const QUICKLOGIN_RETRY_CAP_MS = 30 * MINUTE_MS;
 
 export type DeviceAction =
   | "stop"
@@ -10,6 +13,24 @@ export type DeviceAction =
   | "login"
   | "keepalive"
   | "wait";
+
+export function nextQuickloginRetryDelayMs(
+  firstFailureAt: number,
+  now: number
+): number {
+  const elapsed = Math.max(0, now - firstFailureAt);
+  if (elapsed < 5 * MINUTE_MS) return MINUTE_MS;
+  if (elapsed < 30 * MINUTE_MS) return 3 * MINUTE_MS;
+  if (elapsed < QUICKLOGIN_RETRY_BACKOFF_AT_MS) return 5 * MINUTE_MS;
+
+  let remaining = elapsed - QUICKLOGIN_RETRY_BACKOFF_AT_MS;
+  let delay = 10 * MINUTE_MS;
+  while (remaining >= delay && delay < QUICKLOGIN_RETRY_CAP_MS) {
+    remaining -= delay;
+    delay = Math.min(delay * 2, QUICKLOGIN_RETRY_CAP_MS);
+  }
+  return delay;
+}
 
 export function nextDeviceAction(
   state: StoredDeviceSession,
