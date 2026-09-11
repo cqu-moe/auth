@@ -41,6 +41,16 @@ import {
   routeQuickloginEntitlementWrite,
   type EntitlementItem,
 } from "../services/quicklogin/quota-admin";
+import {
+  ensureQuickloginOAuthClient,
+  QuickloginClientRegistrationError,
+  type ClientAdapter,
+} from "../services/quicklogin/client-registration";
+import {
+  assertMigrationApplicable,
+  previewQuickloginMigration,
+  QuickloginMigrationError,
+} from "../services/quicklogin/migration";
 
 const admin = new Hono<HonoEnv>();
 
@@ -523,6 +533,112 @@ admin.patch("/users/:id/cqu-binding", async (c) => {
 
 // GET /api/admin/users/:id/entitlements - 列出某用户的全部 entitlement 原始行。
 // 读权限:admin.use("/*") 已 gate admin/superAdmin 角色,足够。
+async function quickloginInitializationPreview(
+  c: Context<HonoEnv>,
+  userId: string,
+  migrationId: string,
+  deviceLimit: number
+) {
+  const rows = await drizzle(c.env.DATABASE)
+    .select()
+    .from(userEntitlement)
+    .where(and(
+      eq(userEntitlement.userId, userId),
+      eq(userEntitlement.subsystem, "cqu")
+    ))
+    .all();
+  const oldAccess = rows.some((row) =>
+    row.capability === "quicklogin_access" && row.value === "1"
+  );
+  const oldMaster = rows.some((row) =>
+    row.capability === "quicklogin" && row.value === "1"
+  );
+  if (!oldAccess && !oldMaster) {
+    throw new QuickloginMigrationError("MISSING_MAPPING");
+  }
+  return previewQuickloginMigration(
+    [{ userId, oldAccess, oldMaster }],
+    {
+      schemaVersion: 1,
+      migrationId,
+      users: [{ userId, deviceLimit }],
+    }
+  );
+}
+
+admin.post("/users/:id/quicklogin-policy/preview", async (c) => {
+  const auth = createAuth(c.env, c.req.raw);
+  if (!(await hasEntitlementPermission(c, auth, "assign"))) {
+    return errorResponse(c, "FORBIDDEN", "需要权益写权限", 403);
+  }
+  const body = await c.req.json<{
+    migrationId?: unknown;
+    deviceLimit?: unknown;
+  }>().catch(() => ({}) as {
+    migrationId?: unknown;
+    deviceLimit?: unknown;
+  });
+  if (typeof body.migrationId !== "string" ||
+      !Number.isSafeInteger(body.deviceLimit) ||
+      (body.deviceLimit as number) < 0) {
+    return errorResponse(c, "INVALID_REQUEST", "迁移参数无效", 422);
+  }
+  try {
+    return c.json(await quickloginInitializationPreview(
+      c,
+      c.req.param("id"),
+      body.migrationId,
+      body.deviceLimit as number
+    ));
+  } catch (error) {
+    if (error instanceof QuickloginMigrationError) {
+      return errorResponse(c, error.code, error.message, 409);
+    }
+    throw error;
+  }
+});
+
+admin.put("/users/:id/quicklogin-policy/initialize", async (c) => {
+  const auth = createAuth(c.env, c.req.raw);
+  if (!(await hasEntitlementPermission(c, auth, "assign"))) {
+    return errorResponse(c, "FORBIDDEN", "需要权益写权限", 403);
+  }
+  const body = await c.req.json<{
+    migrationId?: unknown;
+    deviceLimit?: unknown;
+    previewHash?: unknown;
+  }>().catch(() => ({}) as {
+    migrationId?: unknown;
+    deviceLimit?: unknown;
+    previewHash?: unknown;
+  });
+  if (typeof body.migrationId !== "string" ||
+      typeof body.previewHash !== "string" ||
+      !Number.isSafeInteger(body.deviceLimit) ||
+      (body.deviceLimit as number) < 0) {
+    return errorResponse(c, "INVALID_REQUEST", "迁移参数无效", 422);
+  }
+  try {
+    const userId = c.req.param("id");
+    const preview = await quickloginInitializationPreview(
+      c, userId, body.migrationId, body.deviceLimit as number
+    );
+    assertMigrationApplicable(preview, body.previewHash);
+    await new QuickloginAccountClient(c.env).initializeQuickloginPolicy(userId, {
+      migrationId: body.migrationId,
+      deviceLimit: body.deviceLimit as number,
+      masterEnabled: preview.initializations[0].masterEnabled,
+    });
+    return c.json(await new QuickloginAccountClient(c.env)
+      .listDevices(userId, Date.now()));
+  } catch (error) {
+    if (error instanceof QuickloginMigrationError) {
+      return errorResponse(c, error.code, error.message, 409);
+    }
+    return quickloginQuotaError(c, error);
+  }
+});
+
 admin.post("/users/:id/quicklogin-quota/preview", async (c) => {
   const auth = createAuth(c.env, c.req.raw);
   if (!(await hasEntitlementPermission(c, auth, "assign"))) {
@@ -994,6 +1110,35 @@ admin.post("/oauth-clients", async (c) => {
     return c.json({ data: result });
   } catch (e) {
     return oauthClientError(c, e);
+  }
+});
+
+admin.put("/quicklogin-client", async (c) => {
+  const auth = createAuth(c.env, c.req.raw);
+  if (!(await hasOAuthClientPermission(c, auth, "create"))) {
+    return errorResponse(c, "FORBIDDEN", "需要 OAuth 客户端写权限", 403);
+  }
+  try {
+    const ctx = await auth.$context;
+    const client = await ensureQuickloginOAuthClient(
+      c.env,
+      ctx.adapter as unknown as ClientAdapter
+    );
+    return c.json({
+      clientId: client.clientId,
+      redirectUris: client.redirectUris,
+      scopes: client.scopes,
+      public: client.public,
+      requirePKCE: client.requirePKCE,
+      skipConsent: client.skipConsent,
+      tokenEndpointAuthMethod: client.tokenEndpointAuthMethod,
+      metadata: client.metadata,
+    });
+  } catch (error) {
+    if (error instanceof QuickloginClientRegistrationError) {
+      return errorResponse(c, error.code, error.message, 409);
+    }
+    throw error;
   }
 });
 
