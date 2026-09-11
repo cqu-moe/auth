@@ -90,7 +90,7 @@ async function post(
   clientIp?: string
 ) {
   return auth.handler(
-    new Request(`http://localhost:8787/api/auth${path}`, {
+    new Request(`http://localhost:8787/api/v1/auth${path}`, {
       method: "POST",
       headers: new Headers({
         cookie: headers.get("cookie") ?? "",

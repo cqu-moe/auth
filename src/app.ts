@@ -9,12 +9,13 @@ import { cqu } from "./routes/cqu";
 import { cquBinding } from "./routes/cqu-bind";
 import { cquQuicklogin } from "./routes/cqu-quicklogin";
 import { admin } from "./routes/admin";
-import { handleInvitationSignup } from "./services/registration-invitations";
 import type { HonoEnv } from "./types";
 import { createV1Api } from "./api/v1";
 import { createLegacyRouter } from "./api/legacy";
 import { allowedMethods, listHttpOperations } from "./api/operations";
 import { problem } from "./api/problem";
+import { createAuthApi } from "./api/v1/auth";
+import { AUTH_BASE_PATH } from "../shared/api-paths";
 
 export function createApp() {
   const app = new Hono<HonoEnv>();
@@ -36,30 +37,30 @@ export function createApp() {
     return app.request(new Request(url, request), undefined, env);
   }));
 
-  app.get("/.well-known/oauth-authorization-server", async (c) => {
+  const oauthMetadata = async (c: Parameters<typeof problem>[0]) => {
     const auth = createAuth(c.env, c.req.raw);
     return oauthProviderAuthServerMetadata(auth)(c.req.raw);
-  });
+  };
 
-  app.get("/.well-known/openid-configuration", async (c) => {
+  const openIdMetadata = async (c: Parameters<typeof problem>[0]) => {
     const auth = createAuth(c.env, c.req.raw);
     return oauthProviderOpenIdConfigMetadata(auth)(c.req.raw);
-  });
+  };
 
-  app.post("/api/auth/sign-up/email", async (c) => {
-    const auth = createAuth(c.env, c.req.raw);
-    return handleInvitationSignup(c.req.raw, c.env.DATABASE, (request) => auth.handler(request));
-  });
+  app.get("/.well-known/oauth-authorization-server", oauthMetadata);
+  app.get("/.well-known/openid-configuration", openIdMetadata);
+  app.get("/api/auth/.well-known/openid-configuration", openIdMetadata);
+  app.get("/api/auth/.well-known/oauth-authorization-server", oauthMetadata);
+  app.get("/.well-known/oauth-authorization-server/api/auth", oauthMetadata);
+
+  app.route(AUTH_BASE_PATH, createAuthApi());
 
   app.get("/api/auth/registration-settings", async (c) => {
     const { isInvitationRequired } = await import("./services/entitlements");
     return c.json({ invitationRequired: await isInvitationRequired(c.env.DATABASE) });
   });
 
-  app.all("/api/auth/*", async (c) => {
-    const auth = createAuth(c.env, c.req.raw);
-    return auth.handler(c.req.raw);
-  });
+  app.route("/api/auth", createAuthApi({ legacy: true }));
 
   app.route("/api/cqu/binding", cquBinding);
   app.route("/api/cqu/quicklogin", cquQuicklogin);

@@ -3,6 +3,7 @@ import { verifyAccessToken } from "better-auth/oauth2";
 import { createAuth } from "../auth";
 import { problem } from "../api/problem";
 import type { HonoEnv, Principal, RequestAuthCache } from "../types";
+import { authUrls } from "../auth-config";
 
 function getCache(c: Context<HonoEnv>): RequestAuthCache {
   let cache = c.get("requestAuthCache");
@@ -53,11 +54,10 @@ async function bearerPrincipal(c: Context<HonoEnv>): Promise<Principal | null> {
     if (!token) return null;
 
     try {
-      const origin = c.env.BETTER_AUTH_URL.replace(/\/$/, "");
-      const issuer = `${origin}/api/auth`;
+      const { issuer, jwksUrl } = authUrls(c.env.BETTER_AUTH_URL);
       const payload = await verifyAccessToken(token, {
         verifyOptions: { issuer, audience: issuer },
-        jwksUrl: `${origin}/api/auth/jwks`,
+        jwksUrl,
       });
       const userId = claimString(payload.sub);
       const clientId = claimString(payload.azp ?? payload.client_id);

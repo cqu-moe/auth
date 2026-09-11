@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { Hono } from "hono";
 import { allowedMethods, listHttpOperations } from "./operations";
+import { createApp } from "../app";
+import { AUTH_OPERATIONS } from "./auth-operations.generated";
 
 describe("HTTP operation inventory", () => {
   it("derives concrete methods and matches one-segment parameters", () => {
@@ -25,5 +27,18 @@ describe("HTTP operation inventory", () => {
     const operations = listHttpOperations(app);
     expect(allowedMethods(operations, "/api/v1/cqu/binding/events"))
       .toEqual(["GET", "OPTIONS"]);
+  });
+
+  it("mounts every generated auth operation once at canonical and legacy prefixes", () => {
+    const operations = listHttpOperations(createApp());
+    const keys = new Set(operations.map(({ method, path }) => `${method} ${path}`));
+    for (const { method, path } of AUTH_OPERATIONS) {
+      expect(keys.has(`${method} /api/v1/auth${path}`), `canonical ${method} ${path}`).toBe(true);
+      expect(keys.has(`${method} /api/auth${path}`), `legacy ${method} ${path}`).toBe(true);
+    }
+    expect(keys.has("POST /api/v1/auth/get-session")).toBe(false);
+    expect(keys.has("POST /api/auth/get-session")).toBe(false);
+    expect(keys.has("GET /api/v1/auth/token")).toBe(false);
+    expect(keys.has("POST /api/v1/auth/sign-in/email-otp")).toBe(false);
   });
 });

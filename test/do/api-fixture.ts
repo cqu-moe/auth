@@ -51,11 +51,11 @@ export async function createApiFixture() {
   const origin = env.BETTER_AUTH_URL;
 
   async function request(path: string, init?: RequestInit) {
-    return worker.fetch(
+    return withFakeResend(() => Promise.resolve(worker.fetch(
       new Request(new URL(path, origin), init),
       env,
       requestContext()
-    );
+    )));
   }
 
   async function signIn(role: TestRole): Promise<Headers> {

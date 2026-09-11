@@ -11,6 +11,7 @@ import { Resend } from "resend";
 import type { Env } from "./types";
 import { resolveCaps, subsystemForAccessToken } from "./services/entitlements";
 import { isCquMoeHost } from "./utils/cookie-domain";
+import { authUrls } from "./auth-config";
 
 // Must spread the admin plugin's defaultStatements: its built-in endpoints
 // (listUsers/setRole/banUser/...) authorize against actions like
@@ -66,9 +67,11 @@ const currentEmailOtpPaths = new Set([
 
 export function createAuth(env: Env, request: Request) {
   const getResend = () => new Resend(env.RESEND_API_KEY);
+  const urls = authUrls(env.BETTER_AUTH_URL);
 
   return betterAuth({
     baseURL: env.BETTER_AUTH_URL,
+    basePath: urls.basePath,
     secret: env.BETTER_AUTH_SECRET,
     ...withCloudflare(
       {
@@ -126,11 +129,18 @@ export function createAuth(env: Env, request: Request) {
             defaultRole: "user",
             adminRoles: ["admin", "superAdmin"],
           }),
-          jwt(),
+          jwt({
+            jwt: { issuer: urls.issuer, audience: urls.issuer },
+            jwks: {
+              remoteUrl: urls.jwksUrl,
+              keyPairConfig: { alg: "EdDSA", crv: "Ed25519" },
+            },
+          }),
           oauthProvider({
             loginPage: "/login",
             consentPage: "/oauth/authorize",
             scopes: OAUTH_SCOPES,
+            validAudiences: [urls.issuer],
             // 按 client→subsystem 只盖该片 caps(最小披露);拿不到映射则盖空 {},绝不盖全量。
             // 用 customAccessTokenClaims(oauth-provider)而非 jwt.definePayload:
             // 已核实 OAuth access token 不经 definePayload,且 definePayload 入参无 client_id。

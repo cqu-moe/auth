@@ -58,7 +58,7 @@ async function nativePost(
   headers: Headers,
   body: Record<string, unknown>
 ) {
-  return auth.handler(new Request(`http://localhost:8787/api/auth${path}`, {
+  return auth.handler(new Request(`http://localhost:8787/api/v1/auth${path}`, {
     method: "POST",
     headers: new Headers({
       cookie: headers.get("cookie") ?? "",

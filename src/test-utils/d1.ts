@@ -57,6 +57,10 @@ export function createSqliteD1(database: DatabaseSync): D1Database {
 
   return {
     prepare,
+    async exec(query: string) {
+      database.exec(query);
+      return { count: 0, duration: 0 };
+    },
     async batch(statements: BoundStatement[]) {
       database.exec("BEGIN");
       try {

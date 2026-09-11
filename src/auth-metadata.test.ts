@@ -5,6 +5,7 @@ import {
   oauthProviderOpenIdConfigMetadata,
 } from "@better-auth/oauth-provider";
 import { createTestAuth } from "./test-utils/auth";
+import { AUTH_OPERATIONS } from "./api/auth-operations.generated";
 
 const EXPECTED_OPERATIONS = `
 GET /account-info
@@ -108,6 +109,8 @@ describe("Better Auth migration baseline", () => {
 
       expect(endpoints).toHaveLength(80);
       expect(operations).toEqual(EXPECTED_OPERATIONS);
+      expect(AUTH_OPERATIONS.map(({ method, path }) => `${method} ${path}`).sort())
+        .toEqual(operations);
       expect(operations).toHaveLength(81);
       expect(operations.filter((operation) => operation.endsWith(" /get-session")))
         .toEqual(["GET /get-session"]);
@@ -126,7 +129,7 @@ describe("Better Auth migration baseline", () => {
         .map(([key, endpoint]) => `${key}:${endpoint.options.method}:${endpoint.path}`)
         .sort();
 
-      expect(ctx.baseURL).toBe("https://auth.cqu.moe/api/auth");
+      expect(ctx.baseURL).toBe("https://auth.cqu.moe/api/v1/auth");
       expect(fixture.auth.options.disabledPaths).toEqual([
         "/token",
         "/sign-in/email-otp",
@@ -167,15 +170,15 @@ describe("Better Auth migration baseline", () => {
       );
       expect(await authServer.json()).toMatchObject({
         issuer: "https://auth.cqu.moe/api/auth",
-        authorization_endpoint: "https://auth.cqu.moe/api/auth/oauth2/authorize",
-        token_endpoint: "https://auth.cqu.moe/api/auth/oauth2/token",
-        jwks_uri: "https://auth.cqu.moe/api/auth/jwks",
+        authorization_endpoint: "https://auth.cqu.moe/api/v1/auth/oauth2/authorize",
+        token_endpoint: "https://auth.cqu.moe/api/v1/auth/oauth2/token",
+        jwks_uri: "https://auth.cqu.moe/api/v1/auth/jwks",
       });
       expect(await openId.json()).toMatchObject({
         issuer: "https://auth.cqu.moe/api/auth",
-        authorization_endpoint: "https://auth.cqu.moe/api/auth/oauth2/authorize",
-        token_endpoint: "https://auth.cqu.moe/api/auth/oauth2/token",
-        jwks_uri: "https://auth.cqu.moe/api/auth/jwks",
+        authorization_endpoint: "https://auth.cqu.moe/api/v1/auth/oauth2/authorize",
+        token_endpoint: "https://auth.cqu.moe/api/v1/auth/oauth2/token",
+        jwks_uri: "https://auth.cqu.moe/api/v1/auth/jwks",
       });
     } finally {
       fixture.close();

@@ -93,4 +93,91 @@ describe("API and SPA routing boundary", () => {
       await fixture.close();
     }
   });
+
+  it("mounts only the generated auth operations at canonical and legacy prefixes", async () => {
+    const fixture = createHttpFixture();
+    try {
+      const app = createApp();
+      for (const path of ["/api/v1/auth/ok", "/api/auth/ok"]) {
+        const response = await app.request(path, {}, fixture.env);
+        expect(response.status, path).toBe(200);
+        expect(await response.json()).toEqual({ ok: true });
+      }
+
+      const wrongMethod = await app.request("/api/v1/auth/get-session", {
+        method: "POST",
+      }, fixture.env);
+      expect(wrongMethod.status).toBe(405);
+      expect(wrongMethod.headers.get("allow")).toBe("GET, HEAD, OPTIONS");
+
+      for (const path of [
+        "/api/v1/auth/devices",
+        "/api/auth/devices",
+        "/api/v1/auth/sign-in/email-otp",
+        "/api/auth/sign-in/email-otp",
+      ]) {
+        const response = await app.request(path, { method: "POST" }, fixture.env);
+        expect(response.status, path).toBe(404);
+        expect(response.headers.get("content-type"), path).toContain("application/problem+json");
+      }
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("redirects auth errors safely and keeps all issuer discovery variants stable", async () => {
+    const fixture = createHttpFixture();
+    try {
+      const app = createApp();
+      for (const path of ["/api/v1/auth/error?error=boom&description=secret", "/api/auth/error?error=boom&redirect=https://evil.test"]) {
+        const response = await app.request(path, {}, fixture.env);
+        expect(response.status, path).toBe(302);
+        expect(response.headers.get("location"), path).toBe("/auth/error");
+      }
+
+      const discovery = [
+        "/.well-known/oauth-authorization-server",
+        "/.well-known/openid-configuration",
+        "/api/auth/.well-known/openid-configuration",
+        "/api/auth/.well-known/oauth-authorization-server",
+        "/.well-known/oauth-authorization-server/api/auth",
+      ];
+      for (const path of discovery) {
+        const response = await app.request(path, {}, fixture.env);
+        expect(response.status, path).toBe(200);
+        expect(await response.json(), path).toMatchObject({
+          issuer: "http://localhost:8787/api/auth",
+          authorization_endpoint: "http://localhost:8787/api/v1/auth/oauth2/authorize",
+          token_endpoint: "http://localhost:8787/api/v1/auth/oauth2/token",
+          jwks_uri: "http://localhost:8787/api/v1/auth/jwks",
+        });
+      }
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("forwards legacy OAuth form and callback requests without HTTP redirects", async () => {
+    const fixture = createHttpFixture();
+    try {
+      const app = createApp();
+      const form = "grant_type=authorization_code&code=invalid&redirect_uri=https%3A%2F%2Fclient.example%2Fcallback";
+      const init = {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          authorization: "Basic Zml4dHVyZS1jbGllbnQ6bG9jYWwtc2VjcmV0",
+        },
+        body: form,
+      } satisfies RequestInit;
+      const canonical = await app.request("/api/v1/auth/oauth2/token?trace=signed%2Bvalue", init, fixture.env);
+      const legacy = await app.request("/api/auth/oauth2/token?trace=signed%2Bvalue", init, fixture.env);
+      expect(legacy.status).toBe(canonical.status);
+      expect(legacy.status).not.toBe(301);
+      expect(legacy.status).not.toBe(302);
+      expect(await legacy.text()).toBe(await canonical.text());
+    } finally {
+      await fixture.close();
+    }
+  });
 });
