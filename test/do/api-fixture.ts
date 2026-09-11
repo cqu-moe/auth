@@ -73,6 +73,11 @@ export async function createApiFixture() {
         where: [{ field: "id", value: signup.response.user.id }],
         update: { role },
       });
+      const signedIn = await auth.api.signInEmail({
+        body: { email, password: "local-test-password" },
+        returnHeaders: true,
+      });
+      return new Headers({ cookie: cookieHeader(signedIn.headers) });
     }
     return new Headers({ cookie: cookieHeader(signup.headers) });
   }
