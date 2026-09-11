@@ -9,6 +9,7 @@ import {
   createAdminInvitationsApi,
   createPublicRegistrationSettingsApi,
 } from "./admin/invitations";
+import { createAdminEntitlementsApi } from "./admin/entitlements";
 
 const Health = z.object({
   data: z.object({
@@ -39,6 +40,7 @@ export function createV1Api() {
   api.route("/cqu/quicklogin", createCquQuickloginApi());
   api.route("/admin/users", createAdminUsersApi());
   api.route("/admin", createAdminInvitationsApi());
+  api.route("/admin", createAdminEntitlementsApi());
   api.route("/registration-settings", createPublicRegistrationSettingsApi());
   return api;
 }

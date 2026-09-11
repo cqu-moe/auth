@@ -19,8 +19,8 @@ Node/npm：`v22.22.3` / `10.9.8`
 | T06 | 通过 | v1 CQU binding adapter/schema、严格canonical输入、dead forward创建分支清理、Workers API测试 | v1 Workers初跑2/2因路径不存在而404；identity injection新增用例观察到201而非400 | Workers v1/legacy/auth/注入/forward/幂等/解绑 4/4；既有binding/邮件链42/42；两端typecheck exit 0 | CQU-01–CQU-10、LEG-02、LEG-03（真实WS对象随最终Workers全套复核） | `254849f refactor(api): migrate CQU binding resources to v1` |
 | T07 | 通过 | v1 service-tickets/quicklogin schema与适配、POST/201/no-store、session-only测试 | ticket测试初跑2/2因路径不存在而404；双目标红灯确认必须在验签/DO前校验 | ticket/auth/service矩阵32/32；QuickLogin Workers 1/1；完整Node 61 files/541 tests；两端typecheck exit 0 | CQU-11–CQU-18、AUTH-01–AUTH-06、LEG-04 | `56bca4e refactor(api): version ticket issuance and quicklogin preferences` |
 | T08 | 通过 | `api/v1/admin/users` schema/handlers、严格分页、属性式PATCH、CQU状态适配、测试fixture角色刷新 | Workers初跑因v1路径缺失返回404；首次管理员用例因fixture沿用角色变更前session得到403，改为角色更新后重新登录 | Workers users 2/2（匿名、分页负例、ban、双字段、admin升权拒绝）；root typecheck exit 0 | ADMIN-01–ADMIN-05、LEG-09 | `f9e2520 refactor(api): model admin user updates as resource changes` |
-| T09 | 通过 | v1公开/管理注册设置、邀请schema/handler、严格可选body与权限 | 初跑公开v1设置404；坏JSON行数用例先固定无写入要求 | Workers邀请/设置2/2；既有邀请并发事务26项连同新API共27/27；Node服务9/9；root typecheck exit 0 | ADMIN-06–ADMIN-10、AUTH-13、OAS-04 | 待提交 |
-| T10 | 未开始 | — | — | — | ADMIN-11–ADMIN-18、LEG-10 | — |
+| T09 | 通过 | v1公开/管理注册设置、邀请schema/handler、严格可选body与权限 | 初跑公开v1设置404；坏JSON行数用例先固定无写入要求 | Workers邀请/设置2/2；既有邀请并发事务26项连同新API共27/27；Node服务9/9；root typecheck exit 0 | ADMIN-06–ADMIN-10、AUTH-13、OAS-04 | `27f09c8 refactor(api): version invitation and registration resources` |
+| T10 | 通过 | v1权益replace/merge/单项删除、预设CRUD、默认配置与权限 | Workers首个PUT因路径缺失404；首次green断言未投影DB元数据而失败，改为只比较公开Item字段 | Workers真实D1 replace+merge 1/1；服务/能力目录57/57；root typecheck exit 0 | ADMIN-11–ADMIN-18、LEG-10 | 待提交 |
 | T11 | 未开始 | — | — | — | ADMIN-19–ADMIN-28、LEG-11、LEG-12 | — |
 | T12 | 未开始 | — | — | — | OAS-01–OAS-14、CLEAN-02 | — |
 | T13 | 未开始 | — | — | — | WEB-01–WEB-08、AUTH-13–AUTH-18、CLEAN-01 | — |
