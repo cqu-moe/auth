@@ -5,7 +5,7 @@ import { errorResponse } from "../utils/error";
 import { requireCquScope } from "../middleware/scope";
 import { validateCquServiceUrl } from "../services/service-url";
 import { pickServiceTicketMode } from "../services/service-ticket-mode";
-import { verifyAccessToken } from "better-auth/oauth2";
+import { verifyAuthAccessToken } from "../services/auth-access-token";
 
 const cqu = new Hono<HonoEnv>();
 
@@ -15,13 +15,7 @@ cqu.use("/*", async (c, next) => {
   if (authHeader?.startsWith("Bearer ")) {
     const token = authHeader.substring(7);
     try {
-      const payload = await verifyAccessToken(token, {
-        verifyOptions: {
-          issuer: c.env.BETTER_AUTH_URL,
-          audience: c.env.BETTER_AUTH_URL,
-        },
-        jwksUrl: `${c.env.BETTER_AUTH_URL}/api/auth/jwks`,
-      });
+      const payload = await verifyAuthAccessToken(token, c.env);
       c.set("user", { id: payload.sub as string });
       // 取票客户端身份: OAuth 标准用 azp(authorized party), 兼容 client_id。
       // 转发给 DO 做 per-client 限频与审计(无则 DO 视为 null)。

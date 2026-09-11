@@ -8,7 +8,7 @@ import { genAddressToken } from "../services/cqu-2fa/token";
 import { CQU_SENDER } from "../services/cqu-2fa/sender-auth";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, sql } from "drizzle-orm";
-import { verifyAccessToken } from "better-auth/oauth2";
+import { verifyAuthAccessToken } from "../services/auth-access-token";
 
 // CQU 绑定资源路由（RESTful 重构）。
 //
@@ -30,13 +30,7 @@ cquBinding.use("/*", async (c, next) => {
   if (authHeader?.startsWith("Bearer ")) {
     const token = authHeader.substring(7);
     try {
-      const payload = await verifyAccessToken(token, {
-        verifyOptions: {
-          issuer: c.env.BETTER_AUTH_URL,
-          audience: c.env.BETTER_AUTH_URL,
-        },
-        jwksUrl: `${c.env.BETTER_AUTH_URL}/api/auth/jwks`,
-      });
+      const payload = await verifyAuthAccessToken(token, c.env);
       c.set("user", { id: payload.sub as string });
       return next();
     } catch {

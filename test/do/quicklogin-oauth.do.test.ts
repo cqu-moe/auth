@@ -82,6 +82,20 @@ describe("quicklogin OAuth grants", () => {
     await expect(second.refresh()).resolves.toBeDefined();
   });
 
+  it("verifies an issued device token without fetching JWKS through the public WAF", async () => {
+    const fixture = await createOAuthFixture(env);
+    const install = await authorizeOfficialInstall(fixture, {
+      websiteSession: fixture.websiteSession,
+    });
+    const publicFetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("challenge", { status: 403 })
+    );
+
+    await expect(verifyQuickloginBearer(install.request(), env)).resolves
+      .toMatchObject({ clientId: OFFICIAL_CLIENT_ID });
+    expect(publicFetch).not.toHaveBeenCalled();
+  });
+
   it("rejects missing PKCE, a wrong verifier, and an unregistered redirect", async () => {
     const fixture = await createOAuthFixture(env);
 

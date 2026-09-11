@@ -1,5 +1,5 @@
-import { verifyAccessToken } from "better-auth/oauth2";
 import type { Env } from "../types";
+import { verifyAuthAccessToken } from "../services/auth-access-token";
 import {
   QuickloginAccountClient,
   QuickloginAccountClientError,
@@ -35,13 +35,7 @@ export async function verifyQuickloginBearer(
 
   let payload: Record<string, unknown>;
   try {
-    payload = (await verifyAccessToken(token, {
-      verifyOptions: {
-        issuer: env.BETTER_AUTH_URL,
-        audience: env.BETTER_AUTH_URL,
-      },
-      jwksUrl: `${env.BETTER_AUTH_URL}/api/auth/jwks`,
-    })) as Record<string, unknown>;
+    payload = (await verifyAuthAccessToken(token, env)) as Record<string, unknown>;
   } catch {
     fail("UNAUTHORIZED");
   }

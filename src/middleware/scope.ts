@@ -1,6 +1,6 @@
 import type { Context, Next } from "hono";
 import type { HonoEnv } from "../types";
-import { verifyAccessToken } from "better-auth/oauth2";
+import { verifyAuthAccessToken } from "../services/auth-access-token";
 import { oauthClientCquScopes } from "../db/schema";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
@@ -28,13 +28,7 @@ export function requireCquScope(service: string) {
 
     let payload;
     try {
-      payload = await verifyAccessToken(token, {
-        verifyOptions: {
-          issuer: c.env.BETTER_AUTH_URL,
-          audience: c.env.BETTER_AUTH_URL,
-        },
-        jwksUrl: `${c.env.BETTER_AUTH_URL}/api/auth/jwks`,
-      });
+      payload = await verifyAuthAccessToken(token, c.env);
     } catch {
       return errorResponse(c, "UNAUTHORIZED", "无效的访问令牌", 401);
     }
