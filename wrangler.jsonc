@@ -10,6 +10,8 @@
   "vars": {
     "BIND_EMAIL_DOMAIN": "cquotp.com",
     "QUICKLOGIN_DEVICE_MODE": "off",
+    "QUICKLOGIN_CLIENT_ID": "cqu-quicklogin-chrome",
+    "QUICKLOGIN_EXTENSION_ORIGIN": "chrome-extension://igfidegfgfoofnoncpmbcokbffjmmook",
     // 浏览器后端已固定为 Cloudflare APAC Containers(2026-09-08 全量切换,
     // 2026-09-09 移除腾讯云节点绑定 LOGIN_NODE 与 node 回退路径)。
   },
