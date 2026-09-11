@@ -20,7 +20,7 @@ on:
     # 纯文档/忽略文件改动不触发部署（main 自动部署下省一次无谓生产重部署）。
     paths-ignore:
       - '**.md'
-      - 'docs/**'
+      - 'docs/**/*.md'
       - '.gitignore'
       - 'LICENSE'
   workflow_dispatch:
@@ -58,11 +58,32 @@ jobs:
       - name: Typecheck (backend)
         run: npm run typecheck
 
+      - name: Typecheck (Workers tests)
+        run: npm run typecheck:do
+
       - name: Test
         run: npm test
 
+      - name: Test (Workers / Durable Objects)
+        run: npm run test:do
+        env:
+          WRANGLER_LOG_PATH: /tmp/auth-api-v1-wrangler.log
+
+      - name: Check API artifacts
+        run: npm run check:api
+
+      - name: Lint API contracts
+        run: npm run lint:api
+
+      - name: Check import boundaries
+        run: npm run check:boundaries
+
       - name: Typecheck (frontend)
-        run: npx tsc --noEmit
+        run: npx tsc -b
+        working-directory: frontend
+
+      - name: Lint (frontend)
+        run: npm run lint
         working-directory: frontend
 
       - name: Build (frontend)

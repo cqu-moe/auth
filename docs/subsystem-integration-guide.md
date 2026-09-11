@@ -169,7 +169,7 @@ async function generatePKCE() {
 ```
 
 ```
-GET https://auth.cqu.moe/api/auth/oauth2/authorize
+GET https://auth.cqu.moe/api/v1/auth/oauth2/authorize
   ?client_id=YOUR_CLIENT_ID
   &redirect_uri=https://your-app.cqu.moe/callback   # 必须精确匹配注册值
   &response_type=code
@@ -180,7 +180,7 @@ GET https://auth.cqu.moe/api/auth/oauth2/authorize
 回调拿 `code` 换 token:
 
 ```
-POST https://auth.cqu.moe/api/auth/oauth2/token   (application/x-www-form-urlencoded)
+POST https://auth.cqu.moe/api/v1/auth/oauth2/token   (application/x-www-form-urlencoded)
 grant_type=authorization_code &code=... &client_id=... &client_secret=...
 &redirect_uri=... &code_verifier=ORIGINAL_VERIFIER
 ```
@@ -193,7 +193,7 @@ grant_type=authorization_code &code=... &client_id=... &client_secret=...
 
 ```ts
 import { createRemoteJWKSet, jwtVerify } from "jose"
-const JWKS = createRemoteJWKSet(new URL("https://auth.cqu.moe/api/auth/jwks"))
+const JWKS = createRemoteJWKSet(new URL("https://auth.cqu.moe/api/v1/auth/jwks"))
 const { payload } = await jwtVerify(token, JWKS, {
   issuer: "https://auth.cqu.moe/api/auth",   // pin 死 issuer
   audience: "YOUR_CLIENT_ID",                 // pin 死 audience
@@ -214,9 +214,11 @@ const { payload } = await jwtVerify(token, JWKS, {
 拥有 `cqu:ticket:<service>` 的 token(或拓扑① 的 RPC)可代理取 CAS Service Ticket:
 
 ```
-GET https://auth.cqu.moe/api/cqu/service-ticket?service=jwxt
+POST https://auth.cqu.moe/api/v1/cqu/service-tickets
 Authorization: Bearer ACCESS_TOKEN
-→ { "ticket": "ST-12345-ABCDEF...", "service": "jwxt" }
+Content-Type: application/json
+Body: { "service": "jwxt" }
+→ { "data": { "ticket": "ST-12345-ABCDEF..." } }
 ```
 
 可用 `service` key:`jwxt`(教务) · `jxpj`(教评) · `library`(图书馆) · `card`(校园卡)。
@@ -268,17 +270,19 @@ if (count > limit) return deny(`订阅上限 ${limit} 条`)
 ### 5.2 取票接口
 
 ```
-GET https://auth.cqu.moe/api/cqu/service-ticket?serviceUrl=<完整CQU服务URL>
+POST https://auth.cqu.moe/api/v1/cqu/service-tickets
 Authorization: Bearer EXT_ACCESS_TOKEN
-→ { "ticket": "ST-..." }
+Content-Type: application/json
+Body: { "serviceUrl": "<完整CQU服务URL>" }
+→ { "data": { "ticket": "ST-..." } }
 ```
 
 拿到后把当前标签页导航到 `serviceUrl?ticket=ST-...`,由服务自身向 CAS 验票。
 
 ### 5.3 必须知道的约束
 
-- **`serviceUrl` 由 auth 服务端严格校验**(https + 解析后 `*.cqu.edu.cn` host + 拒 userinfo/异常端口)。非法直接 403——别指望"它来自 SSO 页"就被信任。
-- **功能开放闸 + 用户级 opt-in(两道独立 flag)**:`cqu.quicklogin_access`(admin 授予)是功能开放闸 —— 无此权益的用户设置页不显示快捷登录卡片、自助端点拒写(403)、DO 广路径取票同拒;被开放的用户还须本人开启 `cqu.quicklogin`(同意开关),否则即使 token 在也签不出 ST。同意开关由用户**自助**读写:`GET /api/cqu/quicklogin` → `{eligible, enabled}`、`PUT /api/cqu/quicklogin {enabled}`(仅认 auth 站登录 session,**绝不接受 Bearer/OAuth token** —— OAuth client 不能替用户翻这个开关);设置页已内置开关。superAdmin 也可经 admin entitlement 路由代写。
+- **`serviceUrl` 由 auth 服务端严格校验**(https + 解析后 `*.cqu.edu.cn` host + 拒 userinfo/异常端口)。非法直接 400——别指望"它来自 SSO 页"就被信任。
+- **功能开放闸 + 用户级 opt-in(两道独立 flag)**:`cqu.quicklogin_access`(admin 授予)是功能开放闸 —— 无此权益的用户设置页不显示快捷登录卡片、自助端点拒写(403)、DO 广路径取票同拒;被开放的用户还须本人开启 `cqu.quicklogin`(同意开关),否则即使 token 在也签不出 ST。同意开关由用户**自助**读写:`GET /api/v1/cqu/quicklogin` 与 `PUT /api/v1/cqu/quicklogin {enabled}`(仅认 auth 站登录 session,**绝不接受 Bearer/OAuth token** —— OAuth client 不能替用户翻这个开关);设置页已内置开关。superAdmin 也可经 admin entitlement 路由代写。
 - **失败一律降级到原生登录页,绝不伪造流程**:
   - 服务未在 CQU CAS 注册 → 报"不支持此服务"。
   - 非 `?ticket=` 回调(POST-binding 等)→ 交回服务自身登录按钮。
@@ -295,11 +299,11 @@ Authorization: Bearer EXT_ACCESS_TOKEN
 非自家应用走完整 OAuth(**会弹同意页**,不设 `skipConsent`)。流程同 §2.1;CQU scope 需 admin 额外授权且用户已绑定。补充端点:
 
 ```
-GET  /api/auth/oauth2/userinfo            (Bearer)            → { sub, name, email, email_verified }
-POST /api/auth/oauth2/token  grant_type=refresh_token …       → 刷新
-POST /api/auth/oauth2/introspect   (Basic client)  token=…    → RFC 7662 自省
-POST /api/auth/oauth2/revoke       (Basic client)  token=…    → RFC 7009 吊销
-GET  /api/auth/oauth2/end-session  ?id_token_hint=…&post_logout_redirect_uri=…  → 登出
+GET  /api/v1/auth/oauth2/userinfo            (Bearer)            → { sub, name, email, email_verified }
+POST /api/v1/auth/oauth2/token  grant_type=refresh_token …       → 刷新
+POST /api/v1/auth/oauth2/introspect   (Basic client)  token=…    → RFC 7662 自省
+POST /api/v1/auth/oauth2/revoke       (Basic client)  token=…    → RFC 7009 吊销
+GET  /api/v1/auth/oauth2/end-session  ?id_token_hint=…&post_logout_redirect_uri=…  → 登出
 ```
 
 ---
@@ -319,7 +323,7 @@ GET  /api/auth/oauth2/end-session  ?id_token_hint=…&post_logout_redirect_uri=�
 
 | Discovery | `GET /.well-known/oauth-authorization-server` · `GET /.well-known/openid-configuration` |
 |---|---|
-| JWKS | `GET /api/auth/jwks` |
+| JWKS | `GET /api/v1/auth/jwks` |
 | Issuer | `https://auth.cqu.moe/api/auth` |
 | 签名 | EdDSA (Ed25519) |
 | Access Token | JWT,默认 1h,可 JWKS 离线验 |

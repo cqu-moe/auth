@@ -1,4 +1,10 @@
-# Handoff — Codex 多轮 review + 双盲核验 + 14 项加固已实现并双审,待真节点 e2e 冒烟
+# Current handoff — API v1 refactor in local isolated worktree
+
+当前执行分支为 `codex/api-v1-refactor`，工作区 `.worktrees/api-v1-refactor`，基线 `225d1c6`。T00–T15 已按执行日志推进；正式 HTTP 前缀为 `/api/v1`，旧地址仍处兼容期，issuer 永久保持 `https://auth.cqu.moe/api/auth`。本分支尚未 push、部署、上传 Cloudflare schema 或启用 WAF；不要把本地生成/测试结果写成线上状态。当前事实与命令见 `docs/superpowers/plans/2026-09-11-api-v1-refactor/execution-log.md` 和 `docs/api/README.md`。
+
+以下为此前浏览器水化分支的历史 handoff，保留作背景，不代表当前分支状态。
+
+# Historical handoff — Codex 多轮 review + 双盲核验 + 14 项加固已实现并双审,待真节点 e2e 冒烟
 
 > 取代上一版("待 Codex 多轮 review")。本会话:Codex 5 轮 review → 双盲独立核验(0 误报)→ subagent-driven 实现 14 修复 + H1 注释订正 → 每任务 spec+quality 双审 + 最终整体审查(Ready for production)。**故意未 merge**(push main = 自动部署生产;merge 前仍欠真节点 e2e 冒烟 + H1 机制验证)。
 

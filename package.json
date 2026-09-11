@@ -1,11 +1,6 @@
 {
   "name": "auth",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs"
-  },
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "npm run build:frontend && wrangler deploy",
@@ -15,10 +10,10 @@
     "test:do": "vitest run -c vitest.workers.config.mts",
     "generate:api": "tsx scripts/generate-api.ts",
     "check:api": "tsx scripts/check-api.ts",
+    "check:boundaries": "tsx scripts/check-boundaries.ts",
     "lint:api": "redocly lint --config .redocly.yaml docs/api/openapi.json docs/api/cloudflare.openapi.json",
-    "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply auth-cqu-moe-db --local",
-    "build:frontend": "cd frontend && npm install && npm run build"
+    "build:frontend": "npm --prefix frontend run build"
   },
   "repository": {
     "type": "git",

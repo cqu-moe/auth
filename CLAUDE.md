@@ -18,10 +18,10 @@ cd frontend && npm run dev           # Vite dev (localhost:5173, /api 代理到 
 
 # 类型检查
 npm run typecheck                    # 后端 (根目录 tsconfig)
-cd frontend && npx tsc --noEmit      # 前端 (单独 tsconfig)
+cd frontend && npx tsc -b            # 前端 project references
 
 # 数据库
-# ⚠️ 勿用 npm run db:generate：本项目 drizzle/migrations 无 meta/ 基线(0000-0004 全是手写
+# 本项目不提供 db:generate：drizzle/migrations 无 meta/ 基线(0000-0004 全是手写
 #    wrangler 风格 SQL)；drizzle-kit generate 会把 schema.ts 所有表(含 Better Auth 表)当全新
 #    重生成 0000_<随机名>.sql + 新建 meta/，与手写迁移灾难性冲突。新表一律手写下一个编号的 SQL。
 npm run db:migrate:local             # 本地 D1 执行 migration（生产由 GH Actions push main 自动 apply --remote）
@@ -39,21 +39,23 @@ npm run deploy                       # 备用手动部署: 构建前端 + wrangl
 ### 后端 (src/)
 
 ```
-src/index.ts          → Hono 路由入口，catch-all 转发 ASSETS (run_worker_first 模式)；导出 default(fetch)+CquSessionDO+CquLoginContainer+AuthService(RPC)
+src/index.ts          → Worker fetch/email/queue 与命名导出；HTTP 装配在 src/app.ts
+src/app.ts            → /api/v1、有限 legacy、discovery 与 ASSETS 页面 fallback 装配
 src/auth.ts           → Better Auth 配置 (角色: user/admin/superAdmin, RBAC, OAuth 2.1 Provider)；caps 下发(customSession/customAccessTokenClaims)；跨子域 cookie
-src/capabilities.ts   → 能力目录(方案A,TS 常量)CAPABILITIES + PRESETS，前后端唯一权威键空间(calendar/eval/cqu)
+shared/capabilities.ts → 能力目录(方案A,TS 常量)CAPABILITIES + PRESETS，前后端唯一权威键空间(calendar/eval/cqu)
 src/db/schema.ts      → Drizzle schema: cquCredentials, oauthClientCquScopes, userEntitlement(分级权益事实源)
 src/services/entitlements.ts → rowsToCaps/resolveCaps(行→caps)、subsystemForAccessToken、validateEntitlementItems/presetToItems(admin 校验)
 src/services/service-url.ts → serviceUrl 严格校验(仅 https *.cqu.edu.cn，杜绝 CVE-2022-39369 ST-relay)，返回 canonical href
 src/services/st-mint-policy.ts → 纯函数:ST 出票限流(per-user/per-client 窗口)+ distinct-host 告警策略
-src/routes/cqu.ts     → GET /api/cqu/service-ticket(取 ST，需 Bearer；?service=key 或 ?serviceUrl=广域)
+src/api/v1/           → 正式 /api/v1 HTTP 资源、schema 与协议适配
+src/routes/cqu.ts     → legacy GET ticket 的共享业务实现；正式接口为 POST /api/v1/cqu/service-tickets
 src/routes/cqu-bind.ts → RESTful 绑定资源 /api/cqu/binding (POST 创建/GET 状态/PUT credentials/GET events WS/DELETE 解绑)
 src/routes/admin.ts   → 用户管理、OAuth 客户端 scope 配置、per-user entitlement CRUD+预设 (需 admin/superAdmin)
 src/rpc.ts            → AuthService extends WorkerEntrypoint：verifySession + getCaps(离线权益,schedule cron 用) + getCquTicket(拓扑① Service Binding RPC)；getCquTicket/getCaps 共用 authenticateClient(M-6 client_secret 闸)
 src/services/cqu-sso.ts → CAS 登录流程、ticket 获取、会话保活(哑层,不做 URL 校验)
 src/services/crypto.ts  → AES-256-GCM (凭证加密) + AES-ECB (CQU SSO 密码加密)
 src/durable-objects/cqu-session.ts → CQU 会话状态机，60 分钟 alarm keepalive(KEEPALIVE_INTERVAL_MS)；getServiceTicket 是取票万能闸(host 校验+quicklogin opt-in+限流+审计)
-src/middleware/scope.ts → OAuth scope 校验中间件 (JWT 验证 + CQU scope 双重检查；无 Bearer 拒发票)
+src/middleware/scope.ts → 消费已验签 Principal，执行 token/client CQU scope 双重检查
 ```
 
 **关键设计**：
@@ -65,13 +67,13 @@ src/middleware/scope.ts → OAuth scope 校验中间件 (JWT 验证 + CQU scope 
 ### OAuth 2.1 Provider
 
 使用 `@better-auth/oauth-provider`（替代已废弃的 `oidcProvider`）+ `jwt` 插件。
-端点前缀 `/api/auth/oauth2/*`，`.well-known` 在 `src/index.ts` 中手动挂载到根路径。
+HTTP 端点前缀 `/api/v1/auth/oauth2/*`；issuer 永久保持 `https://auth.cqu.moe/api/auth`，标准 discovery 由 `src/app.ts` 显式挂载。
 CQU 自定义 scope: `cqu:ticket:{jwxt,jxpj,library,card}` + `cqu:ticket:any`(广域,浏览器插件用,需用户 opt-in)，通过 `oauth_client_cqu_scopes` 表 + scope middleware 双重校验。
 
 ### 分级权益 (Entitlements) + 第一方一体化
 
 正交于 per-client 取票安全的 `用户 × 子系统 × 能力` 轴(`user_entitlement` 表为事实源)：
-- **能力目录**：`src/capabilities.ts` TS 常量(方案 A)是唯一权威，分 flag(布尔) / quota(数字,null=无限)。预设(PRESETS)只是 admin 一键套用便利，非事实源。
+- **能力目录**：`shared/capabilities.ts` TS 常量(方案 A)是唯一权威，分 flag(布尔) / quota(数字,null=无限)。预设(PRESETS)只是 admin 一键套用便利，非事实源。
 - **caps 下发**：`customSession` 给 SPA 会话注入 caps(排除 `cqu` 伪子系统)；`customAccessTokenClaims`(oauth-provider)按 `client.metadata.subsystem` 给 access token 只盖该片 caps(最小披露，拿不到映射盖空 `{}` 绝不盖全量)。子系统只读 boolean/数字。
 - **第一方三拓扑**：① 同账户 `*.cqu.moe` Worker = 跨子域 cookie + Service Binding RPC(`AuthService`)；② `*.cqu.moe` 非 Worker = cookie + JWT；③ 别域/插件 = OAuth+PKCE。跨子域 cookie 靠 `advanced.crossSubDomainCookies{domain:"cqu.moe"}` + `trustedOrigins`。
 - **取票万能闸**：route(Bearer+scope) 与 RPC(clientSecret+scope) 两入口都收敛于 `DO.getServiceTicket` —— 它做 serviceUrl host 校验 + `cqu.quicklogin` opt-in(仅广域) + 限流 + 审计。普通符号 key 取票不受 caps/opt-in 影响。
@@ -80,7 +82,7 @@ CQU 自定义 scope: `cqu:ticket:{jwxt,jxpj,library,card}` + `cqu:ticket:any`(�
 ### 前端 (frontend/src/)
 
 React 19 + React Router 7 + Tailwind CSS 4 SPA。
-`createAuthClient()` 无参数调用 — 默认同源 + `/api/auth` basePath。
+`createAuthClient()` 显式使用同源 `/api/v1/auth` basePath。
 
 页面：Login, Register, ResetPassword, ResetPasswordConfirm, Settings (含 CQU 绑定), Admin, OAuthAuthorize。
 
@@ -115,7 +117,7 @@ Secrets (via `wrangler secret`): `ENCRYPTION_KEY`, `BETTER_AUTH_URL`, `BETTER_AU
 - `npm run deploy` 是手动部署的备用方式，常规部署通过 push 到 main 自动触发
 - **Better Auth admin 插件自定义 `ac` 时必须 spread `defaultStatements` + 角色 spread `adminAc.statements`**（`better-auth/plugins/admin/access`），否则内置端点（listUsers/setRole/banUser…）缺 `user:["list","set-role",...]` 动作，权限校验全失败抛 FORBIDDEN；而 `auth.api.*` 抛的 APIError 无 try/catch 会被 Hono 兜底成**通用 500**，伪装成"服务器崩溃"。前端路由守卫也要同时放行 `admin` 和 `superAdmin`
 - admin 层轮换/直写 OAuth client secret 必须复刻插件 `defaultHasher`（`base64Url.encode(SHA-256(secret), {padding:false})`，存储模式 `"hashed"`，见 `src/utils/oauth-secret.ts`）；插件的 rotate/delete 端点有 `userId===session.user.id` 的 owner 硬校验，admin 用不了，只能走 adapter 直操
-- **项目 API 一律 RESTful**：资源名词 + HTTP 方法语义 + 正确状态码（201 创建/204 删除/200 读写）。绑定流程=资源 `/api/cqu/binding`；admin 吊销/恢复=`PATCH /api/admin/users/:id/cqu-binding {status:"revoked"|"active"}`，不用动词端点
+- **项目正式 API 一律 `/api/v1` + RESTful**：资源名词 + HTTP 方法语义 + 正确状态码（201 创建/204 删除/200 读写）。旧 `/api/*` 仅由有限兼容映射保留，尚未退役。
 - 部署用 **GitHub Actions**（`.github/workflows/deploy.yml`）而非 CF Workers Builds：容器构建需 Docker，CF git-connected Workers Builds 构建不了容器（已禁用）；runner/本地自带 Docker 可构建。push main → 迁移+部署；其他分支 → `versions upload` 0 流量版本
 - CF **不为使用 Durable Objects 的 Worker 生成 preview URL** → 分支 `versions upload` 拿不到可点预览链接；要可测分支环境只能另建独立预览 Worker
 - DO 可休眠 WebSocket keepalive：`this.ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping","pong"))`，运行时层直接应答 ping、不唤醒休眠 DO（前端定期发 `"ping"`）
