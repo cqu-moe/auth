@@ -1,6 +1,7 @@
 import { createRoute, z } from "@hono/zod-openapi";
 import { createApiRouter } from "../validation";
 import type { HonoEnv } from "../../types";
+import { createCquBindingApi } from "./cqu-binding";
 
 const Health = z.object({
   data: z.object({
@@ -26,5 +27,6 @@ export function createV1Api() {
   api.openapi(healthRoute, (c) =>
     c.json({ data: { status: "ok" as const, timestamp: new Date().toISOString() } }, 200)
   );
+  api.route("/cqu/binding", createCquBindingApi());
   return api;
 }

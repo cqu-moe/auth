@@ -4,7 +4,6 @@ import { encrypt } from "../services/crypto";
 import { errorResponse } from "../utils/error";
 import { cquBindAddresses, cquCredentials } from "../db/schema";
 import { genAddressToken } from "../services/cqu-2fa/token";
-import { CQU_SENDER } from "../services/cqu-2fa/sender-auth";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, sql } from "drizzle-orm";
 import { getCquBinding } from "../services/cqu-binding";
@@ -26,19 +25,13 @@ const cquBinding = new Hono<HonoEnv>();
 
 cquBinding.use("/*", requireSessionOrBearer);
 
-// 基础邮箱格式校验（仅 forward 模式登记用户转发地址时使用）。不追求 RFC 完整性——只挡明显畸形，
-// 真正的可达性由后续真实转发邮件的 envelope 校验背书。
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 // POST /api/cqu/binding （← 原 POST /address）
 // 创建绑定、签发专属地址。
 // 幂等：用户已有绑定地址行则直接返回现状（200），不因本次请求改 kind/whitelist；
 //       新建成功返回 201。
-// body { kind?: "direct"|"forward", forwardAddress?: string }：
+// body { kind?: "direct"|"forward" }：
 //   - 缺省 / "direct"：whitelist=["sso@cqu.edu.cn"]（现状）。
-//   - "forward"：要求 forwardAddress 是合法邮箱，whitelist=去重([该地址规范化(trim+lower), CQU_SENDER])。
-//     双源白名单覆盖两类转发器：真转发（如 Fastmail "Send a copy to"，保留原始信封 sso@cqu.edu.cn）
-//     与 SRS 改写（信封变成转发方地址）。若 forwardAddress 规范化后即 CQU_SENDER，去重后只留一个。
+//   - "forward"：新建仍被硬性禁用；旧 forward 记录的读取和邮件处理不受影响。
 // userId 只取自 session/JWT（绝不取客户端入参）；域名只取自 c.env.BIND_EMAIL_DOMAIN。
 cquBinding.post("/", async (c) => {
   const user = c.get("user") as { id: string };
@@ -63,17 +56,7 @@ cquBinding.post("/", async (c) => {
   let senderWhitelist = JSON.stringify(["sso@cqu.edu.cn"]);
   if (body.kind === "forward") {
     // 转发模式暂时禁用：前端已置灰不可选，此处再做后端硬拦截，防止绕过前端直接调用。
-    // 下方 forward 白名单构造逻辑保留在代码里（待重新开放），但因前置 return 永不执行。
     return errorResponse(c, "FORWARD_MODE_DISABLED", "转发模式暂未开放，请使用直设模式", 403);
-    const forwardAddress = (body.forwardAddress ?? "").trim().toLowerCase();
-    if (!EMAIL_RE.test(forwardAddress)) {
-      return errorResponse(c, "INVALID_FORWARD_ADDRESS", "转发邮箱地址不合法", 400);
-    }
-    kind = "forward";
-    // 双源白名单：用户转发地址 + CQU_SENDER。去重——forwardAddress 规范化后若 === CQU_SENDER 只留一个。
-    const whitelist =
-      forwardAddress === CQU_SENDER ? [CQU_SENDER] : [forwardAddress, CQU_SENDER];
-    senderWhitelist = JSON.stringify(whitelist);
   } else if (body.kind !== undefined && body.kind !== "direct") {
     return errorResponse(c, "INVALID_KIND", "未知的绑定方式", 400);
   }
