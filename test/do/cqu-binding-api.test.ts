@@ -92,4 +92,22 @@ describe("CQU binding API v1", () => {
       await fixture.close();
     }
   });
+
+  it("preserves the real WebSocket upgrade object on canonical and legacy paths", async () => {
+    const fixture = await createApiFixture();
+    try {
+      const session = await fixture.signIn("user");
+      session.set("upgrade", "websocket");
+      session.set("origin", "http://localhost:8787");
+      for (const path of ["/api/v1/cqu/binding/events", "/api/cqu/binding/events"]) {
+        const response = await fixture.request(path, { headers: session });
+        expect(response.status, path).toBe(101);
+        expect(response.webSocket, path).toBeTruthy();
+        response.webSocket?.accept();
+        response.webSocket?.close(1000, "test complete");
+      }
+    } finally {
+      await fixture.close();
+    }
+  });
 });

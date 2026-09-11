@@ -6,6 +6,7 @@ import { authClient } from "../lib/auth-client";
 import { bindingReturnTarget } from "../lib/cqu-bind-continuation";
 import { createBinding, getBinding, updateCredentials } from "../lib/api/cqu";
 import { ApiError } from "../lib/api/http";
+import { openBindingEvents } from "../lib/api/binding-events";
 import {
   bindScreen,
   clearBindProgress,
@@ -17,6 +18,7 @@ import {
   type BindScreen,
 } from "../lib/cqu-bind-progress";
 
+import CopyButton from "../components/CopyButton";
 // ────────────────────────────────────────────────────────────────────────────
 // Types
 // ────────────────────────────────────────────────────────────────────────────
@@ -24,6 +26,13 @@ import {
 type Step = 1 | 2 | 3 | 4;
 
 type WsState = "idle" | "connecting" | "open" | "closed" | "error";
+
+const STEP_LABELS: Record<Step, string> = {
+  1: "说明",
+  2: "绑定邮箱",
+  3: "录入凭证",
+  4: "完成",
+};
 
 // ────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -53,11 +62,6 @@ function progressStorage(): Storage | null {
 }
 
 const replaceLocation = (url: string) => window.location.replace(url);
-
-function buildWsUrl(): string {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/api/v1/cqu/binding/events`;
-}
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -94,63 +98,6 @@ function AlertBox({ variant, children }: { variant: "error" | "success" | "info"
   );
 }
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // fallback: select + execCommand
-      const el = document.createElement("textarea");
-      el.value = text;
-      document.body.appendChild(el);
-      el.select();
-      document.execCommand("copy");
-      document.body.removeChild(el);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors"
-      aria-label="复制到剪贴板"
-    >
-      {copied ? (
-        <>
-          <svg className="w-3.5 h-3.5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
-          已复制
-        </>
-      ) : (
-        <>
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-          </svg>
-          复制
-        </>
-      )}
-    </button>
-  );
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Step indicator
-// ────────────────────────────────────────────────────────────────────────────
-
-const STEP_LABELS: Record<Step, string> = {
-  1: "说明",
-  2: "绑定邮箱",
-  3: "录入凭证",
-  4: "完成",
-};
 
 function StepIndicator({ current }: { current: Step }) {
   const steps: Step[] = [1, 2, 3, 4];
@@ -430,74 +377,28 @@ function Step2Direct({
   const [wsState, setWsState] = useState<WsState>("idle");
   const [code, setCode] = useState<string>("");
   const [codeTs, setCodeTs] = useState<number | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const mountedRef = useRef(true);
-  // Ref mirror of `code` so the `connect` callback (dep array []) can read
-  // the current value without capturing a stale closure.
+  const connectionRef = useRef<{ close(): void } | null>(null);
   const codeRef = useRef("");
 
   // ── WS lifecycle ─────────────────────────────────────────────────────────
-  const connect = useCallback(() => {
-    if (!mountedRef.current) return;
-    if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
-      return;
-    }
-
-    setWsState("connecting");
-    const ws = new WebSocket(buildWsUrl());
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      if (!mountedRef.current) { ws.close(); return; }
-      setWsState("open");
-    };
-
-    ws.onmessage = (evt) => {
-      if (!mountedRef.current) return;
-      try {
-        const msg = JSON.parse(evt.data as string) as { type: string; code?: string; ts?: number };
-        if (msg.type === "bind_code" && msg.code) {
-          codeRef.current = msg.code;
-          setCode(msg.code);
-          setCodeTs(msg.ts ?? Date.now());
-        }
-      } catch {
-        // ignore malformed messages
-      }
-    };
-
-    ws.onclose = () => {
-      // Stop reconnecting once unmounted or once a code has been received.
-      // Use codeRef (not the `code` state) because this callback is closed
-      // over the initial empty string due to useCallback([]).
-      if (!mountedRef.current || codeRef.current) {
-        setWsState("closed");
-        return;
-      }
-      setWsState("closed");
-      // reconnect after 3 s unless unmounted or code already in hand
-      reconnectTimer.current = setTimeout(() => {
-        if (mountedRef.current) connect();
-      }, 3000);
-    };
-
-    ws.onerror = () => {
-      if (!mountedRef.current) return;
-      setWsState("error");
-      ws.close();
+  useEffect(() => {
+    connectionRef.current = openBindingEvents({
+      onState: (state) => setWsState(state === "failed" ? "error" : state),
+      shouldReconnect: () => !codeRef.current,
+      retry: { delayMs: 3000, maxAttempts: null },
+      heartbeatMs: null,
+      onEvent: (event) => {
+        if (event.type !== "bind_code") return;
+        codeRef.current = event.code;
+        setCode(event.code);
+        setCodeTs(event.ts ?? Date.now());
+      },
+    });
+    return () => {
+      connectionRef.current?.close();
+      connectionRef.current = null;
     };
   }, []);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    connect();
-    return () => {
-      mountedRef.current = false;
-      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-      wsRef.current?.close();
-    };
-  }, [connect]);
 
   // ── Address fetch ─────────────────────────────────────────────────────────
   useEffect(() => {

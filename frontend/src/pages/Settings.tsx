@@ -7,11 +7,13 @@ import {
   getQuicklogin,
   updateQuicklogin,
 } from "../lib/api/cqu";
+import { openBindingEvents } from "../lib/api/binding-events";
 import Layout from "../components/Layout";
 import AccountProfileSection from "../components/AccountProfileSection";
 import SecuritySection from "../components/SecuritySection";
 import SettingsCard from "../components/SettingsCard";
 
+import CopyButton from "../components/CopyButton";
 // DO /status 返回的会话状态对象（active/relogin_required/... + studentId）；
 // 后端在 DO 非 2xx 或解析失败时回传 { error: true } sentinel。
 interface CquSessionStatus {
@@ -27,72 +29,17 @@ interface CquBindStatus {
   sessionStatus: CquSessionStatus;
 }
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // fallback: select + execCommand
-      const el = document.createElement("textarea");
-      el.value = text;
-      document.body.appendChild(el);
-      el.select();
-      document.execCommand("copy");
-      document.body.removeChild(el);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-colors flex-shrink-0"
-      aria-label="复制到剪贴板"
-    >
-      {copied ? (
-        <>
-          <svg className="w-3.5 h-3.5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
-          已复制
-        </>
-      ) : (
-        <>
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-          </svg>
-          复制
-        </>
-      )}
-    </button>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// LiveCodeSection — 实时验证码面板（仅 bindStatus === "active" 时渲染）
-// ─────────────────────────────────────────────────────────────────────────────
-
 type WsState = "idle" | "connecting" | "open" | "closed" | "error" | "failed";
 
 interface LiveCode {
   id: number;
   type: "login_2fa" | "bind_code";
   code: string;
-  ts: number;        // 原始收码时刻，仅用于「到达时间」展示
-  deadline: number;  // Date.now() + remainingMs，本地时钟 deadline，用于倒计时
+  ts: number;
+  deadline: number;
   expired?: boolean;
 }
 
-function buildWsUrl(): string {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/api/v1/cqu/binding/events`;
-}
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -153,135 +100,45 @@ function LiveCodeSection() {
   const [open, setOpen] = useState(false);
   const [wsState, setWsState] = useState<WsState>("idle");
   const [codes, setCodes] = useState<LiveCode[]>([]);
+  const [connectionKey, setConnectionKey] = useState(0);
 
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const mountedRef = useRef(false);
+  const connectionRef = useRef<{ close(): void } | null>(null);
   const openRef = useRef(false);
-  const retryCountRef = useRef(0);
 
   // Keep openRef in sync so WS close handler can check whether to reconnect
   openRef.current = open;
 
-  const connect = useCallback(() => {
-    if (!mountedRef.current || !openRef.current) return;
-    if (
-      wsRef.current &&
-      (wsRef.current.readyState === WebSocket.OPEN ||
-        wsRef.current.readyState === WebSocket.CONNECTING)
-    ) {
+  useEffect(() => {
+    connectionRef.current?.close();
+    connectionRef.current = null;
+    if (!open) {
+      setWsState("idle");
       return;
     }
-
-    setWsState("connecting");
-    const ws = new WebSocket(buildWsUrl());
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      if (!mountedRef.current) { ws.close(); return; }
-      retryCountRef.current = 0; // 连接成功 → 清零重试计数
-      setWsState("open");
-      // keepalive：每 30s 发一次 ping，防止代理/CF 因空闲断连
-      if (pingTimer.current) clearInterval(pingTimer.current);
-      pingTimer.current = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send("ping");
-        }
-      }, 30000);
-    };
-
-    ws.onmessage = (evt) => {
-      if (!mountedRef.current) return;
-      // 服务端 keepalive pong（非 JSON），直接忽略
-      if (evt.data === "pong") return;
-      try {
-        const msg = JSON.parse(evt.data as string) as {
-          type: string;
-          code?: string;
-          ts?: number;
-          remainingMs?: number;
+    connectionRef.current = openBindingEvents({
+      onState: setWsState,
+      shouldReconnect: () => openRef.current,
+      retry: { delayMs: 3000, maxAttempts: MAX_RETRIES },
+      heartbeatMs: 30000,
+      onEvent: (msg) => {
+        const deadline = Date.now() + (msg.remainingMs ?? 600000);
+        const entry: LiveCode = {
+          id: ++liveCodeIdCounter,
+          type: msg.type,
+          code: msg.code,
+          ts: msg.ts ?? Date.now(),
+          deadline,
         };
-        if (
-          (msg.type === "login_2fa" || msg.type === "bind_code") &&
-          msg.code
-        ) {
-          const deadline = Date.now() + (typeof msg.remainingMs === "number" ? msg.remainingMs : 600000);
-          const entry: LiveCode = {
-            id: ++liveCodeIdCounter,
-            type: msg.type as "login_2fa" | "bind_code",
-            code: msg.code,
-            ts: msg.ts ?? Date.now(),
-            deadline,
-          };
-          // 去重：已有相同 code 的卡不再新增（回放/重连不堆重复卡）
-          setCodes((prev) => {
-            if (prev.some((c) => c.code === entry.code)) return prev;
-            return [entry, ...prev].slice(0, 3);
-          });
-        }
-      } catch {
-        // ignore malformed messages
-      }
-    };
-
-    ws.onclose = () => {
-      if (pingTimer.current) { clearInterval(pingTimer.current); pingTimer.current = null; }
-      if (!mountedRef.current) return;
-      if (!openRef.current) return;
-      // 面板仍展开 → 有限重试（上限 MAX_RETRIES 次）
-      if (retryCountRef.current < MAX_RETRIES) {
-        retryCountRef.current += 1;
-        setWsState("closed");
-        reconnectTimer.current = setTimeout(() => {
-          if (mountedRef.current && openRef.current) connect();
-        }, 3000);
-      } else {
-        // 超过上限 → 终态，停止重连
-        setWsState("failed");
-      }
-    };
-
-    ws.onerror = () => {
-      if (!mountedRef.current) return;
-      setWsState("error");
-      ws.close();
-    };
-  }, []); // stable — reads state only via refs
-
-  // 展开时建立连接，折叠时关闭
-  useEffect(() => {
-    mountedRef.current = true;
+        setCodes((prev) => prev.some((code) => code.code === entry.code)
+          ? prev
+          : [entry, ...prev].slice(0, 3));
+      },
+    });
     return () => {
-      mountedRef.current = false;
+      connectionRef.current?.close();
+      connectionRef.current = null;
     };
-  }, []);
-
-  useEffect(() => {
-    if (open) {
-      connect();
-    } else {
-      // 折叠 → 关闭 WS、重连定时器、ping 定时器，清零重试计数
-      if (reconnectTimer.current) {
-        clearTimeout(reconnectTimer.current);
-        reconnectTimer.current = null;
-      }
-      if (pingTimer.current) {
-        clearInterval(pingTimer.current);
-        pingTimer.current = null;
-      }
-      wsRef.current?.close();
-      wsRef.current = null;
-      retryCountRef.current = 0;
-      setWsState("idle");
-    }
-    return () => {
-      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-      if (pingTimer.current) { clearInterval(pingTimer.current); pingTimer.current = null; }
-      wsRef.current?.close();
-      retryCountRef.current = 0;
-    };
-  }, [open, connect]);
+  }, [open, connectionKey]);
 
   // 稳定引用：避免 onExpire 每轮渲染变化导致 CodeCountdown 的 expiredFiredRef 被重置
   const markExpired = useCallback((id: number) => {
@@ -366,10 +223,7 @@ function LiveCodeSection() {
                 <span>连接多次失败，请检查网络或登录状态</span>
                 <button
                   type="button"
-                  onClick={() => {
-                    retryCountRef.current = 0;
-                    connect();
-                  }}
+                  onClick={() => setConnectionKey((key) => key + 1)}
                   className="ml-auto shrink-0 px-2 py-0.5 rounded border border-red-300 bg-white text-red-600 hover:bg-red-50 transition-colors"
                 >
                   重试
