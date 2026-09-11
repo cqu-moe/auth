@@ -1,10 +1,10 @@
-// 能力目录单一事实源:直接复用后端 src/capabilities.ts(纯常量,无服务端依赖,
-// 可被前端 bundle)。新增能力只需在后端那一处加行,前端自动同步。
+// 能力目录单一事实源:直接复用 shared/capabilities.ts(纯常量,无服务端依赖,
+// 可被前端 bundle)。新增能力只需在 shared 目录这一处加行,前后端自动同步。
 import {
   CAPABILITIES,
   type CapDef,
   type Subsystem,
-} from "../../../src/capabilities";
+} from "../../../shared/capabilities";
 
 // 一项 entitlement 的最小形状:per-user 行、预设项、PUT 提交体都是这个结构
 // (per-user 行多 userId/updatedAt,结构化类型下可直接传入)。

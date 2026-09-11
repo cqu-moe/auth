@@ -1,7 +1,7 @@
 import { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
-import { canAccessAdmin } from "../../../src/user-roles";
+import { canAccessAdmin } from "../../../shared/user-roles";
 import { protectedLoginUrl } from "../lib/cqu-bind-continuation";
 
 interface ProtectedRouteProps {

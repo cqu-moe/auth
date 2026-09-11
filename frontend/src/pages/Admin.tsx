@@ -9,7 +9,7 @@ import {
   type EntitlementForm,
   type EntitlementItem,
 } from "../components/entitlement-form";
-import { USER_ROLE_OPTIONS } from "../../../src/user-roles";
+import { USER_ROLE_OPTIONS } from "../../../shared/user-roles";
 
 // --- Types ---
 interface User {
@@ -147,7 +147,7 @@ async function readErrorMessage(res: Response, fallback: string): Promise<string
   }
 }
 
-// 角色的展示元数据:色点与权限说明。值与 src/user-roles.ts 的 USER_ROLE_OPTIONS 对齐。
+// 角色的展示元数据:色点与权限说明。值与 shared/user-roles.ts 的 USER_ROLE_OPTIONS 对齐。
 const ROLE_META: Record<string, { dotClass: string; hint: string }> = {
   user: { dotClass: "bg-gray-400", hint: "普通使用,无管理入口" },
   admin: { dotClass: "bg-blue-500", hint: "可管理用户与邀请" },

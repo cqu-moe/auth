@@ -1,7 +1,7 @@
 import { drizzle } from "drizzle-orm/d1";
 import { eq, sql } from "drizzle-orm";
 import { entitlementConfig, entitlementPreset, userEntitlement } from "../db/schema";
-import { CAPABILITIES, PRESETS, SUBSYSTEMS, type Subsystem } from "../capabilities";
+import { CAPABILITIES, PRESETS, SUBSYSTEMS, type Subsystem } from "../../shared/capabilities";
 
 type Row = { subsystem: string; capability: string; value: string };
 export type Caps = Record<string, Record<string, boolean | number | null>>;

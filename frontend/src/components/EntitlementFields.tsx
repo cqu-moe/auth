@@ -5,7 +5,7 @@ import {
   CAPABILITIES,
   type CapDef,
   type Subsystem,
-} from "../../../src/capabilities";
+} from "../../../shared/capabilities";
 import { SUBSYSTEM_LABELS, type EntitlementForm } from "./entitlement-form";
 
 export function EntitlementMatrix({
