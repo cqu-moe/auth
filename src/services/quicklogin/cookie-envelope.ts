@@ -107,7 +107,9 @@ export function extractSsoCookies(
     return SSO_DOMAINS.has(value.domain);
   });
 
-  return validateSsoCookies(ssoCookies, now);
+  return validateSsoCookies(ssoCookies, now).filter(
+    (cookie) => cookie.name === "SOURCEID_TGC" || cookie.value.length > 0
+  );
 }
 
 function compareText(left: string, right: string): number {

@@ -115,6 +115,18 @@ describe("extractSsoCookies", () => {
     expect(extractSsoCookies(storageState, NOW_MS)).toEqual([cookie()]);
   });
 
+  it("omits empty non-TGC placeholders from the exported envelope", () => {
+    const storageState = JSON.stringify({
+      cookies: [
+        cookie(),
+        cookie({ name: "clientThemeKey", value: "", expires: -1 }),
+      ],
+      origins: [],
+    });
+
+    expect(extractSsoCookies(storageState, NOW_MS)).toEqual([cookie()]);
+  });
+
   it("does not treat the parent CQU domain as an SSO allowlist match", () => {
     const storageState = JSON.stringify({
       cookies: [cookie({ domain: ".cqu.edu.cn" as never })],
