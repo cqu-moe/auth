@@ -27,6 +27,11 @@ export const CAPABILITIES = {
     batch: { type: "flag", label: "批量评教" },
   },
   cqu: {
+    quicklogin_device_limit: {
+      type: "quota",
+      label: "快捷登录设备额度",
+      unit: "台",
+    },
     // 浏览器插件快捷登录的「功能开放」闸(灰度/准入):由 admin 授予。无此权益的用户
     // 在设置页看不到快捷登录卡片,自助端点拒写,DO 广路径取票也拒(见 cqu-session.ts)。
     // 与 quicklogin 是两个独立维度:access 管「是否向该用户开放此功能」,

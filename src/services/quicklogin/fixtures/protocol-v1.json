@@ -1,0 +1,54 @@
+{
+  "status": {
+    "protocolVersion": 1,
+    "deviceId": "synthetic-device-a",
+    "generation": 4,
+    "masterEnabled": true,
+    "enabled": true,
+    "deviceLimit": 5,
+    "used": 2,
+    "disabledReason": null,
+    "state": "ready",
+    "sessionVersion": 7,
+    "appliedVersion": 6,
+    "loginAt": 1700000000000,
+    "lastKeepAliveAt": 1700003600000,
+    "lastSeenAt": 1700003900000
+  },
+  "envelope": {
+    "protocolVersion": 1,
+    "deviceId": "synthetic-device-a",
+    "generation": 4,
+    "sessionVersion": 7,
+    "createdAt": 1700004000000,
+    "cookies": [
+      {
+        "name": "SOURCEID_TGC",
+        "value": "synthetic-test-session",
+        "domain": "sso.cqu.edu.cn",
+        "path": "/",
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "Lax",
+        "expires": -1
+      },
+      {
+        "name": "SESSION",
+        "value": "synthetic-persistent-cookie",
+        "domain": ".sso.cqu.edu.cn",
+        "path": "/login",
+        "secure": true,
+        "httpOnly": true,
+        "sameSite": "None",
+        "expires": 1900000000
+      }
+    ]
+  },
+  "error": {
+    "error": {
+      "code": "RATE_LIMITED",
+      "message": "RATE_LIMITED",
+      "retryAfterMs": 60000
+    }
+  }
+}

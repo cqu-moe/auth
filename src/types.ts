@@ -4,10 +4,15 @@ export interface Env {
   RESEND_API_KEY: string;
   CQU_SESSION: DurableObjectNamespace;
   CQU_LOGIN: DurableObjectNamespace;
+  CQU_QUICKLOGIN_ACCOUNT: DurableObjectNamespace;
+  CQU_QUICKLOGIN_DEVICE: DurableObjectNamespace;
   ASSETS: Fetcher;
   ENCRYPTION_KEY: string;
   BETTER_AUTH_URL: string;
   BETTER_AUTH_SECRET: string;
+  QUICKLOGIN_CLIENT_ID: string;
+  QUICKLOGIN_EXTENSION_ORIGIN: string;
+  QUICKLOGIN_DEVICE_MODE?: "off" | "on";
   BIND_EMAIL_DOMAIN: string;
 }
 

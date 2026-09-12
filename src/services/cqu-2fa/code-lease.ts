@@ -10,7 +10,7 @@ import type {
 export const CODE_LEASE_OWNER_TTL_MS = 1500 * 1000;
 export const CODE_LEASE_QUEUE_TTL_MS = LOGIN_LOCK_TTL_MS;
 
-export type LoginKind = "cas" | "atrust";
+export type LoginKind = "cas" | "atrust" | "quicklogin";
 
 export interface CodeLeaseEntry {
   token: string;

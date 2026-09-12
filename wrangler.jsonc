@@ -9,6 +9,9 @@
 
   "vars": {
     "BIND_EMAIL_DOMAIN": "cquotp.com",
+    "QUICKLOGIN_DEVICE_MODE": "on",
+    "QUICKLOGIN_CLIENT_ID": "cqu-quicklogin-chrome",
+    "QUICKLOGIN_EXTENSION_ORIGIN": "chrome-extension://igfidegfgfoofnoncpmbcokbffjmmook",
     // 浏览器后端已固定为 Cloudflare APAC Containers(2026-09-08 全量切换,
     // 2026-09-09 移除腾讯云节点绑定 LOGIN_NODE 与 node 回退路径)。
   },
@@ -51,6 +54,14 @@
       {
         "name": "CQU_LOGIN",
         "class_name": "CquLoginContainer"
+      },
+      {
+        "name": "CQU_QUICKLOGIN_ACCOUNT",
+        "class_name": "CquQuickloginAccountDO"
+      },
+      {
+        "name": "CQU_QUICKLOGIN_DEVICE",
+        "class_name": "CquQuickloginDeviceDO"
       }
     ]
   },
@@ -76,7 +87,7 @@
     },
     {
       "tag": "v3",
-      "new_sqlite_classes": ["CquQuickloginAccountDO"]
+      "new_sqlite_classes": ["CquQuickloginAccountDO", "CquQuickloginDeviceDO"]
     }
   ],
 

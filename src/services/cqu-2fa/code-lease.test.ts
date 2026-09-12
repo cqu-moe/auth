@@ -20,6 +20,12 @@ const atrust = (token: string, queuedAt: number): CodeLeaseEntry => ({
   queuedAt,
 });
 
+const quicklogin = (token: string, queuedAt: number): CodeLeaseEntry => ({
+  token,
+  kind: "quicklogin",
+  queuedAt,
+});
+
 describe("verification-code lease", () => {
   it("makes the first login the owner", () => {
     expect(acquireCodeLease(null, cas("cas-1", 10), 10)).toEqual({
@@ -35,6 +41,20 @@ describe("verification-code lease", () => {
     const second = acquireCodeLease(first, atrust("atrust-1", 20), 20);
     expect(second.ownerToken).toBe("cas-1");
     expect(second.queue).toEqual([atrust("atrust-1", 20)]);
+  });
+
+  it("serializes schedule and quicklogin owners in one FIFO lease", () => {
+    let lease = acquireCodeLease(null, cas("cas-1", 10), 10);
+    lease = acquireCodeLease(lease, quicklogin("quick-a", 20), 20);
+    lease = acquireCodeLease(lease, quicklogin("quick-b", 30), 30);
+    lease = acquireCodeLease(lease, atrust("atrust-1", 40), 40);
+
+    expect(lease.ownerToken).toBe("cas-1");
+    expect(releaseCodeLease(lease, "cas-1", 50)?.ownerToken).toBe("quick-a");
+    const afterA = releaseCodeLease(lease, "cas-1", 50);
+    expect(releaseCodeLease(afterA, "quick-a", 60)?.ownerToken).toBe("quick-b");
+    const afterB = releaseCodeLease(afterA, "quick-a", 60);
+    expect(releaseCodeLease(afterB, "quick-b", 70)?.ownerToken).toBe("atrust-1");
   });
 
   it("does not duplicate an owner or queued token", () => {

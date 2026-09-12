@@ -163,3 +163,25 @@ export const registrationInvitation = sqliteTable("registration_invitation", {
   // 注册该邀请码时套用的权益预设名;NULL = 回落默认预设。
   preset: text("preset"),
 });
+
+export const quickloginAccountProjection = sqliteTable(
+  "quicklogin_account_projection",
+  {
+    userId: text("user_id").primaryKey(),
+    revision: integer("revision").notNull(),
+    deviceLimit: integer("device_limit").notNull(),
+    masterEnabled: integer("master_enabled", { mode: "boolean" }).notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  }
+);
+
+export const quickloginDeviceProjection = sqliteTable(
+  "quicklogin_device_projection",
+  {
+    deviceId: text("device_id").primaryKey(),
+    userId: text("user_id").notNull(),
+    revision: integer("revision").notNull(),
+    payloadJson: text("payload_json").notNull(),
+  },
+  (table) => [index("idx_quicklogin_device_projection_user_id").on(table.userId)]
+);

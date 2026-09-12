@@ -7,13 +7,14 @@ export interface BrowserRoute {
   version: 1;
   backend: BrowserBackend;
   userId: string;
+  containerKey?: string;
   /** Cloudflare 登录准备成功后必填;node 不填。 */
   bootId?: string;
 }
 
 export interface LoginRouteRecord {
   token: string;
-  kind: "cas" | "atrust";
+  kind: "cas" | "atrust" | "quicklogin";
   route: BrowserRoute;
   createdAt: number;
   expiresAt: number;
@@ -58,7 +59,7 @@ export async function fetchBrowser(
       }
     );
   }
-  const id = env.CQU_LOGIN.idFromName(route.userId);
+  const id = env.CQU_LOGIN.idFromName(route.containerKey ?? route.userId);
   const response = await env.CQU_LOGIN.get(id).fetch(request);
   if (response.status === 429 || response.status === 503) {
     const protocolError = await readProtocolError(response);
