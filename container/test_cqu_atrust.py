@@ -12,6 +12,12 @@ def test_url_classification_uses_exact_atrust_hosts():
     assert cqu_atrust.is_rewritten_sso_url(
         "https://sso-cqu-edu-cn-s.atrust.cqu.edu.cn.evil.example/login"
     ) is False
+    assert cqu_atrust.is_supported_sso_url(
+        "https://sso.cqu.edu.cn/login?service=x"
+    ) is True
+    assert cqu_atrust.is_supported_sso_url(
+        "https://sso.cqu.edu.cn.evil.example/login"
+    ) is False
 
 
 def test_first_factor_failure_classification_only_marks_explicit_password_rejection():
@@ -174,7 +180,7 @@ class _ForcedClientPortalPage:
 
 def test_click_unified_identity_bypasses_forced_client_page_via_fixed_cas_route():
     page = _ForcedClientPortalPage(
-        "https://sso-cqu-edu-cn-s.atrust.cqu.edu.cn/login?service=x"
+        "https://sso.cqu.edu.cn/login?service=x"
     )
 
     asyncio.run(cqu_atrust.click_unified_identity(page))

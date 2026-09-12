@@ -22,6 +22,7 @@ ATRUST_CAS_LOGIN_URL = (
 )
 ATRUST_PORTAL_HOST = "atrust.cqu.edu.cn"
 ATRUST_SSO_HOST = "sso-cqu-edu-cn-s.atrust.cqu.edu.cn"
+ATRUST_DIRECT_SSO_HOST = "sso.cqu.edu.cn"
 ATRUST_APP_HOST = "my-cqu-edu-cn-s.atrust.cqu.edu.cn"
 
 
@@ -52,6 +53,10 @@ def is_rewritten_sso_url(url: str) -> bool:
     return _safe_host(url) == ATRUST_SSO_HOST
 
 
+def is_supported_sso_url(url: str) -> bool:
+    return _safe_host(url) in {ATRUST_SSO_HOST, ATRUST_DIRECT_SSO_HOST}
+
+
 def is_atrust_login_done(url: str) -> bool:
     return _safe_host(url) == ATRUST_APP_HOST
 
@@ -72,12 +77,12 @@ def classify_first_factor_failure(verdict: str) -> str:
 
 
 async def click_unified_identity(page) -> None:
-    """Open the fixed entry and reach the rewritten CAS login page."""
+    """Open the fixed entry and reach an exact CQU CAS login host."""
     await page.goto(ATRUST_APP_URL, wait_until="domcontentloaded", timeout=browser_profile.ATRUST_NAV_TIMEOUT_MS)
     for _ in range(browser_profile.ATRUST_PORTAL_POLLS):
         # The aTrust shortcut remembers the previously selected server and may
         # forward straight to rewritten CAS without rendering the portal list.
-        if is_rewritten_sso_url(page.url):
+        if is_supported_sso_url(page.url):
             return
         if is_forced_client_page(page.url):
             break
@@ -104,14 +109,14 @@ async def click_unified_identity(page) -> None:
         wait_until="domcontentloaded",
         timeout=browser_profile.ATRUST_NAV_TIMEOUT_MS,
     )
-    if is_rewritten_sso_url(page.url):
+    if is_supported_sso_url(page.url):
         return
     raise RuntimeError("ATRUST_PORTAL_FALLBACK_FAILED")
 
 
 async def wait_for_rewritten_sso(page) -> None:
     for _ in range(browser_profile.ATRUST_SSO_POLLS):
-        if is_rewritten_sso_url(page.url) and await page.locator(
+        if is_supported_sso_url(page.url) and await page.locator(
             "#login-croypto"
         ).count():
             return
