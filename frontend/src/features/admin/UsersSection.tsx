@@ -312,8 +312,8 @@ export function EntitlementPanel({
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const load = useCallback(async (showLoading = true) => {
-    if (showLoading) setInitLoading(true);
+  const load = useCallback(async () => {
+    setInitLoading(true);
     setError("");
     try {
       const [res, presetsRes] = await Promise.all([
@@ -338,7 +338,7 @@ export function EntitlementPanel({
     } catch {
       setError("网络错误，请稍后重试");
     } finally {
-      if (showLoading) setInitLoading(false);
+      setInitLoading(false);
     }
   }, [user.id]);
 
@@ -481,7 +481,13 @@ export function EntitlementPanel({
               />
             </div>
             {canEditQuota && (
-              <QuotaEditor userId={user.id} onSaved={() => void load(false)} />
+              <QuotaEditor
+                userId={user.id}
+                onSaved={(deviceLimit) => setForm((current) => ({
+                  ...current,
+                  "cqu.quicklogin_device_limit": { quota: String(deviceLimit) },
+                }))}
+              />
             )}
           </>
         )}

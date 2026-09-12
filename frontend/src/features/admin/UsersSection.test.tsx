@@ -6,6 +6,7 @@ import {
   click,
   renderUi,
   setInputValue,
+  settleUi,
   submit,
 } from "../../lib/api/quicklogin.testbots";
 import { EntitlementPanel } from "./UsersSection";
@@ -28,6 +29,22 @@ function button(container: HTMLElement, name: string): HTMLButtonElement {
     .find((element) => element.textContent?.includes(name));
   if (!(found instanceof HTMLButtonElement)) throw new Error(`missing button: ${name}`);
   return found;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
+function checkbox(container: HTMLElement, label: string): HTMLInputElement {
+  const row = [...container.querySelectorAll("label")]
+    .find((element) => element.textContent?.includes(label));
+  const input = row?.querySelector('input[type="checkbox"]');
+  if (!(input instanceof HTMLInputElement)) throw new Error(`missing checkbox: ${label}`);
+  return input;
 }
 
 beforeEach(() => {
@@ -68,7 +85,15 @@ afterEach(async () => {
 });
 
 describe("admin QuickLogin quota integration", () => {
-  it("keeps the quota success notice mounted while entitlements refresh", async () => {
+  it("updates only quota and preserves local entitlement edits when apply completes", async () => {
+    const apply = deferred<{
+      masterEnabled: boolean;
+      deviceLimit: number;
+      used: number;
+      revision: number;
+      devices: never[];
+    }>();
+    mocks.applyQuickloginQuota.mockReturnValue(apply.promise);
     const container = await renderUi(createElement(EntitlementPanel, {
       user: {
         id: "user-a",
@@ -90,8 +115,23 @@ describe("admin QuickLogin quota integration", () => {
     await setInputValue(input, "3");
     await submit(form);
     await click(button(container, "确认保存额度"));
+    const calendarSync = checkbox(container, "日历同步");
+    await click(calendarSync);
+    expect(calendarSync.checked).toBe(true);
+
+    apply.resolve({
+      masterEnabled: true,
+      deviceLimit: 3,
+      used: 0,
+      revision: 5,
+      devices: [],
+    });
+    await settleUi();
 
     expect(container.textContent).toContain("设备额度已保存");
-    expect(mocks.adminFetch).toHaveBeenCalledTimes(4);
+    expect(calendarSync.checked).toBe(true);
+    expect(container.querySelector('[aria-label="快捷登录设备额度当前值"]')?.textContent)
+      .toContain("3 台");
+    expect(mocks.adminFetch).toHaveBeenCalledTimes(2);
   });
 });

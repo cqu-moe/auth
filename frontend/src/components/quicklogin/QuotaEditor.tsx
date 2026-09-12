@@ -33,7 +33,7 @@ function previewDeviceList(
 
 export default function QuotaEditor({ userId, onSaved }: {
   userId: string;
-  onSaved: () => void;
+  onSaved: (deviceLimit: number) => void;
 }) {
   const [value, setValue] = useState("");
   const [preview, setPreview] = useState<QuotaPreview | null>(null);
@@ -66,10 +66,10 @@ export default function QuotaEditor({ userId, onSaved }: {
     setError("");
     setNotice("");
     try {
-      await applyQuickloginQuota(userId, preview);
+      const result = await applyQuickloginQuota(userId, preview);
       setNotice("设备额度已保存");
       setPreview(null);
-      onSaved();
+      onSaved(result.deviceLimit);
     } catch (caught) {
       const latest = previewFromApiError(caught);
       if (caught instanceof ApiError && caught.code === "PREVIEW_CHANGED" && latest) {
