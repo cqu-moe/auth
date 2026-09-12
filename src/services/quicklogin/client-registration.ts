@@ -53,7 +53,7 @@ function metadata(value: unknown): Record<string, unknown> | null {
     try { return JSON.parse(value) as Record<string, unknown>; }
     catch { return null; }
   }
-  return typeof value === "object" && value !== null
+  return typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as Record<string, unknown> : null;
 }
 
@@ -67,17 +67,23 @@ function matches(
   expected: QuickloginOAuthClientRecord
 ) {
   const meta = metadata(value.metadata);
-  return value.clientId === expected.clientId && value.clientSecret == null &&
+  const metadataKeys = meta ? Object.keys(meta).sort() : [];
+  return value.clientId === expected.clientId && value.clientSecret === null &&
     value.disabled === false && value.skipConsent === false &&
     value.enableEndSession === false && value.subjectType === "public" &&
     sameArray(value.scopes, expected.scopes) &&
+    value.userId === null && value.name === expected.name &&
     sameArray(value.redirectUris, expected.redirectUris) &&
     sameArray(value.postLogoutRedirectUris, []) &&
     value.tokenEndpointAuthMethod === "none" &&
     sameArray(value.grantTypes, expected.grantTypes) &&
     sameArray(value.responseTypes, expected.responseTypes) &&
     value.public === true && value.type === "user-agent-based" &&
-    value.requirePKCE === true && meta?.quickloginOfficial === true &&
+    value.requirePKCE === true && value.referenceId === null &&
+    value.createdAt instanceof Date && value.updatedAt instanceof Date &&
+    metadataKeys.length === 2 && metadataKeys[0] === "extensionOrigin" &&
+    metadataKeys[1] === "quickloginOfficial" &&
+    meta?.quickloginOfficial === true &&
     meta.extensionOrigin === expected.metadata.extensionOrigin;
 }
 

@@ -27,22 +27,35 @@ import type { DeviceAuthority, DeviceStatus, ErrorCode } from "../services/quick
 import { quickloginDeviceModeEnabled } from "../services/quicklogin/mode";
 
 const router = new Hono<HonoEnv>();
+const DEVICE_BASE_PATH = "/api/v1/cqu/quicklogin/devices";
 
 function apiError(c: Context<HonoEnv>, code: ErrorCode, status: number) {
   return c.json({ error: { code, message: code } }, status as never);
 }
 
+function isDeviceOperation(method: string, pathname: string): boolean {
+  if (!pathname.startsWith(DEVICE_BASE_PATH)) return false;
+  const suffix = pathname.slice(DEVICE_BASE_PATH.length).replace(/\/$/, "");
+  if (!suffix) return method === "GET" || method === "HEAD" || method === "POST";
+  if (/^\/[^/]+$/.test(suffix)) return method === "PUT" || method === "DELETE";
+  return /^\/[^/]+\/(status|refresh|export)$/.test(suffix) && method === "POST";
+}
+
 router.use("*", async (c, next) => {
   c.header("Cache-Control", "no-store");
-  if (!quickloginDeviceModeEnabled(c.env)) {
-    return apiError(c, "TEMPORARY_UNAVAILABLE", 503);
-  }
-  await next();
   const origin = c.req.header("Origin");
   if (origin === c.env.QUICKLOGIN_EXTENSION_ORIGIN) {
     c.header("Access-Control-Allow-Origin", origin);
     c.header("Vary", "Origin");
   }
+  if (
+    c.req.method !== "OPTIONS" &&
+    isDeviceOperation(c.req.method, new URL(c.req.url).pathname) &&
+    !quickloginDeviceModeEnabled(c.env)
+  ) {
+    return apiError(c, "TEMPORARY_UNAVAILABLE", 503);
+  }
+  await next();
 });
 
 router.options("*", (c) => {

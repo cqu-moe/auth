@@ -196,10 +196,42 @@ describe("quicklogin device HTTP", () => {
 
     env.QUICKLOGIN_DEVICE_MODE = "off";
     const unavailable = await SELF.fetch(
-      "http://localhost:8787/api/v1/cqu/quicklogin/devices", { method: "POST" });
+      "http://localhost:8787/api/v1/cqu/quicklogin/devices", {
+        method: "POST",
+        headers: { origin: env.QUICKLOGIN_EXTENSION_ORIGIN },
+      });
     expect(unavailable.status).toBe(503);
+    expect(unavailable.headers.get("access-control-allow-origin"))
+      .toBe(env.QUICKLOGIN_EXTENSION_ORIGIN);
     await expect(unavailable.json()).resolves.toMatchObject({
       error: { code: "TEMPORARY_UNAVAILABLE" },
     });
+
+    const offPreflight = await SELF.fetch(
+      "http://localhost:8787/api/v1/cqu/quicklogin/devices", {
+        method: "OPTIONS",
+        headers: {
+          origin: env.QUICKLOGIN_EXTENSION_ORIGIN,
+          "access-control-request-method": "POST",
+        },
+      });
+    expect(offPreflight.status).toBe(204);
+    expect(offPreflight.headers.get("access-control-allow-origin"))
+      .toBe(env.QUICKLOGIN_EXTENSION_ORIGIN);
+
+    const offWrongMethod = await SELF.fetch(
+      "http://localhost:8787/api/v1/cqu/quicklogin/devices", {
+        method: "PATCH",
+        headers: { origin: env.QUICKLOGIN_EXTENSION_ORIGIN },
+      });
+    expect(offWrongMethod.status).toBe(405);
+    expect(offWrongMethod.headers.get("allow")).toContain("POST");
+
+    const offUnknown = await SELF.fetch(
+      "http://localhost:8787/api/v1/cqu/quicklogin/devices/private/raw/path", {
+        headers: { origin: env.QUICKLOGIN_EXTENSION_ORIGIN },
+      });
+    expect(offUnknown.status).toBe(404);
+    expect(offUnknown.headers.get("content-type")).toContain("json");
   });
 });
