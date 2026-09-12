@@ -63,9 +63,13 @@ def classify_first_factor_failure(verdict: str) -> str:
 
 
 async def click_unified_identity(page) -> None:
-    """Open the fixed entry and select the exact visible CAS option."""
+    """Open the fixed entry and reach the rewritten CAS login page."""
     await page.goto(ATRUST_APP_URL, wait_until="domcontentloaded", timeout=browser_profile.ATRUST_NAV_TIMEOUT_MS)
     for _ in range(browser_profile.ATRUST_PORTAL_POLLS):
+        # The aTrust shortcut remembers the previously selected server and may
+        # forward straight to rewritten CAS without rendering the portal list.
+        if is_rewritten_sso_url(page.url):
+            return
         candidates = page.locator("li.server-container .server-name")
         for index in range(await candidates.count()):
             candidate = candidates.nth(index)

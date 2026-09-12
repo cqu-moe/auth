@@ -94,6 +94,52 @@ def test_click_unified_identity_uses_fixed_entry_and_exact_visible_text():
     assert page.clicks == ["统一身份认证"]
 
 
+class _AutoForwardPortalPage:
+    def __init__(self, destination):
+        self.url = "about:blank"
+        self.destination = destination
+        self.goto_url = None
+        self.waits = 0
+
+    async def goto(self, url, **_kwargs):
+        self.url = (
+            "https://atrust.cqu.edu.cn/portal/shortcut.html"
+            "?dest=%23!%2Flogin&source=logout_cas"
+        )
+        self.goto_url = url
+
+    def locator(self, selector):
+        assert selector == "li.server-container .server-name"
+        return _Candidates([])
+
+    def get_by_text(self, *_args, **_kwargs):
+        return _ExactText()
+
+    async def wait_for_timeout(self, _timeout):
+        self.waits += 1
+        self.url = self.destination
+
+
+def test_click_unified_identity_accepts_remembered_auto_forward_to_rewritten_sso():
+    page = _AutoForwardPortalPage(
+        "https://sso-cqu-edu-cn-s.atrust.cqu.edu.cn/login?service=x"
+    )
+
+    asyncio.run(cqu_atrust.click_unified_identity(page))
+
+    assert page.goto_url == cqu_atrust.ATRUST_APP_URL
+    assert page.waits == 1
+
+
+def test_click_unified_identity_rejects_auto_forward_to_similar_host():
+    page = _AutoForwardPortalPage(
+        "https://sso-cqu-edu-cn-s.atrust.cqu.edu.cn.evil.example/login"
+    )
+
+    with pytest.raises(RuntimeError, match="ATRUST_PORTAL_OPTION_MISSING"):
+        asyncio.run(cqu_atrust.click_unified_identity(page))
+
+
 class _ReadyResponse:
     url = (
         "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/"
