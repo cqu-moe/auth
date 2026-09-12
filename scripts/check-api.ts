@@ -23,6 +23,9 @@ for (const file of [
   const expected = readFileSync(resolve(process.cwd(), file));
   const actual = readFileSync(resolve(temp, file));
   if (!expected.equals(actual)) throw new Error(`Generated API artifact is stale: ${file}`);
+  if (file === "docs/api/cloudflare.openapi.json" && expected.byteLength > 512 * 1024) {
+    throw new Error(`Cloudflare API schema exceeds 512 KiB: ${expected.byteLength} bytes`);
+  }
 }
 
 const readJson = (file: string) => JSON.parse(

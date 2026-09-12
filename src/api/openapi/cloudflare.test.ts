@@ -28,4 +28,11 @@ describe("Cloudflare OpenAPI 3.0 schema projection", () => {
       "#/components/schemas/Unsupported"
     )).toThrow("#/components/schemas/Unsupported");
   });
+
+  it("rejects look-around patterns that Cloudflare cannot import", () => {
+    expect(() => toCloudflareSchema(
+      { type: "string", pattern: "^(?!\\s).+$" },
+      "#/components/schemas/UnsupportedPattern"
+    )).toThrow("#/components/schemas/UnsupportedPattern/pattern");
+  });
 });

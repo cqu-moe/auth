@@ -50,10 +50,13 @@ assertApiArtifactConsistency({
   coverage,
   authPolicy,
 });
-const writeJson = (name: string, value: unknown) =>
-  writeFileSync(resolve(docsDir, name), `${JSON.stringify(value, null, 2)}\n`);
+const writeJson = (name: string, value: unknown, compact = false) =>
+  writeFileSync(
+    resolve(docsDir, name),
+    `${JSON.stringify(value, null, compact ? undefined : 2)}\n`
+  );
 writeJson("openapi.json", document);
-writeJson("cloudflare.openapi.json", cloudflare);
+writeJson("cloudflare.openapi.json", cloudflare, true);
 writeJson("endpoints.json", endpoints);
 writeJson("coverage.json", coverage);
 writeJson("auth-policy.json", authPolicy);

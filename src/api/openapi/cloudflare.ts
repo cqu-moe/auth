@@ -13,6 +13,10 @@ export function toCloudflareSchema(
   const output: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(schema)) {
     if (UNSUPPORTED.has(key)) throw new Error(`Unsupported OpenAPI 3.1 keyword at ${pointer}/${key}`);
+    if (key === "pattern" && typeof value === "string" &&
+        /\(\?(?:[=!]|<[=!])/.test(value)) {
+      throw new Error(`Unsupported regular expression at ${pointer}/${key}`);
+    }
     if (key === "$ref" && typeof value === "string" && !value.startsWith("#/")) {
       throw new Error(`External reference at ${pointer}/$ref`);
     }
