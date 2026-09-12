@@ -52,16 +52,6 @@
                 }
               }
             }
-          },
-          "400": {
-            "description": "Invalid request",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
-                }
-              }
-            }
           }
         }
       }
@@ -160,6 +150,24 @@
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type",
             "headers": {
               "Cache-Control": {
                 "schema": {
@@ -360,6 +368,24 @@
                 }
               }
             }
+          },
+          "415": {
+            "description": "Unsupported request media type",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -420,24 +446,6 @@
                 }
               }
             }
-          },
-          "400": {
-            "description": "Invalid request",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "type": "string",
-                  "const": "no-store"
-                }
-              }
-            },
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
-                }
-              }
-            }
           }
         }
       }
@@ -491,6 +499,24 @@
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type",
             "headers": {
               "Cache-Control": {
                 "schema": {
@@ -595,6 +621,16 @@
               }
             }
           },
+          "400": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickloginNativeError"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Error response",
             "content": {
@@ -616,6 +652,16 @@
             }
           },
           "409": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickloginNativeError"
+                }
+              }
+            }
+          },
+          "415": {
             "description": "Error response",
             "content": {
               "application/json": {
@@ -775,6 +821,16 @@
               }
             }
           },
+          "400": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickloginNativeError"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Error response",
             "content": {
@@ -796,6 +852,16 @@
             }
           },
           "409": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickloginNativeError"
+                }
+              }
+            }
+          },
+          "415": {
             "description": "Error response",
             "content": {
               "application/json": {
@@ -958,6 +1024,16 @@
               }
             }
           },
+          "400": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickloginNativeError"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Error response",
             "content": {
@@ -979,6 +1055,16 @@
             }
           },
           "409": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickloginNativeError"
+                }
+              }
+            }
+          },
+          "415": {
             "description": "Error response",
             "content": {
               "application/json": {
@@ -1113,6 +1199,16 @@
               }
             }
           },
+          "400": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickloginNativeError"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Error response",
             "content": {
@@ -1134,6 +1230,16 @@
             }
           },
           "409": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickloginNativeError"
+                }
+              }
+            }
+          },
+          "415": {
             "description": "Error response",
             "content": {
               "application/json": {
@@ -1268,6 +1374,16 @@
               }
             }
           },
+          "400": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickloginNativeError"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Error response",
             "content": {
@@ -1289,6 +1405,16 @@
             }
           },
           "409": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickloginNativeError"
+                }
+              }
+            }
+          },
+          "415": {
             "description": "Error response",
             "content": {
               "application/json": {
@@ -1656,24 +1782,6 @@
                 }
               }
             }
-          },
-          "400": {
-            "description": "Invalid request",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "type": "string",
-                  "const": "no-store"
-                }
-              }
-            },
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
-                }
-              }
-            }
           }
         }
       },
@@ -1763,6 +1871,24 @@
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type",
             "headers": {
               "Cache-Control": {
                 "schema": {
@@ -1899,6 +2025,24 @@
                 }
               }
             }
+          },
+          "415": {
+            "description": "Unsupported request media type",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -1962,24 +2106,6 @@
                       }
                     }
                   }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "type": "string",
-                  "const": "no-store"
-                }
-              }
-            },
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
                 }
               }
             }
@@ -2055,6 +2181,24 @@
                 }
               }
             }
+          },
+          "415": {
+            "description": "Unsupported request media type",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -2106,24 +2250,6 @@
         "responses": {
           "204": {
             "description": "No content"
-          },
-          "400": {
-            "description": "Invalid request",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "type": "string",
-                  "const": "no-store"
-                }
-              }
-            },
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
-                }
-              }
-            }
           }
         }
       }
@@ -2170,24 +2296,6 @@
                       }
                     }
                   }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "type": "string",
-                  "const": "no-store"
-                }
-              }
-            },
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
                 }
               }
             }
@@ -2241,6 +2349,24 @@
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type",
             "headers": {
               "Cache-Control": {
                 "schema": {
@@ -2328,24 +2454,6 @@
                 }
               }
             }
-          },
-          "400": {
-            "description": "Invalid request",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "type": "string",
-                  "const": "no-store"
-                }
-              }
-            },
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
-                }
-              }
-            }
           }
         }
       },
@@ -2409,6 +2517,24 @@
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type",
             "headers": {
               "Cache-Control": {
                 "schema": {
@@ -2542,6 +2668,24 @@
                 }
               }
             }
+          },
+          "415": {
+            "description": "Unsupported request media type",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -2610,24 +2754,6 @@
         "responses": {
           "204": {
             "description": "No content"
-          },
-          "400": {
-            "description": "Invalid request",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "type": "string",
-                  "const": "no-store"
-                }
-              }
-            },
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
-                }
-              }
-            }
           }
         },
         "x-required-permissions": [
@@ -2671,24 +2797,6 @@
                       }
                     }
                   }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "type": "string",
-                  "const": "no-store"
-                }
-              }
-            },
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
                 }
               }
             }
@@ -2776,6 +2884,24 @@
                 }
               }
             }
+          },
+          "415": {
+            "description": "Unsupported request media type",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -2840,24 +2966,6 @@
         "responses": {
           "204": {
             "description": "No content"
-          },
-          "400": {
-            "description": "Invalid request",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "type": "string",
-                  "const": "no-store"
-                }
-              }
-            },
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
-                }
-              }
-            }
           }
         }
       }
@@ -2907,24 +3015,6 @@
                       }
                     }
                   }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "type": "string",
-                  "const": "no-store"
-                }
-              }
-            },
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
                 }
               }
             }
@@ -2981,6 +3071,24 @@
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type",
             "headers": {
               "Cache-Control": {
                 "schema": {
@@ -3609,24 +3717,6 @@
                 }
               }
             }
-          },
-          "400": {
-            "description": "Invalid request",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "type": "string",
-                  "const": "no-store"
-                }
-              }
-            },
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
-                }
-              }
-            }
           }
         }
       },
@@ -3681,6 +3771,24 @@
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type",
             "headers": {
               "Cache-Control": {
                 "schema": {
@@ -3917,6 +4025,24 @@
                 }
               }
             }
+          },
+          "415": {
+            "description": "Unsupported request media type",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -4135,24 +4261,6 @@
         "responses": {
           "204": {
             "description": "No content"
-          },
-          "400": {
-            "description": "Invalid request",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "type": "string",
-                  "const": "no-store"
-                }
-              }
-            },
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
-                }
-              }
-            }
           }
         }
       }
@@ -4216,24 +4324,6 @@
                       }
                     }
                   }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request",
-            "headers": {
-              "Cache-Control": {
-                "schema": {
-                  "type": "string",
-                  "const": "no-store"
-                }
-              }
-            },
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
                 }
               }
             }
@@ -4304,6 +4394,24 @@
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported request media type",
             "headers": {
               "Cache-Control": {
                 "schema": {
@@ -4428,6 +4536,24 @@
                 }
               }
             }
+          },
+          "415": {
+            "description": "Unsupported request media type",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -4474,16 +4600,6 @@
                       }
                     }
                   }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
                 }
               }
             }
@@ -5150,6 +5266,16 @@
               }
             }
           },
+          "400": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickloginNativeError"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Error response",
             "content": {
@@ -5171,6 +5297,16 @@
             }
           },
           "409": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickloginNativeError"
+                }
+              }
+            }
+          },
+          "415": {
             "description": "Error response",
             "content": {
               "application/json": {
@@ -5267,6 +5403,16 @@
               }
             }
           },
+          "400": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickloginNativeError"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Error response",
             "content": {
@@ -5288,6 +5434,16 @@
             }
           },
           "409": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickloginNativeError"
+                }
+              }
+            }
+          },
+          "415": {
             "description": "Error response",
             "content": {
               "application/json": {
@@ -5450,6 +5606,16 @@
               }
             }
           },
+          "400": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickloginNativeError"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Error response",
             "content": {
@@ -5471,6 +5637,16 @@
             }
           },
           "409": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickloginNativeError"
+                }
+              }
+            }
+          },
+          "415": {
             "description": "Error response",
             "content": {
               "application/json": {
@@ -5605,6 +5781,16 @@
               }
             }
           },
+          "400": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickloginNativeError"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Error response",
             "content": {
@@ -5626,6 +5812,16 @@
             }
           },
           "409": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickloginNativeError"
+                }
+              }
+            }
+          },
+          "415": {
             "description": "Error response",
             "content": {
               "application/json": {
@@ -5760,6 +5956,16 @@
               }
             }
           },
+          "400": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickloginNativeError"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Error response",
             "content": {
@@ -5781,6 +5987,16 @@
             }
           },
           "409": {
+            "description": "Error response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickloginNativeError"
+                }
+              }
+            }
+          },
+          "415": {
             "description": "Error response",
             "content": {
               "application/json": {
@@ -5922,16 +6138,6 @@
                 }
               }
             }
-          },
-          "400": {
-            "description": "Invalid request",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
-                }
-              }
-            }
           }
         }
       }
@@ -5971,16 +6177,6 @@
                       "format": "uri"
                     }
                   }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
                 }
               }
             }
@@ -6026,16 +6222,6 @@
                 }
               }
             }
-          },
-          "400": {
-            "description": "Invalid request",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
-                }
-              }
-            }
           }
         }
       }
@@ -6078,16 +6264,6 @@
                 }
               }
             }
-          },
-          "400": {
-            "description": "Invalid request",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
-                }
-              }
-            }
           }
         }
       }
@@ -6127,16 +6303,6 @@
                       "format": "uri"
                     }
                   }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
                 }
               }
             }
@@ -9869,7 +10035,11 @@
         ],
         "description": "Verify an email with an OTP",
         "operationId": "post_api_v1_auth_email_otp_check_verification_otp",
-        "security": [],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
         "parameters": [],
         "requestBody": {
           "required": true,
@@ -10177,7 +10347,11 @@
         ],
         "description": "Send a verification OTP to an email",
         "operationId": "post_api_v1_auth_email_otp_send_verification_otp",
-        "security": [],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
         "parameters": [],
         "requestBody": {
           "required": true,
@@ -18116,6 +18290,9 @@
         "operationId": "post_api_v1_auth_two_factor_send_otp",
         "security": [
           {
+            "cookieAuth": []
+          },
+          {
             "twoFactorCookie": []
           }
         ],
@@ -18244,6 +18421,9 @@
         "description": "Verify a backup code for two-factor authentication",
         "operationId": "post_api_v1_auth_two_factor_verify_backup_code",
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "twoFactorCookie": []
           }
@@ -18497,6 +18677,9 @@
         "description": "Verify two factor OTP",
         "operationId": "post_api_v1_auth_two_factor_verify_otp",
         "security": [
+          {
+            "cookieAuth": []
+          },
           {
             "twoFactorCookie": []
           }
@@ -19485,16 +19668,6 @@
                       "type": "object"
                     }
                   }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid request",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiProblem"
                 }
               }
             }

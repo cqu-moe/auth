@@ -2745,15 +2745,6 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
-                };
-            };
         };
     };
     get_api_v1_cqu_binding: {
@@ -2845,6 +2836,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
+            /** @description Unsupported request media type */
+            415: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
         };
     };
     delete_api_v1_cqu_binding: {
@@ -2915,6 +2916,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
+            /** @description Unsupported request media type */
+            415: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
         };
     };
     get_api_v1_cqu_binding_events: {
@@ -2934,16 +2945,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
-                };
             };
         };
     };
@@ -2981,6 +2982,16 @@ export interface operations {
             };
             /** @description Invalid request */
             400: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unsupported request media type */
+            415: {
                 headers: {
                     "Cache-Control"?: "no-store";
                     [name: string]: unknown;
@@ -3061,6 +3072,15 @@ export interface operations {
                 };
             };
             /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginNativeError"];
+                };
+            };
+            /** @description Error response */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -3080,6 +3100,15 @@ export interface operations {
             };
             /** @description Error response */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginNativeError"];
+                };
+            };
+            /** @description Error response */
+            415: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3159,6 +3188,15 @@ export interface operations {
                 };
             };
             /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginNativeError"];
+                };
+            };
+            /** @description Error response */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -3178,6 +3216,15 @@ export interface operations {
             };
             /** @description Error response */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginNativeError"];
+                };
+            };
+            /** @description Error response */
+            415: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3306,6 +3353,15 @@ export interface operations {
                 };
             };
             /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginNativeError"];
+                };
+            };
+            /** @description Error response */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -3325,6 +3381,15 @@ export interface operations {
             };
             /** @description Error response */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginNativeError"];
+                };
+            };
+            /** @description Error response */
+            415: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3425,6 +3490,15 @@ export interface operations {
                 };
             };
             /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginNativeError"];
+                };
+            };
+            /** @description Error response */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -3444,6 +3518,15 @@ export interface operations {
             };
             /** @description Error response */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginNativeError"];
+                };
+            };
+            /** @description Error response */
+            415: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3544,6 +3627,15 @@ export interface operations {
                 };
             };
             /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginNativeError"];
+                };
+            };
+            /** @description Error response */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -3563,6 +3655,15 @@ export interface operations {
             };
             /** @description Error response */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginNativeError"];
+                };
+            };
+            /** @description Error response */
+            415: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3827,16 +3928,6 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
-                };
-            };
         };
     };
     patch_api_v1_admin_users_id: {
@@ -3880,6 +3971,16 @@ export interface operations {
             };
             /** @description Invalid request */
             400: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unsupported request media type */
+            415: {
                 headers: {
                     "Cache-Control"?: "no-store";
                     [name: string]: unknown;
@@ -3933,6 +4034,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
+            /** @description Unsupported request media type */
+            415: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
         };
     };
     get_api_v1_admin_registration_invitations: {
@@ -3954,16 +4065,6 @@ export interface operations {
                     "application/json": {
                         data: components["schemas"]["RegistrationInvitation"][];
                     };
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
         };
@@ -4008,6 +4109,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
+            /** @description Unsupported request media type */
+            415: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
         };
     };
     delete_api_v1_admin_registration_invitations_code: {
@@ -4027,16 +4138,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
-                };
             };
         };
     };
@@ -4061,16 +4162,6 @@ export interface operations {
                             invitationRequired: boolean;
                         };
                     };
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
         };
@@ -4114,6 +4205,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
+            /** @description Unsupported request media type */
+            415: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
         };
     };
     get_api_v1_admin_users_id_entitlements: {
@@ -4137,16 +4238,6 @@ export interface operations {
                     "application/json": {
                         data: components["schemas"]["EntitlementRow"][];
                     };
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
         };
@@ -4188,6 +4279,16 @@ export interface operations {
             };
             /** @description Invalid request */
             400: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unsupported request media type */
+            415: {
                 headers: {
                     "Cache-Control"?: "no-store";
                     [name: string]: unknown;
@@ -4239,6 +4340,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
+            /** @description Unsupported request media type */
+            415: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
         };
     };
     delete_api_v1_admin_users_id_entitlements_subsystem_capability: {
@@ -4261,16 +4372,6 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
-                };
-            };
         };
     };
     get_api_v1_admin_entitlement_presets: {
@@ -4292,16 +4393,6 @@ export interface operations {
                     "application/json": {
                         data: components["schemas"]["EntitlementPreset"][];
                     };
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
         };
@@ -4352,6 +4443,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
+            /** @description Unsupported request media type */
+            415: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
         };
     };
     delete_api_v1_admin_entitlement_presets_name: {
@@ -4371,16 +4472,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
-                };
             };
         };
     };
@@ -4405,16 +4496,6 @@ export interface operations {
                             preset: string | null;
                         };
                     };
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
         };
@@ -4450,6 +4531,16 @@ export interface operations {
             };
             /** @description Invalid request */
             400: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unsupported request media type */
+            415: {
                 headers: {
                     "Cache-Control"?: "no-store";
                     [name: string]: unknown;
@@ -4881,16 +4972,6 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
-                };
-            };
         };
     };
     post_api_v1_admin_oauth_clients: {
@@ -4975,6 +5056,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
+            /** @description Unsupported request media type */
+            415: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
         };
     };
     delete_api_v1_admin_oauth_clients_id: {
@@ -4994,16 +5085,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
-                };
             };
         };
     };
@@ -5069,6 +5150,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
+            /** @description Unsupported request media type */
+            415: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
         };
     };
     get_api_v1_admin_oauth_clients_id_scopes: {
@@ -5095,16 +5186,6 @@ export interface operations {
                             scopes: string[];
                         };
                     };
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    "Cache-Control"?: "no-store";
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
         };
@@ -5143,6 +5224,16 @@ export interface operations {
             };
             /** @description Invalid request */
             400: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+            /** @description Unsupported request media type */
+            415: {
                 headers: {
                     "Cache-Control"?: "no-store";
                     [name: string]: unknown;
@@ -5195,6 +5286,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
+            /** @description Unsupported request media type */
+            415: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
         };
     };
     get_api_v1_registration_settings: {
@@ -5217,15 +5318,6 @@ export interface operations {
                             invitationRequired: boolean;
                         };
                     };
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
         };
@@ -5636,6 +5728,15 @@ export interface operations {
                 };
             };
             /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginNativeError"];
+                };
+            };
+            /** @description Error response */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -5655,6 +5756,15 @@ export interface operations {
             };
             /** @description Error response */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginNativeError"];
+                };
+            };
+            /** @description Error response */
+            415: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5734,6 +5844,15 @@ export interface operations {
                 };
             };
             /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginNativeError"];
+                };
+            };
+            /** @description Error response */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -5753,6 +5872,15 @@ export interface operations {
             };
             /** @description Error response */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginNativeError"];
+                };
+            };
+            /** @description Error response */
+            415: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -5881,6 +6009,15 @@ export interface operations {
                 };
             };
             /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginNativeError"];
+                };
+            };
+            /** @description Error response */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -5900,6 +6037,15 @@ export interface operations {
             };
             /** @description Error response */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginNativeError"];
+                };
+            };
+            /** @description Error response */
+            415: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6000,6 +6146,15 @@ export interface operations {
                 };
             };
             /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginNativeError"];
+                };
+            };
+            /** @description Error response */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -6019,6 +6174,15 @@ export interface operations {
             };
             /** @description Error response */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginNativeError"];
+                };
+            };
+            /** @description Error response */
+            415: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6119,6 +6283,15 @@ export interface operations {
                 };
             };
             /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginNativeError"];
+                };
+            };
+            /** @description Error response */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -6138,6 +6311,15 @@ export interface operations {
             };
             /** @description Error response */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginNativeError"];
+                };
+            };
+            /** @description Error response */
+            415: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -6242,15 +6424,6 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
-                };
-            };
         };
     };
     get_well_known_openid_configuration: {
@@ -6280,15 +6453,6 @@ export interface operations {
                     } & {
                         [key: string]: unknown;
                     };
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
         };
@@ -6322,15 +6486,6 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
-                };
-            };
         };
     };
     get_api_auth_well_known_oauth_authorization_server: {
@@ -6362,15 +6517,6 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
-                };
-            };
         };
     };
     get_well_known_oauth_authorization_server_api_auth: {
@@ -6400,15 +6546,6 @@ export interface operations {
                     } & {
                         [key: string]: unknown;
                     };
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
         };
@@ -14469,15 +14606,6 @@ export interface operations {
                     } & {
                         [key: string]: unknown;
                     };
-                };
-            };
-            /** @description Invalid request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
         };

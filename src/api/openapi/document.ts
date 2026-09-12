@@ -247,7 +247,11 @@ function successStatuses(operation: HttpOperation): string[] {
   return ["200"];
 }
 
-function responsesFor(operation: HttpOperation, schema: Record<string, unknown>) {
+function responsesFor(
+  operation: HttpOperation,
+  schema: Record<string, unknown>,
+  hasJsonBody: boolean
+) {
   const responses: Record<string, unknown> = {};
   const sensitive = operation.path.startsWith("/api/v1/admin/") ||
     operation.path.startsWith("/api/v1/cqu/");
@@ -266,11 +270,16 @@ function responsesFor(operation: HttpOperation, schema: Record<string, unknown>)
       content: { "application/json": { schema } },
     };
   }
-  responses["400"] = {
-    description: "Invalid request",
+  const hasValidatedQuery =
+    (operation.path.endsWith("/admin/users") && operation.method === "GET") ||
+    (operation.path.endsWith("/cqu/binding") && ["GET", "DELETE"].includes(operation.method));
+  const problemResponse = (description: string) => ({
+    description,
     ...(sensitive ? { headers: { "Cache-Control": { schema: { type: "string", const: "no-store" } } } } : {}),
     content: { "application/problem+json": { schema: { $ref: "#/components/schemas/ApiProblem" } } },
-  };
+  });
+  if (hasJsonBody || hasValidatedQuery) responses["400"] = problemResponse("Invalid request");
+  if (hasJsonBody) responses["415"] = problemResponse("Unsupported request media type");
   return responses;
 }
 
@@ -301,7 +310,7 @@ export function buildOpenApiDocument(operations: readonly HttpOperation[]) {
       summary: `${operation.method} ${operation.path}`,
       parameters,
       security: securityFor(operation),
-      responses: responsesFor(operation, successSchema),
+      responses: responsesFor(operation, successSchema, requestSchema !== undefined),
     };
     if (requestSchema) {
       entry.requestBody = {

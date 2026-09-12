@@ -344,7 +344,7 @@ export function quickloginOperationContract(
     if (suffix === "" && method === "POST") return {
       ...extension,
       requestBody: requestBody("QuickloginDeviceRegistration"),
-      responses: responses(200, ref("DeviceStatus"), [401, 403, 409, 422, 503], "native"),
+      responses: responses(200, ref("DeviceStatus"), [400, 401, 403, 409, 415, 422, 503], "native"),
     };
     if (suffix === "" && method === "GET") return {
       security: [{ cookieAuth: [] }],
@@ -354,7 +354,7 @@ export function quickloginOperationContract(
     if (suffix === "/:id" && method === "PUT") return {
       ...extension,
       requestBody: requestBody("QuickloginDeviceUpdate"),
-      responses: responses(200, ref("DeviceStatus"), [401, 403, 409, 422, 503], "native"),
+      responses: responses(200, ref("DeviceStatus"), [400, 401, 403, 409, 415, 422, 503], "native"),
     };
     if (suffix === "/:id" && method === "DELETE") return {
       security: [{ cookieAuth: [] }],
@@ -364,17 +364,17 @@ export function quickloginOperationContract(
     if (suffix === "/:id/status" && method === "POST") return {
       ...extension,
       requestBody: requestBody("QuickloginDeviceHeartbeat"),
-      responses: responses(200, ref("DeviceStatus"), [401, 403, 409, 422, 426, 429, 503], "native"),
+      responses: responses(200, ref("DeviceStatus"), [400, 401, 403, 409, 415, 422, 426, 429, 503], "native"),
     };
     if (suffix === "/:id/refresh" && method === "POST") return {
       ...extension,
       requestBody: requestBody("QuickloginDeviceRefresh"),
-      responses: responses(202, ref("DeviceStatus"), [401, 403, 409, 422, 426, 429, 503], "native"),
+      responses: responses(202, ref("DeviceStatus"), [400, 401, 403, 409, 415, 422, 426, 429, 503], "native"),
     };
     if (suffix === "/:id/export" && method === "POST") return {
       ...extension,
       requestBody: requestBody("QuickloginDeviceExport"),
-      responses: responses(200, ref("QuickloginCookieEnvelope"), [401, 403, 409, 422, 426, 429, 503], "native"),
+      responses: responses(200, ref("QuickloginCookieEnvelope"), [400, 401, 403, 409, 415, 422, 426, 429, 503], "native"),
     };
   }
 

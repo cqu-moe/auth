@@ -132,6 +132,40 @@ describe("complete API document", () => {
     }
   });
 
+  it("documents device JSON transport errors only on QuickLogin write operations", () => {
+    const document = buildOpenApiDocument(listHttpOperations(createApp())) as Record<string, any>;
+    const paths = document.paths as Record<string, Record<string, any>>;
+    for (const base of ["/api/v1/cqu/quicklogin/devices", "/api/cqu/quicklogin/devices"]) {
+      for (const [suffix, method] of [
+        ["", "post"], ["/{id}", "put"], ["/{id}/status", "post"],
+        ["/{id}/refresh", "post"], ["/{id}/export", "post"],
+      ] as const) {
+        expect(paths[`${base}${suffix}`][method].responses, `${method} ${base}${suffix}`)
+          .toMatchObject({
+            "400": { content: { "application/json": { schema: { $ref: "#/components/schemas/QuickloginNativeError" } } } },
+            "415": { content: { "application/json": { schema: { $ref: "#/components/schemas/QuickloginNativeError" } } } },
+          });
+      }
+      for (const [suffix, method] of [
+        ["", "get"], ["/{id}", "delete"], ["", "options"],
+        ["/{id}", "options"], ["/{id}/status", "options"],
+        ["/{id}/refresh", "options"], ["/{id}/export", "options"],
+      ] as const) {
+        expect(paths[`${base}${suffix}`][method].responses, `${method} ${base}${suffix}`)
+          .not.toHaveProperty("400");
+        expect(paths[`${base}${suffix}`][method].responses, `${method} ${base}${suffix}`)
+          .not.toHaveProperty("415");
+      }
+    }
+    for (const path of [
+      "/api/v1/health", "/api/v1/openapi.json",
+      "/.well-known/oauth-authorization-server", "/.well-known/openid-configuration",
+      "/api/auth/.well-known/openid-configuration",
+      "/api/auth/.well-known/oauth-authorization-server",
+      "/.well-known/oauth-authorization-server/api/auth",
+    ]) expect(paths[path].get.responses, path).not.toHaveProperty("400");
+  });
+
   it("serves the document object without a data envelope", async () => {
     const fixture = createHttpFixture();
     try {

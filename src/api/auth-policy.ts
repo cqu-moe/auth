@@ -22,8 +22,7 @@ const entries = (policy: AuthPolicyKind, values: readonly string[]) =>
 const AUTH_POLICIES = new Map<string, AuthPolicyKind>([
   ...entries("public", [
     "GET /callback/:id", "POST /callback/:id", "GET /cloudflare/geolocation",
-    "GET /delete-user/callback", "POST /email-otp/check-verification-otp",
-    "POST /email-otp/send-verification-otp", "POST /email-otp/verify-email",
+    "GET /delete-user/callback", "POST /email-otp/verify-email",
     "GET /error", "POST /get-access-token", "GET /jwks",
     "GET /oauth2/authorize", "GET /oauth2/end-session", "GET /oauth2/public-client",
     "POST /oauth2/public-client-prelogin", "POST /oauth2/register", "GET /ok",
@@ -36,11 +35,10 @@ const AUTH_POLICIES = new Map<string, AuthPolicyKind>([
   ...entries("oauth-client", [
     "POST /oauth2/introspect", "POST /oauth2/revoke", "POST /oauth2/token",
   ]),
-  ...entries("two-factor-cookie", [
+  ...entries("session-or-two-factor-cookie", [
     "POST /two-factor/send-otp", "POST /two-factor/verify-backup-code",
-    "POST /two-factor/verify-otp",
+    "POST /two-factor/verify-otp", "POST /two-factor/verify-totp",
   ]),
-  ...entries("session-or-two-factor-cookie", ["POST /two-factor/verify-totp"]),
   ...entries("admin-session", [
     "POST /admin/ban-user", "POST /admin/create-user", "GET /admin/get-user",
     "POST /admin/has-permission", "POST /admin/impersonate-user",
@@ -53,7 +51,8 @@ const AUTH_POLICIES = new Map<string, AuthPolicyKind>([
   ...entries("session", [
     "GET /account-info", "POST /change-email", "POST /change-password",
     "POST /delete-user", "POST /email-otp/change-email",
-    "POST /email-otp/request-email-change", "POST /link-social",
+    "POST /email-otp/request-email-change", "POST /email-otp/send-verification-otp",
+    "POST /email-otp/check-verification-otp", "POST /link-social",
     "GET /list-accounts", "GET /list-sessions", "POST /oauth2/client/rotate-secret",
     "POST /oauth2/consent", "POST /oauth2/continue", "POST /oauth2/create-client",
     "POST /oauth2/delete-client", "POST /oauth2/delete-consent",
@@ -113,7 +112,9 @@ export function buildAuthPolicy(operations: readonly HttpOperation[]): AuthPolic
       ...operation,
       policy,
       source: authPolicy === null ? "custom-contract" :
-        policy === "optional-session" || operation.path.endsWith("/sign-up/email")
+        policy === "optional-session" || operation.path.endsWith("/sign-up/email") ||
+        operation.path.endsWith("/email-otp/send-verification-otp") ||
+        operation.path.endsWith("/email-otp/check-verification-otp")
         ? "application-override"
         : "better-auth-1.6.11",
     };

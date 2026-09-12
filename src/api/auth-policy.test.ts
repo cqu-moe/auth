@@ -17,7 +17,8 @@ describe("deterministic API authentication policy", () => {
   });
 
   it.each([
-    ["POST", "/api/v1/auth/email-otp/send-verification-otp", "public"],
+    ["POST", "/api/v1/auth/email-otp/send-verification-otp", "session"],
+    ["POST", "/api/v1/auth/email-otp/check-verification-otp", "session"],
     ["POST", "/api/v1/auth/email-otp/verify-email", "public"],
     ["POST", "/api/v1/auth/email-otp/request-email-change", "session"],
     ["GET", "/api/v1/auth/get-session", "optional-session"],
@@ -26,7 +27,9 @@ describe("deterministic API authentication policy", () => {
     ["GET", "/api/v1/auth/oauth2/userinfo", "bearer"],
     ["POST", "/api/v1/auth/oauth2/token", "oauth-client"],
     ["POST", "/api/v1/auth/admin/ban-user", "admin-session"],
-    ["POST", "/api/v1/auth/two-factor/verify-otp", "two-factor-cookie"],
+    ["POST", "/api/v1/auth/two-factor/send-otp", "session-or-two-factor-cookie"],
+    ["POST", "/api/v1/auth/two-factor/verify-otp", "session-or-two-factor-cookie"],
+    ["POST", "/api/v1/auth/two-factor/verify-backup-code", "session-or-two-factor-cookie"],
   ])("records %s %s as %s", (method, path, expected) => {
     const [entry] = buildAuthPolicy([{ method, path }]);
     expect(entry.policy).toBe(expected);
@@ -40,6 +43,17 @@ describe("deterministic API authentication policy", () => {
     expect(securityForPolicy("bearer")).toEqual([{ bearerAuth: [] }]);
     expect(securityForPolicy("oauth-client")).toEqual([{ oauthClientAuth: [] }]);
     expect(securityForPolicy("two-factor-cookie")).toEqual([{ twoFactorCookie: [] }]);
+    expect(securityForPolicy("session-or-two-factor-cookie"))
+      .toEqual([{ cookieAuth: [] }, { twoFactorCookie: [] }]);
+  });
+
+  it("marks current-email OTP policy as an application override", () => {
+    const policy = buildAuthPolicy([
+      { method: "POST", path: "/api/v1/auth/email-otp/send-verification-otp" },
+      { method: "POST", path: "/api/v1/auth/email-otp/check-verification-otp" },
+    ]);
+    expect(policy.map(({ source }) => source))
+      .toEqual(["application-override", "application-override"]);
   });
 
   it("characterizes public, optional-session, session, Bearer, client-auth, and admin gates", async () => {
@@ -69,6 +83,19 @@ describe("deterministic API authentication policy", () => {
         body: "grant_type=client_credentials",
       }, fixture.env);
       expect(token.status).not.toBe(200);
+
+      for (const [path, body] of [
+        ["/api/v1/auth/email-otp/send-verification-otp", { email: "current@example.test", type: "email-verification" }],
+        ["/api/v1/auth/email-otp/check-verification-otp", { email: "current@example.test", type: "email-verification", otp: "000000" }],
+      ] as const) {
+        const response = await app.request(path, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }, fixture.env);
+        expect(response.status, path).toBe(403);
+        expect(await response.json(), path).toMatchObject({ code: "CURRENT_EMAIL_OTP_ONLY" });
+      }
     } finally {
       await fixture.close();
     }

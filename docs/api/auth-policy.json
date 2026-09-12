@@ -572,8 +572,8 @@
   {
     "method": "POST",
     "path": "/api/v1/auth/email-otp/check-verification-otp",
-    "policy": "public",
-    "source": "better-auth-1.6.11"
+    "policy": "session",
+    "source": "application-override"
   },
   {
     "method": "POST",
@@ -584,8 +584,8 @@
   {
     "method": "POST",
     "path": "/api/v1/auth/email-otp/send-verification-otp",
-    "policy": "public",
-    "source": "better-auth-1.6.11"
+    "policy": "session",
+    "source": "application-override"
   },
   {
     "method": "POST",
@@ -866,19 +866,19 @@
   {
     "method": "POST",
     "path": "/api/v1/auth/two-factor/send-otp",
-    "policy": "two-factor-cookie",
+    "policy": "session-or-two-factor-cookie",
     "source": "better-auth-1.6.11"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/two-factor/verify-backup-code",
-    "policy": "two-factor-cookie",
+    "policy": "session-or-two-factor-cookie",
     "source": "better-auth-1.6.11"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/two-factor/verify-otp",
-    "policy": "two-factor-cookie",
+    "policy": "session-or-two-factor-cookie",
     "source": "better-auth-1.6.11"
   },
   {
