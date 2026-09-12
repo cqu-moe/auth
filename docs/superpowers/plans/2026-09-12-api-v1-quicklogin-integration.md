@@ -11,6 +11,7 @@
 - API v1 工作区：`/Users/uu/Developer/cqu-moe/auth/.worktrees/api-v1-refactor`；分支 `codex/api-v1-refactor`；补充任务起点 `c1d379984e176d635f01382ae800137ffae0a08e`。
 - QuickLogin Auth 来源：分支 `codex/quicklogin-implementation`；当前 HEAD `2f350976694829875c609fbb2f00bf086d329084`；共同祖先 `79026bad4dd29322c458b7517ec0759a91f84c2a`。
 - QuickLogin 扩展来源：`/Users/uu/Developer/cqu-moe/quicklogin` 的 `main`/`82bfb12`；0.1.2 仍调用旧 OAuth 与旧设备路径。
+- 用户确认当前生产 OAuth client 清单只有 Schedule 与 QuickLogin；Schedule 使用 Service Binding RPC，不依赖旧 HTTP OAuth 路由。
 - API v1 起点本地基线：Node 68 files / 554 tests；Workers 11 files / 109 tests；root、Workers、frontend TypeScript 均 exit 0。Workers 输出含既有 Container sourcemap/未启用提示，但测试退出码为 0。
 
 ## 裁决与约束
@@ -26,7 +27,8 @@
 - QuickLogin 扩展正式调用 `/api/v1/auth/oauth2/authorize`、`/api/v1/auth/oauth2/token` 和 `/api/v1/cqu/quicklogin/devices*`。不扩大 host permissions，不更换 client ID、extension ID、redirect URI、scope 或协议版本。
 - 稳定 issuer 仍为 `https://auth.cqu.moe/api/auth`；D01–D05 discovery 永久保留。
 - 生产已应用的 D1/DO 迁移历史只追加/对齐，不重编号、不删除、不重写表；`v3` 必须保留 `CquQuickloginAccountDO` 与 `CquQuickloginDeviceDO`。
-- legacy 没有自动 Sunset；生产退役仍需部署后的路由计数、OAuth client 清单和单独授权。
+- 上线时关闭通用 legacy 映射；只保留当前 QuickLogin 0.1.2 实际需要的旧 `GET /api/auth/oauth2/authorize`、`POST /api/auth/oauth2/token`、旧 `/api/cqu/quicklogin/devices*`，以及已签发密码重置链接在其有效期内所需的旧 callback。其它旧 API 必须返回 JSON 404/405，不进入 ASSETS。
+- 上述 QuickLogin/重置回调过渡桥没有自动 Sunset；晚上核对路由流量并完成两台扩展升级后，另行移除。D01–D05 discovery 永久保留，不属于 legacy。
 - Auth 部署必须在 Task 1–5 本地门禁、任务审查和整分支审查全部通过后执行；优先使用仓库现有 Wrangler/CI 所定义的生产配置，不顺带变更 D1/KV/WAF/Endpoint Management。部署不等于流量验收。
 - 所有新行为先写或移植会失败的测试并观察 RED，再移植最小实现变 GREEN；每项本地提交前审查 staged diff，不改其他 worktree。
 
@@ -49,7 +51,7 @@
 1. 先添加真实 app/Workers 测试：v1 设备注册/列表/开关/删除/status/refresh/export 当前 404；旧路径在实现后必须与 v1 共享状态和权限。
 2. 把 QuickLogin OAuth grant 绑定、access-token 验证和 device principal 接入当前 `createAuth`，同时保持 v1 basePath、稳定 issuer、OTP/2FA/customSession 行为。
 3. 设备 API 使用当前 v1 验证/错误层；扩展 Bearer 路径保持协议错误体，网站 session 路径保持 no-store、同源要求和用户隔离。不得把坏 Bearer 降级成 session。
-4. v1 路由只实现一份业务 handler；旧设备路径由集中 legacy 路由精确转发，不使用 HTTP redirect，不复制 DO 调用。
+4. v1 路由只实现一份业务 handler；旧设备路径及 QuickLogin 旧 OAuth authorize/token 由集中最小 legacy 路由精确转发，不使用 HTTP redirect，不复制 DO 调用。除短期密码重置 callback 外，删除其它通用 legacy 映射。
 5. 更新 runtime 操作枚举与负例：错误方法 405、未知子路径 JSON 404、OPTIONS CORS 只允许固定 extension origin、禁用模式 503。
 6. 运行 OAuth、设备路由、认证、legacy、OTP/2FA 和 Workers 集成测试及类型检查；提交 Conventional Commit。
 
@@ -79,8 +81,8 @@
 **要求：**
 
 1. 为所有新 v1/legacy/admin QuickLogin 操作补同源运行时 schema、OpenAPI、Cloudflare 投影、auth policy、endpoint kind 和覆盖说明；扩展协议错误响应不得被错误包装。
-2. `generate:api` 后检查 runtime ↔ OpenAPI ↔ endpoints ↔ Cloudflare 集合；连续生成无漂移。永久 discovery 与仍保留 legacy 明确登记。
+2. `generate:api` 后检查 runtime ↔ OpenAPI ↔ endpoints ↔ Cloudflare 集合；连续生成无漂移。永久 discovery 与最小 QuickLogin/密码重置兼容桥明确登记，旧的全量 115-operation legacy 清单不得残留。
 3. 更新原 API v1 execution-log、acceptance-results、cleanup-ledger 和当前接入文档，说明原计划前提为何被修正、QuickLogin 哪些能力被保留、哪些退役条件仍未满足。
 4. 运行原 API v1 验收命令全集，加 QuickLogin Auth 全部 Node/Workers 测试和扩展全部门禁；记录实际退出码、测试数和已知环境噪声。
-5. 最终做任务级审查和整分支审查。全部通过后部署 Auth Worker；不上传 Cloudflare schema、不启用 WAF、不下线旧路由。
+5. 最终做任务级审查和整分支审查。全部通过后部署 Auth Worker；不上传 Cloudflare schema、不启用 WAF；通用 legacy 下线，只保留本计划列出的过渡桥与永久 discovery。
 6. 部署后只做 health、静态页面、v1/legacy/discovery 和未登录拒绝等无凭据安全探针，记录 Worker version。真实用户流量、生产 OAuth client/D1 清单及退役判断留待用户晚上回来共同检查。
