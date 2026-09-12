@@ -163,7 +163,7 @@
 
 - 本地已验证：最终 Node 85 files / 683 tests、Workers/DO 20 files / 160 tests、root/DO TypeScript、frontend tsc/lint/build、OpenAPI/Cloudflare Redocly、API漂移和边界检查；153个runtime操作均有auth-policy且完整文档无空1xx/2xx body（101/204除外）。
 - 生成确定性：`openapi.json`、`cloudflare.openapi.json`、`endpoints.json`、`coverage.json`、`auth-policy.json`、generated types 连续生成SHA不变。
-- Workers/DO最终通过：子环境workerd监听被EPERM阻止后由根任务执行；首轮full为156/158，暴露测试表名误写及admin-create strict schema漏`require_pkce`。修正后focused 2 files/9 tests通过，最终full 20/20 files、158/158 tests、exit 0；新增Device DO keepalive/login竞态、1000波outbox持久化收敛、admin strict/no-store和QuickLogin逐资源OPTIONS均已执行。仅有既有sourcemap、overdue alarm与disabled-container噪音。
+- Workers/DO最终通过：首轮final-fix full为156/158，修正测试表名及admin-create `require_pkce`后158/158；scoped review又补齐auth-policy/OpenAPI媒体状态与transient失败竞态，最终full 20/20 files、160/160 tests、exit 0。新增Device DO success/transient keepalive/login竞态、1000波outbox持久化收敛、admin strict/no-store和QuickLogin逐资源OPTIONS均已执行；仅有既有sourcemap、overdue alarm与disabled-container噪音。
 - 已部署 Auth Worker、assets 和现有 Container 镜像；未push、未发布扩展、未上传schema、未改WAF/API Shield。生产验证只覆盖无凭据路由与静态资源，不冒充真实登录/学校业务/扩展设备验收。
 
 | 补充项 | 状态 | 当前证据 |
