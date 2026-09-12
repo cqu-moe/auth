@@ -2,6 +2,38 @@ import { describe, expect, it } from "vitest";
 import { createApiFixture } from "./api-fixture";
 
 describe("admin entitlements API v1", () => {
+  it("rejects invalid media and strict-shape violations before mutating entitlements", async () => {
+    const fixture = await createApiFixture();
+    try {
+      const targetHeaders = await fixture.signIn("user");
+      const target = await fixture.request("/api/v1/auth/get-session", { headers: targetHeaders })
+        .then((response) => response.json() as Promise<{ user: { id: string } }>);
+      await fixture.database.prepare(
+        "INSERT INTO user_entitlement (user_id, subsystem, capability, value) VALUES (?, 'calendar', 'sync', '1')"
+      ).bind(target.user.id).run();
+      const headers = await fixture.signIn("superAdmin");
+      const path = `/api/v1/admin/users/${target.user.id}/entitlements`;
+      const cases = [
+        [{ ...Object.fromEntries(headers), "content-type": "text/plain" }, '{"items":[]}', 415],
+        [{ ...Object.fromEntries(headers), "content-type": "application/json" }, "{", 400],
+        [{ ...Object.fromEntries(headers), "content-type": "application/json" }, "null", 400],
+        [{ ...Object.fromEntries(headers), "content-type": "application/json" }, "[]", 400],
+        [{ ...Object.fromEntries(headers), "content-type": "application/json" }, '{"items":[],"extra":true}', 400],
+      ] as const;
+      for (const [caseHeaders, body, status] of cases) {
+        const response = await fixture.request(path, { method: "PUT", headers: caseHeaders, body });
+        expect(response.status, body).toBe(status);
+        expect(response.headers.get("cache-control"), body).toBe("no-store");
+      }
+      const rows = await fixture.database.prepare(
+        "SELECT subsystem, capability, value FROM user_entitlement WHERE user_id = ?"
+      ).bind(target.user.id).all();
+      expect(rows.results).toEqual([{ subsystem: "calendar", capability: "sync", value: "1" }]);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("distinguishes whole-set replace from preset-key merge", async () => {
     const fixture = await createApiFixture();
     try {

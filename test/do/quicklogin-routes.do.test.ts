@@ -177,6 +177,23 @@ describe("quicklogin device HTTP", () => {
     expect(allowed.status).toBe(204);
     expect(allowed.headers.get("access-control-allow-origin"))
       .toBe(env.QUICKLOGIN_EXTENSION_ORIGIN);
+    expect(allowed.headers.get("access-control-allow-methods")).toBe("GET, POST");
+    const itemPreflight = await SELF.fetch(
+      "http://localhost:8787/api/v1/cqu/quicklogin/devices/device-a", {
+        method: "OPTIONS",
+        headers: { origin: env.QUICKLOGIN_EXTENSION_ORIGIN,
+          "access-control-request-method": "DELETE" },
+      });
+    expect(itemPreflight.status).toBe(204);
+    expect(itemPreflight.headers.get("access-control-allow-methods")).toBe("PUT, DELETE");
+    const statusPreflight = await SELF.fetch(
+      "http://localhost:8787/api/v1/cqu/quicklogin/devices/device-a/status", {
+        method: "OPTIONS",
+        headers: { origin: env.QUICKLOGIN_EXTENSION_ORIGIN,
+          "access-control-request-method": "POST" },
+      });
+    expect(statusPreflight.status).toBe(204);
+    expect(statusPreflight.headers.get("access-control-allow-methods")).toBe("POST");
     const denied = await SELF.fetch(
       "http://localhost:8787/api/v1/cqu/quicklogin/devices", {
         method: "OPTIONS",

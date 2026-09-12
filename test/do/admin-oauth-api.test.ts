@@ -2,6 +2,31 @@ import { describe, expect, it } from "vitest";
 import { createApiFixture } from "./api-fixture";
 
 describe("admin OAuth API v1", () => {
+  it("rejects non-JSON and unknown OAuth write fields without side effects", async () => {
+    const fixture = await createApiFixture();
+    try {
+      const headers = await fixture.signIn("superAdmin");
+      const before = await fixture.database.prepare("SELECT COUNT(*) AS count FROM oauthClient").first<{ count: number }>();
+      for (const [contentType, body, status] of [
+        ["text/plain", '{"redirect_uris":[]}', 415],
+        ["application/json", '{"redirect_uris":[],"client_secret":"forbidden"}', 400],
+        ["application/json", "null", 400],
+      ] as const) {
+        const requestHeaders = new Headers(headers);
+        requestHeaders.set("content-type", contentType);
+        const response = await fixture.request("/api/v1/admin/oauth-clients", {
+          method: "POST", headers: requestHeaders, body,
+        });
+        expect(response.status, body).toBe(status);
+        expect(response.headers.get("cache-control"), body).toBe("no-store");
+      }
+      const after = await fixture.database.prepare("SELECT COUNT(*) AS count FROM oauthClient").first<{ count: number }>();
+      expect(after?.count).toBe(before?.count);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("requires both CQU scope permissions canonically and retires legacy writes", async () => {
     const fixture = await createApiFixture();
     try {

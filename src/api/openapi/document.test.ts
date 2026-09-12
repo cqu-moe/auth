@@ -91,6 +91,47 @@ describe("complete API document", () => {
     ]));
   });
 
+  it("documents exact custom statuses, bodies, headers, and every success response schema", () => {
+    const document = buildOpenApiDocument(listHttpOperations(createApp())) as Record<string, any>;
+    const paths = document.paths as Record<string, Record<string, any>>;
+    const custom = Object.entries(paths).flatMap(([path, item]) =>
+      Object.entries(item).flatMap(([method, operation]) =>
+        path.startsWith("/api/v1/auth/") ? [] : [{ path, method, operation }]
+      )
+    );
+    const emptySuccesses = custom.flatMap(({ path, method, operation }) =>
+      Object.entries((operation as any).responses ?? {}).flatMap(([status, response]: [string, any]) =>
+        /^1\d\d$|^2\d\d$/.test(status) && status !== "204" && status !== "101" && !response.content
+          ? [`${method.toUpperCase()} ${path} ${status}`]
+          : []
+      )
+    );
+    expect(emptySuccesses).toEqual([]);
+
+    const tickets = paths["/api/v1/cqu/service-tickets"].post;
+    expect(Object.keys(tickets.responses)).toContain("201");
+    expect(tickets.responses["201"].content["application/json"].schema)
+      .toMatchObject({ properties: { data: { properties: { ticket: { type: "string" } } } } });
+    expect(tickets.responses["201"].headers["Cache-Control"].schema.const).toBe("no-store");
+    expect(tickets.responses["400"].headers["Cache-Control"].schema.const).toBe("no-store");
+    expect(paths["/api/v1/admin/oauth-clients"].post.requestBody.content["application/json"].schema)
+      .toBeTruthy();
+    expect(paths["/api/v1/admin/oauth-clients/{id}"].patch.requestBody.content["application/json"].schema)
+      .toMatchObject({ type: "object", minProperties: 1, additionalProperties: false });
+    expect(paths["/api/v1/admin/oauth-clients/{id}"].delete.responses).toHaveProperty("204");
+    expect(paths["/api/v1/cqu/binding/events"].get.responses).toHaveProperty("101");
+    for (const path of [
+      "/.well-known/oauth-authorization-server",
+      "/.well-known/openid-configuration",
+      "/api/auth/.well-known/openid-configuration",
+      "/api/auth/.well-known/oauth-authorization-server",
+      "/.well-known/oauth-authorization-server/api/auth",
+    ]) {
+      expect(paths[path].get.responses["200"].content["application/json"].schema)
+        .toMatchObject({ type: "object" });
+    }
+  });
+
   it("serves the document object without a data envelope", async () => {
     const fixture = createHttpFixture();
     try {
@@ -291,7 +332,7 @@ describe("complete API document", () => {
         schema: "QuickloginDeviceRegistration",
         parser: parseDeviceMetadata,
         input: { deviceName: " macOS Chrome ", browserFamily: "chrome", browserVersion: " 140.0 " },
-        ok: false, code: "INVALID_REQUEST", status: 422,
+        ok: false, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "registration preserves BMP Chinese and internal ordinary spaces",
@@ -306,56 +347,56 @@ describe("complete API document", () => {
         schema: "QuickloginDeviceRegistration",
         parser: parseDeviceMetadata,
         input: { deviceName: "   ", browserFamily: "chrome", browserVersion: "140" },
-        ok: false, code: "INVALID_REQUEST", status: 422,
+        ok: false, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "registration rejects control characters",
         schema: "QuickloginDeviceRegistration",
         parser: parseDeviceMetadata,
         input: { deviceName: "Chrome\u0000", browserFamily: "chrome", browserVersion: "140" },
-        ok: false, code: "INVALID_REQUEST", status: 422,
+        ok: false, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "registration rejects a name beyond 80 characters",
         schema: "QuickloginDeviceRegistration",
         parser: parseDeviceMetadata,
         input: { deviceName: "x".repeat(81), browserFamily: "chrome", browserVersion: "140" },
-        ok: false, code: "INVALID_REQUEST", status: 422,
+        ok: false, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "registration rejects padding after an 80-character name",
         schema: "QuickloginDeviceRegistration",
         parser: parseDeviceMetadata,
         input: { deviceName: `${"x".repeat(80)} `, browserFamily: "chrome", browserVersion: "140" },
-        ok: false, code: "INVALID_REQUEST", status: 422,
+        ok: false, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "registration rejects trailing Unicode whitespace",
         schema: "QuickloginDeviceRegistration",
         parser: parseDeviceMetadata,
         input: { deviceName: "Chrome\u3000", browserFamily: "chrome", browserVersion: "140" },
-        ok: false, code: "INVALID_REQUEST", status: 422,
+        ok: false, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "registration rejects non-BMP emoji",
         schema: "QuickloginDeviceRegistration",
         parser: parseDeviceMetadata,
         input: { deviceName: "Chrome 🚀", browserFamily: "chrome", browserVersion: "140" },
-        ok: false, code: "INVALID_REQUEST", status: 422,
+        ok: false, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "registration rejects an internal zero-width space",
         schema: "QuickloginDeviceRegistration",
         parser: parseDeviceMetadata,
         input: { deviceName: "Chrome\u200BDevice", browserFamily: "chrome", browserVersion: "140" },
-        ok: false, code: "INVALID_REQUEST", status: 422,
+        ok: false, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "device update is strict",
         schema: "QuickloginDeviceUpdate",
         parser: parseEnabled,
         input: { enabled: true, extra: false },
-        ok: false, code: "INVALID_REQUEST", status: 422,
+        ok: false, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "heartbeat accepts maximum safe integers and canonical version",
@@ -376,14 +417,14 @@ describe("complete API document", () => {
         schema: "QuickloginDeviceHeartbeat",
         parser: parseHeartbeat,
         input: { protocolVersion: 1, appliedVersion: null, generation: 2 ** 53, browserVersion: "140" },
-        ok: false, code: "INVALID_REQUEST", status: 422,
+        ok: false, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "heartbeat rejects whitespace-only version",
         schema: "QuickloginDeviceHeartbeat",
         parser: parseHeartbeat,
         input: { protocolVersion: 1, appliedVersion: null, generation: 1, browserVersion: "   " },
-        ok: false, code: "INVALID_REQUEST", status: 422,
+        ok: false, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "heartbeat rejects a version beyond 40 characters",
@@ -393,7 +434,7 @@ describe("complete API document", () => {
           protocolVersion: 1, appliedVersion: null, generation: 1,
           browserVersion: "1".repeat(41),
         },
-        ok: false, code: "INVALID_REQUEST", status: 422,
+        ok: false, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "heartbeat rejects leading Unicode whitespace",
@@ -403,7 +444,7 @@ describe("complete API document", () => {
           protocolVersion: 1, appliedVersion: null, generation: 1,
           browserVersion: "\u3000140",
         },
-        ok: false, code: "INVALID_REQUEST", status: 422,
+        ok: false, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "heartbeat rejects non-BMP emoji",
@@ -413,7 +454,7 @@ describe("complete API document", () => {
           protocolVersion: 1, appliedVersion: null, generation: 1,
           browserVersion: "Chrome🚀",
         },
-        ok: false, code: "INVALID_REQUEST", status: 422,
+        ok: false, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "heartbeat rejects an internal byte-order mark",
@@ -423,7 +464,7 @@ describe("complete API document", () => {
           protocolVersion: 1, appliedVersion: null, generation: 1,
           browserVersion: "Chrome\uFEFF140",
         },
-        ok: false, code: "INVALID_REQUEST", status: 422,
+        ok: false, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "heartbeat rejects unsupported protocol separately",
@@ -437,7 +478,7 @@ describe("complete API document", () => {
         schema: "QuickloginDeviceRefresh",
         parser: parseRefreshRequest,
         input: { protocolVersion: 1, generation: 2 ** 53 },
-        ok: false, code: "INVALID_REQUEST", status: 422,
+        ok: false, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "refresh rejects unsupported protocol separately",
@@ -451,7 +492,7 @@ describe("complete API document", () => {
         schema: "QuickloginDeviceExport",
         parser: parseExportRequest,
         input: { protocolVersion: 1, generation: 1, sessionVersion: 2 ** 53 },
-        ok: false, code: "INVALID_REQUEST", status: 422,
+        ok: false, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "export rejects unsupported protocol separately",

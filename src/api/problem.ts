@@ -33,6 +33,9 @@ export function problem(
       code,
     }),
     status as ContentfulStatusCode,
-    { "content-type": "application/problem+json" }
+    {
+      "content-type": "application/problem+json",
+      "cache-control": "no-store",
+    }
   );
 }

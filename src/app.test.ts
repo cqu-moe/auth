@@ -87,8 +87,33 @@ describe("API and SPA routing boundary", () => {
         },
       }, fixture.env);
       expect(preflight.status).toBe(204);
+      expect(preflight.headers.get("access-control-allow-methods")).toBe("GET, HEAD");
       expect(fixture.doFetch).not.toHaveBeenCalled();
       expect(fixture.assetsFetch).not.toHaveBeenCalled();
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it.each([
+    "/api/v1/does-not-exist",
+    "/api/auth/get-session",
+    "/api/unknown",
+  ])("does not synthesize a preflight for unknown or retired path %s", async (path) => {
+    const fixture = createHttpFixture();
+    try {
+      const response = await createApp().request(path, {
+        method: "OPTIONS",
+        headers: {
+          origin: "https://schedule.cqu.moe",
+          "access-control-request-method": "GET",
+        },
+      }, fixture.env);
+      expect(response.status).toBe(path === "/api/auth/get-session" ? 404 : 404);
+      expect(response.headers.get("content-type")).toContain("application/problem+json");
+      expect(await response.json()).toMatchObject({ code: "NOT_FOUND" });
+      expect(fixture.assetsFetch).not.toHaveBeenCalled();
+      expect(fixture.doFetch).not.toHaveBeenCalled();
     } finally {
       await fixture.close();
     }

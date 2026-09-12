@@ -443,8 +443,8 @@
     "method": "POST",
     "path": "/api/v1/admin/oauth-clients",
     "kind": "canonical",
-    "requestValidation": "parameters-only",
-    "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "requestValidation": "json-body-and-parameters",
+    "requestReason": "The Cloudflare projection retains the JSON body and path/query parameters.",
     "responseValidation": "not-supported-by-cloudflare",
     "responseContract": "problem-details-or-protocol",
     "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
@@ -453,8 +453,8 @@
     "method": "PATCH",
     "path": "/api/v1/admin/oauth-clients/{id}",
     "kind": "canonical",
-    "requestValidation": "parameters-only",
-    "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "requestValidation": "json-body-and-parameters",
+    "requestReason": "The Cloudflare projection retains the JSON body and path/query parameters.",
     "responseValidation": "not-supported-by-cloudflare",
     "responseContract": "problem-details-or-protocol",
     "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
@@ -493,8 +493,8 @@
     "method": "POST",
     "path": "/api/v1/admin/oauth-clients/{id}/secrets",
     "kind": "canonical",
-    "requestValidation": "parameters-only",
-    "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "requestValidation": "json-body-and-parameters",
+    "requestReason": "The Cloudflare projection retains the JSON body and path/query parameters.",
     "responseValidation": "not-supported-by-cloudflare",
     "responseContract": "problem-details-or-protocol",
     "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."

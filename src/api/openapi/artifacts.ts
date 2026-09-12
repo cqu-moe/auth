@@ -1,4 +1,6 @@
 import type { HttpOperation } from "../operations";
+import type { AuthPolicyEntry } from "../auth-policy";
+import { securityForPolicy } from "../auth-policy";
 
 const HTTP_METHODS = new Set([
   "get", "head", "post", "put", "patch", "delete", "options", "trace",
@@ -183,6 +185,7 @@ export function assertApiArtifactConsistency(input: {
   cloudflare: Record<string, any>;
   endpoints: readonly EndpointManifestEntry[];
   coverage: readonly CoverageManifestEntry[];
+  authPolicy: readonly AuthPolicyEntry[];
 }) {
   const runtimeKeys = input.runtime.map(({ method, path }) =>
     operationKey(method, normalizedPath(path))
@@ -191,10 +194,14 @@ export function assertApiArtifactConsistency(input: {
   const cloudflare = documentOperations(input.cloudflare);
   const endpointKeys = input.endpoints.map(({ method, path }) => operationKey(method, path));
   const coverageKeys = input.coverage.map(({ method, path }) => operationKey(method, path));
+  const authPolicyKeys = input.authPolicy.map(({ method, path }) =>
+    operationKey(method, normalizedPath(path))
+  );
   assertSameSet("runtime/OpenAPI", runtimeKeys, openapi.keys());
   assertSameSet("runtime/Cloudflare", runtimeKeys, cloudflare.keys());
   assertSameSet("runtime/endpoints", runtimeKeys, endpointKeys);
   assertSameSet("runtime/coverage", runtimeKeys, coverageKeys);
+  assertSameSet("runtime/auth-policy", runtimeKeys, authPolicyKeys);
 
   const operationIds = input.endpoints.map((endpoint) => endpoint.operationId);
   if (new Set(operationIds).size !== operationIds.length) {
@@ -210,6 +217,13 @@ export function assertApiArtifactConsistency(input: {
     }
     if (endpoint.kind !== kindFor(endpoint.method, endpoint.path)) {
       throw new Error(`Incorrect endpoint kind for ${endpoint.method} ${endpoint.path}`);
+    }
+    const policy = input.authPolicy.find(({ method, path }) =>
+      operationKey(method, normalizedPath(path)) === key
+    );
+    if (!policy || JSON.stringify(documented?.security ?? []) !==
+        JSON.stringify(securityForPolicy(policy.policy))) {
+      throw new Error(`Authentication policy mismatch for ${key}`);
     }
     const coverage = input.coverage.find(({ method, path }) =>
       operationKey(method, path) === key

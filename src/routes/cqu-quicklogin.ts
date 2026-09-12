@@ -132,17 +132,17 @@ cquQuicklogin.put("/", async (c) => {
     return errorResponse(c, "FORBIDDEN", "未开放浏览器插件快捷登录功能", 403);
   }
 
-  let body: { enabled?: unknown };
+  let enabled: boolean;
   try {
-    body = await c.req.json<{ enabled?: unknown }>();
-  } catch {
-    return errorResponse(c, "INVALID_BODY", "请求体不是合法 JSON", 400);
-  }
-  if (typeof body.enabled !== "boolean") {
-    return errorResponse(c, "INVALID_BODY", "enabled 必须是布尔值", 400);
+    enabled = parseEnabled(await readJson(c.req.raw));
+  } catch (error) {
+    if (error instanceof QuickloginHttpError) {
+      return errorResponse(c, error.code, error.code, error.status);
+    }
+    throw error;
   }
 
-  if (body.enabled) {
+  if (enabled) {
     // 开启:存在则更新 value,不存在则插入。复合主键 (user_id, subsystem, capability)。
     await db
       .insert(userEntitlement)
@@ -172,7 +172,7 @@ cquQuicklogin.put("/", async (c) => {
         )
       );
   }
-  return c.json({ enabled: body.enabled });
+  return c.json({ enabled });
 });
 
 export { cquQuicklogin };

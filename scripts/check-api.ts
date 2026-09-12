@@ -17,6 +17,7 @@ for (const file of [
   "docs/api/cloudflare.openapi.json",
   "docs/api/endpoints.json",
   "docs/api/coverage.json",
+  "docs/api/auth-policy.json",
   "shared/api-types.generated.ts",
 ]) {
   const expected = readFileSync(resolve(process.cwd(), file));
@@ -33,4 +34,5 @@ assertApiArtifactConsistency({
   cloudflare: readJson("docs/api/cloudflare.openapi.json"),
   endpoints: readJson("docs/api/endpoints.json"),
   coverage: readJson("docs/api/coverage.json"),
+  authPolicy: readJson("docs/api/auth-policy.json"),
 });

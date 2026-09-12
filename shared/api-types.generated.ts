@@ -2436,6 +2436,22 @@ export interface components {
             capability: string;
             value: string;
         };
+        EntitlementRow: {
+            userId: string;
+            subsystem: string;
+            capability: string;
+            value: string;
+        };
+        ApiUser: {
+            id: string;
+            /** Format: email */
+            email?: string;
+            name?: string;
+            role?: string | null;
+            banned?: boolean | null;
+        } & {
+            [key: string]: unknown;
+        };
         EntitlementPreset: {
             name: string;
             items: components["schemas"]["EntitlementItem"][];
@@ -2718,7 +2734,16 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            /** @constant */
+                            status: "ok";
+                            /** Format: date-time */
+                            timestamp: string;
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
@@ -2743,6 +2768,7 @@ export interface operations {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -2754,6 +2780,7 @@ export interface operations {
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -2781,13 +2808,37 @@ export interface operations {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            address: string;
+                            status: string;
+                        };
+                    };
+                };
+            };
+            /** @description Created */
+            201: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            address: string;
+                            status: string;
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -2805,8 +2856,8 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response */
-            200: {
+            /** @description No content */
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2815,6 +2866,7 @@ export interface operations {
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -2842,13 +2894,21 @@ export interface operations {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            studentId: string;
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -2866,9 +2926,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response */
-            200: {
+            /** @description WebSocket protocol switch */
+            101: {
                 headers: {
+                    Upgrade?: "websocket";
+                    Connection?: "Upgrade";
                     [name: string]: unknown;
                 };
                 content?: never;
@@ -2876,6 +2938,7 @@ export interface operations {
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -2897,22 +2960,29 @@ export interface operations {
                     /** @enum {string} */
                     service: "jwxt" | "jxpj" | "library" | "card";
                 } | {
-                    /** Format: uri */
                     serviceUrl: string;
                 };
             };
         };
         responses: {
-            /** @description Successful response */
-            200: {
+            /** @description Created */
+            201: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            ticket: string;
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -3712,11 +3782,12 @@ export interface operations {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
-                        data: Record<string, never>[];
+                        data: components["schemas"]["ApiUser"][];
                         pagination: components["schemas"]["PageInfo"];
                     };
                 };
@@ -3724,6 +3795,7 @@ export interface operations {
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -3746,13 +3818,19 @@ export interface operations {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ApiUser"];
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -3784,13 +3862,26 @@ export interface operations {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            id: string;
+                            banned: boolean;
+                        } | {
+                            id: string;
+                            /** @enum {string} */
+                            role: "user" | "admin" | "superAdmin";
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -3820,13 +3911,22 @@ export interface operations {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            /** @enum {string} */
+                            status: "active" | "revoked";
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -3847,6 +3947,7 @@ export interface operations {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -3858,6 +3959,7 @@ export interface operations {
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -3881,16 +3983,25 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful response */
-            200: {
+            /** @description Created */
+            201: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RegistrationInvitation"] & {
+                            /** Format: uri */
+                            registrationUrl: string;
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -3910,8 +4021,8 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response */
-            200: {
+            /** @description No content */
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3920,6 +4031,7 @@ export interface operations {
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -3940,13 +4052,21 @@ export interface operations {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            invitationRequired: boolean;
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -3973,13 +4093,21 @@ export interface operations {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            invitationRequired: boolean;
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -4002,13 +4130,19 @@ export interface operations {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["EntitlementRow"][];
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -4029,7 +4163,11 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    items: components["schemas"]["EntitlementItem"][];
+                    items: {
+                        subsystem: string;
+                        capability: string;
+                        value: string;
+                    }[];
                 };
             };
         };
@@ -4037,13 +4175,21 @@ export interface operations {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            items: components["schemas"]["EntitlementItem"][];
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -4072,13 +4218,21 @@ export interface operations {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            applied: number;
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -4100,8 +4254,8 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response */
-            200: {
+            /** @description No content */
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4110,6 +4264,7 @@ export interface operations {
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -4130,6 +4285,7 @@ export interface operations {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -4141,6 +4297,7 @@ export interface operations {
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -4161,7 +4318,11 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    items: components["schemas"]["EntitlementItem"][];
+                    items: {
+                        subsystem: string;
+                        capability: string;
+                        value: string;
+                    }[];
                 };
             };
         };
@@ -4169,13 +4330,22 @@ export interface operations {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            name: string;
+                            items: components["schemas"]["EntitlementItem"][];
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -4195,8 +4365,8 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response */
-            200: {
+            /** @description No content */
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4205,6 +4375,7 @@ export interface operations {
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -4225,13 +4396,21 @@ export interface operations {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            preset: string | null;
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -4258,13 +4437,21 @@ export interface operations {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            preset: string | null;
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -4685,6 +4872,7 @@ export interface operations {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -4696,6 +4884,7 @@ export interface operations {
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -4711,18 +4900,75 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": {
+                    redirect_uris: string[];
+                    scope?: string;
+                    client_name?: string;
+                    client_uri?: string;
+                    logo_uri?: string;
+                    contacts?: string[];
+                    tos_uri?: string;
+                    policy_uri?: string;
+                    software_id?: string;
+                    software_version?: string;
+                    software_statement?: string;
+                    post_logout_redirect_uris?: string[];
+                    /**
+                     * @default client_secret_basic
+                     * @enum {string}
+                     */
+                    token_endpoint_auth_method?: "none" | "client_secret_basic" | "client_secret_post";
+                    /**
+                     * @default [
+                     *       "authorization_code"
+                     *     ]
+                     */
+                    grant_types?: ("authorization_code" | "client_credentials" | "refresh_token")[];
+                    /**
+                     * @default [
+                     *       "code"
+                     *     ]
+                     */
+                    response_types?: "code"[];
+                    /** @enum {string} */
+                    type?: "web" | "native" | "user-agent-based";
+                    /** @default 0 */
+                    client_secret_expires_at?: string | number;
+                    skip_consent?: boolean;
+                    enable_end_session?: boolean;
+                    require_pkce?: boolean;
+                    /** @enum {string} */
+                    subject_type?: "public" | "pairwise";
+                    metadata?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
         responses: {
-            /** @description Successful response */
-            200: {
+            /** @description Created */
+            201: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            client_id: string;
+                            client_secret?: string;
+                        } & {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -4742,8 +4988,8 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful response */
-            200: {
+            /** @description No content */
+            204: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -4752,6 +4998,7 @@ export interface operations {
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -4769,18 +5016,53 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": {
+                    client_name?: string | null;
+                    client_uri?: string | null;
+                    logo_uri?: string | null;
+                    tos_uri?: string | null;
+                    policy_uri?: string | null;
+                    token_endpoint_auth_method?: string | null;
+                    type?: string | null;
+                    subject_type?: string | null;
+                    contacts?: string[] | null;
+                    redirect_uris?: string[] | null;
+                    post_logout_redirect_uris?: string[] | null;
+                    grant_types?: string[] | null;
+                    response_types?: string[] | null;
+                    skip_consent?: boolean;
+                    enable_end_session?: boolean;
+                    require_pkce?: boolean;
+                    disabled?: boolean;
+                    metadata?: {
+                        [key: string]: unknown;
+                    } | null;
+                    scope?: string | null;
+                };
+            };
+        };
         responses: {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            client_id: string;
+                            client_secret?: string;
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -4803,13 +5085,22 @@ export interface operations {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            client_id: string;
+                            scopes: string[];
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -4838,13 +5129,22 @@ export interface operations {
             /** @description Successful response */
             200: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            client_id: string;
+                            scopes: string[];
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -4862,18 +5162,33 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
         responses: {
-            /** @description Successful response */
-            200: {
+            /** @description Created */
+            201: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            client_id: string;
+                            client_secret?: string;
+                        } & {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
                 headers: {
+                    "Cache-Control"?: "no-store";
                     [name: string]: unknown;
                 };
                 content: {
@@ -4896,7 +5211,13 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        data: {
+                            invitationRequired: boolean;
+                        };
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
@@ -5906,7 +6227,20 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        issuer: string;
+                        /** Format: uri */
+                        authorization_endpoint?: string;
+                        /** Format: uri */
+                        token_endpoint?: string;
+                        /** Format: uri */
+                        jwks_uri?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
@@ -5933,7 +6267,20 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        issuer: string;
+                        /** Format: uri */
+                        authorization_endpoint?: string;
+                        /** Format: uri */
+                        token_endpoint?: string;
+                        /** Format: uri */
+                        jwks_uri?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
@@ -5960,7 +6307,20 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        issuer: string;
+                        /** Format: uri */
+                        authorization_endpoint?: string;
+                        /** Format: uri */
+                        token_endpoint?: string;
+                        /** Format: uri */
+                        jwks_uri?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
@@ -5987,7 +6347,20 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        issuer: string;
+                        /** Format: uri */
+                        authorization_endpoint?: string;
+                        /** Format: uri */
+                        token_endpoint?: string;
+                        /** Format: uri */
+                        jwks_uri?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
@@ -6014,7 +6387,20 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** Format: uri */
+                        issuer: string;
+                        /** Format: uri */
+                        authorization_endpoint?: string;
+                        /** Format: uri */
+                        token_endpoint?: string;
+                        /** Format: uri */
+                        jwks_uri?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
             };
             /** @description Invalid request */
             400: {
@@ -14074,7 +14460,16 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        openapi: "3.1.1";
+                        info: Record<string, never>;
+                        paths: Record<string, never>;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
             };
             /** @description Invalid request */
             400: {

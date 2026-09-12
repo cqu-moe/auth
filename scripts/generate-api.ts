@@ -13,6 +13,7 @@ import {
   buildEndpointManifest,
 } from "../src/api/openapi/artifacts";
 import type { Env } from "../src/types";
+import { buildAuthPolicy } from "../src/api/auth-policy";
 
 async function main() {
 const root = resolve(process.env.API_OUTPUT_ROOT ?? process.cwd());
@@ -40,12 +41,14 @@ database.close();
 const cloudflare = buildCloudflareSchema(document as unknown as Record<string, unknown>);
 const endpoints = buildEndpointManifest(operations, document);
 const coverage = buildCoverageManifest(endpoints, document);
+const authPolicy = buildAuthPolicy(operations);
 assertApiArtifactConsistency({
   runtime: operations,
   openapi: document,
   cloudflare,
   endpoints,
   coverage,
+  authPolicy,
 });
 const writeJson = (name: string, value: unknown) =>
   writeFileSync(resolve(docsDir, name), `${JSON.stringify(value, null, 2)}\n`);
@@ -53,6 +56,7 @@ writeJson("openapi.json", document);
 writeJson("cloudflare.openapi.json", cloudflare);
 writeJson("endpoints.json", endpoints);
 writeJson("coverage.json", coverage);
+writeJson("auth-policy.json", authPolicy);
 
 execFileSync(
   resolve(process.cwd(), "node_modules/.bin/openapi-typescript"),

@@ -9,6 +9,7 @@ describe("admin users API v1", () => {
       const headers = await fixture.signIn("superAdmin");
       const list = await fixture.request("/api/v1/admin/users?page=1&limit=20", { headers });
       expect(list.status).toBe(200);
+      expect(list.headers.get("cache-control")).toBe("no-store");
       expect(await list.json()).toMatchObject({
         data: expect.any(Array),
         pagination: { page: 1, limit: 20, total: expect.any(Number) },
@@ -36,6 +37,7 @@ describe("admin users API v1", () => {
         body: JSON.stringify({ banned: true }),
       });
       expect(banned.status).toBe(200);
+      expect(banned.headers.get("cache-control")).toBe("no-store");
       expect(await banned.json()).toEqual({ data: { id: target.user.id, banned: true } });
 
       const invalid = await fixture.request(`/api/v1/admin/users/${target.user.id}`, {

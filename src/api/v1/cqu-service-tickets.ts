@@ -1,42 +1,34 @@
 import { Hono } from "hono";
 import type { HonoEnv } from "../../types";
-import { cqu } from "../../routes/cqu";
+import { requireBearer } from "../../middleware/authentication";
+import { issueCquServiceTicket } from "../../routes/cqu";
 import { problem } from "../problem";
+import { JsonBodyError, jsonBodyProblem, parseJsonBody } from "../validation";
 import { TicketTargetSchema } from "./cqu-service-tickets.schema";
 
 export function createCquServiceTicketsApi() {
   const api = new Hono<HonoEnv>();
-  api.post("/", async (c) => {
+  api.post("/", requireBearer, async (c) => {
     c.header("Cache-Control", "no-store");
-    const contentType = c.req.header("content-type") ?? "";
-    if (!/^application\/json(?:\s*;|$)/i.test(contentType)) {
-      return problem(c, "UNSUPPORTED_MEDIA_TYPE", "仅支持 JSON 请求体", 415);
-    }
-    let input: unknown;
+    let input: { service: "jwxt" | "jxpj" | "library" | "card" } | { serviceUrl: string };
     try {
-      input = await c.req.json();
-    } catch {
-      return problem(c, "INVALID_BODY", "请求体不是合法 JSON", 400);
-    }
-    if (input && typeof input === "object") {
-      const value = input as Record<string, unknown>;
-      if (value.service === undefined && value.serviceUrl === undefined) {
-        return problem(c, "MISSING_SERVICE", "缺少 service 或 serviceUrl", 400);
+      input = await parseJsonBody(c.req.raw, TicketTargetSchema);
+    } catch (error) {
+      if (error instanceof JsonBodyError) {
+        if (error.code === "UNSUPPORTED_MEDIA_TYPE") return jsonBodyProblem(c, error);
+        const raw = await c.req.raw.clone().json().catch(() => null) as Record<string, unknown> | null;
+        if (raw && raw.service === undefined && raw.serviceUrl === undefined) {
+          return problem(c, "MISSING_SERVICE", "缺少 service 或 serviceUrl", 400);
+        }
+        if (raw && raw.service !== undefined && raw.serviceUrl !== undefined) {
+          return problem(c, "INVALID_TARGET", "service 与 serviceUrl 只能提供一个", 400);
+        }
+        return problem(c, "INVALID_TARGET", "出票目标无效", 400);
       }
-      if (value.service !== undefined && value.serviceUrl !== undefined) {
-        return problem(c, "INVALID_TARGET", "service 与 serviceUrl 只能提供一个", 400);
-      }
+      throw error;
     }
-    const parsed = TicketTargetSchema.safeParse(input);
-    if (!parsed.success) return problem(c, "INVALID_TARGET", "出票目标无效", 400);
 
-    const url = new URL("http://cqu/service-ticket");
-    if ("service" in parsed.data) url.searchParams.set("service", parsed.data.service);
-    else url.searchParams.set("serviceUrl", parsed.data.serviceUrl);
-    const response = await cqu.request(new Request(url, {
-      method: "GET",
-      headers: c.req.raw.headers,
-    }), undefined, c.env);
+    const response = await issueCquServiceTicket(c, input);
     const body = await response.json() as Record<string, any>;
     if (!response.ok) {
       if (typeof body.status === "number" && typeof body.code === "string") {

@@ -31,8 +31,36 @@ import {
   revokeRegistrationInvitation,
 } from "../services/registration-invitations";
 import { requireAdmin } from "../middleware/authentication";
+import { JsonBodyError, parseJsonBody } from "../api/validation";
+import {
+  OAuthClientCreateBody,
+  OAuthClientPatchBody,
+  OAuthClientScopesBody,
+  OAuthClientSecretBody,
+} from "../api/v1/admin/oauth-clients.schema";
 
 const admin = new Hono<HonoEnv>();
+
+async function parseAdminJson<T>(
+  c: Context<HonoEnv>,
+  schema: Parameters<typeof parseJsonBody<T>>[1],
+  optionalEmpty = false
+): Promise<{ ok: true; data: T } | { ok: false; response: Response }> {
+  try {
+    return { ok: true, data: await parseJsonBody(c.req.raw, schema, { optionalEmpty }) };
+  } catch (error) {
+    if (!(error instanceof JsonBodyError)) throw error;
+    return {
+      ok: false,
+      response: errorResponse(
+        c,
+        error.code,
+        error.code === "UNSUPPORTED_MEDIA_TYPE" ? "仅支持 JSON 请求体" : "请求体无效",
+        error.status
+      ),
+    };
+  }
+}
 
 // Plugin endpoints (adminCreateOAuthClient/adminUpdateOAuthClient) throw
 // APIError on validation/authorization failures. Called via auth.api.* without
@@ -770,12 +798,10 @@ admin.put("/oauth-clients/:id/scopes", async (c) => {
   if (!(await hasCquScopePermission(c, auth))) {
     return errorResponse(c, "FORBIDDEN", "需要 CQU scope 写权限", 403);
   }
+  const parsed = await parseAdminJson(c, OAuthClientScopesBody);
+  if (!parsed.ok) return parsed.response;
   const clientId = c.req.param("id");
-  const { scopes } = await c.req.json<{ scopes: string[] }>();
-
-  if (!Array.isArray(scopes)) {
-    return errorResponse(c, "INVALID_SCOPES", "scopes 必须是数组", 400);
-  }
+  const { scopes } = parsed.data;
 
   // Validate scope format: cqu:ticket:<service> or cqu:ticket:*
   const validPattern = /^cqu:ticket:([\w*]+)$/;
@@ -826,11 +852,12 @@ admin.post("/oauth-clients", async (c) => {
   if (!(await hasOAuthClientPermission(c, auth, "create"))) {
     return errorResponse(c, "FORBIDDEN", "需要 OAuth 客户端写权限", 403);
   }
-  const body = await c.req.json();
+  const parsed = await parseAdminJson(c, OAuthClientCreateBody);
+  if (!parsed.ok) return parsed.response;
   try {
     const result = await auth.api.adminCreateOAuthClient({
       headers: c.req.raw.headers,
-      body,
+      body: parsed.data as never,
     });
     return c.json({ data: result });
   } catch (e) {
@@ -846,8 +873,10 @@ admin.patch("/oauth-clients/:id", async (c) => {
   if (!(await hasOAuthClientPermission(c, auth, "update"))) {
     return errorResponse(c, "FORBIDDEN", "需要 OAuth 客户端写权限", 403);
   }
+  const parsed = await parseAdminJson(c, OAuthClientPatchBody);
+  if (!parsed.ok) return parsed.response;
   const clientId = c.req.param("id");
-  const update = await c.req.json<Record<string, unknown>>();
+  const update = parsed.data as Record<string, unknown>;
   const dbUpdate = oauthClientUpdateToSchema(update);
   if (Object.keys(dbUpdate).length === 0) {
     return errorResponse(c, "NO_UPDATE", "没有可更新的字段", 400);
@@ -898,6 +927,8 @@ admin.post("/oauth-clients/:id/rotate-secret", async (c) => {
   if (!(await hasOAuthClientPermission(c, auth, "update"))) {
     return errorResponse(c, "FORBIDDEN", "需要 OAuth 客户端写权限", 403);
   }
+  const parsed = await parseAdminJson(c, OAuthClientSecretBody, true);
+  if (!parsed.ok) return parsed.response;
   const clientId = c.req.param("id");
   const ctx = await auth.$context;
   const existing = await ctx.adapter.findOne<OAuthClientRow>({

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createRoute, z } from "@hono/zod-openapi";
-import { createApiRouter } from "./validation";
+import { createApiRouter, JsonBodyError, parseJsonBody } from "./validation";
 
 const Body = z.strictObject({ enabled: z.boolean() });
 const route = createRoute({
@@ -66,4 +66,31 @@ describe("v1 request validation", () => {
       });
     }
   );
+
+  it.each([
+    ["missing content type", undefined, '{"enabled":true}', "UNSUPPORTED_MEDIA_TYPE", 415],
+    ["wrong content type", "text/plain", '{"enabled":true}', "UNSUPPORTED_MEDIA_TYPE", 415],
+    ["malformed", "application/json", "{", "INVALID_BODY", 400],
+    ["null", "application/json", "null", "INVALID_BODY", 400],
+    ["array", "application/json", "[]", "INVALID_BODY", 400],
+    ["unknown field", "application/json", '{"enabled":true,"extra":1}', "INVALID_BODY", 400],
+  ])("shared parser rejects %s", async (_name, contentType, body, code, status) => {
+    const headers = contentType ? { "content-type": contentType } : undefined;
+    await expect(parseJsonBody(new Request("https://auth.test/write", {
+      method: "POST", headers, body,
+    }), Body)).rejects.toMatchObject({ code, status });
+  });
+
+  it("shared parser admits an omitted optional body as an empty strict object", async () => {
+    const Optional = z.strictObject({ preset: z.string().nullable().optional() });
+    await expect(parseJsonBody(new Request("https://auth.test/write", {
+      method: "POST",
+    }), Optional, { optionalEmpty: true })).resolves.toEqual({});
+  });
+
+  it("shared parser rejects an omitted required body", async () => {
+    await expect(parseJsonBody(new Request("https://auth.test/write", {
+      method: "POST",
+    }), Body)).rejects.toBeInstanceOf(JsonBodyError);
+  });
 });

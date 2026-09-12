@@ -1,5 +1,4 @@
 import { Hono } from "hono";
-import { cors } from "hono/cors";
 import {
   oauthProviderAuthServerMetadata,
   oauthProviderOpenIdConfigMetadata,
@@ -17,6 +16,7 @@ import { getBetterAuthOpenApi, mergeBetterAuthOpenApi } from "./api/openapi/auth
 
 export function createApp() {
   const app = new Hono<HonoEnv>();
+  let runtimeOperations: ReturnType<typeof listHttpOperations> = [];
 
   const rejectWebSocketHead = async (c: Parameters<typeof problem>[0], next: () => Promise<void>) => {
     if (c.req.method !== "HEAD") return next();
@@ -25,14 +25,31 @@ export function createApp() {
   };
   app.use("/api/v1/cqu/binding/events", rejectWebSocketHead);
 
-  const genericCors = cors();
-  app.use("/*", (c, next) => {
+  app.use("/*", async (c, next) => {
     const path = new URL(c.req.url).pathname;
     if (path.startsWith("/api/v1/cqu/quicklogin/devices") ||
         path.startsWith("/api/cqu/quicklogin/devices")) {
       return next();
     }
-    return genericCors(c, next);
+    const origin = c.req.header("origin");
+    if (origin) {
+      c.header("Access-Control-Allow-Origin", "*");
+      c.header("Vary", "Origin");
+    }
+    if (c.req.method !== "OPTIONS") return next();
+    const methods = allowedMethods(runtimeOperations, path)
+      .filter((method) => method !== "OPTIONS");
+    const requested = c.req.header("access-control-request-method")?.toUpperCase();
+    if (!methods.length || (requested && !methods.includes(requested))) return next();
+    c.header("Access-Control-Allow-Methods", methods.join(", "));
+    const requestedHeaders = c.req.header("access-control-request-headers");
+    if (requestedHeaders) c.header("Access-Control-Allow-Headers", requestedHeaders);
+    return c.body(null, 204);
+  });
+
+  app.use("/api/v1/admin/*", async (c, next) => {
+    c.header("Cache-Control", "no-store");
+    await next();
   });
 
   app.route("/api/v1", createV1Api());
@@ -67,6 +84,7 @@ export function createApp() {
   });
 
   const operations = listHttpOperations(app);
+  runtimeOperations = operations;
   const apiFallback = (c: Parameters<typeof problem>[0]) => {
     const pathname = new URL(c.req.url).pathname;
     const allow = allowedMethods(operations, pathname);

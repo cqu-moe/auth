@@ -11,6 +11,7 @@ describe("Problem Details responses", () => {
 
     expect(response.status).toBe(400);
     expect(response.headers.get("content-type")).toContain("application/problem+json");
+    expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({
       type: "about:blank",
       title: "Bad Request",

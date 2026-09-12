@@ -8,6 +8,8 @@ import { drizzle } from "drizzle-orm/d1";
 import { eq, sql } from "drizzle-orm";
 import { getCquBinding } from "../services/cqu-binding";
 import { requireSessionOrBearer } from "../middleware/authentication";
+import { JsonBodyError, parseJsonBody } from "../api/validation";
+import { CquCredentialsBody, CreateCquBindingBody } from "../api/v1/cqu-binding.schema";
 
 // CQU 绑定资源路由（RESTful 重构）。
 //
@@ -39,16 +41,13 @@ cquBinding.post("/", async (c) => {
 
   // 兼容空 body（旧前端不带 body 调用，无 Content-Type 的 POST）：空 body 视为 {} 等价「缺省 direct」。
   // 非空 body 才解析；畸形 JSON 不裸 500，统一返回 400 INVALID_BODY。
-  let body: { kind?: string; forwardAddress?: string };
-  const raw = await c.req.text();
-  if (raw.trim() === "") {
-    body = {};
-  } else {
-    try {
-      body = JSON.parse(raw) as { kind?: string; forwardAddress?: string };
-    } catch {
-      return errorResponse(c, "INVALID_BODY", "请求体不是合法 JSON", 400);
-    }
+  let body: { kind?: "direct" | "forward" };
+  try {
+    body = await parseJsonBody(c.req.raw, CreateCquBindingBody, { optionalEmpty: true });
+  } catch (error) {
+    if (!(error instanceof JsonBodyError)) throw error;
+    return errorResponse(c, error.code, error.code === "UNSUPPORTED_MEDIA_TYPE"
+      ? "仅支持 JSON 请求体" : "请求体无效", error.status);
   }
 
   // 解析绑定方式。仅在创建新行时生效；已存在行保持原 kind（幂等，见下）。
@@ -149,17 +148,15 @@ cquBinding.put("/credentials", async (c) => {
   const user = c.get("user") as { id: string };
 
   // #5: 畸形 JSON body 不应裸 500，统一返回 400 INVALID_BODY。
-  let body: { studentId?: string; password?: string };
+  let body: { studentId: string; password: string };
   try {
-    body = await c.req.json<{ studentId?: string; password?: string }>();
-  } catch {
-    return errorResponse(c, "INVALID_BODY", "请求体不是合法 JSON", 400);
+    body = await parseJsonBody(c.req.raw, CquCredentialsBody);
+  } catch (error) {
+    if (!(error instanceof JsonBodyError)) throw error;
+    return errorResponse(c, error.code, error.code === "UNSUPPORTED_MEDIA_TYPE"
+      ? "仅支持 JSON 请求体" : "请求体无效", error.status);
   }
   const { studentId, password } = body;
-
-  if (!studentId || !password) {
-    return errorResponse(c, "MISSING_FIELDS", "缺少统一身份认证账号或密码", 400);
-  }
 
   const db = drizzle(c.env.DATABASE);
 

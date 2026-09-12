@@ -14,20 +14,8 @@ import {
 } from "../../../services/registration-invitations";
 import type { HonoEnv } from "../../../types";
 import { problem } from "../../problem";
+import { JsonBodyError, jsonBodyProblem, parseJsonBody } from "../../validation";
 import { CreateInvitationBody, RegistrationSettingsBody } from "./invitations.schema";
-
-async function parseOptionalJson(c: Parameters<typeof problem>[0]) {
-  const raw = await c.req.text();
-  if (!raw.trim()) return { ok: true as const, value: {} };
-  if (!/^application\/json(?:\s*;|$)/i.test(c.req.header("content-type") ?? "")) {
-    return { ok: false as const, response: problem(c, "UNSUPPORTED_MEDIA_TYPE", "仅支持 JSON 请求体", 415) };
-  }
-  try {
-    return { ok: true as const, value: JSON.parse(raw) as unknown };
-  } catch {
-    return { ok: false as const, response: problem(c, "INVALID_BODY", "请求体不是合法 JSON", 400) };
-  }
-}
 
 export function createAdminInvitationsApi() {
   const api = new Hono<HonoEnv>();
@@ -37,11 +25,14 @@ export function createAdminInvitationsApi() {
     c.json({ data: await listRegistrationInvitations(c.env.DATABASE) })
   );
   api.post("/registration-invitations", async (c) => {
-    const parsedBody = await parseOptionalJson(c);
-    if (!parsedBody.ok) return parsedBody.response;
-    const parsed = CreateInvitationBody.safeParse(parsedBody.value);
-    if (!parsed.success) return problem(c, "INVALID_BODY", "请求体无效", 400);
-    const preset = parsed.data.preset ?? null;
+    let body;
+    try {
+      body = await parseJsonBody(c.req.raw, CreateInvitationBody, { optionalEmpty: true });
+    } catch (error) {
+      if (error instanceof JsonBodyError) return jsonBodyProblem(c, error);
+      throw error;
+    }
+    const preset = body.preset ?? null;
     if (preset !== null && !(await getPresetItems(c.env.DATABASE, preset))) {
       return problem(c, "UNKNOWN_PRESET", "未知预设", 400);
     }
@@ -79,16 +70,14 @@ export function createAdminInvitationsApi() {
       body: { permissions: { entitlement: ["assign"] } },
     });
     if (!permission.success) return problem(c, "FORBIDDEN", "需要权益写权限", 403);
-    let input: unknown;
     try {
-      input = await c.req.json();
-    } catch {
-      return problem(c, "INVALID_BODY", "请求体不是合法 JSON", 400);
+      const input = await parseJsonBody(c.req.raw, RegistrationSettingsBody);
+      await setInvitationRequired(c.env.DATABASE, input.invitationRequired);
+      return c.json({ data: input });
+    } catch (error) {
+      if (error instanceof JsonBodyError) return jsonBodyProblem(c, error);
+      throw error;
     }
-    const parsed = RegistrationSettingsBody.safeParse(input);
-    if (!parsed.success) return problem(c, "INVALID_BODY", "请求体无效", 400);
-    await setInvitationRequired(c.env.DATABASE, parsed.data.invitationRequired);
-    return c.json({ data: parsed.data });
   });
   return api;
 }

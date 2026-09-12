@@ -5,6 +5,7 @@ import { requireAdmin } from "../../../middleware/authentication";
 import { admin as legacyAdmin } from "../../../routes/admin";
 import type { HonoEnv } from "../../../types";
 import { problem } from "../../problem";
+import { JsonBodyError, jsonBodyProblem, parseJsonBody } from "../../validation";
 import { parsePositiveInteger, UserPatchSchema } from "./users.schema";
 
 function apiError(c: Parameters<typeof problem>[0], error: unknown) {
@@ -57,28 +58,22 @@ export function createAdminUsersApi() {
   });
 
   api.patch("/:id", async (c) => {
-    let input: unknown;
     try {
-      input = await c.req.json();
-    } catch {
-      return problem(c, "INVALID_BODY", "请求体不是合法 JSON", 400);
-    }
-    const parsed = UserPatchSchema.safeParse(input);
-    if (!parsed.success) return problem(c, "INVALID_BODY", "用户更新必须且只能指定一种变更", 400);
-    const auth = createAuth(c.env, c.req.raw);
-    const userId = c.req.param("id");
-    try {
-      if ("banned" in parsed.data) {
-        if (parsed.data.banned) await auth.api.banUser({ headers: c.req.raw.headers, body: { userId } });
+      const input = await parseJsonBody(c.req.raw, UserPatchSchema);
+      const auth = createAuth(c.env, c.req.raw);
+      const userId = c.req.param("id");
+      if ("banned" in input) {
+        if (input.banned) await auth.api.banUser({ headers: c.req.raw.headers, body: { userId } });
         else await auth.api.unbanUser({ headers: c.req.raw.headers, body: { userId } });
-        return c.json({ data: { id: userId, banned: parsed.data.banned } });
+        return c.json({ data: { id: userId, banned: input.banned } });
       }
       await auth.api.setRole({
         headers: c.req.raw.headers,
-        body: { userId, role: parsed.data.role },
+        body: { userId, role: input.role },
       });
-      return c.json({ data: { id: userId, role: parsed.data.role } });
+      return c.json({ data: { id: userId, role: input.role } });
     } catch (error) {
+      if (error instanceof JsonBodyError) return jsonBodyProblem(c, error);
       return apiError(c, error);
     }
   });

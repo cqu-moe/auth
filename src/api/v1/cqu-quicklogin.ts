@@ -3,26 +3,11 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { HonoEnv } from "../../types";
 import { cquQuicklogin } from "../../routes/cqu-quicklogin";
 import { problem } from "../problem";
-import { QuickloginPreferenceBody } from "./cqu-quicklogin.schema";
 
 export function createCquQuickloginApi() {
   const api = new Hono<HonoEnv>();
   const forward = async (c: Parameters<typeof problem>[0]) => {
     c.header("Cache-Control", "no-store");
-    if (c.req.method === "PUT") {
-      if (!/^application\/json(?:\s*;|$)/i.test(c.req.header("content-type") ?? "")) {
-        return problem(c, "UNSUPPORTED_MEDIA_TYPE", "仅支持 JSON 请求体", 415);
-      }
-      let body: unknown;
-      try {
-        body = await c.req.raw.clone().json();
-      } catch {
-        return problem(c, "INVALID_BODY", "请求体不是合法 JSON", 400);
-      }
-      if (!QuickloginPreferenceBody.safeParse(body).success) {
-        return problem(c, "INVALID_BODY", "请求体无效", 400);
-      }
-    }
     const url = new URL(c.req.url);
     url.pathname = "/";
     const response = await cquQuicklogin.request(new Request(url, c.req.raw), undefined, c.env);

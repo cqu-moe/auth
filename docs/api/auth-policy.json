@@ -1,0 +1,920 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/v1/health",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/cqu/binding",
+    "policy": "session-or-bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/cqu/binding",
+    "policy": "session-or-bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/cqu/binding/credentials",
+    "policy": "session-or-bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/cqu/binding/events",
+    "policy": "session-or-bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/cqu/binding",
+    "policy": "session-or-bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/cqu/service-tickets",
+    "policy": "bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/:id",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/:id/status",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/:id/refresh",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/:id/export",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/devices",
+    "policy": "bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/cqu/quicklogin/devices",
+    "policy": "session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/cqu/quicklogin/devices/:id",
+    "policy": "bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/cqu/quicklogin/devices/:id",
+    "policy": "session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/devices/:id/status",
+    "policy": "bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/devices/:id/refresh",
+    "policy": "bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/devices/:id/export",
+    "policy": "bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/cqu/quicklogin",
+    "policy": "session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/cqu/quicklogin",
+    "policy": "session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/admin/users",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/admin/users/:id",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/v1/admin/users/:id",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/v1/admin/users/:id/cqu-binding",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/admin/registration-invitations",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/admin/registration-invitations",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/admin/registration-invitations/:code",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/admin/registration-settings",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/admin/registration-settings",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/admin/users/:id/entitlements",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/admin/users/:id/entitlements",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/v1/admin/users/:id/entitlements",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/admin/users/:id/entitlements/:subsystem/:capability",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/admin/entitlement-presets",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/admin/entitlement-presets/:name",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/admin/entitlement-presets/:name",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/admin/entitlement-default",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/admin/entitlement-default",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/admin/users/:id/quicklogin-policy/preview",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/admin/users/:id/quicklogin-policy/initialize",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/admin/users/:id/quicklogin-quota/preview",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/admin/users/:id/quicklogin-quota",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/admin/oauth-clients",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/admin/oauth-clients",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "PATCH",
+    "path": "/api/v1/admin/oauth-clients/:id",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/v1/admin/oauth-clients/:id",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/admin/oauth-clients/:id/scopes",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/v1/admin/oauth-clients/:id/scopes",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/admin/oauth-clients/:id/secrets",
+    "policy": "admin-session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/registration-settings",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/oauth2/authorize",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/auth/oauth2/token",
+    "policy": "oauth-client",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/reset-password/:token",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/cqu/quicklogin/devices",
+    "policy": "session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cqu/quicklogin/devices",
+    "policy": "bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "PUT",
+    "path": "/api/cqu/quicklogin/devices/:id",
+    "policy": "bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "DELETE",
+    "path": "/api/cqu/quicklogin/devices/:id",
+    "policy": "session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cqu/quicklogin/devices/:id/status",
+    "policy": "bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cqu/quicklogin/devices/:id/refresh",
+    "policy": "bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cqu/quicklogin/devices/:id/export",
+    "policy": "bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/cqu/quicklogin/devices",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/cqu/quicklogin/devices/:id",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/cqu/quicklogin/devices/:id/status",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/cqu/quicklogin/devices/:id/refresh",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/cqu/quicklogin/devices/:id/export",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/.well-known/oauth-authorization-server",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/.well-known/openid-configuration",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/.well-known/openid-configuration",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/auth/.well-known/oauth-authorization-server",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/.well-known/oauth-authorization-server/api/auth",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/account-info",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/ban-user",
+    "policy": "admin-session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/create-user",
+    "policy": "admin-session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/admin/get-user",
+    "policy": "admin-session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/has-permission",
+    "policy": "admin-session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/impersonate-user",
+    "policy": "admin-session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/list-user-sessions",
+    "policy": "admin-session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/admin/list-users",
+    "policy": "admin-session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/remove-user",
+    "policy": "admin-session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/revoke-user-session",
+    "policy": "admin-session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/revoke-user-sessions",
+    "policy": "admin-session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/set-role",
+    "policy": "admin-session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/set-user-password",
+    "policy": "admin-session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/stop-impersonating",
+    "policy": "admin-session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/unban-user",
+    "policy": "admin-session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/update-user",
+    "policy": "admin-session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/callback/:id",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/callback/:id",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/change-email",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/change-password",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/cloudflare/geolocation",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/delete-user",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/delete-user/callback",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/email-otp/change-email",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/email-otp/check-verification-otp",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/email-otp/request-email-change",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/email-otp/send-verification-otp",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/email-otp/verify-email",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/error",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/get-access-token",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/get-session",
+    "policy": "optional-session",
+    "source": "application-override"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/jwks",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/link-social",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/list-accounts",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/list-sessions",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/authorize",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/client/rotate-secret",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/consent",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/continue",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/create-client",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/delete-client",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/delete-consent",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/end-session",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/get-client",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/get-clients",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/get-consent",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/get-consents",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/introspect",
+    "policy": "oauth-client",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/public-client",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/public-client-prelogin",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/register",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/revoke",
+    "policy": "oauth-client",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/token",
+    "policy": "oauth-client",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/update-client",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/update-consent",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/oauth2/userinfo",
+    "policy": "bearer",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/ok",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/refresh-token",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/request-password-reset",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/reset-password",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/reset-password/:token",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/revoke-other-sessions",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/revoke-session",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/revoke-sessions",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/send-verification-email",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/sign-in/email",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/sign-in/social",
+    "policy": "public",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/sign-out",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/sign-up/email",
+    "policy": "public",
+    "source": "application-override"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/disable",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/enable",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/generate-backup-codes",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/get-totp-uri",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/send-otp",
+    "policy": "two-factor-cookie",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/verify-backup-code",
+    "policy": "two-factor-cookie",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/verify-otp",
+    "policy": "two-factor-cookie",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/two-factor/verify-totp",
+    "policy": "session-or-two-factor-cookie",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/unlink-account",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/update-session",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/update-user",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/verify-password",
+    "policy": "session",
+    "source": "better-auth-1.6.11"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/openapi.json",
+    "policy": "public",
+    "source": "custom-contract"
+  }
+]

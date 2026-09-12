@@ -20,6 +20,12 @@ import {
   QuickloginQuotaAdminError,
 } from "../../../services/quicklogin/quota-admin";
 import { problem } from "../../problem";
+import { JsonBodyError, jsonBodyProblem, parseJsonBody } from "../../validation";
+import {
+  EntitlementDefaultBody,
+  MergeEntitlementPresetBody,
+  ReplaceEntitlementsBody,
+} from "./entitlements.schema";
 
 type Item = { subsystem: string; capability: string; value: string };
 
@@ -32,16 +38,15 @@ async function entitlementPermission(c: Parameters<typeof problem>[0], action: "
   return result.success;
 }
 
-async function jsonObject(c: Parameters<typeof problem>[0]): Promise<Record<string, unknown> | null> {
-  try {
-    const value = await c.req.json();
-    return value && typeof value === "object" && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : null;
-  } catch {
-    return null;
+async function validated<T>(c: Parameters<typeof problem>[0], schema: Parameters<typeof parseJsonBody<T>>[1]) {
+  try { return await parseJsonBody(c.req.raw, schema); }
+  catch (error) {
+    if (error instanceof JsonBodyError) return jsonBodyProblem(c, error);
+    throw error;
   }
 }
+
+function isResponse(value: unknown): value is Response { return value instanceof Response; }
 
 function rejectQuickloginPolicyWrite(
   c: Parameters<typeof problem>[0],
@@ -75,8 +80,8 @@ export function createAdminEntitlementsApi() {
 
   api.put("/users/:id/entitlements", async (c) => {
     if (!(await entitlementPermission(c, "assign"))) return problem(c, "FORBIDDEN", "需要权益写权限", 403);
-    const body = await jsonObject(c);
-    if (!Array.isArray(body?.items)) return problem(c, "INVALID_ENTITLEMENTS", "items 必须是数组", 400);
+    const body = await validated(c, ReplaceEntitlementsBody);
+    if (isResponse(body)) return body;
     const items = body.items as Item[];
     const invalid = validateEntitlementItems(items);
     if (invalid) return problem(c, "INVALID_ENTITLEMENTS", invalid, 400);
@@ -97,10 +102,8 @@ export function createAdminEntitlementsApi() {
 
   api.patch("/users/:id/entitlements", async (c) => {
     if (!(await entitlementPermission(c, "assign"))) return problem(c, "FORBIDDEN", "需要权益写权限", 403);
-    const body = await jsonObject(c);
-    if (!body || typeof body.preset !== "string" || !body.preset) {
-      return problem(c, "INVALID_BODY", "preset 必须是非空字符串", 400);
-    }
+    const body = await validated(c, MergeEntitlementPresetBody);
+    if (isResponse(body)) return body;
     const items = await getPresetItems(c.env.DATABASE, body.preset);
     if (!items) return problem(c, "UNKNOWN_PRESET", "未知预设", 400);
     const invalid = validateEntitlementItems(items);
@@ -146,8 +149,8 @@ export function createAdminEntitlementsApi() {
     if (!(await entitlementPermission(c, "assign"))) return problem(c, "FORBIDDEN", "需要权益写权限", 403);
     const name = c.req.param("name").trim();
     if (!name || name.length > 50) return problem(c, "INVALID_NAME", "预设名需要 1-50 个字符", 400);
-    const body = await jsonObject(c);
-    if (!Array.isArray(body?.items)) return problem(c, "INVALID_ENTITLEMENTS", "items 必须是数组", 400);
+    const body = await validated(c, ReplaceEntitlementsBody);
+    if (isResponse(body)) return body;
     const items = body.items as Item[];
     const invalid = validateEntitlementItems(items);
     if (invalid) return problem(c, "INVALID_ENTITLEMENTS", invalid, 400);
@@ -170,11 +173,9 @@ export function createAdminEntitlementsApi() {
   );
   api.put("/entitlement-default", async (c) => {
     if (!(await entitlementPermission(c, "assign"))) return problem(c, "FORBIDDEN", "需要权益写权限", 403);
-    const body = await jsonObject(c);
-    if (!body || !("preset" in body) || (body.preset !== null && typeof body.preset !== "string")) {
-      return problem(c, "INVALID_BODY", "必须显式提供 preset", 400);
-    }
-    const preset = body.preset as string | null;
+    const body = await validated(c, EntitlementDefaultBody);
+    if (isResponse(body)) return body;
+    const preset = body.preset;
     if (preset !== null) {
       const items = await getPresetItems(c.env.DATABASE, preset);
       if (!items) return problem(c, "UNKNOWN_PRESET", "未知预设", 400);

@@ -19,6 +19,7 @@ describe("registration resources v1", () => {
         body: "{",
       });
       expect(malformed.status).toBe(400);
+      expect(malformed.headers.get("cache-control")).toBe("no-store");
       const after = await fixture.database.prepare("SELECT COUNT(*) AS count FROM registration_invitation").first<{ count: number }>();
       expect(after?.count).toBe(before?.count);
     } finally {
@@ -35,6 +36,7 @@ describe("registration resources v1", () => {
         headers: superHeaders,
       });
       expect(created.status).toBe(201);
+      expect(created.headers.get("cache-control")).toBe("no-store");
       const invitation = await created.json() as { data: { code: string } };
       expect(invitation.data.code).toMatch(/^[A-Z0-9]{8}$/);
       const revoked = await fixture.request(
@@ -59,6 +61,7 @@ describe("registration resources v1", () => {
         body: JSON.stringify({ invitationRequired: false }),
       });
       expect(changed.status).toBe(200);
+      expect(changed.headers.get("cache-control")).toBe("no-store");
       expect(await changed.json()).toEqual({ data: { invitationRequired: false } });
       expect(await fixture.request("/api/v1/registration-settings").then((response) => response.json()))
         .toEqual({ data: { invitationRequired: false } });

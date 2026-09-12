@@ -37,13 +37,19 @@ describe("service ticket API v1", () => {
     }
   });
 
-  it("rejects GET and ambiguous targets before auth or DO work", async () => {
+  it("rejects GET before routing and ambiguous targets after authentication but before DO work", async () => {
     const fixture = createHttpFixture();
     try {
       const app = createApp();
       const get = await app.request("/api/v1/cqu/service-tickets", {}, fixture.env);
       expect(get.status).toBe(405);
       expect(get.headers.get("allow")).toBe("POST, OPTIONS");
+
+      verifyAccessToken.mockResolvedValue({
+        sub: "ticket-user",
+        azp: "ticket-client",
+        scope: "cqu:ticket:jwxt",
+      });
 
       const ambiguous = await app.request("/api/v1/cqu/service-tickets", {
         method: "POST",
@@ -52,7 +58,7 @@ describe("service ticket API v1", () => {
       }, fixture.env);
       expect(ambiguous.status).toBe(400);
       expect(await ambiguous.json()).toMatchObject({ code: "INVALID_TARGET" });
-      expect(verifyAccessToken).not.toHaveBeenCalled();
+      expect(verifyAccessToken).toHaveBeenCalledTimes(1);
       expect(fixture.doFetch).not.toHaveBeenCalled();
     } finally {
       await fixture.close();

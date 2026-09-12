@@ -2,6 +2,7 @@ import { betterAuth } from "better-auth";
 import { openAPI } from "better-auth/plugins";
 import { createAuth } from "../../auth";
 import type { Env } from "../../types";
+import { policyForOperation, securityForPolicy } from "../auth-policy";
 
 export async function getBetterAuthOpenApi(env: Env, request: Request) {
   const configured = createAuth(env, request);
@@ -88,22 +89,6 @@ function pruneSchemas(document: Record<string, any>) {
   for (const name of Object.keys(schemas)) if (!used.has(name)) delete schemas[name];
 }
 
-function authSecurityFor(path: string) {
-  if (path === "/oauth2/userinfo") return [{ bearerAuth: [] }];
-  if (
-    path.startsWith("/admin/") ||
-    path.startsWith("/two-factor/") ||
-    [
-      "/sign-out", "/change-email", "/change-password", "/update-session", "/update-user",
-      "/delete-user", "/list-sessions", "/revoke-session", "/revoke-sessions",
-      "/revoke-other-sessions", "/link-social", "/list-accounts", "/unlink-account",
-      "/oauth2/consent", "/oauth2/continue", "/email-otp/request-email-change",
-      "/email-otp/change-email",
-    ].includes(path)
-  ) return [{ cookieAuth: [] }];
-  return [];
-}
-
 export function mergeBetterAuthOpenApi(
   base: Record<string, any>,
   authDocument: Record<string, any>
@@ -121,7 +106,10 @@ export function mergeBetterAuthOpenApi(
       (operation as Record<string, unknown>).operationId = `auth_${method}_${suffix}`
         .replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_|_$/g, "");
       (operation as Record<string, unknown>).summary ??= `${method.toUpperCase()} auth ${suffix}`;
-      (operation as Record<string, unknown>).security = authSecurityFor(suffix);
+      const policyPath = `/api/v1/auth${suffix}`.replace(/\{([^}]+)\}/g, ":$1");
+      const policy = policyForOperation({ method: method.toUpperCase(), path: policyPath });
+      if (!policy) throw new Error(`Missing auth policy for ${method.toUpperCase()} ${suffix}`);
+      (operation as Record<string, unknown>).security = securityForPolicy(policy);
     }
     if (suffix === "/error" && rewritten.get) {
       rewritten.get.responses = {

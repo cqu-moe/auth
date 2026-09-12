@@ -21,7 +21,37 @@
         "security": [],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "status",
+                        "timestamp"
+                      ],
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "const": "ok"
+                        },
+                        "timestamp": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
@@ -51,10 +81,93 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "address",
+                        "status"
+                      ],
+                      "properties": {
+                        "address": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Created",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "address",
+                        "status"
+                      ],
+                      "properties": {
+                        "address": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -70,7 +183,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": false,
                 "properties": {
                   "kind": {
                     "type": "string",
@@ -79,7 +191,8 @@
                       "forward"
                     ]
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -100,6 +213,14 @@
         "responses": {
           "200": {
             "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -118,6 +239,14 @@
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -141,11 +270,19 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Successful response"
+          "204": {
+            "description": "No content"
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -172,10 +309,50 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "studentId"
+                      ],
+                      "properties": {
+                        "studentId": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -191,11 +368,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "studentId",
-                  "password"
-                ],
                 "properties": {
                   "studentId": {
                     "type": "string",
@@ -206,7 +378,12 @@
                     "minLength": 1,
                     "writeOnly": true
                   }
-                }
+                },
+                "required": [
+                  "studentId",
+                  "password"
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -227,11 +404,33 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Successful response"
+          "101": {
+            "description": "WebSocket protocol switch",
+            "headers": {
+              "Upgrade": {
+                "schema": {
+                  "type": "string",
+                  "const": "websocket"
+                }
+              },
+              "Connection": {
+                "schema": {
+                  "type": "string",
+                  "const": "Upgrade"
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -254,11 +453,52 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Successful response"
+          "201": {
+            "description": "Created",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "ticket"
+                      ],
+                      "properties": {
+                        "ticket": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -273,13 +513,9 @@
           "content": {
             "application/json": {
               "schema": {
-                "oneOf": [
+                "anyOf": [
                   {
                     "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "service"
-                    ],
                     "properties": {
                       "service": {
                         "type": "string",
@@ -290,20 +526,24 @@
                           "card"
                         ]
                       }
-                    }
+                    },
+                    "required": [
+                      "service"
+                    ],
+                    "additionalProperties": false
                   },
                   {
                     "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "serviceUrl"
-                    ],
                     "properties": {
                       "serviceUrl": {
                         "type": "string",
-                        "format": "uri"
+                        "minLength": 1
                       }
-                    }
+                    },
+                    "required": [
+                      "serviceUrl"
+                    ],
+                    "additionalProperties": false
                   }
                 ]
               }
@@ -1318,6 +1558,14 @@
         "responses": {
           "200": {
             "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -1330,7 +1578,7 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "type": "object"
+                        "$ref": "#/components/schemas/ApiUser"
                       }
                     },
                     "pagination": {
@@ -1343,6 +1591,14 @@
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1376,10 +1632,41 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ApiUser"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1411,10 +1698,79 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "id",
+                            "banned"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "banned": {
+                              "type": "boolean"
+                            }
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "id",
+                            "role"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "role": {
+                              "type": "string",
+                              "enum": [
+                                "user",
+                                "admin",
+                                "superAdmin"
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1429,25 +1785,21 @@
           "content": {
             "application/json": {
               "schema": {
-                "oneOf": [
+                "anyOf": [
                   {
                     "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "banned"
-                    ],
                     "properties": {
                       "banned": {
                         "type": "boolean"
                       }
-                    }
+                    },
+                    "required": [
+                      "banned"
+                    ],
+                    "additionalProperties": false
                   },
                   {
                     "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "role"
-                    ],
                     "properties": {
                       "role": {
                         "type": "string",
@@ -1457,7 +1809,11 @@
                           "superAdmin"
                         ]
                       }
-                    }
+                    },
+                    "required": [
+                      "role"
+                    ],
+                    "additionalProperties": false
                   }
                 ]
               }
@@ -1488,10 +1844,54 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "status"
+                      ],
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "active",
+                            "revoked"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1539,6 +1939,14 @@
         "responses": {
           "200": {
             "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -1560,6 +1968,14 @@
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1580,11 +1996,58 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Successful response"
+          "201": {
+            "description": "Created",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/RegistrationInvitation"
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "registrationUrl"
+                          ],
+                          "properties": {
+                            "registrationUrl": {
+                              "type": "string",
+                              "format": "uri"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1600,15 +2063,20 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": false,
                 "properties": {
                   "preset": {
-                    "type": [
-                      "string",
-                      "null"
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "type": "null"
+                      }
                     ]
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -1636,11 +2104,19 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Successful response"
+          "204": {
+            "description": "No content"
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1664,10 +2140,50 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "invitationRequired"
+                      ],
+                      "properties": {
+                        "invitationRequired": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1689,10 +2205,50 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "invitationRequired"
+                      ],
+                      "properties": {
+                        "invitationRequired": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1708,15 +2264,15 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "invitationRequired"
-                ],
                 "properties": {
                   "invitationRequired": {
                     "type": "boolean"
                   }
-                }
+                },
+                "required": [
+                  "invitationRequired"
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -1745,10 +2301,44 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/EntitlementRow"
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1780,10 +2370,53 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "items"
+                      ],
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/EntitlementItem"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1799,18 +2432,35 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "items"
-                ],
                 "properties": {
                   "items": {
                     "type": "array",
                     "items": {
-                      "$ref": "#/components/schemas/EntitlementItem"
+                      "type": "object",
+                      "properties": {
+                        "subsystem": {
+                          "type": "string"
+                        },
+                        "capability": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "subsystem",
+                        "capability",
+                        "value"
+                      ],
+                      "additionalProperties": false
                     }
                   }
-                }
+                },
+                "required": [
+                  "items"
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -1840,10 +2490,51 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "applied"
+                      ],
+                      "properties": {
+                        "applied": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1859,16 +2550,16 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "preset"
-                ],
                 "properties": {
                   "preset": {
                     "type": "string",
                     "minLength": 1
                   }
-                }
+                },
+                "required": [
+                  "preset"
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -1917,11 +2608,19 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Successful response"
+          "204": {
+            "description": "No content"
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1949,6 +2648,14 @@
         "responses": {
           "200": {
             "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -1970,6 +2677,14 @@
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2003,10 +2718,57 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "name",
+                        "items"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/EntitlementItem"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2022,18 +2784,35 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "items"
-                ],
                 "properties": {
                   "items": {
                     "type": "array",
                     "items": {
-                      "$ref": "#/components/schemas/EntitlementItem"
+                      "type": "object",
+                      "properties": {
+                        "subsystem": {
+                          "type": "string"
+                        },
+                        "capability": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "subsystem",
+                        "capability",
+                        "value"
+                      ],
+                      "additionalProperties": false
                     }
                   }
-                }
+                },
+                "required": [
+                  "items"
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -2059,11 +2838,19 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Successful response"
+          "204": {
+            "description": "No content"
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2087,10 +2874,53 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "preset"
+                      ],
+                      "properties": {
+                        "preset": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2112,10 +2942,53 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "preset"
+                      ],
+                      "properties": {
+                        "preset": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2131,18 +3004,22 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": false,
+                "properties": {
+                  "preset": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
                 "required": [
                   "preset"
                 ],
-                "properties": {
-                  "preset": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  }
-                }
+                "additionalProperties": false
               }
             }
           }
@@ -2706,6 +3583,14 @@
         "responses": {
           "200": {
             "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -2727,6 +3612,14 @@
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2747,16 +3640,200 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Successful response"
+          "201": {
+            "description": "Created",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "client_id"
+                      ],
+                      "properties": {
+                        "client_id": {
+                          "type": "string"
+                        },
+                        "client_secret": {
+                          "type": "string",
+                          "writeOnly": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiProblem"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "redirect_uris": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  },
+                  "scope": {
+                    "type": "string"
+                  },
+                  "client_name": {
+                    "type": "string"
+                  },
+                  "client_uri": {
+                    "type": "string"
+                  },
+                  "logo_uri": {
+                    "type": "string"
+                  },
+                  "contacts": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "tos_uri": {
+                    "type": "string"
+                  },
+                  "policy_uri": {
+                    "type": "string"
+                  },
+                  "software_id": {
+                    "type": "string"
+                  },
+                  "software_version": {
+                    "type": "string"
+                  },
+                  "software_statement": {
+                    "type": "string"
+                  },
+                  "post_logout_redirect_uris": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  },
+                  "token_endpoint_auth_method": {
+                    "default": "client_secret_basic",
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "client_secret_basic",
+                      "client_secret_post"
+                    ]
+                  },
+                  "grant_types": {
+                    "default": [
+                      "authorization_code"
+                    ],
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "authorization_code",
+                        "client_credentials",
+                        "refresh_token"
+                      ]
+                    }
+                  },
+                  "response_types": {
+                    "default": [
+                      "code"
+                    ],
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "const": "code"
+                    }
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "web",
+                      "native",
+                      "user-agent-based"
+                    ]
+                  },
+                  "client_secret_expires_at": {
+                    "default": 0,
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ]
+                  },
+                  "skip_consent": {
+                    "type": "boolean"
+                  },
+                  "enable_end_session": {
+                    "type": "boolean"
+                  },
+                  "require_pkce": {
+                    "type": "boolean"
+                  },
+                  "subject_type": {
+                    "type": "string",
+                    "enum": [
+                      "public",
+                      "pairwise"
+                    ]
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "redirect_uris"
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -2785,15 +3862,252 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "client_id"
+                      ],
+                      "properties": {
+                        "client_id": {
+                          "type": "string"
+                        },
+                        "client_secret": {
+                          "type": "string",
+                          "writeOnly": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiProblem"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "client_name": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "client_uri": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "logo_uri": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "tos_uri": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "policy_uri": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "token_endpoint_auth_method": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "type": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "subject_type": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "contacts": {
+                    "anyOf": [
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "redirect_uris": {
+                    "anyOf": [
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "post_logout_redirect_uris": {
+                    "anyOf": [
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "grant_types": {
+                    "anyOf": [
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "response_types": {
+                    "anyOf": [
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "skip_consent": {
+                    "type": "boolean"
+                  },
+                  "enable_end_session": {
+                    "type": "boolean"
+                  },
+                  "require_pkce": {
+                    "type": "boolean"
+                  },
+                  "disabled": {
+                    "type": "boolean"
+                  },
+                  "metadata": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": {}
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "scope": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false,
+                "minProperties": 1
               }
             }
           }
@@ -2819,11 +4133,19 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Successful response"
+          "204": {
+            "description": "No content"
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2857,10 +4179,57 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "client_id",
+                        "scopes"
+                      ],
+                      "properties": {
+                        "client_id": {
+                          "type": "string"
+                        },
+                        "scopes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2892,10 +4261,57 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "client_id",
+                        "scopes"
+                      ],
+                      "properties": {
+                        "client_id": {
+                          "type": "string"
+                        },
+                        "scopes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2911,20 +4327,20 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "scopes"
-                ],
                 "properties": {
                   "scopes": {
                     "type": "array",
-                    "uniqueItems": true,
                     "items": {
                       "type": "string",
                       "pattern": "^cqu:ticket:[\\w*]+$"
-                    }
+                    },
+                    "uniqueItems": true
                   }
-                }
+                },
+                "required": [
+                  "scopes"
+                ],
+                "additionalProperties": false
               }
             }
           }
@@ -2956,16 +4372,72 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Successful response"
+          "201": {
+            "description": "Created",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "client_id"
+                      ],
+                      "properties": {
+                        "client_id": {
+                          "type": "string"
+                        },
+                        "client_secret": {
+                          "type": "string",
+                          "writeOnly": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiProblem"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
               }
             }
           }
@@ -2980,7 +4452,31 @@
         "security": [],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "invitationRequired"
+                      ],
+                      "properties": {
+                        "invitationRequired": {
+                          "type": "boolean"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
@@ -3222,7 +4718,11 @@
         ],
         "description": "Obtain an OAuth2.1 access token",
         "operationId": "post_api_auth_oauth2_token",
-        "security": [],
+        "security": [
+          {
+            "oauthClientAuth": []
+          }
+        ],
         "parameters": [],
         "requestBody": {
           "required": true,
@@ -4392,7 +5892,36 @@
         "security": [],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "issuer"
+                  ],
+                  "properties": {
+                    "issuer": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "authorization_endpoint": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "token_endpoint": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "jwks_uri": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
@@ -4415,7 +5944,36 @@
         "security": [],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "issuer"
+                  ],
+                  "properties": {
+                    "issuer": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "authorization_endpoint": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "token_endpoint": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "jwks_uri": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
@@ -4438,7 +5996,36 @@
         "security": [],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "issuer"
+                  ],
+                  "properties": {
+                    "issuer": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "authorization_endpoint": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "token_endpoint": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "jwks_uri": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
@@ -4461,7 +6048,36 @@
         "security": [],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "issuer"
+                  ],
+                  "properties": {
+                    "issuer": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "authorization_endpoint": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "token_endpoint": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "jwks_uri": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
@@ -4484,7 +6100,36 @@
         "security": [],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "issuer"
+                  ],
+                  "properties": {
+                    "issuer": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "authorization_endpoint": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "token_endpoint": {
+                      "type": "string",
+                      "format": "uri"
+                    },
+                    "jwks_uri": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
@@ -4506,7 +6151,11 @@
         ],
         "description": "Get the account info provided by the provider",
         "operationId": "get_api_v1_auth_account_info",
-        "security": [],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
         "parameters": [],
         "responses": {
           "200": {
@@ -10109,7 +11758,11 @@
         ],
         "description": "Rotates a confidential client's secret",
         "operationId": "post_api_v1_auth_oauth2_client_rotate_secret",
-        "security": [],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
         "parameters": [],
         "requestBody": {
           "required": true,
@@ -10573,7 +12226,11 @@
         ],
         "description": "Register an OAuth2 application",
         "operationId": "post_api_v1_auth_oauth2_create_client",
-        "security": [],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
         "parameters": [],
         "requestBody": {
           "required": true,
@@ -10940,7 +12597,11 @@
         ],
         "description": "Deletes an oauth client",
         "operationId": "post_api_v1_auth_oauth2_delete_client",
-        "security": [],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
         "parameters": [],
         "requestBody": {
           "required": true,
@@ -11068,7 +12729,11 @@
         ],
         "description": "Deletes consent granted to a client",
         "operationId": "post_api_v1_auth_oauth2_delete_consent",
-        "security": [],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
         "parameters": [],
         "requestBody": {
           "required": true,
@@ -11365,7 +13030,11 @@
         ],
         "description": "Get OAuth2 formatted client details",
         "operationId": "get_api_v1_auth_oauth2_get_client",
-        "security": [],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
         "parameters": [
           {
             "name": "client_id",
@@ -11483,7 +13152,11 @@
         ],
         "description": "Get OAuth2 formatted client details for a user or organization",
         "operationId": "get_api_v1_auth_oauth2_get_clients",
-        "security": [],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
         "parameters": [],
         "responses": {
           "400": {
@@ -11593,7 +13266,11 @@
         ],
         "description": "Gets details of a specific OAuth2 consent for a user",
         "operationId": "get_api_v1_auth_oauth2_get_consent",
-        "security": [],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
         "parameters": [
           {
             "name": "id",
@@ -11711,7 +13388,11 @@
         ],
         "description": "Gets all available OAuth2 consents for a user",
         "operationId": "get_api_v1_auth_oauth2_get_consents",
-        "security": [],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
         "parameters": [],
         "responses": {
           "400": {
@@ -11821,7 +13502,11 @@
         ],
         "description": "Introspect an OAuth2 access or refresh token",
         "operationId": "post_api_v1_auth_oauth2_introspect",
-        "security": [],
+        "security": [
+          {
+            "oauthClientAuth": []
+          }
+        ],
         "parameters": [],
         "requestBody": {
           "required": true,
@@ -12670,7 +14355,11 @@
         ],
         "description": "Revoke an OAuth2 access or refresh token",
         "operationId": "post_api_v1_auth_oauth2_revoke",
-        "security": [],
+        "security": [
+          {
+            "oauthClientAuth": []
+          }
+        ],
         "parameters": [],
         "requestBody": {
           "required": true,
@@ -12832,7 +14521,11 @@
         ],
         "description": "Obtain an OAuth2.1 access token",
         "operationId": "post_api_v1_auth_oauth2_token",
-        "security": [],
+        "security": [
+          {
+            "oauthClientAuth": []
+          }
+        ],
         "parameters": [],
         "requestBody": {
           "required": true,
@@ -13049,7 +14742,11 @@
         ],
         "description": "Updates OAuth2 formatted client details.",
         "operationId": "post_api_v1_auth_oauth2_update_client",
-        "security": [],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
         "parameters": [],
         "requestBody": {
           "required": true,
@@ -13273,7 +14970,11 @@
         ],
         "description": "Updates consent granted to a client.",
         "operationId": "post_api_v1_auth_oauth2_update_consent",
-        "security": [],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
         "parameters": [],
         "requestBody": {
           "required": true,
@@ -16415,7 +18116,7 @@
         "operationId": "post_api_v1_auth_two_factor_send_otp",
         "security": [
           {
-            "cookieAuth": []
+            "twoFactorCookie": []
           }
         ],
         "parameters": [],
@@ -16544,7 +18245,7 @@
         "operationId": "post_api_v1_auth_two_factor_verify_backup_code",
         "security": [
           {
-            "cookieAuth": []
+            "twoFactorCookie": []
           }
         ],
         "parameters": [],
@@ -16797,7 +18498,7 @@
         "operationId": "post_api_v1_auth_two_factor_verify_otp",
         "security": [
           {
-            "cookieAuth": []
+            "twoFactorCookie": []
           }
         ],
         "parameters": [],
@@ -17012,6 +18713,9 @@
         "security": [
           {
             "cookieAuth": []
+          },
+          {
+            "twoFactorCookie": []
           }
         ],
         "parameters": [],
@@ -17609,7 +19313,11 @@
         ],
         "description": "Verify the current user's password",
         "operationId": "post_api_v1_auth_verify_password",
-        "security": [],
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ],
         "parameters": [],
         "requestBody": {
           "required": true,
@@ -17754,7 +19462,32 @@
         "security": [],
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "openapi",
+                    "info",
+                    "paths"
+                  ],
+                  "properties": {
+                    "openapi": {
+                      "type": "string",
+                      "const": "3.1.1"
+                    },
+                    "info": {
+                      "type": "object"
+                    },
+                    "paths": {
+                      "type": "object"
+                    }
+                  }
+                }
+              }
+            }
           },
           "400": {
             "description": "Invalid request",
@@ -17781,6 +19514,15 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "JWT"
+      },
+      "oauthClientAuth": {
+        "type": "http",
+        "scheme": "basic"
+      },
+      "twoFactorCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "__Secure-better-auth.two_factor"
       }
     },
     "schemas": {
@@ -17929,6 +19671,61 @@
           },
           "value": {
             "type": "string"
+          }
+        }
+      },
+      "EntitlementRow": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "userId",
+          "subsystem",
+          "capability",
+          "value"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string"
+          },
+          "subsystem": {
+            "type": "string"
+          },
+          "capability": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "ApiUser": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "banned": {
+            "type": [
+              "boolean",
+              "null"
+            ]
           }
         }
       },

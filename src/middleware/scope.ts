@@ -8,12 +8,22 @@ import { scopeSatisfies } from "../services/oauth-scopes";
 
 export function requireCquScope(service: string) {
   return async (c: Context<HonoEnv>, next: Next) => {
+    const rejected = await cquScopeRejection(c, service);
+    if (rejected) return rejected;
+    return next();
+  };
+}
+
+export async function cquScopeRejection(
+  c: Context<HonoEnv>,
+  service: string
+): Promise<Response | null> {
     const principal = c.get("principal");
     if (!principal || principal.kind !== "bearer") {
       return errorResponse(c, "UNAUTHORIZED", "取票需要 Bearer 访问令牌", 401);
     }
 
-    if (service === "*") return next();
+    if (service === "*") return null;
 
     const requiredScope = `cqu:ticket:${service}`;
     if (!scopeSatisfies(principal.scopes, requiredScope)) {
@@ -30,6 +40,5 @@ export function requireCquScope(service: string) {
       return errorResponse(c, "FORBIDDEN", "该应用未被授权访问此 CQU 服务", 403);
     }
 
-    return next();
-  };
+    return null;
 }

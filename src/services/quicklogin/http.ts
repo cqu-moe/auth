@@ -60,14 +60,17 @@ function exactKeys(value: Record<string, unknown>, keys: string[]): boolean {
 }
 
 export async function readJson(request: Request): Promise<unknown> {
+  if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get("content-type") ?? "")) {
+    throw new QuickloginHttpError("INVALID_REQUEST", 415);
+  }
   try { return await request.json(); }
-  catch { throw new QuickloginHttpError("INVALID_REQUEST", 422); }
+  catch { throw new QuickloginHttpError("INVALID_REQUEST", 400); }
 }
 
 export function parseEnabled(value: unknown): boolean {
   const parsed = QuickloginDeviceUpdateBody.safeParse(value);
   if (!parsed.success) {
-    throw new QuickloginHttpError("INVALID_REQUEST", 422);
+    throw new QuickloginHttpError("INVALID_REQUEST", 400);
   }
   return parsed.data.enabled;
 }
@@ -81,7 +84,7 @@ function parseProtocol<T>(
     throw new QuickloginHttpError("PROTOCOL_UNSUPPORTED", 426);
   }
   const parsed = schema.safeParse(value);
-  if (!parsed.success) throw new QuickloginHttpError("INVALID_REQUEST", 422);
+  if (!parsed.success) throw new QuickloginHttpError("INVALID_REQUEST", 400);
   return parsed.data;
 }
 
@@ -107,7 +110,7 @@ export function parseExportRequest(value: unknown): {
 
 export function parseDeviceMetadata(value: unknown): DeviceMetadata {
   const parsed = QuickloginDeviceRegistrationBody.safeParse(value);
-  if (!parsed.success) throw new QuickloginHttpError("INVALID_REQUEST", 422);
+  if (!parsed.success) throw new QuickloginHttpError("INVALID_REQUEST", 400);
   return parsed.data;
 }
 

@@ -59,11 +59,24 @@ router.use("*", async (c, next) => {
   await next();
 });
 
+function preflightMethods(pathname: string): string[] {
+  const suffix = pathname.slice(DEVICE_BASE_PATH.length).replace(/\/$/, "");
+  if (!suffix) return ["GET", "POST"];
+  if (/^\/[^/]+$/.test(suffix)) return ["PUT", "DELETE"];
+  if (/^\/[^/]+\/(status|refresh|export)$/.test(suffix)) return ["POST"];
+  return [];
+}
+
 const devicePreflight = (c: Context<HonoEnv>) => {
   if (c.req.header("Origin") !== c.env.QUICKLOGIN_EXTENSION_ORIGIN) {
     return apiError(c, "FORBIDDEN", 403);
   }
-  c.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  const methods = preflightMethods(new URL(c.req.url).pathname);
+  const requested = c.req.header("access-control-request-method")?.toUpperCase();
+  if (!methods.length || (requested && !methods.includes(requested))) {
+    return apiError(c, "FORBIDDEN", 403);
+  }
+  c.header("Access-Control-Allow-Methods", methods.join(", "));
   c.header("Access-Control-Allow-Headers", "Authorization, Content-Type");
   return c.body(null, 204);
 };
