@@ -24,6 +24,20 @@ function exportableStorageState(marker = "") {
   };
 }
 
+function largeExportableStorageState(marker: string) {
+  const state = exportableStorageState(marker);
+  return {
+    ...state,
+    origins: [{
+      origin: "https://sso.cqu.edu.cn",
+      localStorage: [{
+        name: "quicklogin-test-padding",
+        value: `${marker}:${"x".repeat(70 * 1024)}`,
+      }],
+    }],
+  };
+}
+
 async function setupDevice() {
   const accounts = new QuickloginAccountClient(env);
   const userId = `device-do-${crypto.randomUUID()}`;
@@ -135,13 +149,16 @@ describe("CquQuickloginDeviceDO", () => {
         capabilities: ["browser-route-v1", "operation-deadline-v1"],
       }),
       "/code-permit": () => Response.json({ ok: true }),
-      "/run": () => Response.json({ ok: true, state: exportableStorageState() }),
+      "/run": () => Response.json({
+        ok: true,
+        state: largeExportableStorageState("initial"),
+      }),
       "/keepalive": () => {
         keepaliveCalls += 1;
         return Response.json({
           ok: true,
           status: "alive",
-          state: exportableStorageState("-pending"),
+          state: largeExportableStorageState("pending"),
         });
       },
     });
@@ -187,6 +204,10 @@ describe("CquQuickloginDeviceDO", () => {
     expect(pending?.pendingKeepaliveMint).toMatchObject({
       operationId: expect.any(String),
     });
+    expect(JSON.stringify(pending).length).toBeLessThan(120 * 1024);
+    expect(
+      (await readStorage<string>(stub, "pendingKeepaliveState"))?.length
+    ).toBeGreaterThan(64 * 1024);
 
     await runInDurableObject(stub, async (instance) => {
       await (instance as unknown as { alarm(): Promise<void> }).alarm();
@@ -197,6 +218,77 @@ describe("CquQuickloginDeviceDO", () => {
     expect(operationIds[1]).toBe(operationIds[0]);
     expect(await readStorage<Record<string, unknown>>(stub, "session"))
       .not.toHaveProperty("pendingKeepaliveMint");
+    expect(await readStorage(stub, "pendingKeepaliveState")).toBeUndefined();
+  });
+
+  it("clears an independent pending keepalive payload when authority changes", async () => {
+    const { userId, authority } = await setupDevice();
+    const devices = new QuickloginDeviceClient(env);
+    await devices.notifyDevice(authority);
+    const stub = env.CQU_QUICKLOGIN_DEVICE.get(
+      env.CQU_QUICKLOGIN_DEVICE.idFromName(`${userId}:${authority.deviceId}`)
+    );
+    const session = await devices.readDeviceSession(userId, authority.deviceId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      await state.storage.put({
+        session: {
+          ...session,
+          pendingKeepaliveMint: {
+            operationId: "pending-before-disable",
+            mintedAt: Date.now(),
+            expiresAt: Date.now() + 60_000,
+            hasStorageState: true,
+          },
+        },
+        pendingKeepaliveState: JSON.stringify(exportableStorageState("stale")),
+      });
+    });
+
+    await runInDurableObject(stub, async (instance) => {
+      await (instance as unknown as {
+        notify(input: typeof authority): Promise<void>;
+      }).notify({
+        ...authority,
+        generation: authority.generation + 1,
+        enabled: false,
+        allowed: false,
+        reason: "DEVICE_DISABLED",
+      });
+    });
+
+    expect(await readStorage<Record<string, unknown>>(stub, "session"))
+      .not.toHaveProperty("pendingKeepaliveMint");
+    expect(await readStorage(stub, "pendingKeepaliveState")).toBeUndefined();
+  });
+
+  it("recovers an expired pending keepalive payload on read", async () => {
+    const currentTime = 1_800_000_000_000;
+    vi.spyOn(Date, "now").mockReturnValue(currentTime);
+    const { userId, authority } = await setupDevice();
+    const devices = new QuickloginDeviceClient(env);
+    await devices.notifyDevice(authority);
+    const stub = env.CQU_QUICKLOGIN_DEVICE.get(
+      env.CQU_QUICKLOGIN_DEVICE.idFromName(`${userId}:${authority.deviceId}`)
+    );
+    const session = await devices.readDeviceSession(userId, authority.deviceId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      await state.storage.put({
+        session: {
+          ...session,
+          pendingKeepaliveMint: {
+            operationId: "expired-pending",
+            mintedAt: currentTime - 60_000,
+            expiresAt: currentTime - 1,
+            hasStorageState: true,
+          },
+        },
+        pendingKeepaliveState: JSON.stringify(exportableStorageState("expired")),
+      });
+    });
+
+    await expect(devices.readDeviceSession(userId, authority.deviceId))
+      .resolves.not.toHaveProperty("pendingKeepaliveMint");
+    expect(await readStorage(stub, "pendingKeepaliveState")).toBeUndefined();
   });
 
   it("uses the elapsed failure window and resets it after recovery", async () => {

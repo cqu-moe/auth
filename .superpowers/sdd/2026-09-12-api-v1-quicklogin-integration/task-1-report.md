@@ -194,3 +194,42 @@ npm run typecheck:do
 - receipt 上限使存储条数有硬边界；TTL 清理由正常 alarm 和后续 mint 调用触发，长期无活动的最后一组收据会保留到下一次唤醒，但最多 64 条。
 - best-effort 账号通知失败时，CquSession 已 fail-closed；Account DO 投影/设备 fencing 会在后续同步机会收敛，本轮没有新增跨 DO outbox。
 - Workers 仍打印既有 Containers sourcemap/未启用容器背景噪音，测试 exit 0。
+
+## Fix round 2/5（pending keepalive payload 拆分）
+
+### 修复
+
+1. `StoredDeviceSession.pendingKeepaliveMint` 只保留小 metadata：`operationId`、`mintedAt`、`expiresAt`、`hasStorageState`。
+2. 待确认的 serialized browser state 改存 Device DO 独立 key `pendingKeepaliveState`；创建 pending 时在同一 storage transaction 中分别写 session metadata 与独立 payload，不再把现有 state 和新 state 复制进一个 value。
+3. broker 回包失败时 metadata/payload 都保留，下次 alarm 先用同一 operation ID 确认，仍不重复浏览器 keepalive。
+4. broker 确认后 transaction 更新正式 session 并删除独立 payload；mode-off、禁用、撤销、generation 变化也同步清理 payload。
+5. pending metadata 使用 24 小时有效期；`alarm()` 与 `readSession()` 会恢复过期记录，并删除 metadata 与独立 payload。没有 metadata 的孤儿 payload 也会惰性清理。
+
+### RED
+
+```sh
+npm run test:do -- test/do/quicklogin-device.do.test.ts
+```
+
+结果：exit 1；7 tests passed、3 tests failed。
+
+- 约 70 KiB 的现有 state 与约 70 KiB 的 pending state 同时塞进 session，序列化长度达到 145,249 字符，超过测试锁定的 120 KiB 边界；
+- authority 禁用/代次变化后 `pendingKeepaliveState` 仍残留；
+- 过期 pending 在 read recovery 后仍保留 metadata/payload。
+
+### GREEN
+
+```sh
+npm run test:do -- test/do/cqu-session.do.test.ts test/do/quicklogin-device.do.test.ts test/do/quicklogin-login-broker.do.test.ts test/do/quicklogin-account.do.test.ts test/do/quicklogin-migration.do.test.ts test/do/quicklogin-projection.do.test.ts test/do/quicklogin-regression.do.test.ts
+npm test -- src/services/quicklogin/*.test.ts
+npm run typecheck
+npm run typecheck:do
+```
+
+结果：Task 1 Workers 7 files / 89 tests passed；QuickLogin Node 8 files / 56 tests passed；两项 TypeScript 检查 exit 0。
+
+### 自审与担忧
+
+- 大 state 测试确认 session 主 value 低于 120 KiB，独立 pending payload 大于 64 KiB；重试两次发送相同 operation ID，浏览器 keepalive 只执行一次。
+- 当前正式 `storageState` 本身仍按既有协议保存在 session；本轮只消除“正式 state + pending state”在同一 value 的重复。
+- Workers 仍有既有 Containers sourcemap/未启用容器及 overdue alarm 背景噪音，测试 exit 0。

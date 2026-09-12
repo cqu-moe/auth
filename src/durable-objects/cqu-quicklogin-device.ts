@@ -27,7 +27,9 @@ import { quickloginBrowserRoute } from "../services/quicklogin/browser-routing";
 
 const SESSION_KEY = "session";
 const OWNER_KEY = "owner";
+const PENDING_KEEPALIVE_STATE_KEY = "pendingKeepaliveState";
 const KEEPALIVE_MS = 60 * 60_000;
+const PENDING_KEEPALIVE_TTL_MS = 24 * 60 * 60_000;
 
 interface DeviceOwner {
   userId: string;
@@ -137,6 +139,7 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     if (!this.owner) return;
     const session = await this.ctx.storage.get<StoredDeviceSession>(SESSION_KEY);
     if (!session) return;
+    await this.recoverPendingKeepalive(session, Date.now());
     const authority = await new QuickloginAccountClient(this.env)
       .getDeviceAuthority(this.owner.userId, this.owner.deviceId);
     const action = nextDeviceAction(session, authority, Date.now());
@@ -178,6 +181,7 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     const session = await this.ctx.storage.get<StoredDeviceSession>(SESSION_KEY);
     if (!session) throw new DeviceDoError("PREPARING");
     const now = Date.now();
+    await this.recoverPendingKeepalive(session, now);
     if (
       session.state === "temporary_unavailable" &&
       session.nextAttemptAt !== null &&
@@ -298,11 +302,20 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     session.pendingKeepaliveMint = {
       operationId: crypto.randomUUID(),
       mintedAt: Date.now(),
-      ...(body.state === undefined
-        ? {}
-        : { storageState: JSON.stringify(body.state) }),
+      expiresAt: Date.now() + PENDING_KEEPALIVE_TTL_MS,
+      hasStorageState: body.state !== undefined,
     };
-    await this.ctx.storage.put(SESSION_KEY, session);
+    const pendingStorageState = body.state === undefined
+      ? undefined
+      : JSON.stringify(body.state);
+    await this.ctx.storage.transaction(async (tx) => {
+      await tx.put(SESSION_KEY, session);
+      if (pendingStorageState === undefined) {
+        await tx.delete(PENDING_KEEPALIVE_STATE_KEY);
+      } else {
+        await tx.put(PENDING_KEEPALIVE_STATE_KEY, pendingStorageState);
+      }
+    });
     await this.confirmKeepaliveMint(session, authority);
   }
 
@@ -312,14 +325,17 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
   ): Promise<void> {
     const pending = session.pendingKeepaliveMint;
     if (!pending) return;
+    const pendingStorageState = pending.hasStorageState
+      ? await this.ctx.storage.get<string>(PENDING_KEEPALIVE_STATE_KEY)
+      : undefined;
     await new QuickloginLoginBrokerClient(this.env)
       .recordQuickloginKeepaliveMint(authority.ownerUserId, {
         deviceId: authority.deviceId,
         operationId: pending.operationId,
         mintedAt: pending.mintedAt,
       });
-    if (pending.storageState !== undefined) {
-      const serialized = pending.storageState;
+    if (pendingStorageState !== undefined) {
+      const serialized = pendingStorageState;
       const cookies = extractSsoCookies(serialized, Date.now());
       const digest = await digestSsoCookies(cookies);
       if (digest !== session.exportDigest) session.sessionVersion += 1;
@@ -333,8 +349,24 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     session.fastRetries = 0;
     session.nextAttemptAt = null;
     delete session.pendingKeepaliveMint;
-    await this.ctx.storage.put(SESSION_KEY, session);
+    await this.ctx.storage.transaction(async (tx) => {
+      await tx.put(SESSION_KEY, session);
+      await tx.delete(PENDING_KEEPALIVE_STATE_KEY);
+    });
     await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_MS);
+  }
+
+  private async recoverPendingKeepalive(
+    session: StoredDeviceSession,
+    now: number
+  ): Promise<void> {
+    const pending = session.pendingKeepaliveMint;
+    if (pending && pending.expiresAt > now) return;
+    if (pending) delete session.pendingKeepaliveMint;
+    await this.ctx.storage.transaction(async (tx) => {
+      if (pending) await tx.put(SESSION_KEY, session);
+      await tx.delete(PENDING_KEEPALIVE_STATE_KEY);
+    });
   }
 
   private async performLogin(
@@ -402,7 +434,12 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     }
     if (!quickloginDeviceModeEnabled(this.env)) {
       next.state = authority.enabled ? "paused" : "disabled";
-      await this.ctx.storage.put(SESSION_KEY, next);
+      await this.ctx.storage.transaction(async (tx) => {
+        await tx.put(SESSION_KEY, next);
+        if (!next.pendingKeepaliveMint) {
+          await tx.delete(PENDING_KEEPALIVE_STATE_KEY);
+        }
+      });
       await this.ctx.storage.deleteAlarm();
       return;
     }
@@ -423,7 +460,12 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       next.state = next.storageState ? "ready" : "preparing";
       await this.ctx.storage.setAlarm(Date.now());
     }
-    await this.ctx.storage.put(SESSION_KEY, next);
+    await this.ctx.storage.transaction(async (tx) => {
+      await tx.put(SESSION_KEY, next);
+      if (!next.pendingKeepaliveMint) {
+        await tx.delete(PENDING_KEEPALIVE_STATE_KEY);
+      }
+    });
   }
 
   private async exportCookies(

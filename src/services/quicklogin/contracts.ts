@@ -160,7 +160,8 @@ export interface StoredDeviceSession {
   pendingKeepaliveMint?: {
     operationId: string;
     mintedAt: EpochMs;
-    storageState?: string;
+    expiresAt: EpochMs;
+    hasStorageState: boolean;
   };
 }
 
