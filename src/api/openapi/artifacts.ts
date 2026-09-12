@@ -129,7 +129,7 @@ export function buildCoverageManifest(
       requestReason = "Cloudflare Schema Validation does not validate form request bodies.";
     } else if (contentTypes.includes("application/json")) {
       requestValidation = "json-body-and-parameters";
-      requestReason = "The Cloudflare projection retains the JSON body and path/query parameters.";
+      requestReason = "The Cloudflare projection retains the JSON body and path/query parameters; pattern constraints remain application-validated.";
     } else {
       requestValidation = "parameters-only";
       requestReason = "This operation has no JSON request body; documented parameters remain projected.";

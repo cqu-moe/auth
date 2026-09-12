@@ -354,6 +354,7 @@ describe("complete API document", () => {
       parser: Parser;
       input: unknown;
       ok: boolean;
+      cloudflareOk?: boolean;
       code?: string;
       status?: number;
       output?: unknown;
@@ -363,7 +364,7 @@ describe("complete API document", () => {
         schema: "QuickloginDeviceRegistration",
         parser: parseDeviceMetadata,
         input: { deviceName: " macOS Chrome ", browserFamily: "chrome", browserVersion: " 140.0 " },
-        ok: false, code: "INVALID_REQUEST", status: 400,
+        ok: false, cloudflareOk: true, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "registration preserves BMP Chinese and internal ordinary spaces",
@@ -378,14 +379,14 @@ describe("complete API document", () => {
         schema: "QuickloginDeviceRegistration",
         parser: parseDeviceMetadata,
         input: { deviceName: "   ", browserFamily: "chrome", browserVersion: "140" },
-        ok: false, code: "INVALID_REQUEST", status: 400,
+        ok: false, cloudflareOk: true, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "registration rejects control characters",
         schema: "QuickloginDeviceRegistration",
         parser: parseDeviceMetadata,
         input: { deviceName: "Chrome\u0000", browserFamily: "chrome", browserVersion: "140" },
-        ok: false, code: "INVALID_REQUEST", status: 400,
+        ok: false, cloudflareOk: true, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "registration rejects a name beyond 80 characters",
@@ -406,21 +407,21 @@ describe("complete API document", () => {
         schema: "QuickloginDeviceRegistration",
         parser: parseDeviceMetadata,
         input: { deviceName: "Chrome\u3000", browserFamily: "chrome", browserVersion: "140" },
-        ok: false, code: "INVALID_REQUEST", status: 400,
+        ok: false, cloudflareOk: true, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "registration rejects non-BMP emoji",
         schema: "QuickloginDeviceRegistration",
         parser: parseDeviceMetadata,
         input: { deviceName: "Chrome 🚀", browserFamily: "chrome", browserVersion: "140" },
-        ok: false, code: "INVALID_REQUEST", status: 400,
+        ok: false, cloudflareOk: true, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "registration rejects an internal zero-width space",
         schema: "QuickloginDeviceRegistration",
         parser: parseDeviceMetadata,
         input: { deviceName: "Chrome\u200BDevice", browserFamily: "chrome", browserVersion: "140" },
-        ok: false, code: "INVALID_REQUEST", status: 400,
+        ok: false, cloudflareOk: true, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "device update is strict",
@@ -455,7 +456,7 @@ describe("complete API document", () => {
         schema: "QuickloginDeviceHeartbeat",
         parser: parseHeartbeat,
         input: { protocolVersion: 1, appliedVersion: null, generation: 1, browserVersion: "   " },
-        ok: false, code: "INVALID_REQUEST", status: 400,
+        ok: false, cloudflareOk: true, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "heartbeat rejects a version beyond 40 characters",
@@ -475,7 +476,7 @@ describe("complete API document", () => {
           protocolVersion: 1, appliedVersion: null, generation: 1,
           browserVersion: "\u3000140",
         },
-        ok: false, code: "INVALID_REQUEST", status: 400,
+        ok: false, cloudflareOk: true, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "heartbeat rejects non-BMP emoji",
@@ -485,7 +486,7 @@ describe("complete API document", () => {
           protocolVersion: 1, appliedVersion: null, generation: 1,
           browserVersion: "Chrome🚀",
         },
-        ok: false, code: "INVALID_REQUEST", status: 400,
+        ok: false, cloudflareOk: true, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "heartbeat rejects an internal byte-order mark",
@@ -495,7 +496,7 @@ describe("complete API document", () => {
           protocolVersion: 1, appliedVersion: null, generation: 1,
           browserVersion: "Chrome\uFEFF140",
         },
-        ok: false, code: "INVALID_REQUEST", status: 400,
+        ok: false, cloudflareOk: true, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "heartbeat rejects unsupported protocol separately",
@@ -548,7 +549,7 @@ describe("complete API document", () => {
         cloudflare.components.schemas[sample.schema],
         sample.input,
         cloudflare.components.schemas
-      ), `${sample.name} Cloudflare 3.0`).toBe(sample.ok);
+      ), `${sample.name} Cloudflare 3.0`).toBe(sample.cloudflareOk ?? sample.ok);
     }
   });
 

@@ -3,7 +3,8 @@
 `openapi.json` is the complete repository contract (OpenAPI 3.1.1).
 `cloudflare.openapi.json` is the OpenAPI 3.0.3 projection prepared for a later API Shield import.
 It is written as compact JSON to stay below the dashboard's 512 KiB upload limit;
-generation rejects look-around regular expressions that Cloudflare cannot import.
+the Cloudflare projection omits `pattern` constraints because Cloudflare does not
+document its accepted regular-expression subset. The application still enforces them.
 `endpoints.json` is the exact runtime method/path/operationId manifest.
 `coverage.json` records, per operation, what Cloudflare can validate and what remains application-validated.
 `auth-policy.json` records the exact authentication policy and evidence source for every runtime operation.

@@ -3,18 +3,10 @@ import type { DeviceMetadata, ErrorCode, HeartbeatInput } from "./contracts";
 
 const SafeNonNegativeInteger = z.number().int().nonnegative()
   .max(Number.MAX_SAFE_INTEGER);
-const excludedCanonicalText =
-  "\\x00-\\x1f\\x7f-\\x9f\\u00ad\\u061c\\u180e\\u200b-\\u200f" +
-  "\\u202a-\\u202e\\u2060-\\u206f\\ufeff\\ufff9-\\ufffb\\ud800-\\udfff";
-const canonicalTextEdge = `[^\\s${excludedCanonicalText}]`;
-const canonicalTextMiddle = `[^${excludedCanonicalText}]`;
-const canonicalTextPattern = new RegExp(
-  `^(${canonicalTextEdge}|${canonicalTextEdge}${canonicalTextMiddle}*${canonicalTextEdge})$`
-);
 const boundedCanonicalText = (maxLength: number) => z.string()
   .min(1)
   .max(maxLength)
-  .regex(canonicalTextPattern);
+  .regex(/^(?!\s)(?!.*\s$)[^\x00-\x1f\x7f-\x9f\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb\ud800-\udfff]+$/);
 
 export const QuickloginDeviceUpdateBody = z.strictObject({
   enabled: z.boolean(),

@@ -29,10 +29,18 @@ describe("Cloudflare OpenAPI 3.0 schema projection", () => {
     )).toThrow("#/components/schemas/Unsupported");
   });
 
-  it("rejects look-around patterns that Cloudflare cannot import", () => {
-    expect(() => toCloudflareSchema(
-      { type: "string", pattern: "^(?!\\s).+$" },
-      "#/components/schemas/UnsupportedPattern"
-    )).toThrow("#/components/schemas/UnsupportedPattern/pattern");
+  it("omits patterns because Cloudflare does not document its accepted regex subset", () => {
+    expect(toCloudflareSchema(
+      { type: "string", minLength: 1, pattern: "^(?!\\s).+$" },
+      "#/components/schemas/LookAhead"
+    )).toEqual({ type: "string", minLength: 1 });
+    expect(toCloudflareSchema(
+      { type: "string", pattern: "^[^\\ud800-\\udfff]+$" },
+      "#/components/schemas/SurrogateRange"
+    )).toEqual({ type: "string" });
+    expect(toCloudflareSchema(
+      { type: "string", pattern: "^[A-Z0-9]{8}$" },
+      "#/components/schemas/InvitationCode"
+    )).toEqual({ type: "string" });
   });
 });
