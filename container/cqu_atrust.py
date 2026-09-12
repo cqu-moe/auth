@@ -132,6 +132,17 @@ async def wait_for_atrust_app(page) -> None:
     raise RuntimeError("ATRUST_APP_NOT_REACHED")
 
 
+async def enter_atrust_app(page) -> None:
+    """Resume the fixed app when direct CAS returns to the aTrust portal."""
+    if _safe_host(page.url) == ATRUST_PORTAL_HOST:
+        await page.goto(
+            ATRUST_APP_URL,
+            wait_until="domcontentloaded",
+            timeout=browser_profile.ATRUST_NAV_TIMEOUT_MS,
+        )
+    await wait_for_atrust_app(page)
+
+
 async def verify_atrust_app_ready(page, timeout_seconds: float | None = None) -> None:
     """Require a real curriculum API response before persisting the session."""
     if timeout_seconds is None:
@@ -256,7 +267,7 @@ async def run_atrust_login(
                     raise AtrustPasswordRejectedError("PASSWORD_REJECTED")
                 raise RuntimeError("ATRUST_FIRST_FACTOR_FAILED")
 
-            await wait_for_atrust_app(page)
+            await enter_atrust_app(page)
             await verify_atrust_app_ready(page)
             state = await context.storage_state()
             return {"state": state}

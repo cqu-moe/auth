@@ -199,6 +199,27 @@ def test_click_unified_identity_rejects_fallback_redirect_to_untrusted_host():
         asyncio.run(cqu_atrust.click_unified_identity(page))
 
 
+class _PostCasPortalPage:
+    def __init__(self):
+        self.url = "https://atrust.cqu.edu.cn/portal/#/app_center"
+        self.goto_urls = []
+
+    async def goto(self, url, **_kwargs):
+        self.goto_urls.append(url)
+        self.url = url
+
+    async def wait_for_timeout(self, _timeout):
+        return None
+
+
+def test_enter_atrust_app_revisits_fixed_app_after_direct_cas_callback():
+    page = _PostCasPortalPage()
+
+    asyncio.run(cqu_atrust.enter_atrust_app(page))
+
+    assert page.goto_urls == [cqu_atrust.ATRUST_APP_URL]
+
+
 class _ReadyResponse:
     url = (
         "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/"
