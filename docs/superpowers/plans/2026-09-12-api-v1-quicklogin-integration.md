@@ -23,7 +23,7 @@
 - 保留 API v1 已完成的 OTP、onboarding、issuer、路由边界、Problem Details、前端模块化和 OpenAPI 结构。
 - 不整体合并旧功能分支的文件树；只移植 QuickLogin 功能提交，避免回退或删除 v1/OTP/onboarding 内容。
 - QuickLogin 设备正式入口为 `/api/v1/cqu/quicklogin/devices` 及其子资源；旧 `/api/cqu/quicklogin/devices` 精确委托同一实现。
-- QuickLogin 管理正式入口位于 `/api/v1/admin/users/{id}/quicklogin-*`；旧 `/api/admin/users/:id/quicklogin-*` 精确兼容。
+- QuickLogin 管理正式入口只位于 `/api/v1/admin/users/{id}/quicklogin-*`；旧 `/api/admin/users/:id/quicklogin-*` 随通用 legacy 一起下线，不属于 0.1.2 扩展过渡桥。
 - QuickLogin 扩展正式调用 `/api/v1/auth/oauth2/authorize`、`/api/v1/auth/oauth2/token` 和 `/api/v1/cqu/quicklogin/devices*`。不扩大 host permissions，不更换 client ID、extension ID、redirect URI、scope 或协议版本。
 - 当前 0.1.2 OAuth 请求的 resource/audience 是根 origin；过渡桥可同时接受根 audience 与 stable issuer audience，但 issuer 始终只能是 `https://auth.cqu.moe/api/auth`。新扩展把 resource 迁到 stable issuer audience，设备升级后再删除根 audience 兼容。
 - 稳定 issuer 仍为 `https://auth.cqu.moe/api/auth`；D01–D05 discovery 永久保留。
@@ -62,7 +62,7 @@
 **要求：**
 
 1. 先移植 QuickLogin settings、设备列表、quota editor 的交互测试，并针对当前拆分后的 `features/admin` 与统一 API client 写失败请求断言。
-2. 新增 v1 管理资源：policy preview/initialize、quota preview/apply；保留原权限、preview token、revision、防并发覆盖和事务语义，旧地址集中兼容。
+2. 新增仅 v1 的管理资源：policy preview/initialize、quota preview/apply；保留原权限、preview token、revision、防并发覆盖和事务语义；旧 admin 地址返回 JSON 404。
 3. Settings 只在用户 eligible 时显示 QuickLogin 管理；设备列表走 v1 session API。Admin 在现有模块化页面中接入额度编辑，不把 `Admin.tsx` 重新膨胀成旧单文件。
 4. 所有请求复用 `frontend/src/lib/api` 的 v1 基址、ApiError、204/no-store 处理；不恢复散落 fetch 或后端 `src` import。
 5. 运行相关组件/API client 测试、frontend typecheck/lint/build、边界检查；提交 Conventional Commit。
