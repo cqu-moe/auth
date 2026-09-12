@@ -2,11 +2,11 @@
 
 状态：用户于 2026-09-12 在核对现有调用方后批准执行。本计划是已完成的 API v1 T00–T17 的补充，不重开原设计审批。
 
-执行状态（2026-09-12）：Q1–Q5、整分支审查及修复均已完成；最终Auth Node85 files/683 tests、Workers/DO20 files/160 tests、扩展14 files/46 tests和全部合同/前端门禁通过。Auth HEAD `cff2a87` 已部署为production version `08ac7991-689c-41fa-b235-ccc062f2cdda`并接管100%流量；无凭据探针通过。扩展未发布、现有两台设备未升级，真实流量与最终过渡桥移除留待今晚。
+执行状态（2026-09-12）：Q1–Q5、整分支审查及修复均已完成；随后用户明确批准全量切换，不再兼容现有两台旧扩展设备。当前源码已移除旧 OAuth、reset callback、QuickLogin device bridge 与 root audience；扩展源码只使用 v1 和稳定 issuer audience。最终全量门禁、main 合并、push、CI 部署和线上探针在本轮继续记录。
 
 ## 目标
 
-把 `codex/quicklogin-implementation` 中已经部署并由 canary 使用的 QuickLogin 设备能力选择性整合进 `codex/api-v1-refactor`，为设备与管理接口提供 `/api/v1` 正式入口，同时保留必要过渡兼容；把 QuickLogin 扩展仓库的 OAuth 与设备请求迁到 v1。用户随后于 2026-09-12 明确授权在全部本地门禁通过后上线 Auth API v1。扩展只调整、构建和留本地提交，不发布商店；通用legacy下线，QuickLogin/reset过渡桥暂留；不上传Cloudflare schema、不改WAF。
+把 `codex/quicklogin-implementation` 中已经部署并由 canary 使用的 QuickLogin 设备能力选择性整合进 `codex/api-v1-refactor`，为设备与管理接口提供 `/api/v1` 正式入口；把 QuickLogin 扩展仓库的 OAuth 与设备请求迁到 v1。用户随后于 2026-09-12 明确授权在全部本地门禁通过后上线 Auth API v1，并明确放弃两台旧设备兼容。扩展不发布商店；全部旧业务 API 下线，不上传Cloudflare schema、不改WAF。
 
 ## 已核实基线
 
@@ -102,4 +102,4 @@
 | Q4 扩展 v1 客户端 | `codex/quicklogin-api-v1-client`: `c399987`、`8216986` | 14 files / 46 tests、typecheck/build/package 通过；未发布商店，未实际升级两台设备 |
 | Q5 合同/Cloudflare/最终验收 | `codex/api-v1-refactor`: `6808ef7` 至最终 `cff2a87` | 合同、auth-policy、HTTP/DO审查修复、本地门禁、dry-run、production部署和无凭据探针通过 |
 
-Q5 生成集合固定为153个操作：canonical132、websocket1、legacy15、永久discovery5。已部署build关闭通用legacy；QuickLogin0.1.2 authorize/token/devices与旧reset callback暂留，D01–D05永久保留。根任务已完成部署和无凭据探针；真实流量观察、真实用户路径和最终bridge移除留待今晚。
+最终切换后的生成集合固定为138个操作：canonical132、websocket1、legacy0、永久discovery5。旧 QuickLogin authorize/token/devices 与旧 reset callback 全部退役；D01–D05 因稳定 issuer 永久保留。两台旧设备需重新安装新版扩展。

@@ -7,8 +7,8 @@
 `auth-policy.json` records the exact authentication policy and evidence source for every runtime operation.
 `shared/api-types.generated.ts` is generated from the complete contract and must not be edited manually.
 
-The current local build has 153 operations: 132 canonical, one WebSocket handshake,
-15 temporary legacy operations, and five permanent discovery operations. Generation
+The current build has 138 operations: 132 canonical, one WebSocket handshake,
+zero legacy operations, and five permanent discovery operations. Generation
 fails unless the runtime, complete OpenAPI, Cloudflare projection, endpoint manifest,
 coverage manifest, and authentication policy have exactly the same operation set and operation IDs.
 
@@ -32,11 +32,9 @@ optional-session, session-only, admin, Bearer, OAuth client, and two-factor-cook
   export protocol DTOs. Internal grant records, DO account state, stored browser
   state, and pending operation state are not public schemas.
 
-The temporary legacy set is only old OAuth authorize/token, the old reset callback,
-and QuickLogin 0.1.2 device methods plus their exact OPTIONS routes. D01-D05 discovery
-paths are permanent issuer compatibility, not legacy retirement candidates. The
-current repository build removes the former blanket legacy Auth/custom API surface;
-deployment and later bridge removal are separate root-task actions.
+The old OAuth authorize/token paths, reset callback, and QuickLogin device paths are
+retired. D01-D05 discovery paths remain because they publish metadata for the stable
+issuer `https://auth.cqu.moe/api/auth`; they are not legacy business API operations.
 
 Cloudflare retains JSON request bodies and path/query parameters. Its schema
 validation does not validate form bodies, WebSocket messages, or responses; every

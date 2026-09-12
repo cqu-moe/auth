@@ -198,7 +198,7 @@ describe("Better Auth v1 migration", () => {
         refresh_token: expect.any(String),
         token_type: "Bearer",
       });
-      const refreshed = await fixture.request("/api/auth/oauth2/token", {
+      const refreshed = await fixture.request("/api/v1/auth/oauth2/token", {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
@@ -214,7 +214,7 @@ describe("Better Auth v1 migration", () => {
     }
   });
 
-  it("completes an existing legacy reset callback and password update", async () => {
+  it("retires the legacy reset callback and completes the canonical flow", async () => {
     const fixture = await createApiFixture();
     try {
       const headers = await fixture.signIn("user");
@@ -228,15 +228,20 @@ describe("Better Auth v1 migration", () => {
         "content-type": "application/json",
         origin: "http://localhost:8787",
       });
-      const resetToken = "legacy-reset-token-local-only";
-      const legacyAuth = createAuth(env, new Request("http://localhost:8787/api/auth/request-password-reset"));
-      const context = await legacyAuth.$context;
+      const resetToken = "canonical-reset-token-local-only";
+      const auth = createAuth(env, new Request("http://localhost:8787/api/v1/auth/request-password-reset"));
+      const context = await auth.$context;
       await context.internalAdapter.createVerificationValue({
         identifier: `reset-password:${resetToken}`,
         value: storedUser!.id,
         expiresAt: new Date(Date.now() + 60_000),
       });
-      const callback = `/api/auth/reset-password/${encodeURIComponent(resetToken)}?callbackURL=${encodeURIComponent("/reset-password/confirm")}`;
+      const legacyCallback = `/api/auth/reset-password/${encodeURIComponent(resetToken)}?callbackURL=${encodeURIComponent("/reset-password/confirm")}`;
+      const retired = await fixture.request(legacyCallback);
+      expect(retired.status).toBe(404);
+      await expect(retired.json()).resolves.toMatchObject({ status: 404, code: "NOT_FOUND" });
+
+      const callback = `/api/v1/auth/reset-password/${encodeURIComponent(resetToken)}?callbackURL=${encodeURIComponent("/reset-password/confirm")}`;
       const opened = await fixture.request(callback);
       expect(opened.status).toBe(302);
       const destination = new URL(opened.headers.get("location")!, "http://localhost:8787");

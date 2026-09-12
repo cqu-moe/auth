@@ -25,7 +25,7 @@ function extensionHeaders(authorization: string): Headers {
 }
 
 describe("quicklogin device HTTP", () => {
-  it("serves every v1 device operation and shares state with the exact legacy bridge", async () => {
+  it("serves every v1 device operation with no legacy bridge", async () => {
     const fixture = await createOAuthFixture(env);
     const install = await authorizeOfficialInstall(fixture, {
       websiteSession: fixture.websiteSession,
@@ -51,12 +51,12 @@ describe("quicklogin device HTTP", () => {
 
     const websiteHeaders = new Headers(fixture.websiteSession.headers);
     websiteHeaders.set("origin", new URL(env.BETTER_AUTH_URL).origin);
-    const legacyList = await SELF.fetch(
-      "http://localhost:8787/api/cqu/quicklogin/devices",
+    const canonicalList = await SELF.fetch(
+      "http://localhost:8787/api/v1/cqu/quicklogin/devices",
       { headers: websiteHeaders }
     );
-    expect(legacyList.status).toBe(200);
-    await expect(legacyList.json()).resolves.toMatchObject({
+    expect(canonicalList.status).toBe(200);
+    await expect(canonicalList.json()).resolves.toMatchObject({
       used: 0,
       devices: [expect.objectContaining({ deviceId: device.deviceId })],
     });
@@ -76,7 +76,7 @@ describe("quicklogin device HTTP", () => {
     });
 
     const enabled = await SELF.fetch(
-      `http://localhost:8787/api/cqu/quicklogin/devices/${device.deviceId}`,
+      `http://localhost:8787/api/v1/cqu/quicklogin/devices/${device.deviceId}`,
       {
         method: "PUT",
         headers: extensionHeaders(authorization),
@@ -128,7 +128,7 @@ describe("quicklogin device HTTP", () => {
     await expect(exported.json()).resolves.toMatchObject({ error: { code: "PREPARING" } });
 
     const deleted = await SELF.fetch(
-      `http://localhost:8787/api/cqu/quicklogin/devices/${device.deviceId}`,
+      `http://localhost:8787/api/v1/cqu/quicklogin/devices/${device.deviceId}`,
       { method: "DELETE", headers: websiteHeaders }
     );
     expect(deleted.status).toBe(204);
@@ -210,6 +210,9 @@ describe("quicklogin device HTTP", () => {
       "http://localhost:8787/api/cqu/quicklogin/devices/private/raw/path");
     expect(unknown.status).toBe(404);
     expect(unknown.headers.get("content-type")).toContain("json");
+    const retired = await SELF.fetch(
+      "http://localhost:8787/api/cqu/quicklogin/devices");
+    expect(retired.status).toBe(404);
 
     env.QUICKLOGIN_DEVICE_MODE = "off";
     const unavailable = await SELF.fetch(

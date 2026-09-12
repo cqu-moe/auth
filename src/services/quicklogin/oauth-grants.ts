@@ -177,7 +177,7 @@ export async function revokeProviderGrantFamily(
   const { createAuth } = await import("../../auth");
   const auth = createAuth(
     env,
-    new Request(`${env.BETTER_AUTH_URL}/api/auth/oauth2/token`)
+    new Request(`${env.BETTER_AUTH_URL}/api/v1/auth/oauth2/token`)
   );
   const ctx = await auth.$context;
   const where = [

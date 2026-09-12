@@ -29,26 +29,26 @@ describe("HTTP operation inventory", () => {
       .toEqual(["GET", "OPTIONS"]);
   });
 
-  it("mounts every generated auth operation canonically and only the legacy transition bridge", () => {
+  it("mounts every generated auth operation canonically with no legacy operations", () => {
     const operations = listHttpOperations(createApp());
     const keys = new Set(operations.map(({ method, path }) => `${method} ${path}`));
     for (const { method, path } of AUTH_OPERATIONS) {
       expect(keys.has(`${method} /api/v1/auth${path}`), `canonical ${method} ${path}`).toBe(true);
     }
-    expect(keys.has("GET /api/auth/oauth2/authorize")).toBe(true);
-    expect(keys.has("POST /api/auth/oauth2/token")).toBe(true);
-    expect(keys.has("GET /api/auth/reset-password/:token")).toBe(true);
+    expect(keys.has("GET /api/auth/oauth2/authorize")).toBe(false);
+    expect(keys.has("POST /api/auth/oauth2/token")).toBe(false);
+    expect(keys.has("GET /api/auth/reset-password/:token")).toBe(false);
     expect(keys.has("GET /api/auth/get-session")).toBe(false);
     expect(keys.has("POST /api/auth/email-otp/send-verification-otp")).toBe(false);
-    expect(keys.has("GET /api/cqu/quicklogin/devices")).toBe(true);
-    expect(keys.has("POST /api/cqu/quicklogin/devices/:id/export")).toBe(true);
+    expect(keys.has("GET /api/cqu/quicklogin/devices")).toBe(false);
+    expect(keys.has("POST /api/cqu/quicklogin/devices/:id/export")).toBe(false);
     expect(keys.has("POST /api/v1/auth/get-session")).toBe(false);
     expect(keys.has("POST /api/auth/get-session")).toBe(false);
     expect(keys.has("GET /api/v1/auth/token")).toBe(false);
     expect(keys.has("POST /api/v1/auth/sign-in/email-otp")).toBe(false);
   });
 
-  it("exposes only exact QuickLogin device preflights and the approved legacy bridge", () => {
+  it("exposes only canonical QuickLogin operations", () => {
     const operations = listHttpOperations(createApp());
     const quicklogin = operations
       .filter(({ path }) => path.includes("quicklogin"))
@@ -56,32 +56,20 @@ describe("HTTP operation inventory", () => {
       .sort();
 
     expect(quicklogin).toEqual([
-      "DELETE /api/cqu/quicklogin/devices/:id",
       "DELETE /api/v1/cqu/quicklogin/devices/:id",
-      "GET /api/cqu/quicklogin/devices",
       "GET /api/v1/cqu/quicklogin",
       "GET /api/v1/cqu/quicklogin/devices",
-      "OPTIONS /api/cqu/quicklogin/devices",
-      "OPTIONS /api/cqu/quicklogin/devices/:id",
-      "OPTIONS /api/cqu/quicklogin/devices/:id/export",
-      "OPTIONS /api/cqu/quicklogin/devices/:id/refresh",
-      "OPTIONS /api/cqu/quicklogin/devices/:id/status",
       "OPTIONS /api/v1/cqu/quicklogin/devices",
       "OPTIONS /api/v1/cqu/quicklogin/devices/:id",
       "OPTIONS /api/v1/cqu/quicklogin/devices/:id/export",
       "OPTIONS /api/v1/cqu/quicklogin/devices/:id/refresh",
       "OPTIONS /api/v1/cqu/quicklogin/devices/:id/status",
-      "POST /api/cqu/quicklogin/devices",
-      "POST /api/cqu/quicklogin/devices/:id/export",
-      "POST /api/cqu/quicklogin/devices/:id/refresh",
-      "POST /api/cqu/quicklogin/devices/:id/status",
       "POST /api/v1/admin/users/:id/quicklogin-policy/preview",
       "POST /api/v1/admin/users/:id/quicklogin-quota/preview",
       "POST /api/v1/cqu/quicklogin/devices",
       "POST /api/v1/cqu/quicklogin/devices/:id/export",
       "POST /api/v1/cqu/quicklogin/devices/:id/refresh",
       "POST /api/v1/cqu/quicklogin/devices/:id/status",
-      "PUT /api/cqu/quicklogin/devices/:id",
       "PUT /api/v1/admin/users/:id/quicklogin-policy/initialize",
       "PUT /api/v1/admin/users/:id/quicklogin-quota",
       "PUT /api/v1/cqu/quicklogin",

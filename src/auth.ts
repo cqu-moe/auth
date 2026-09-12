@@ -76,10 +76,6 @@ const currentEmailOtpPaths = new Set([
 export function createAuth(env: Env, request: Request) {
   const getResend = () => new Resend(env.RESEND_API_KEY);
   const urls = authUrls(env.BETTER_AUTH_URL);
-  // QuickLogin 0.1.2 sends resource=<auth origin>. This is a temporary audience
-  // compatibility value, never an issuer. Remove it after the extension moves
-  // resource to the stable issuer and legacy-device traffic is confirmed gone.
-  const legacyResourceAudience = new URL(env.BETTER_AUTH_URL).origin;
   const quickloginConsentReference = createQuickloginConsentReference(env);
 
   return betterAuth({
@@ -174,7 +170,7 @@ export function createAuth(env: Env, request: Request) {
             loginPage: "/login",
             consentPage: "/oauth/authorize",
             scopes: OAUTH_SCOPES,
-            validAudiences: [urls.issuer, legacyResourceAudience],
+            validAudiences: [urls.issuer],
             postLogin: {
               page: "/oauth/authorize",
               shouldRedirect: async () => false,

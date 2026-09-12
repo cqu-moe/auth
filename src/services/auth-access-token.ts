@@ -20,11 +20,8 @@ async function readLocalJwks(env: Env): Promise<JwksDocument> {
 
 export function verifyAuthAccessToken(token: string, env: Env) {
   const { issuer } = authUrls(env.BETTER_AUTH_URL);
-  // Temporary QuickLogin 0.1.2 audience only. Signature issuer remains the
-  // stable /api/auth identity and keys are loaded only from the v1 JWKS route.
-  const legacyResourceAudience = new URL(env.BETTER_AUTH_URL).origin;
   return verifyJwsAccessToken(token, {
-    verifyOptions: { issuer, audience: [issuer, legacyResourceAudience] },
+    verifyOptions: { issuer, audience: issuer },
     jwksFetch: () => readLocalJwks(env),
   });
 }

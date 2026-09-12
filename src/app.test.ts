@@ -182,26 +182,24 @@ describe("API and SPA routing boundary", () => {
     }
   });
 
-  it("forwards legacy OAuth form and callback requests without HTTP redirects", async () => {
+  it("retires legacy OAuth, reset callback, and device routes", async () => {
     const fixture = createHttpFixture();
     try {
       const app = createApp();
-      const form = "grant_type=authorization_code&code=invalid&redirect_uri=https%3A%2F%2Fclient.example%2Fcallback";
-      const init = {
-        method: "POST",
-        headers: {
-          "content-type": "application/x-www-form-urlencoded",
-          authorization: "Basic Zml4dHVyZS1jbGllbnQ6bG9jYWwtc2VjcmV0",
-        },
-        body: form,
-      } satisfies RequestInit;
-      const canonical = await app.request("/api/v1/auth/oauth2/token?trace=signed%2Bvalue", init, fixture.env);
-      const legacy = await app.request("/api/auth/oauth2/token?trace=signed%2Bvalue", init, fixture.env);
-      expect(legacy.status).toBe(canonical.status);
-      expect(legacy.status).not.toBe(301);
-      expect(legacy.status).not.toBe(302);
-      expect([...legacy.headers.entries()]).toEqual([...canonical.headers.entries()]);
-      expect(await legacy.text()).toBe(await canonical.text());
+      for (const [method, path] of [
+        ["GET", "/api/auth/oauth2/authorize"],
+        ["POST", "/api/auth/oauth2/token"],
+        ["GET", "/api/auth/reset-password/local-token"],
+        ["GET", "/api/cqu/quicklogin/devices"],
+        ["POST", "/api/cqu/quicklogin/devices/local-device/status"],
+      ] as const) {
+        const response = await app.request(path, { method }, fixture.env);
+        expect(response.status, `${method} ${path}`).toBe(404);
+        expect(await response.json(), `${method} ${path}`).toMatchObject({
+          status: 404,
+          code: "NOT_FOUND",
+        });
+      }
     } finally {
       await fixture.close();
     }
@@ -228,9 +226,9 @@ describe("API and SPA routing boundary", () => {
       expect(response.status).not.toBe(200);
       const entries = info.mock.calls.map(([entry]) => JSON.parse(String(entry)));
       expect(entries).toContainEqual({
-        event: "api.legacy_bridge",
+        event: "api.legacy_rejected",
         method: "POST",
-        route: "/api/cqu/quicklogin/devices/:id/status",
+        route: "/api/cqu/quicklogin/devices/*",
         status: response.status,
       });
       const serialized = JSON.stringify(entries);

@@ -7,6 +7,7 @@ export const OTHER_CLIENT_ID = "ordinary-test-client";
 export const OFFICIAL_REDIRECT_URI = "https://quicklogin-test.chromiumapp.org/";
 export const OTHER_REDIRECT_URI = "https://ordinary.example/callback";
 const BASE_URL = "http://localhost:8787";
+const RESOURCE = `${BASE_URL}/api/auth`;
 
 export interface WebsiteSession { userId: string; headers: Headers }
 export interface OAuthFixture {
@@ -161,7 +162,7 @@ async function authorizeInstall(
   authorizeUrl.searchParams.set("scope", scopes.join(" "));
   authorizeUrl.searchParams.set("state", crypto.randomUUID());
   authorizeUrl.searchParams.set("prompt", "consent");
-  authorizeUrl.searchParams.set("resource", BASE_URL);
+  authorizeUrl.searchParams.set("resource", RESOURCE);
   if (verifier !== null) {
     authorizeUrl.searchParams.set("code_challenge", await codeChallenge(verifier));
     authorizeUrl.searchParams.set("code_challenge_method", "S256");
@@ -201,7 +202,7 @@ async function authorizeInstall(
     code,
     code_verifier: options.exchangeVerifier ?? verifier ?? "",
     redirect_uri: redirectUri,
-    resource: BASE_URL,
+    resource: RESOURCE,
   })));
   const tokenBody = await tokenResponse.json<{
     access_token?: string; refresh_token?: string; error?: string; error_description?: string;
@@ -221,7 +222,7 @@ async function authorizeInstall(
         grant_type: "refresh_token",
         client_id: clientId,
         refresh_token: refreshToken,
-        resource: BASE_URL,
+        resource: RESOURCE,
       })));
       const body = await response.json<{
         access_token?: string; refresh_token?: string; error?: string; error_description?: string;

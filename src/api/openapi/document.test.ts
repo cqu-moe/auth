@@ -135,7 +135,7 @@ describe("complete API document", () => {
   it("documents device JSON transport errors only on QuickLogin write operations", () => {
     const document = buildOpenApiDocument(listHttpOperations(createApp())) as Record<string, any>;
     const paths = document.paths as Record<string, Record<string, any>>;
-    for (const base of ["/api/v1/cqu/quicklogin/devices", "/api/cqu/quicklogin/devices"]) {
+    for (const base of ["/api/v1/cqu/quicklogin/devices"]) {
       for (const [suffix, method] of [
         ["", "post"], ["/{id}", "put"], ["/{id}/status", "post"],
         ["/{id}/refresh", "post"], ["/{id}/export", "post"],
@@ -303,10 +303,7 @@ describe("complete API document", () => {
       .content["application/problem+json"].schema)
       .toEqual({ $ref: "#/components/schemas/QuickloginQuotaProblem" });
 
-    const legacyRegister = paths["/api/cqu/quicklogin/devices"].post;
-    expect(legacyRegister.security).toEqual([{ bearerAuth: [] }]);
-    expect(legacyRegister.responses["422"].content["application/json"].schema)
-      .toEqual({ $ref: "#/components/schemas/QuickloginNativeError" });
+    expect(paths).not.toHaveProperty("/api/cqu/quicklogin/devices");
   });
 
   it("keeps QuickLogin JSON sample acceptance equivalent in 3.1 and Cloudflare 3.0", () => {

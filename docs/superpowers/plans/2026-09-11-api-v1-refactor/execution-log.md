@@ -69,3 +69,12 @@ Node/npm：`v22.22.3` / `10.9.8`
 - `wrangler deployments status --json`：deployment `e7c63b0e-972a-4fe1-b691-e33776946c6a`，新version接管100%；部署前version=`4d02e29d-c1e2-4176-a7ab-308e36ea4c13`。
 - Ego Lite TaskSpace 27、`credentials:omit`：v1 health/OpenAPI/JWKS和D01–D05均200；旧health/auth get-session/admin与未知v1均Problem404；未知/retired OPTIONS 404，health OPTIONS 204；v1 QuickLogin无会话401、旧device bridge无会话401、旧OAuth bridge缺参数400；登录页与新静态bundle200。
 - 普通页面不能伪造`chrome-extension://` Origin，线上QuickLogin preflight没有冒充通过；本地真实workerd已在最终160项中覆盖固定extension origin/CORS。真实流量、登录/OTP/学校业务和两台扩展升级留待今晚。
+
+### 全量 V1 切换（2026-09-12）
+
+- 授权边界：用户明确要求合并、push 和全量上线，并确认不兼容现有两台旧设备；仍不上传 Cloudflare schema、不改 WAF、不访问生产 D1/KV、不发布扩展商店。
+- RED：Node 定点 5 files / 50 tests 中6项按预期失败，命中旧 route inventory、OpenAPI、bridge telemetry 与 root audience；Workers 定点 3 files / 13 tests 中2项按预期失败，命中旧 reset/device bridge。
+- GREEN：移除 `createLegacyRouter`、15个批准 legacy operation、Better Auth/root token audience 兼容和旧 OpenAPI 投影；内部 OAuth 上下文与扩展 fixture 改用 `/api/v1` + 稳定 issuer audience。定点 Node 50/50、Workers 13/13。
+- 生成：最终集合138=132 canonical+1 websocket+0 legacy+5 discovery；六份生成物连续两次 SHA-256 不变。
+- 全量本地：Node 85/683、Workers/DO 20/160、扩展14/46；两项root TypeScript、frontend tsc/lint/build、`check:api`、`check:boundaries`、Redocly、Wrangler 4.94.0 dry-run 全部 exit 0。Workers 只含既有 sourcemap、overdue alarm 与 disabled-container 噪音。
+- 合并、push、CI deployment version 与生产无凭据探针尚待本节后续记录，不能由上述本地结果替代。

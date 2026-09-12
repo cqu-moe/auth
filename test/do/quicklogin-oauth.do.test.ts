@@ -30,11 +30,10 @@ describe("quicklogin OAuth grants", () => {
     const fixture = await createOAuthFixture(env);
     const first = await authorizeOfficialInstall(fixture, { websiteSession: fixture.websiteSession });
     const second = await authorizeOfficialInstall(fixture, { websiteSession: fixture.websiteSession });
-    // 0.1.2 requests the root audience, but the issuer must already be stable.
     const claims = accessTokenPayload(first);
     expect(claims).toMatchObject({
       iss: `${env.BETTER_AUTH_URL}/api/auth`,
-      aud: expect.arrayContaining([env.BETTER_AUTH_URL]),
+      aud: expect.arrayContaining([`${env.BETTER_AUTH_URL}/api/auth`]),
       azp: OFFICIAL_CLIENT_ID,
       scope: expect.stringContaining("cqu:quicklogin:device"),
       ql_grant: expect.any(String),

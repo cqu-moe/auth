@@ -6,7 +6,7 @@ import {
 import { createAuth } from "./auth";
 import type { HonoEnv } from "./types";
 import { createV1Api } from "./api/v1";
-import { createLegacyRouter, logLegacy, rejectedLegacyCategory } from "./api/legacy";
+import { logLegacy, rejectedLegacyCategory } from "./api/legacy";
 import { allowedMethods, listHttpOperations } from "./api/operations";
 import { problem } from "./api/problem";
 import { createAuthApi } from "./api/v1/auth";
@@ -27,8 +27,7 @@ export function createApp() {
 
   app.use("/*", async (c, next) => {
     const path = new URL(c.req.url).pathname;
-    if (path.startsWith("/api/v1/cqu/quicklogin/devices") ||
-        path.startsWith("/api/cqu/quicklogin/devices")) {
+    if (path.startsWith("/api/v1/cqu/quicklogin/devices")) {
       return next();
     }
     const origin = c.req.header("origin");
@@ -53,11 +52,6 @@ export function createApp() {
   });
 
   app.route("/api/v1", createV1Api());
-  app.route("/api", createLegacyRouter(async (request, pathname, env) => {
-    const url = new URL(request.url);
-    url.pathname = pathname;
-    return app.request(new Request(url, request), undefined, env);
-  }));
 
   const oauthMetadata = async (c: Parameters<typeof problem>[0]) => {
     const auth = createAuth(c.env, c.req.raw);

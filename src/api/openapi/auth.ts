@@ -158,24 +158,6 @@ export function mergeBetterAuthOpenApi(
       document.paths[canonicalPath] = canonical;
     }
 
-    const legacyPath = `/api/auth${suffix}`;
-    const legacyRuntime = document.paths[legacyPath] as Record<string, any> | undefined;
-    if (legacyRuntime) {
-      const legacy: Record<string, any> = {};
-      for (const [method, runtimeOperation] of Object.entries(legacyRuntime)) {
-        const generated = rewritten[method];
-        if (!generated || typeof generated !== "object") {
-          legacy[method] = runtimeOperation;
-          continue;
-        }
-        legacy[method] = {
-          ...structuredClone(generated),
-          operationId: runtimeOperation.operationId,
-          summary: generated.summary ?? runtimeOperation.summary,
-        };
-      }
-      document.paths[legacyPath] = legacy;
-    }
   }
   pruneSchemas(document);
   return document;

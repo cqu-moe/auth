@@ -311,10 +311,9 @@ scope 与 protocolVersion 都不能由远端内容改写。
 网页 QuickLogin root 和 admin policy/quota 仍按 API v1 使用 `{data}` / Problem。
 生成合同见 `docs/api/README.md`。
 
-过渡期只暂留 QuickLogin 0.1.2 的旧 authorize/token/device exact routes 与旧
-reset callback；通用 legacy 在该 build 部署后下线。D01–D05 discovery 永久保留。
-新扩展源码已迁移但尚未发布商店，两台现有设备尚未实际升级，因此 root audience
-兼容和临时 bridge 现在不能移除。
+旧 authorize/token/device exact routes 与旧 reset callback 已全部退役；OAuth
+只接受稳定 issuer audience `https://auth.cqu.moe/api/auth`。D01–D05 discovery
+永久保留。新扩展源码已迁移；已有旧设备需重新安装新版扩展，不再提供协议兼容。
 
 > 插件本体(MV3 manifest、`launchWebAuthFlow`、内容脚本检测、跳转)由插件项目自行实现,本指南只定 auth 侧契约。实现前用 Context7 核对 `chrome.identity` / `@better-auth/oauth-provider` PKCE 参数名(snake_case:`client_id`/`code_challenge`)。
 

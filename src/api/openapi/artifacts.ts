@@ -14,23 +14,7 @@ export const DISCOVERY_PATHS = new Set([
   "/.well-known/oauth-authorization-server/api/auth",
 ]);
 
-const APPROVED_LEGACY = new Set([
-  "GET /api/auth/oauth2/authorize",
-  "POST /api/auth/oauth2/token",
-  "GET /api/auth/reset-password/{token}",
-  "GET /api/cqu/quicklogin/devices",
-  "POST /api/cqu/quicklogin/devices",
-  "PUT /api/cqu/quicklogin/devices/{id}",
-  "DELETE /api/cqu/quicklogin/devices/{id}",
-  "POST /api/cqu/quicklogin/devices/{id}/status",
-  "POST /api/cqu/quicklogin/devices/{id}/refresh",
-  "POST /api/cqu/quicklogin/devices/{id}/export",
-  "OPTIONS /api/cqu/quicklogin/devices",
-  "OPTIONS /api/cqu/quicklogin/devices/{id}",
-  "OPTIONS /api/cqu/quicklogin/devices/{id}/status",
-  "OPTIONS /api/cqu/quicklogin/devices/{id}/refresh",
-  "OPTIONS /api/cqu/quicklogin/devices/{id}/export",
-]);
+const APPROVED_LEGACY = new Set<string>();
 
 export interface EndpointManifestEntry {
   host: string;

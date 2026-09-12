@@ -193,3 +193,11 @@
 ## 原 T00–T17 发布边界
 
 未 push、未部署、未上传 Cloudflare schema、未启用 API Shield/WAF，旧地址尚未退役，永久 issuer discovery 例外保留。
+
+### 全量 V1 切换验收（2026-09-12）
+
+- 用户明确放弃两台旧扩展设备兼容。旧 OAuth authorize/token、reset callback、QuickLogin device methods+OPTIONS 与 root audience 已移除；D01–D05 issuer discovery 永久保留。
+- TDD 证据：改测试后 Node 定点 6 项失败、Workers 定点 2 项失败，均准确命中旧 bridge/audience；实现后 Node 50/50、Workers 13/13 转绿。
+- 最终本地门禁：Node 85 files / 683 tests、Workers/DO 20 files / 160 tests、扩展 14 files / 46 tests；root/DO TypeScript、frontend tsc/lint/build、API drift、boundary、Redocly 与 Wrangler dry-run 均 exit 0。
+- runtime/OpenAPI 3.1.1/Cloudflare 3.0.3/endpoints/coverage/auth-policy 精确集合为138：132 canonical、1 websocket、0 legacy、5 discovery。六份生成物连续两次 SHA-256 完全一致。
+- 本节只证明本地实现与构建；main 合并、push、CI、production version 和线上探针在执行日志继续记录。

@@ -7,10 +7,10 @@
 以下是原清单完成后的执行期修正，不代表 2026-09-11 设计时已经知道。原清单基于 main 快照排除 QuickLogin device；随后能力分支和 canary 证据确认 `0009_quicklogin_devices.sql`、两个 QuickLogin DO、OAuth grant 和设备路由是必须保留并迁入 v1 的现行能力。批准内容见 [QuickLogin 补充计划](../2026-09-12-api-v1-quicklogin-integration.md)。
 
 - canonical 新增 QuickLogin root、device register/list/PUT/DELETE/status/refresh/export，以及四个 admin policy/quota 操作；device 的成功与错误保持原生 DTO，root/admin 仍使用 `D<T>` / Problem。
-- 当前本地生成集合为153个操作：132 canonical、1 websocket、15 temporary legacy、5 permanent discovery。runtime、OpenAPI、Cloudflare、endpoints 和 coverage 精确相等；原全量115-operation legacy 投影不再属于当前 build。
-- temporary legacy 只有 `GET /api/auth/oauth2/authorize`、`POST /api/auth/oauth2/token`、`GET /api/auth/reset-password/{token}`，以及旧 device exact methods+OPTIONS。旧 admin QuickLogin 不保留。D01–D05 永久保留且 kind=discovery。
+- 当前本地生成集合为138个操作：132 canonical、1 websocket、0 legacy、5 permanent discovery。runtime、OpenAPI、Cloudflare、endpoints、coverage 和 auth-policy 精确相等；旧业务 API 不再属于当前 build。
+- 旧 OAuth authorize/token、reset callback 及 device exact methods+OPTIONS 已全部退役。旧 admin QuickLogin 也不保留。D01–D05 永久保留且 kind=discovery。
 - website device GET/DELETE 是 Cookie（写操作同时固定 website origin）；extension register/PUT/status/refresh/export 是 Bearer + fixed configured extension origin。root 是 session-only；admin 是 admin session + entitlement assign permission。
-- 新扩展分支已改用 v1 和 stable issuer audience，但尚未发布商店或实际升级现有两设备；root audience 与上述 legacy bridge 暂时保留，待今晚流量/升级核对后另行移除。
+- 新扩展分支已改用 v1 和 stable issuer audience。用户确认不兼容现有两台旧设备，因此 root audience 与 legacy bridge 均已移除；旧设备需重新安装新版扩展。
 - 本补充 Task 5 只完成本地合同、生成物、配置和门禁准备；部署、生产 health/静态/无凭据探针、真实用户路径和最终 bridge 移除仍由根任务执行。
 
 ## 1. 基线与事实边界
