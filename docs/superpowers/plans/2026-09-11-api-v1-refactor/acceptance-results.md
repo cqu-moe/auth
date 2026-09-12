@@ -200,4 +200,6 @@
 - TDD 证据：改测试后 Node 定点 6 项失败、Workers 定点 2 项失败，均准确命中旧 bridge/audience；实现后 Node 50/50、Workers 13/13 转绿。
 - 最终本地门禁：Node 85 files / 683 tests、Workers/DO 20 files / 160 tests、扩展 14 files / 46 tests；root/DO TypeScript、frontend tsc/lint/build、API drift、boundary、Redocly 与 Wrangler dry-run 均 exit 0。
 - runtime/OpenAPI 3.1.1/Cloudflare 3.0.3/endpoints/coverage/auth-policy 精确集合为138：132 canonical、1 websocket、0 legacy、5 discovery。六份生成物连续两次 SHA-256 完全一致。
-- 本节只证明本地实现与构建；main 合并、push、CI、production version 和线上探针在执行日志继续记录。
+- main/push/CI/production 全部完成：QuickLogin `main`=`8216986`；Auth `main`=`e58cd6a`；Actions run `34694747439` 全绿；production version `8ba77565-5078-4a04-86b2-58d48b8f0f02` 接管100%流量。
+- Ego Lite `credentials:omit` 生产探针：OpenAPI operation count=138；v1 health/JWKS 与D01–D05均200；15个旧 OAuth/reset/device methods+OPTIONS 均 `application/problem+json` 404/`NOT_FOUND`；v1 QuickLogin无会话401，未知v1为Problem404，登录页加载正常。
+- 仍未上传 Cloudflare schema、未改 API Shield/WAF、未访问生产 D1/KV 内容、未发布扩展商店；真实登录、学校业务和重装后的真实扩展路径不由无凭据探针替代。

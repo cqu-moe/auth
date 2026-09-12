@@ -2,7 +2,7 @@
 
 状态：用户于 2026-09-12 在核对现有调用方后批准执行。本计划是已完成的 API v1 T00–T17 的补充，不重开原设计审批。
 
-执行状态（2026-09-12）：Q1–Q5、整分支审查及修复均已完成；随后用户明确批准全量切换，不再兼容现有两台旧扩展设备。当前源码已移除旧 OAuth、reset callback、QuickLogin device bridge 与 root audience；扩展源码只使用 v1 和稳定 issuer audience。最终全量门禁、main 合并、push、CI 部署和线上探针在本轮继续记录。
+执行状态（2026-09-12）：全量切换完成。QuickLogin `main`=`8216986`；Auth `main` 应用提交=`534081e`、CI 稳定提交=`e58cd6a`。Actions run `34694747439` 全绿，production version `8ba77565-5078-4a04-86b2-58d48b8f0f02` 接管100%流量；生产 OpenAPI 138 operations，旧 OAuth/reset/device routes 全部 Problem 404。现有两台旧设备需重新安装新版扩展。
 
 ## 目标
 

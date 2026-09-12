@@ -81,3 +81,7 @@ Node/npm：`v22.22.3` / `10.9.8`
 - 首次 push：QuickLogin `main` 已到 `8216986`；Auth `main` 已到 `534081e`。Actions run `34694070733` 的 Node/typecheck 通过，但 Workers/DO 在 GitHub shared Linux runner 上 148/160 通过、12项因默认5秒 `testTimeout` 失败，故 D1 migration 与部署均被跳过，production 未变更。失败集中于 Better Auth crypto + D1 集成用例，全部是 timeout 而非断言差异；本地同提交160/160。
 - 根因修正：Workers 专用 Vitest config 将 `testTimeout` 提至20秒，覆盖 CI 实测单例耗时；不改变应用、生产配置或测试断言。修正后的本地/CI结果在后续记录。
 - 本地复验同时复现一个既有 alarm 测试竞态：排定的即时 alarm 与测试手工直接调用可同时执行，导致 `sessionVersion` 偶发从1变2。该测试改用官方 `runDurableObjectAlarm` 并固定未来测试时钟；目标文件连续3次15/15，随后 `CI=true npm run test:do` 20 files / 160 tests 全绿。
+- 修正提交 `e58cd6a test(ci): stabilize workers integration suite` 已 push。Actions run `34694747439`：Node、Workers/DO、两项TypeScript、API drift、Redocly、boundaries、frontend type/lint/build 全部通过；生产D1显示无待执行migration；部署成功。
+- Cloudflare deployment `f922ad47-7b7b-4cc0-845e-f80cffde8e23`，production version `8ba77565-5078-4a04-86b2-58d48b8f0f02`，流量100%，created `2026-09-12T12:55:40Z`。
+- Ego Lite TaskSpace 28、`credentials:omit`：生产OpenAPI为138 operations；v1 health/OpenAPI/JWKS和D01–D05均200；旧OAuth authorize/token、reset callback、QuickLogin device methods+OPTIONS全部Problem404/`NOT_FOUND`；v1 QuickLogin无会话401，未知v1 Problem404，登录页正常。TaskSpace已关闭。
+- 最终边界：未上传Cloudflare schema、未改WAF/API Shield、未读取生产D1/KV内容、未发布扩展商店。两个旧设备明确不兼容，需用户重新安装；真实登录/学校业务/重装扩展验收留待用户执行。
