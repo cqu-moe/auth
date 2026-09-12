@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { eq, sql } from "drizzle-orm";
 import { entitlementConfig, entitlementPreset, userEntitlement } from "../db/schema";
 import { CAPABILITIES, PRESETS, SUBSYSTEMS, type Subsystem } from "../../shared/capabilities";
+import { assertGenericEntitlementWriteAllowed } from "./quicklogin/quota-admin";
 
 type Row = { subsystem: string; capability: string; value: string };
 export type Caps = Record<string, Record<string, boolean | number | null>>;
@@ -236,6 +237,7 @@ export async function upsertPreset(
   name: string,
   items: Item[]
 ): Promise<void> {
+  assertGenericEntitlementWriteAllowed(items);
   const d = drizzle(db);
   await d
     .insert(entitlementPreset)
@@ -305,6 +307,7 @@ export async function applyPresetEntitlements(
 ): Promise<number> {
   const items = await getPresetItems(db, name);
   if (!items || items.length === 0) return 0;
+  assertGenericEntitlementWriteAllowed(items);
   await drizzle(db)
     .insert(userEntitlement)
     .values(items.map((it) => ({ userId, ...it })));

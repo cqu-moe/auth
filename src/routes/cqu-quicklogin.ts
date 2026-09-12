@@ -8,6 +8,7 @@ import { requireSession } from "../middleware/authentication";
 import { QuickloginAccountClient } from "../services/quicklogin/account-client";
 import { quickloginDeviceModeEnabled } from "../services/quicklogin/mode";
 import { parseEnabled, QuickloginHttpError, readJson } from "../services/quicklogin/http";
+import { hasQuickloginPolicy } from "../services/quicklogin/eligibility";
 
 // 用户自助快捷登录开关 /api/cqu/quicklogin。
 //
@@ -69,8 +70,11 @@ async function getOwnFlag(
 cquQuicklogin.get("/", async (c) => {
   const user = c.get("user") as { id: string };
   if (quickloginDeviceModeEnabled(c.env)) {
+    const eligible = await hasQuickloginPolicy(c.env.DATABASE, user.id);
+    if (!eligible) return c.json({ eligible: false });
     const list = await new QuickloginAccountClient(c.env).listDevices(user.id, Date.now());
     return c.json({
+      eligible: true,
       masterEnabled: list.masterEnabled,
       deviceLimit: list.deviceLimit,
       used: list.used,
@@ -100,10 +104,14 @@ cquQuicklogin.put("/", async (c) => {
 
   if (quickloginDeviceModeEnabled(c.env)) {
     try {
+      if (!(await hasQuickloginPolicy(c.env.DATABASE, user.id))) {
+        return errorResponse(c, "FORBIDDEN", "未开放浏览器插件快捷登录功能", 403);
+      }
       const enabled = parseEnabled(await readJson(c.req.raw));
       const list = await new QuickloginAccountClient(c.env)
         .setMasterEnabled(user.id, enabled);
       return c.json({
+        eligible: true,
         masterEnabled: list.masterEnabled,
         deviceLimit: list.deviceLimit,
         used: list.used,

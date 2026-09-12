@@ -4,6 +4,8 @@ import { EntitlementMatrix } from "../../components/EntitlementFields";
 import { buildItems, formFromItems, type EntitlementForm, type EntitlementItem } from "../../components/entitlement-form";
 import { USER_ROLE_OPTIONS } from "../../../../shared/user-roles";
 import { adminFetch } from "../../lib/api/admin";
+import { authClient } from "../../lib/auth-client";
+import QuotaEditor from "../../components/quicklogin/QuotaEditor";
 import { FieldLabel, Modal } from "./ui";
 
 
@@ -86,6 +88,9 @@ function RoleSelect({
 
 // --- Users Section ---
 export function UsersSection() {
+  const { data: session } = authClient.useSession();
+  const canEditQuota =
+    (session?.user as { role?: string } | undefined)?.role === "superAdmin";
   const [users, setUsers] = useState<User[]>([]);
   const [pagination, setPagination] = useState({ page: 1, total: 0, totalPages: 1 });
   const [loading, setLoading] = useState(true);
@@ -281,6 +286,7 @@ export function UsersSection() {
       {entitlementUser && (
         <EntitlementPanel
           user={entitlementUser}
+          canEditQuota={canEditQuota}
           onClose={() => setEntitlementUser(null)}
         />
       )}
@@ -290,9 +296,11 @@ export function UsersSection() {
 
 function EntitlementPanel({
   user,
+  canEditQuota,
   onClose,
 }: {
   user: User;
+  canEditQuota: boolean;
   onClose: () => void;
 }) {
   const [form, setForm] = useState<EntitlementForm>({});
@@ -346,7 +354,13 @@ function EntitlementPanel({
       const res = await adminFetch(`/admin/users/${user.id}/entitlements`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: buildItems(form) }),
+        body: JSON.stringify({
+          items: buildItems(form).filter((item) => !(
+            item.subsystem === "cqu" &&
+            (item.capability === "quicklogin" ||
+              item.capability === "quicklogin_device_limit")
+          )),
+        }),
       });
       if (res.ok) {
         setSuccess("已保存");
@@ -460,8 +474,15 @@ function EntitlementPanel({
 
             {/* --- 按子系统分组的能力 --- */}
             <div className="border-t border-gray-100 pt-4">
-              <EntitlementMatrix form={form} onChange={setForm} />
+              <EntitlementMatrix
+                form={form}
+                onChange={setForm}
+                quickloginPolicyReadOnly
+              />
             </div>
+            {canEditQuota && (
+              <QuotaEditor userId={user.id} onSaved={() => void load()} />
+            )}
           </>
         )}
       </div>

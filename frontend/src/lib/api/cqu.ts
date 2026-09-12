@@ -24,13 +24,3 @@ export async function updateCredentials(studentId: string, password: string, sig
     signal,
   })).data;
 }
-
-export async function getQuicklogin() {
-  return (await apiRequest<ApiSuccess<{ eligible: boolean; enabled: boolean }>>("/cqu/quicklogin")).data;
-}
-
-export async function updateQuicklogin(enabled: boolean) {
-  return (await apiRequest<ApiSuccess<{ enabled: boolean }>>("/cqu/quicklogin", {
-    method: "PUT", body: JSON.stringify({ enabled }),
-  })).data;
-}

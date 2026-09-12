@@ -110,7 +110,11 @@ function PresetEditor({
           </div>
         )}
 
-        <EntitlementMatrix form={form} onChange={setForm} />
+        <EntitlementMatrix
+          form={form}
+          onChange={setForm}
+          quickloginPolicyReadOnly
+        />
       </div>
 
       <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex items-center justify-between gap-2">

@@ -493,6 +493,29 @@ describe("registration entitlements (preset wiring)", () => {
     ]);
   });
 
+  it("does not apply QuickLogin policy from a legacy registration preset", async () => {
+    await insertPreset("legacy-unsafe", [
+      { subsystem: "calendar", capability: "sync", value: "1" },
+      { subsystem: "cqu", capability: "quicklogin_device_limit", value: "3" },
+    ]);
+    await env.DATABASE.prepare(
+      "INSERT INTO entitlement_config (key, value) VALUES ('default_preset', 'legacy-unsafe')"
+    ).run();
+    await env.DATABASE.prepare(
+      "INSERT INTO entitlement_config (key, value) VALUES ('invitation_required', '0')"
+    ).run();
+
+    const response = await handleInvitationSignup(
+      signupRequest({}),
+      env.DATABASE,
+      okRegister,
+      NOW
+    );
+
+    expect(response.status).toBe(200);
+    expect(await entitlementRows("user-ent")).toEqual([]);
+  });
+
   it("no-code signup with no default preset leaves the user entitlement-free (fail-closed)", async () => {
     await env.DATABASE.prepare(
       "INSERT INTO entitlement_config (key, value) VALUES ('invitation_required', '0')"

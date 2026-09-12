@@ -4,7 +4,8 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
-    message: string
+    message: string,
+    readonly body?: Record<string, unknown>
   ) {
     super(message);
     this.name = "ApiError";
@@ -36,7 +37,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
         status?: number; code?: string; detail?: string;
       } | null;
       if (body && typeof body.code === "string" && typeof body.detail === "string") {
-        throw new ApiError(response.status, body.code, body.detail);
+        throw new ApiError(response.status, body.code, body.detail, body);
       }
     }
     throw new ApiError(response.status, "UPSTREAM_ERROR", "请求失败，请稍后重试");

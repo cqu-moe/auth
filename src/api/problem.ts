@@ -19,11 +19,13 @@ export function problem(
   c: Context,
   code: string,
   detail: string,
-  status: number = 400
+  status: number = 400,
+  extensions: Record<string, unknown> = {}
 ) {
   const title = STATUS_TITLES[status] ?? "Error";
   return c.body(
     JSON.stringify({
+      ...extensions,
       type: "about:blank",
       title,
       status,

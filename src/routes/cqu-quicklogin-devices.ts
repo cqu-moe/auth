@@ -25,6 +25,7 @@ import {
 } from "../services/quicklogin/http";
 import type { DeviceAuthority, DeviceStatus, ErrorCode } from "../services/quicklogin/contracts";
 import { quickloginDeviceModeEnabled } from "../services/quicklogin/mode";
+import { hasQuickloginPolicy } from "../services/quicklogin/eligibility";
 
 const router = new Hono<HonoEnv>();
 const DEVICE_BASE_PATH = "/api/v1/cqu/quicklogin/devices";
@@ -87,6 +88,9 @@ async function websiteUser(c: Context<HonoEnv>): Promise<{ id: string }> {
   const auth = createAuth(c.env, c.req.raw);
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!session?.user) throw new QuickloginDeviceAuthError("UNAUTHORIZED");
+  if (!(await hasQuickloginPolicy(c.env.DATABASE, session.user.id))) {
+    throw new QuickloginDeviceAuthError("FORBIDDEN");
+  }
   return session.user;
 }
 

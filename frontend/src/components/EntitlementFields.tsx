@@ -11,9 +11,11 @@ import { SUBSYSTEM_LABELS, type EntitlementForm } from "./entitlement-form";
 export function EntitlementMatrix({
   form,
   onChange,
+  quickloginPolicyReadOnly = false,
 }: {
   form: EntitlementForm;
   onChange: (next: EntitlementForm) => void;
+  quickloginPolicyReadOnly?: boolean;
 }) {
   const setFlag = (key: string, flag: boolean) =>
     onChange({ ...form, [key]: { ...form[key], flag } });
@@ -40,6 +42,30 @@ export function EntitlementMatrix({
               {Object.keys(caps).map((capability) => {
                 const def = caps[capability];
                 const key = `${subsystem}.${capability}`;
+                if (
+                  quickloginPolicyReadOnly &&
+                  (key === "cqu.quicklogin_device_limit" || key === "cqu.quicklogin")
+                ) {
+                  const value = def.type === "quota"
+                    ? (form[key]?.quota || "未初始化")
+                    : (form[key]?.flag ? "已开启" : "已关闭");
+                  const hint = def.type === "quota"
+                    ? "设备额度须通过专用预览流程调整"
+                    : "总开关由用户在账户设置中管理";
+                  return (
+                    <div key={key} className="flex flex-wrap items-center gap-2 p-2 text-sm">
+                      <span className="text-gray-700">{def.label}</span>
+                      <span className="font-mono text-xs text-gray-400">{capability}</span>
+                      <output
+                        aria-label={`${def.label}当前值`}
+                        className="ml-auto text-sm font-medium text-gray-700"
+                      >
+                        {value}{def.type === "quota" && value !== "未初始化" ? ` ${def.unit ?? ""}` : ""}
+                      </output>
+                      <p className="basis-full text-xs text-gray-400">{hint}</p>
+                    </div>
+                  );
+                }
                 if (def.type === "flag") {
                   return (
                     <label

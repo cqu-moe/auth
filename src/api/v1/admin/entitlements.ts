@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { createAuth } from "../../../auth";
 import { userEntitlement } from "../../../db/schema";
@@ -14,6 +14,11 @@ import {
   validateEntitlementItems,
 } from "../../../services/entitlements";
 import type { HonoEnv } from "../../../types";
+import {
+  assertGenericEntitlementWriteAllowed,
+  isQuickloginPolicyItem,
+  QuickloginQuotaAdminError,
+} from "../../../services/quicklogin/quota-admin";
 import { problem } from "../../problem";
 
 type Item = { subsystem: string; capability: string; value: string };
@@ -38,6 +43,26 @@ async function jsonObject(c: Parameters<typeof problem>[0]): Promise<Record<stri
   }
 }
 
+function rejectQuickloginPolicyWrite(
+  c: Parameters<typeof problem>[0],
+  items: Item[]
+): Response | null {
+  try {
+    assertGenericEntitlementWriteAllowed(items);
+    return null;
+  } catch (error) {
+    if (error instanceof QuickloginQuotaAdminError) {
+      return problem(
+        c,
+        error.code,
+        "QuickLogin policy 必须使用专用预览接口修改",
+        409
+      );
+    }
+    throw error;
+  }
+}
+
 export function createAdminEntitlementsApi() {
   const api = new Hono<HonoEnv>();
   api.use("/*", requireAdmin);
@@ -55,9 +80,14 @@ export function createAdminEntitlementsApi() {
     const items = body.items as Item[];
     const invalid = validateEntitlementItems(items);
     if (invalid) return problem(c, "INVALID_ENTITLEMENTS", invalid, 400);
+    const policyError = rejectQuickloginPolicyWrite(c, items);
+    if (policyError) return policyError;
     const db = drizzle(c.env.DATABASE);
     const userId = c.req.param("id");
-    const del = db.delete(userEntitlement).where(eq(userEntitlement.userId, userId));
+    const del = db.delete(userEntitlement).where(and(
+      eq(userEntitlement.userId, userId),
+      sql`NOT (${userEntitlement.subsystem} = 'cqu' AND ${userEntitlement.capability} IN ('quicklogin', 'quicklogin_device_limit'))`
+    ));
     if (items.length) {
       const ins = db.insert(userEntitlement).values(items.map((item) => ({ userId, ...item })));
       await db.batch([del, ins]);
@@ -75,6 +105,8 @@ export function createAdminEntitlementsApi() {
     if (!items) return problem(c, "UNKNOWN_PRESET", "未知预设", 400);
     const invalid = validateEntitlementItems(items);
     if (invalid) return problem(c, "INVALID_PRESET", `预设数据已失效：${invalid}`, 409);
+    const policyError = rejectQuickloginPolicyWrite(c, items);
+    if (policyError) return policyError;
     if (!items.length) return c.json({ data: { applied: 0 } });
     const db = drizzle(c.env.DATABASE);
     const userId = c.req.param("id");
@@ -90,6 +122,17 @@ export function createAdminEntitlementsApi() {
 
   api.delete("/users/:id/entitlements/:subsystem/:capability", async (c) => {
     if (!(await entitlementPermission(c, "revoke"))) return problem(c, "FORBIDDEN", "需要权益撤销权限", 403);
+    if (isQuickloginPolicyItem({
+      subsystem: c.req.param("subsystem"),
+      capability: c.req.param("capability"),
+    })) {
+      return problem(
+        c,
+        "QUICKLOGIN_PREVIEW_REQUIRED",
+        "QuickLogin policy 必须使用专用预览接口修改",
+        409
+      );
+    }
     await drizzle(c.env.DATABASE).delete(userEntitlement).where(and(
       eq(userEntitlement.userId, c.req.param("id")),
       eq(userEntitlement.subsystem, c.req.param("subsystem")),
@@ -108,6 +151,8 @@ export function createAdminEntitlementsApi() {
     const items = body.items as Item[];
     const invalid = validateEntitlementItems(items);
     if (invalid) return problem(c, "INVALID_ENTITLEMENTS", invalid, 400);
+    const policyError = rejectQuickloginPolicyWrite(c, items);
+    if (policyError) return policyError;
     await upsertPreset(c.env.DATABASE, name, items);
     return c.json({ data: { name, items } });
   });
@@ -130,8 +175,11 @@ export function createAdminEntitlementsApi() {
       return problem(c, "INVALID_BODY", "必须显式提供 preset", 400);
     }
     const preset = body.preset as string | null;
-    if (preset !== null && !(await getPresetItems(c.env.DATABASE, preset))) {
-      return problem(c, "UNKNOWN_PRESET", "未知预设", 400);
+    if (preset !== null) {
+      const items = await getPresetItems(c.env.DATABASE, preset);
+      if (!items) return problem(c, "UNKNOWN_PRESET", "未知预设", 400);
+      const policyError = rejectQuickloginPolicyWrite(c, items);
+      if (policyError) return policyError;
     }
     await setDefaultPresetName(c.env.DATABASE, preset);
     return c.json({ data: { preset } });
