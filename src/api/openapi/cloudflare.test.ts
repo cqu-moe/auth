@@ -43,4 +43,26 @@ describe("Cloudflare OpenAPI 3.0 schema projection", () => {
       "#/components/schemas/InvitationCode"
     )).toEqual({ type: "string" });
   });
+
+  it("supplies string items for Better Auth string arrays missing item schemas", () => {
+    expect(toCloudflareSchema(
+      { type: "array", nullable: true },
+      "#/paths/link-social/requestBody/properties/scopes"
+    )).toEqual({ type: "array", nullable: true, items: { type: "string" } });
+    expect(() => toCloudflareSchema(
+      { type: "array" },
+      "#/components/schemas/UnknownArray"
+    )).toThrow("Array schema missing items at #/components/schemas/UnknownArray");
+  });
+
+  it("omits the unsupported uniqueItems array constraint", () => {
+    expect(toCloudflareSchema({
+      type: "array",
+      items: { type: "string" },
+      uniqueItems: true,
+    }, "#/components/schemas/Scopes")).toEqual({
+      type: "array",
+      items: { type: "string" },
+    });
+  });
 });

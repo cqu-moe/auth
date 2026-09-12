@@ -5,6 +5,8 @@
 It is written as compact JSON to stay below the dashboard's 512 KiB upload limit;
 the Cloudflare projection omits `pattern` constraints because Cloudflare does not
 document its accepted regular-expression subset. The application still enforces them.
+Better Auth string arrays missing an item schema are projected with string `items`;
+unsupported `uniqueItems` constraints remain application-validated.
 `endpoints.json` is the exact runtime method/path/operationId manifest.
 `coverage.json` records, per operation, what Cloudflare can validate and what remains application-validated.
 `auth-policy.json` records the exact authentication policy and evidence source for every runtime operation.

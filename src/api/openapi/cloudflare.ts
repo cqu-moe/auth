@@ -6,6 +6,15 @@ const UNSUPPORTED = new Set([
   "$dynamicAnchor",
 ]);
 
+const BETTER_AUTH_STRING_ARRAY_PROPERTIES = new Set([
+  "contacts",
+  "grant_types",
+  "post_logout_redirect_uris",
+  "redirect_uris",
+  "response_types",
+  "scopes",
+]);
+
 export function toCloudflareSchema(
   schema: Record<string, unknown>,
   pointer: string
@@ -13,7 +22,7 @@ export function toCloudflareSchema(
   const output: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(schema)) {
     if (UNSUPPORTED.has(key)) throw new Error(`Unsupported OpenAPI 3.1 keyword at ${pointer}/${key}`);
-    if (key === "pattern") continue;
+    if (key === "pattern" || key === "uniqueItems") continue;
     if (key === "$ref" && typeof value === "string" && !value.startsWith("#/")) {
       throw new Error(`External reference at ${pointer}/$ref`);
     }
@@ -63,6 +72,13 @@ export function toCloudflareSchema(
     } else if (value && typeof value === "object") {
       output[key] = toCloudflareSchema(value as Record<string, unknown>, `${pointer}/${key}`);
     } else output[key] = value;
+  }
+  if (output.type === "array" && !("items" in output)) {
+    const property = pointer.split("/").at(-1) ?? "";
+    if (!BETTER_AUTH_STRING_ARRAY_PROPERTIES.has(property)) {
+      throw new Error(`Array schema missing items at ${pointer}`);
+    }
+    output.items = { type: "string" };
   }
   return output;
 }
