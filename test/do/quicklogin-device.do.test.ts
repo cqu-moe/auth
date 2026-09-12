@@ -1,4 +1,4 @@
-import { env, runInDurableObject } from "cloudflare:test";
+import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { QuickloginAccountClient } from "../../src/services/quicklogin/account-client";
 import { QuickloginDeviceClient } from "../../src/services/quicklogin/device-client";
@@ -249,6 +249,7 @@ describe("CquQuickloginDeviceDO", () => {
   });
 
   it("logs in and exports validated SSO cookies", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
     const { userId, authority } = await setupDevice();
     const sessionStub = env.CQU_SESSION.get(env.CQU_SESSION.idFromName(userId));
     await seedSession(sessionStub, { status: "active" });
@@ -279,9 +280,7 @@ describe("CquQuickloginDeviceDO", () => {
         `${userId}:${authority.deviceId}`
       )
     );
-    await runInDurableObject(stub, async (instance) => {
-      await (instance as unknown as { alarm(): Promise<void> }).alarm();
-    });
+    await runDurableObjectAlarm(stub);
     await expect(devices.readDeviceSession(userId, authority.deviceId))
       .resolves.toMatchObject({ state: "ready", sessionVersion: 1 });
     await expect(devices.exportDeviceCookies(authority)).resolves.toMatchObject({
@@ -297,9 +296,7 @@ describe("CquQuickloginDeviceDO", () => {
     await runInDurableObject(stub, async (_instance, state) => {
       await state.storage.put("session", { ...before, lastKeepAliveAt: 0 });
     });
-    await runInDurableObject(stub, async (instance) => {
-      await (instance as unknown as { alarm(): Promise<void> }).alarm();
-    });
+    await runDurableObjectAlarm(stub);
     await expect(devices.readDeviceSession(userId, authority.deviceId))
       .resolves.toMatchObject({
         state: "ready",

@@ -78,3 +78,6 @@ Node/npm：`v22.22.3` / `10.9.8`
 - 生成：最终集合138=132 canonical+1 websocket+0 legacy+5 discovery；六份生成物连续两次 SHA-256 不变。
 - 全量本地：Node 85/683、Workers/DO 20/160、扩展14/46；两项root TypeScript、frontend tsc/lint/build、`check:api`、`check:boundaries`、Redocly、Wrangler 4.94.0 dry-run 全部 exit 0。Workers 只含既有 sourcemap、overdue alarm 与 disabled-container 噪音。
 - 合并、push、CI deployment version 与生产无凭据探针尚待本节后续记录，不能由上述本地结果替代。
+- 首次 push：QuickLogin `main` 已到 `8216986`；Auth `main` 已到 `534081e`。Actions run `34694070733` 的 Node/typecheck 通过，但 Workers/DO 在 GitHub shared Linux runner 上 148/160 通过、12项因默认5秒 `testTimeout` 失败，故 D1 migration 与部署均被跳过，production 未变更。失败集中于 Better Auth crypto + D1 集成用例，全部是 timeout 而非断言差异；本地同提交160/160。
+- 根因修正：Workers 专用 Vitest config 将 `testTimeout` 提至20秒，覆盖 CI 实测单例耗时；不改变应用、生产配置或测试断言。修正后的本地/CI结果在后续记录。
+- 本地复验同时复现一个既有 alarm 测试竞态：排定的即时 alarm 与测试手工直接调用可同时执行，导致 `sessionVersion` 偶发从1变2。该测试改用官方 `runDurableObjectAlarm` 并固定未来测试时钟；目标文件连续3次15/15，随后 `CI=true npm run test:do` 20 files / 160 tests 全绿。

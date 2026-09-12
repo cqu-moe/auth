@@ -53,5 +53,9 @@ export default defineConfig({
   ],
   test: {
     include: ["test/do/**/*.test.ts"],
+    // GitHub's shared Linux runners execute Better Auth crypto and D1-backed
+    // integration cases more slowly than local workerd. Keep the timeout above
+    // the observed per-test runtime without changing production behavior.
+    testTimeout: 20_000,
   },
 });
