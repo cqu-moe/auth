@@ -6,7 +6,7 @@ const SafeNonNegativeInteger = z.number().int().nonnegative()
 const boundedCanonicalText = (maxLength: number) => z.string()
   .min(1)
   .max(maxLength)
-  .regex(/^(?!\s)(?!.*\s$)[^\x00-\x1f\x7f\uD800-\uDFFF]+$/);
+  .regex(/^(?!\s)(?!.*\s$)[^\x00-\x1f\x7f-\x9f\u00ad\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb\ud800-\udfff]+$/);
 
 export const QuickloginDeviceUpdateBody = z.strictObject({
   enabled: z.boolean(),

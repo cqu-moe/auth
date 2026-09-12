@@ -344,6 +344,13 @@ describe("complete API document", () => {
         ok: false, code: "INVALID_REQUEST", status: 422,
       },
       {
+        name: "registration rejects an internal zero-width space",
+        schema: "QuickloginDeviceRegistration",
+        parser: parseDeviceMetadata,
+        input: { deviceName: "Chrome\u200BDevice", browserFamily: "chrome", browserVersion: "140" },
+        ok: false, code: "INVALID_REQUEST", status: 422,
+      },
+      {
         name: "device update is strict",
         schema: "QuickloginDeviceUpdate",
         parser: parseEnabled,
@@ -405,6 +412,16 @@ describe("complete API document", () => {
         input: {
           protocolVersion: 1, appliedVersion: null, generation: 1,
           browserVersion: "Chrome🚀",
+        },
+        ok: false, code: "INVALID_REQUEST", status: 422,
+      },
+      {
+        name: "heartbeat rejects an internal byte-order mark",
+        schema: "QuickloginDeviceHeartbeat",
+        parser: parseHeartbeat,
+        input: {
+          protocolVersion: 1, appliedVersion: null, generation: 1,
+          browserVersion: "Chrome\uFEFF140",
         },
         ok: false, code: "INVALID_REQUEST", status: 422,
       },
