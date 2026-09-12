@@ -18,7 +18,7 @@
 //     入口同 DO(会抛 "Cannot perform I/O on behalf of a different Durable Object")。故 M7 不靠
 //     input-gate 真交错, 而是让 keepalive spy 往【同一 state.storage】写 revoked(同 DO 上下文)
 //     来复现「探活在途 status 被改写」的因果, 断言写回分支命中撤销守卫。
-import { abortAllDurableObjects, runInDurableObject } from "cloudflare:test";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:test";
 import { describe, it, expect, afterEach, vi, type MockInstance } from "vitest";
 import { encrypt } from "../../src/services/crypto";
@@ -79,10 +79,16 @@ async function seedLease(
   return seedSession(stub, { ...opts, extra });
 }
 
-async function restartDurableObject(stub: DurableObjectStub) {
-  const id = stub.id;
-  await abortAllDurableObjects();
-  return env.CQU_SESSION.get(id);
+async function simulateAtrustActivation(stub: DurableObjectStub) {
+  await runInDurableObject(stub, async (instance) => {
+    const target = instance as unknown as {
+      recoverOrphanedAtrustLogin: (capture: boolean) => Promise<boolean>;
+      recoverPendingCodePermit: () => Promise<void>;
+    };
+    await target.recoverOrphanedAtrustLogin(true);
+    await target.recoverPendingCodePermit();
+  });
+  return stub;
 }
 
 describe("aTrust activation recovery", () => {
@@ -105,7 +111,7 @@ describe("aTrust activation recovery", () => {
         codeLease: {
           ownerToken: "atrust-orphan",
           ownerKind: "atrust",
-          acquiredAt: 0,
+          acquiredAt: now,
           queue: [],
         },
         codePermitPending: "atrust-orphan",
@@ -121,7 +127,7 @@ describe("aTrust activation recovery", () => {
       },
     });
 
-    const restarted = await restartDurableObject(stub);
+    const restarted = await simulateAtrustActivation(stub);
     const response = await restarted.fetch("http://do/status");
 
     expect(response.status).toBe(200);
@@ -166,7 +172,6 @@ describe("aTrust activation recovery", () => {
         codePermitPending: "cas-live",
       },
     });
-    const restarted = await restartDurableObject(stub);
     const permits: string[] = [];
     spyBrowserFetch({
       "/code-permit": async (request) => {
@@ -174,6 +179,7 @@ describe("aTrust activation recovery", () => {
         return Response.json({ ok: true });
       },
     });
+    const restarted = await simulateAtrustActivation(stub);
     await restarted.fetch("http://do/status");
 
     expect(await readStorage(restarted, "atrustLoginInFlight")).toBeUndefined();
@@ -196,13 +202,12 @@ describe("aTrust activation recovery", () => {
         codeLease: {
           ownerToken: "atrust-orphan",
           ownerKind: "atrust",
-          acquiredAt: 0,
+          acquiredAt: now,
           queue: [{ token: "cas-next", kind: "cas", queuedAt: now }],
         },
         codePermitPending: "atrust-orphan",
       },
     });
-    const restarted = await restartDurableObject(stub);
     const permits: string[] = [];
     spyBrowserFetch({
       "/code-permit": async (request) => {
@@ -210,6 +215,7 @@ describe("aTrust activation recovery", () => {
         return Response.json({ ok: true });
       },
     });
+    const restarted = await simulateAtrustActivation(stub);
     await restarted.fetch("http://do/status");
 
     expect(await readStorage(restarted, "atrustLoginInFlight")).toBeUndefined();
@@ -222,7 +228,7 @@ describe("aTrust activation recovery", () => {
     expect(permits).toEqual(["cas-next"]);
   });
 
-  it("keeps a live orphan owner fenced, then releases it on the first request after lease expiry", async () => {
+  it("keeps an orphan fenced for an observed code, then releases it after code expiry", async () => {
     const stub = freshStub("atrust-orphan-live-owner");
     const now = Date.now();
     await seedLease(stub, {
@@ -233,13 +239,13 @@ describe("aTrust activation recovery", () => {
           ownerToken: "atrust-orphan",
           ownerKind: "atrust",
           acquiredAt: now,
+          ownerCodeReceivedAt: now,
           queue: [{ token: "cas-next", kind: "cas", queuedAt: now }],
         },
         codePermitPending: "atrust-orphan",
         codePermitProven: "atrust-orphan",
       },
     });
-    const restarted = await restartDurableObject(stub);
     const permits: string[] = [];
     spyBrowserFetch({
       "/code-permit": async (request) => {
@@ -247,6 +253,7 @@ describe("aTrust activation recovery", () => {
         return Response.json({ ok: true });
       },
     });
+    const restarted = await simulateAtrustActivation(stub);
 
     await restarted.fetch("http://do/status");
 
@@ -261,7 +268,10 @@ describe("aTrust activation recovery", () => {
 
     await runInDurableObject(restarted, async (_instance, state) => {
       const lease = await state.storage.get<Record<string, unknown>>("codeLease");
-      await state.storage.put("codeLease", { ...lease, acquiredAt: 0 });
+      await state.storage.put("codeLease", {
+        ...lease,
+        ownerCodeReceivedAt: now - 10 * 60_000,
+      });
     });
     await restarted.fetch("http://do/status");
 
@@ -307,6 +317,50 @@ describe("verification-code lease orchestration", () => {
 
     expect(response.status).toBe(200);
     expect(delivered).toEqual([{ session: "atrust-1", code: "123456" }]);
+  });
+
+  it("persists the owner's code receipt time before delivering the code", async () => {
+    const stub = freshStub("code-lease-owner-code-time");
+    const before = Date.now();
+    await seedLease(stub, {
+      status: "active",
+      extra: {
+        atrustLoginInFlight: { token: "atrust-1", startedAt: before },
+        codeLease: {
+          ownerToken: "atrust-1",
+          ownerKind: "atrust",
+          acquiredAt: before,
+          queue: [],
+        },
+      },
+    });
+    let observedAtDelivery: number | undefined;
+
+    await runInDurableObject(stub, async (instance, state) => {
+      spyBrowserFetch({
+        "/code": async () => {
+          const lease = await state.storage.get<{ ownerCodeReceivedAt?: number }>(
+            "codeLease"
+          );
+          observedAtDelivery = lease?.ownerCodeReceivedAt;
+          return Response.json({ ok: true });
+        },
+      });
+      await (
+        instance as unknown as {
+          depositCode: (payload: {
+            code: string;
+            kind: "login_2fa";
+          }) => Promise<boolean>;
+        }
+      ).depositCode({ code: "123456", kind: "login_2fa" });
+    });
+
+    expect(observedAtDelivery).toBeGreaterThanOrEqual(before);
+    expect(observedAtDelivery).toBeLessThanOrEqual(Date.now());
+    expect(await readStorage(stub, "pendingCode")).toMatchObject({
+      ownerToken: "atrust-1",
+    });
   });
 
   it("releasing the owner promotes FIFO head and grants only it a fresh permit", async () => {

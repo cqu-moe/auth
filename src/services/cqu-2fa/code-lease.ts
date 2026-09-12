@@ -24,6 +24,8 @@ export interface CodeLease {
   ownerToken: string;
   ownerKind: LoginKind;
   acquiredAt: number;
+  /** 最近一次确实收到该 owner 邮件验证码的时间；孤儿恢复只保护到码有效期。 */
+  ownerCodeReceivedAt?: number;
   queue: CodeLeaseEntry[];
   /** 新格式 owner:FIFO 提升时从 entry 复制,锁删除后仍能区分新旧记录。 */
   ownerBrowserRouteVersion?: 1;

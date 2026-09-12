@@ -1313,16 +1313,24 @@ export class CquSessionDO extends DurableObject<Env> {
         );
         return true;
       }
+      const observedLease: CodeLease = {
+        ...lease,
+        ownerCodeReceivedAt: ts,
+      };
+      pending.ownerToken = observedLease.ownerToken;
       const permitPending =
         (await this.ctx.storage.get<string>("codePermitPending")) ?? null;
-      if (permitPending === lease.ownerToken) {
+      if (permitPending === observedLease.ownerToken) {
         // A mail code can only exist after some login clicked send. That is
         // stronger proof than a lost HTTP response that this owner consumed its
         // permit. Publish separate proof; the in-flight grant/recovery path is
         // the only writer allowed to commit (clear) the durable outbox marker.
-        await this.ctx.storage.put("codePermitProven", lease.ownerToken);
+        await this.ctx.storage.put(
+          "codePermitProven",
+          observedLease.ownerToken
+        );
       }
-      await this.persistCodeLeaseTransition(storedLease, lease);
+      await this.persistCodeLeaseTransition(storedLease, observedLease);
       await this.ctx.storage.put("pendingCode", pending);
       const userId = this.state?.userId;
       if (!userId) {
@@ -1336,10 +1344,13 @@ export class CquSessionDO extends DurableObject<Env> {
         // 2FA 码按该 token 的持久 route 定向投递(新格式 CF 带 boot 头,旧格式兼容 node),
         // 不读全局开关,不向两个后端广播。
         const res = await this.fetchLoginControl(
-          lease.ownerToken,
+          observedLease.ownerToken,
           new Request(`${BROWSER_BASE}/code`, {
             method: "POST",
-            body: JSON.stringify({ session: lease.ownerToken, code }),
+            body: JSON.stringify({
+              session: observedLease.ownerToken,
+              code,
+            }),
           })
         );
         if (!res.ok) {
@@ -2543,9 +2554,16 @@ export class CquSessionDO extends DurableObject<Env> {
       matched = true;
 
       const lease = (await tx.get<CodeLease>("codeLease")) ?? null;
+      const observedCodeAt =
+        typeof lease?.ownerCodeReceivedAt === "number" &&
+        Number.isSafeInteger(lease.ownerCodeReceivedAt) &&
+        lease.ownerCodeReceivedAt > 0
+          ? Math.min(lease.ownerCodeReceivedAt, now)
+          : null;
       if (
         lease?.ownerToken === orphanToken &&
-        pruneCodeLease(lease, now)?.ownerToken === orphanToken
+        observedCodeAt !== null &&
+        now - observedCodeAt < CODE_VALIDITY_MS
       ) {
         deferredByLiveOwner = true;
         return;
@@ -2602,7 +2620,7 @@ export class CquSessionDO extends DurableObject<Env> {
       console.warn(
         JSON.stringify({
           event: "cqu.atrust.orphaned_login_recovery_deferred",
-          reason: "code_owner_fence_live",
+          reason: "observed_code_still_valid",
         })
       );
     }
