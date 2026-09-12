@@ -1,13 +1,15 @@
 // @vitest-environment jsdom
-import { createElement } from "react";
+import { createElement, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanupUi,
   click,
   renderUi,
+  settleUi,
 } from "../../lib/api/quicklogin.testbots";
 import type { DeviceListData } from "../../lib/api/quicklogin";
 import QuickloginSettings from "./QuickloginSettings";
+import DeviceList from "./DeviceList";
 import { isDeviceOnline, QUICKLOGIN_REVOKE_WARNING } from "./device-list";
 
 const api = vi.hoisted(() => ({
@@ -43,6 +45,14 @@ const DEVICE_LIST: DeviceListData = {
     online: false,
   }],
 };
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
 
 function button(container: HTMLElement, name: string): HTMLButtonElement {
   const found = [...container.querySelectorAll("button")]
@@ -165,5 +175,123 @@ describe("QuickLogin settings", () => {
     expect(container.textContent).toContain("还没有授权的浏览器");
     expect(isDeviceOnline(400_000, 1_000_000)).toBe(true);
     expect(isDeviceOnline(399_999, 1_000_000)).toBe(false);
+  });
+
+  it("filters revoked devices before deciding the empty state and actions", async () => {
+    const revoked = { ...DEVICE_LIST.devices[0], revokedAt: 1_800_000_000_000 };
+    const active = {
+      ...DEVICE_LIST.devices[0],
+      deviceId: "device-active",
+      deviceName: "仍在使用的 Chrome",
+    };
+
+    const revokedOnly = await renderUi(createElement(DeviceList, {
+      data: { ...DEVICE_LIST, devices: [revoked] },
+      onRevoke: async () => undefined,
+    }));
+    expect(revokedOnly.textContent).toContain("还没有授权的浏览器");
+    expect(revokedOnly.textContent).not.toContain("宿舍 Chrome");
+    expect(revokedOnly.querySelectorAll("button")).toHaveLength(0);
+
+    const mixed = await renderUi(createElement(DeviceList, {
+      data: { ...DEVICE_LIST, devices: [revoked, active] },
+      onRevoke: async () => undefined,
+    }));
+    expect(mixed.textContent).not.toContain("宿舍 Chrome");
+    expect(mixed.textContent).toContain("仍在使用的 Chrome");
+    expect(mixed.querySelectorAll("button")).toHaveLength(1);
+  });
+
+  it("ignores a superseded StrictMode load that resolves last", async () => {
+    const first = deferred<{ eligible: false }>();
+    const second = deferred<{
+      eligible: true;
+      masterEnabled: boolean;
+      deviceLimit: number;
+      used: number;
+    }>();
+    api.getQuickloginPreference
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    api.listQuickloginDevices.mockResolvedValue({
+      ...DEVICE_LIST,
+      deviceLimit: 1,
+      devices: [{ ...DEVICE_LIST.devices[0], deviceName: "最新 Chrome" }],
+    });
+    const container = await renderUi(createElement(
+      StrictMode,
+      null,
+      createElement(QuickloginSettings)
+    ));
+    expect(api.getQuickloginPreference).toHaveBeenCalledTimes(2);
+
+    second.resolve({
+      eligible: true,
+      masterEnabled: false,
+      deviceLimit: 1,
+      used: 0,
+    });
+    await settleUi();
+    expect(container.textContent).toContain("最新 Chrome");
+
+    first.resolve({ eligible: false });
+    await settleUi();
+    expect(container.textContent).toContain("最新 Chrome");
+  });
+
+  it("invalidates an in-flight load on unmount before it can list devices", async () => {
+    const pending = deferred<{
+      eligible: true;
+      masterEnabled: boolean;
+      deviceLimit: number;
+      used: number;
+    }>();
+    api.getQuickloginPreference.mockReturnValue(pending.promise);
+    await renderUi(createElement(QuickloginSettings));
+
+    await cleanupUi();
+    pending.resolve({
+      eligible: true,
+      masterEnabled: false,
+      deviceLimit: 1,
+      used: 0,
+    });
+    await settleUi();
+
+    expect(api.listQuickloginDevices).not.toHaveBeenCalled();
+  });
+
+  it("uses one action mutex so a master save blocks device revoke", async () => {
+    api.getQuickloginPreference.mockResolvedValue({
+      eligible: true,
+      masterEnabled: false,
+      deviceLimit: 1,
+      used: 0,
+    });
+    api.listQuickloginDevices.mockResolvedValue({ ...DEVICE_LIST, deviceLimit: 1 });
+    const pending = deferred<{
+      eligible: true;
+      masterEnabled: boolean;
+      deviceLimit: number;
+      used: number;
+    }>();
+    api.setQuickloginMasterEnabled.mockReturnValue(pending.promise);
+    const container = await renderUi(createElement(QuickloginSettings));
+    const toggle = container.querySelector('[role="switch"]');
+    if (!(toggle instanceof HTMLButtonElement)) throw new Error("missing master switch");
+
+    await click(toggle);
+    const revoke = button(container, "退出设备");
+    expect(revoke.disabled).toBe(true);
+    await click(revoke);
+    expect(api.revokeQuickloginDevice).not.toHaveBeenCalled();
+
+    pending.resolve({
+      eligible: true,
+      masterEnabled: true,
+      deviceLimit: 1,
+      used: 0,
+    });
+    await settleUi();
   });
 });

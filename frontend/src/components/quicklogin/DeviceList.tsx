@@ -8,15 +8,18 @@ function fullTime(value: number | null): string {
 export default function DeviceList({
   data,
   currentDeviceHint,
+  busy = false,
   revokingDeviceId,
   onRevoke,
 }: {
   data: DeviceListData;
   currentDeviceHint?: string;
+  busy?: boolean;
   revokingDeviceId?: string | null;
   onRevoke: (id: string) => Promise<void>;
 }) {
-  if (data.devices.length === 0) {
+  const devices = data.devices.filter((device) => device.revokedAt === null);
+  if (devices.length === 0) {
     return (
       <div className="py-3 text-sm text-gray-500">
         <p className="font-medium text-gray-800">还没有授权的浏览器</p>
@@ -31,7 +34,7 @@ export default function DeviceList({
         在线状态根据最近联系时间估计。{QUICKLOGIN_REVOKE_WARNING}
       </p>
       <ul className="divide-y divide-gray-100 rounded-xl border border-gray-950/[0.08]">
-        {data.devices.map((device) => {
+        {devices.map((device) => {
           const online = isDeviceOnline(device.lastSeenAt);
           const revoking = revokingDeviceId === device.deviceId;
           return (
@@ -68,7 +71,7 @@ export default function DeviceList({
               </div>
               <button
                 type="button"
-                disabled={revokingDeviceId !== null && revokingDeviceId !== undefined}
+                disabled={busy}
                 onClick={() => {
                   if (window.confirm(QUICKLOGIN_REVOKE_WARNING)) {
                     void onRevoke(device.deviceId);

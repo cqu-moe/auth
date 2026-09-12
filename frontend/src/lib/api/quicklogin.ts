@@ -67,8 +67,13 @@ export function isDeviceQuickloginPreference(
   return value.eligible === true && "masterEnabled" in value;
 }
 
-export async function getQuickloginPreference(): Promise<QuickloginPreference> {
-  return (await apiRequest<ApiSuccess<QuickloginPreference>>("/cqu/quicklogin")).data;
+export async function getQuickloginPreference(
+  signal?: AbortSignal
+): Promise<QuickloginPreference> {
+  return (await apiRequest<ApiSuccess<QuickloginPreference>>(
+    "/cqu/quicklogin",
+    signal ? { signal } : {}
+  )).data;
 }
 
 export async function setQuickloginMasterEnabled(
@@ -80,8 +85,11 @@ export async function setQuickloginMasterEnabled(
   })).data;
 }
 
-export function listQuickloginDevices(): Promise<DeviceListData> {
-  return apiRequest<DeviceListData>("/cqu/quicklogin/devices");
+export function listQuickloginDevices(signal?: AbortSignal): Promise<DeviceListData> {
+  return apiRequest<DeviceListData>(
+    "/cqu/quicklogin/devices",
+    signal ? { signal } : {}
+  );
 }
 
 export async function revokeQuickloginDevice(deviceId: string): Promise<void> {

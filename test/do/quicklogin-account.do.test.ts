@@ -138,6 +138,31 @@ describe("CquQuickloginAccountDO", () => {
     expect(list.used).toBe(2);
   });
 
+  it("rejects an old quota preview when another quota change kept the same device set", async () => {
+    const client = account();
+    const userId = freshUser("preview-old-limit");
+    await configurePolicy(client, userId, 2);
+
+    const stale = await client.previewQuota(userId, 1, TEST_NOW + 100);
+    const current = await client.previewQuota(userId, 3, TEST_NOW + 200);
+    await client.applyQuota(
+      userId,
+      { token: current.token, newLimit: 3 },
+      TEST_NOW + 300
+    );
+
+    await expect(client.applyQuota(
+      userId,
+      { token: stale.token, newLimit: 1 },
+      TEST_NOW + 400
+    )).rejects.toMatchObject({
+      code: "PREVIEW_CHANGED",
+      preview: expect.objectContaining({ oldLimit: 3, newLimit: 1 }),
+    });
+    await expect(client.listDevices(userId, TEST_NOW + 400)).resolves
+      .toMatchObject({ deviceLimit: 3 });
+  });
+
   it("applies a preview after a revision-only heartbeat and replays the token idempotently", async () => {
     const client = account();
     const userId = freshUser("preview-idempotent");

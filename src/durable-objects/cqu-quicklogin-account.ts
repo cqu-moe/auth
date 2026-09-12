@@ -529,6 +529,7 @@ export class CquQuickloginAccountDO extends DurableObject<Env> {
         input.newLimit
       );
       if (
+        state.deviceLimit !== preview.oldLimit ||
         !sameDeviceSet(selection.kept, preview.kept) ||
         !sameDeviceSet(selection.disabled, preview.disabled)
       ) {

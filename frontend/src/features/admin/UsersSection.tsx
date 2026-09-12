@@ -294,7 +294,7 @@ export function UsersSection() {
   );
 }
 
-function EntitlementPanel({
+export function EntitlementPanel({
   user,
   canEditQuota,
   onClose,
@@ -312,8 +312,8 @@ function EntitlementPanel({
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const load = useCallback(async () => {
-    setInitLoading(true);
+  const load = useCallback(async (showLoading = true) => {
+    if (showLoading) setInitLoading(true);
     setError("");
     try {
       const [res, presetsRes] = await Promise.all([
@@ -338,7 +338,7 @@ function EntitlementPanel({
     } catch {
       setError("网络错误，请稍后重试");
     } finally {
-      setInitLoading(false);
+      if (showLoading) setInitLoading(false);
     }
   }, [user.id]);
 
@@ -481,7 +481,7 @@ function EntitlementPanel({
               />
             </div>
             {canEditQuota && (
-              <QuotaEditor userId={user.id} onSaved={() => void load()} />
+              <QuotaEditor userId={user.id} onSaved={() => void load(false)} />
             )}
           </>
         )}
