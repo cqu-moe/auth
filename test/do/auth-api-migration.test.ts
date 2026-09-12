@@ -18,17 +18,16 @@ function mergeSetCookies(headers: Headers, response: Response) {
 import { createApiFixture } from "./api-fixture";
 
 describe("Better Auth v1 migration", () => {
-  it("uses one session across canonical and legacy get-session endpoints", async () => {
+  it("keeps the canonical session endpoint and retires legacy get-session", async () => {
     const fixture = await createApiFixture();
     try {
       const headers = await fixture.signIn("user");
       const canonical = await fixture.request("/api/v1/auth/get-session", { headers });
       const legacy = await fixture.request("/api/auth/get-session", { headers });
       expect(canonical.status).toBe(200);
-      expect(legacy.status).toBe(200);
+      expect(legacy.status).toBe(404);
       const canonicalBody = await canonical.json() as { user: { id: string }; caps: unknown };
-      const legacyBody = await legacy.json() as { user: { id: string }; caps: unknown };
-      expect(legacyBody.user.id).toBe(canonicalBody.user.id);
+      expect(canonicalBody.user.id).toBeTruthy();
       expect(canonicalBody).toHaveProperty("caps");
       expect(canonicalBody).not.toHaveProperty("caps.cqu");
     } finally {
@@ -82,12 +81,19 @@ describe("Better Auth v1 migration", () => {
         body: { token, issuer: "https://wrong.example/api/auth" },
       });
       expect(rejected.payload).toBeNull();
+
+      const jwks = await fixture.request("/api/v1/auth/jwks");
+      expect(jwks.status).toBe(200);
+      expect(await jwks.json()).toMatchObject({
+        keys: [expect.objectContaining({ kid: expect.any(String), alg: "EdDSA" })],
+      });
+      expect((await fixture.request("/api/auth/jwks")).status).toBe(404);
     } finally {
       await fixture.close();
     }
   });
 
-  it("shares the OTP rate-limit bucket between canonical and legacy paths", async () => {
+  it("keeps the OTP rate-limit bucket canonical and rejects its legacy path", async () => {
     const fixture = await createApiFixture();
     try {
       const headers = await fixture.signIn("user");
@@ -102,15 +108,18 @@ describe("Better Auth v1 migration", () => {
       });
       const paths = [
         "/api/v1/auth/email-otp/send-verification-otp",
-        "/api/auth/email-otp/send-verification-otp",
         "/api/v1/auth/email-otp/send-verification-otp",
-        "/api/auth/email-otp/send-verification-otp",
+        "/api/v1/auth/email-otp/send-verification-otp",
+        "/api/v1/auth/email-otp/send-verification-otp",
       ];
       const statuses = [];
       for (const path of paths) {
         statuses.push((await fixture.request(path, { method: "POST", headers, body })).status);
       }
       expect(statuses).toEqual([200, 200, 200, 429]);
+      expect((await fixture.request("/api/auth/email-otp/send-verification-otp", {
+        method: "POST", headers, body,
+      })).status).toBe(404);
     } finally {
       await fixture.close();
     }
@@ -235,7 +244,7 @@ describe("Better Auth v1 migration", () => {
       const token = destination.searchParams.get("token");
       expect(token).toBeTruthy();
 
-      const reset = await fixture.request("/api/auth/reset-password", {
+      const reset = await fixture.request("/api/v1/auth/reset-password", {
         method: "POST", headers: requestHeaders,
         body: JSON.stringify({ token, newPassword: "new-local-password" }),
       });

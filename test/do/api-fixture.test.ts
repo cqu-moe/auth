@@ -6,7 +6,7 @@ describe("API integration fixture", () => {
     const fixture = await createApiFixture();
     try {
       const sessionHeaders = await fixture.signIn("user");
-      const sessionResponse = await fixture.request("/api/auth/get-session", {
+      const sessionResponse = await fixture.request("/api/v1/auth/get-session", {
         headers: sessionHeaders,
       });
       expect(sessionResponse.status).toBe(200);

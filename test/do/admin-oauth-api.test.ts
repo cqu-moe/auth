@@ -2,20 +2,21 @@ import { describe, expect, it } from "vitest";
 import { createApiFixture } from "./api-fixture";
 
 describe("admin OAuth API v1", () => {
-  it("requires both CQU scope permissions on canonical and legacy writes", async () => {
+  it("requires both CQU scope permissions canonically and retires legacy writes", async () => {
     const fixture = await createApiFixture();
     try {
       const headers = await fixture.signIn("admin");
       headers.set("content-type", "application/json");
-      for (const path of [
-        "/api/v1/admin/oauth-clients/local-client/scopes",
-        "/api/admin/oauth-clients/local-client/scopes",
-      ]) {
-        const response = await fixture.request(path, {
+      const canonical = await fixture.request(
+        "/api/v1/admin/oauth-clients/local-client/scopes", {
           method: "PUT", headers, body: JSON.stringify({ scopes: ["cqu:ticket:jwxt"] }),
         });
-        expect(response.status, path).toBe(403);
-      }
+      expect(canonical.status).toBe(403);
+      const legacy = await fixture.request(
+        "/api/admin/oauth-clients/local-client/scopes", {
+          method: "PUT", headers, body: JSON.stringify({ scopes: ["cqu:ticket:jwxt"] }),
+        });
+      expect(legacy.status).toBe(404);
       const row = await fixture.database.prepare(
         "SELECT COUNT(*) AS count FROM oauth_client_cqu_scopes WHERE client_id = ?"
       ).bind("local-client").first<{ count: number }>();
@@ -71,6 +72,11 @@ describe("admin OAuth API v1", () => {
         body: JSON.stringify({ scopes: ["cqu:ticket:jwxt", "cqu:ticket:jwxt"] }),
       });
       expect(duplicate.status).toBe(400);
+      const deviceScope = await fixture.request(scopePath, {
+        method: "PUT", headers,
+        body: JSON.stringify({ scopes: ["cqu:quicklogin:device"] }),
+      });
+      expect(deviceScope.status).toBe(400);
       const rows = await fixture.database.prepare(
         "SELECT scope FROM oauth_client_cqu_scopes WHERE client_id = ? ORDER BY scope"
       ).bind(client.data.client_id).all<{ scope: string }>();

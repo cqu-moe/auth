@@ -4,6 +4,7 @@ import {
   oauthProviderOpenIdConfigMetadata,
 } from "@better-auth/oauth-provider";
 import { createTestAuth } from "./test-utils/auth";
+import { DEVICE_SCOPE } from "./services/quicklogin/contracts";
 
 describe("versioned auth URL configuration", () => {
   it("moves HTTP endpoints while retaining the stable issuer and audience", async () => {
@@ -19,10 +20,20 @@ describe("versioned auth URL configuration", () => {
           issuer: "https://auth.cqu.moe/api/auth",
           audience: "https://auth.cqu.moe/api/auth",
         },
-        jwks: { remoteUrl: "https://auth.cqu.moe/api/v1/auth/jwks" },
+        jwks: { keyPairConfig: { alg: "EdDSA", crv: "Ed25519" } },
       });
+      expect(jwtPlugin?.options.jwks).not.toHaveProperty("remoteUrl");
       expect(oauthPlugin?.options).toMatchObject({
-        validAudiences: ["https://auth.cqu.moe/api/auth"],
+        validAudiences: [
+          "https://auth.cqu.moe/api/auth",
+          "https://auth.cqu.moe",
+        ],
+        scopes: expect.arrayContaining([DEVICE_SCOPE]),
+        postLogin: {
+          page: "/oauth/authorize",
+          shouldRedirect: expect.any(Function),
+          consentReferenceId: expect.any(Function),
+        },
       });
     } finally {
       fixture.close();

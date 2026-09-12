@@ -3,7 +3,7 @@ import type { Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { APIError } from "better-auth/api";
 import type { HonoEnv } from "../types";
-import { createAuth, OAUTH_SCOPES } from "../auth";
+import { createAuth, OAUTH_CLIENT_SCOPES } from "../auth";
 import { isLoopbackHost } from "@better-auth/core/utils/host";
 import { errorResponse } from "../utils/error";
 import { oauthClientCquScopes, cquBindAddresses, userEntitlement } from "../db/schema";
@@ -175,7 +175,7 @@ function validateOAuthClientUpdate(
   // Scopes must stay within the provider's configured allowlist, else later
   // flows treat the stored client.scopes as valid and can mint unsupported scopes.
   if (typeof update.scope === "string") {
-    const allowed = new Set(OAUTH_SCOPES);
+    const allowed = new Set(OAUTH_CLIENT_SCOPES);
     const bad = update.scope
       .split(" ")
       .filter(Boolean)

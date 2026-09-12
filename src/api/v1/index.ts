@@ -11,6 +11,7 @@ import {
 } from "./admin/invitations";
 import { createAdminEntitlementsApi } from "./admin/entitlements";
 import { createAdminOAuthClientsApi } from "./admin/oauth-clients";
+import { cquQuickloginDevices } from "../../routes/cqu-quicklogin-devices";
 
 const Health = z.object({
   data: z.object({
@@ -38,6 +39,7 @@ export function createV1Api() {
   );
   api.route("/cqu/binding", createCquBindingApi());
   api.route("/cqu/service-tickets", createCquServiceTicketsApi());
+  api.route("/cqu/quicklogin/devices", cquQuickloginDevices);
   api.route("/cqu/quicklogin", createCquQuickloginApi());
   api.route("/admin/users", createAdminUsersApi());
   api.route("/admin", createAdminInvitationsApi());

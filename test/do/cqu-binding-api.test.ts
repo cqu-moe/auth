@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createApiFixture } from "./api-fixture";
 
 describe("CQU binding API v1", () => {
-  it("returns the canonical envelope while preserving the legacy shape", async () => {
+  it("returns the canonical envelope and retires the legacy route", async () => {
     const fixture = await createApiFixture();
     try {
       const headers = await fixture.signIn("user");
@@ -13,11 +13,7 @@ describe("CQU binding API v1", () => {
       });
 
       const legacy = await fixture.request("/api/cqu/binding", { headers });
-      expect(legacy.status).toBe(200);
-      expect(await legacy.json()).toMatchObject({
-        bindStatus: "unbound",
-        sessionStatus: expect.any(Object),
-      });
+      expect(legacy.status).toBe(404);
     } finally {
       await fixture.close();
     }
@@ -93,19 +89,19 @@ describe("CQU binding API v1", () => {
     }
   });
 
-  it("preserves the real WebSocket upgrade object on canonical and legacy paths", async () => {
+  it("preserves the canonical WebSocket upgrade and retires the legacy path", async () => {
     const fixture = await createApiFixture();
     try {
       const session = await fixture.signIn("user");
       session.set("upgrade", "websocket");
       session.set("origin", "http://localhost:8787");
-      for (const path of ["/api/v1/cqu/binding/events", "/api/cqu/binding/events"]) {
-        const response = await fixture.request(path, { headers: session });
-        expect(response.status, path).toBe(101);
-        expect(response.webSocket, path).toBeTruthy();
-        response.webSocket?.accept();
-        response.webSocket?.close(1000, "test complete");
-      }
+      const response = await fixture.request("/api/v1/cqu/binding/events", { headers: session });
+      expect(response.status).toBe(101);
+      expect(response.webSocket).toBeTruthy();
+      response.webSocket?.accept();
+      response.webSocket?.close(1000, "test complete");
+      const legacy = await fixture.request("/api/cqu/binding/events", { headers: session });
+      expect(legacy.status).toBe(404);
     } finally {
       await fixture.close();
     }

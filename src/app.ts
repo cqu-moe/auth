@@ -5,13 +5,9 @@ import {
   oauthProviderOpenIdConfigMetadata,
 } from "@better-auth/oauth-provider";
 import { createAuth } from "./auth";
-import { cqu } from "./routes/cqu";
-import { cquBinding } from "./routes/cqu-bind";
-import { cquQuicklogin } from "./routes/cqu-quicklogin";
-import { admin } from "./routes/admin";
 import type { HonoEnv } from "./types";
 import { createV1Api } from "./api/v1";
-import { createLegacyRouter } from "./api/legacy";
+import { createLegacyRouter, logLegacy, rejectedLegacyCategory } from "./api/legacy";
 import { allowedMethods, listHttpOperations } from "./api/operations";
 import { problem } from "./api/problem";
 import { createAuthApi } from "./api/v1/auth";
@@ -27,10 +23,17 @@ export function createApp() {
     c.header("Allow", "GET, OPTIONS");
     return problem(c, "METHOD_NOT_ALLOWED", "WebSocket 握手不支持 HEAD", 405);
   };
-  app.use("/api/cqu/binding/events", rejectWebSocketHead);
   app.use("/api/v1/cqu/binding/events", rejectWebSocketHead);
 
-  app.use("/*", cors());
+  const genericCors = cors();
+  app.use("/*", (c, next) => {
+    const path = new URL(c.req.url).pathname;
+    if (path.startsWith("/api/v1/cqu/quicklogin/devices") ||
+        path.startsWith("/api/cqu/quicklogin/devices")) {
+      return next();
+    }
+    return genericCors(c, next);
+  });
 
   app.route("/api/v1", createV1Api());
   app.route("/api", createLegacyRouter(async (request, pathname, env) => {
@@ -57,18 +60,6 @@ export function createApp() {
 
   app.route(AUTH_BASE_PATH, createAuthApi());
 
-  app.get("/api/auth/registration-settings", async (c) => {
-    const { isInvitationRequired } = await import("./services/entitlements");
-    return c.json({ invitationRequired: await isInvitationRequired(c.env.DATABASE) });
-  });
-
-  app.route("/api/auth", createAuthApi({ legacy: true }));
-
-  app.route("/api/cqu/binding", cquBinding);
-  app.route("/api/cqu/quicklogin", cquQuicklogin);
-  app.route("/api/cqu", cqu);
-  app.route("/api/admin", admin);
-
   app.get("/api/v1/openapi.json", async (c) => {
     const base = buildOpenApiDocument(listHttpOperations(app));
     const authDocument = await getBetterAuthOpenApi(c.env, c.req.raw);
@@ -77,12 +68,19 @@ export function createApp() {
 
   const operations = listHttpOperations(app);
   const apiFallback = (c: Parameters<typeof problem>[0]) => {
-    const allow = allowedMethods(operations, new URL(c.req.url).pathname);
+    const pathname = new URL(c.req.url).pathname;
+    const allow = allowedMethods(operations, pathname);
     if (allow.length && !allow.includes(c.req.method)) {
       c.header("Allow", allow.join(", "));
-      return problem(c, "METHOD_NOT_ALLOWED", "请求方法不受支持", 405);
+      const response = problem(c, "METHOD_NOT_ALLOWED", "请求方法不受支持", 405);
+      const category = rejectedLegacyCategory(pathname);
+      if (category) logLegacy("api.legacy_rejected", c.req.method, category, 405);
+      return response;
     }
-    return problem(c, "NOT_FOUND", "API 路径不存在", 404);
+    const response = problem(c, "NOT_FOUND", "API 路径不存在", 404);
+    const category = rejectedLegacyCategory(pathname);
+    if (category) logLegacy("api.legacy_rejected", c.req.method, category, 404);
+    return response;
   };
   app.all("/api", apiFallback);
   app.all("/api/*", apiFallback);

@@ -12,6 +12,13 @@ import type { Env } from "./types";
 import { resolveCaps, subsystemForAccessToken } from "./services/entitlements";
 import { isCquMoeHost } from "./utils/cookie-domain";
 import { authUrls } from "./auth-config";
+import { DEVICE_SCOPE } from "./services/quicklogin/contracts";
+import {
+  assertQuickloginRefreshAllowed,
+  createQuickloginConsentReference,
+  quickloginAccessTokenClaims,
+  QuickloginOAuthError,
+} from "./services/quicklogin/oauth-grants";
 
 // Must spread the admin plugin's defaultStatements: its built-in endpoints
 // (listUsers/setRole/banUser/...) authorize against actions like
@@ -48,7 +55,7 @@ export const roles = {
 
 // Scopes the OAuth provider accepts. Single source of truth: the oauthProvider
 // config below and the admin client-update validation both reference this.
-export const OAUTH_SCOPES = [
+export const OAUTH_CLIENT_SCOPES = [
   "openid",
   "profile",
   "email",
@@ -59,6 +66,7 @@ export const OAUTH_SCOPES = [
   "cqu:ticket:card",
   "cqu:ticket:any",
 ];
+export const OAUTH_SCOPES = [...OAUTH_CLIENT_SCOPES, DEVICE_SCOPE];
 
 const currentEmailOtpPaths = new Set([
   "/email-otp/send-verification-otp",
@@ -68,6 +76,11 @@ const currentEmailOtpPaths = new Set([
 export function createAuth(env: Env, request: Request) {
   const getResend = () => new Resend(env.RESEND_API_KEY);
   const urls = authUrls(env.BETTER_AUTH_URL);
+  // QuickLogin 0.1.2 sends resource=<auth origin>. This is a temporary audience
+  // compatibility value, never an issuer. Remove it after the extension moves
+  // resource to the stable issuer and legacy-device traffic is confirmed gone.
+  const legacyResourceAudience = new URL(env.BETTER_AUTH_URL).origin;
+  const quickloginConsentReference = createQuickloginConsentReference(env);
 
   return betterAuth({
     baseURL: env.BETTER_AUTH_URL,
@@ -94,6 +107,28 @@ export function createAuth(env: Env, request: Request) {
         },
         hooks: {
           before: createAuthMiddleware(async (ctx) => {
+            if (ctx.path === "/oauth2/token") {
+              const body = ctx.body as {
+                grant_type?: unknown;
+                client_id?: unknown;
+                refresh_token?: unknown;
+              } | undefined;
+              try {
+                await assertQuickloginRefreshAllowed(env, ctx.context.adapter, {
+                  grantType: body?.grant_type,
+                  clientId: body?.client_id,
+                  refreshToken: body?.refresh_token,
+                });
+              } catch (error) {
+                if (error instanceof QuickloginOAuthError) {
+                  throw new APIError("BAD_REQUEST", {
+                    code: "INVALID_GRANT",
+                    message: "invalid refresh token",
+                  });
+                }
+                throw error;
+              }
+            }
             if (!currentEmailOtpPaths.has(ctx.path)) return;
             const session = await getSessionFromCtx(ctx);
             const body = ctx.body as { email?: string; type?: string } | undefined;
@@ -132,7 +167,6 @@ export function createAuth(env: Env, request: Request) {
           jwt({
             jwt: { issuer: urls.issuer, audience: urls.issuer },
             jwks: {
-              remoteUrl: urls.jwksUrl,
               keyPairConfig: { alg: "EdDSA", crv: "Ed25519" },
             },
           }),
@@ -140,15 +174,35 @@ export function createAuth(env: Env, request: Request) {
             loginPage: "/login",
             consentPage: "/oauth/authorize",
             scopes: OAUTH_SCOPES,
-            validAudiences: [urls.issuer],
+            validAudiences: [urls.issuer, legacyResourceAudience],
+            postLogin: {
+              page: "/oauth/authorize",
+              shouldRedirect: async () => false,
+              consentReferenceId: quickloginConsentReference,
+            },
             // 按 client→subsystem 只盖该片 caps(最小披露);拿不到映射则盖空 {},绝不盖全量。
             // 用 customAccessTokenClaims(oauth-provider)而非 jwt.definePayload:
             // 已核实 OAuth access token 不经 definePayload,且 definePayload 入参无 client_id。
             customAccessTokenClaims: async (info) => {
+              const claims: Record<string, unknown> = {};
               const sub = subsystemForAccessToken(info);
-              if (!sub) return {};
-              const caps = await resolveCaps(env.DATABASE, info.user!.id, sub);
-              return { caps };
+              if (sub) {
+                claims.caps = await resolveCaps(env.DATABASE, info.user!.id, sub);
+              }
+              try {
+                return {
+                  ...claims,
+                  ...(await quickloginAccessTokenClaims(env, info)),
+                };
+              } catch (error) {
+                if (error instanceof QuickloginOAuthError) {
+                  throw new APIError("FORBIDDEN", {
+                    code: error.code,
+                    message: error.code,
+                  });
+                }
+                throw error;
+              }
             },
             silenceWarnings: {
               oauthAuthServerConfig: true,

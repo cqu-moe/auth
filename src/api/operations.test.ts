@@ -29,13 +29,19 @@ describe("HTTP operation inventory", () => {
       .toEqual(["GET", "OPTIONS"]);
   });
 
-  it("mounts every generated auth operation once at canonical and legacy prefixes", () => {
+  it("mounts every generated auth operation canonically and only the legacy transition bridge", () => {
     const operations = listHttpOperations(createApp());
     const keys = new Set(operations.map(({ method, path }) => `${method} ${path}`));
     for (const { method, path } of AUTH_OPERATIONS) {
       expect(keys.has(`${method} /api/v1/auth${path}`), `canonical ${method} ${path}`).toBe(true);
-      expect(keys.has(`${method} /api/auth${path}`), `legacy ${method} ${path}`).toBe(true);
     }
+    expect(keys.has("GET /api/auth/oauth2/authorize")).toBe(true);
+    expect(keys.has("POST /api/auth/oauth2/token")).toBe(true);
+    expect(keys.has("GET /api/auth/reset-password/:token")).toBe(true);
+    expect(keys.has("GET /api/auth/get-session")).toBe(false);
+    expect(keys.has("POST /api/auth/email-otp/send-verification-otp")).toBe(false);
+    expect(keys.has("GET /api/cqu/quicklogin/devices")).toBe(true);
+    expect(keys.has("POST /api/cqu/quicklogin/devices/:id/export")).toBe(true);
     expect(keys.has("POST /api/v1/auth/get-session")).toBe(false);
     expect(keys.has("POST /api/auth/get-session")).toBe(false);
     expect(keys.has("GET /api/v1/auth/token")).toBe(false);

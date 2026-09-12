@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApp } from "./app";
 import { createHttpFixture } from "./test-utils/http";
 
@@ -33,7 +33,7 @@ describe("API and SPA routing boundary", () => {
     }
   );
 
-  it("serves canonical health and adapts the legacy response", async () => {
+  it("serves canonical health and retires the legacy health prefix", async () => {
     const fixture = createHttpFixture();
     try {
       const app = createApp();
@@ -42,8 +42,9 @@ describe("API and SPA routing boundary", () => {
       expect(await canonical.json()).toMatchObject({ data: { status: "ok" } });
 
       const legacy = await app.request("/api/health", {}, fixture.env);
-      expect(legacy.status).toBe(200);
-      expect(await legacy.json()).toMatchObject({ status: "ok", version: "d1native-fix" });
+      expect(legacy.status).toBe(404);
+      expect(await legacy.json()).toMatchObject({ status: 404, code: "NOT_FOUND" });
+      expect(fixture.assetsFetch).not.toHaveBeenCalled();
     } finally {
       await fixture.close();
     }
@@ -76,8 +77,7 @@ describe("API and SPA routing boundary", () => {
       const websocketHead = await app.request("/api/cqu/binding/events", {
         method: "HEAD",
       }, fixture.env);
-      expect(websocketHead.status).toBe(405);
-      expect(websocketHead.headers.get("allow")).toBe("GET, OPTIONS");
+      expect(websocketHead.status).toBe(404);
 
       const preflight = await app.request("/api/v1/health", {
         method: "OPTIONS",
@@ -94,15 +94,15 @@ describe("API and SPA routing boundary", () => {
     }
   });
 
-  it("mounts only the generated auth operations at canonical and legacy prefixes", async () => {
+  it("mounts generated auth operations canonically and rejects retired legacy operations", async () => {
     const fixture = createHttpFixture();
     try {
       const app = createApp();
-      for (const path of ["/api/v1/auth/ok", "/api/auth/ok"]) {
-        const response = await app.request(path, {}, fixture.env);
-        expect(response.status, path).toBe(200);
-        expect(await response.json()).toEqual({ ok: true });
-      }
+      const canonical = await app.request("/api/v1/auth/ok", {}, fixture.env);
+      expect(canonical.status).toBe(200);
+      expect(await canonical.json()).toEqual({ ok: true });
+      const legacy = await app.request("/api/auth/ok", {}, fixture.env);
+      expect(legacy.status).toBe(404);
 
       const wrongMethod = await app.request("/api/v1/auth/get-session", {
         method: "POST",
@@ -125,15 +125,15 @@ describe("API and SPA routing boundary", () => {
     }
   });
 
-  it("redirects auth errors safely and keeps all issuer discovery variants stable", async () => {
+  it("redirects canonical auth errors safely and keeps all issuer discovery variants stable", async () => {
     const fixture = createHttpFixture();
     try {
       const app = createApp();
-      for (const path of ["/api/v1/auth/error?error=boom&description=secret", "/api/auth/error?error=boom&redirect=https://evil.test"]) {
-        const response = await app.request(path, {}, fixture.env);
-        expect(response.status, path).toBe(302);
-        expect(response.headers.get("location"), path).toBe("/auth/error");
-      }
+      const response = await app.request("/api/v1/auth/error?error=boom&description=secret", {}, fixture.env);
+      expect(response.status).toBe(302);
+      expect(response.headers.get("location")).toBe("/auth/error");
+      const retired = await app.request("/api/auth/error?error=boom&redirect=https://evil.test", {}, fixture.env);
+      expect(retired.status).toBe(404);
 
       const discovery = [
         "/.well-known/oauth-authorization-server",
@@ -175,8 +175,56 @@ describe("API and SPA routing boundary", () => {
       expect(legacy.status).toBe(canonical.status);
       expect(legacy.status).not.toBe(301);
       expect(legacy.status).not.toBe(302);
+      expect([...legacy.headers.entries()]).toEqual([...canonical.headers.entries()]);
       expect(await legacy.text()).toBe(await canonical.text());
     } finally {
+      await fixture.close();
+    }
+  });
+
+  it("logs only anonymous normalized legacy telemetry", async () => {
+    const fixture = createHttpFixture();
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      const response = await createApp().request(
+        "/api/cqu/quicklogin/devices/device-secret/status?token=query-secret",
+        {
+          method: "POST",
+          headers: {
+            authorization: "Bearer bearer-secret",
+            cookie: "session=cookie-secret",
+            origin: fixture.env.QUICKLOGIN_EXTENSION_ORIGIN,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ private: "body-secret" }),
+        },
+        fixture.env
+      );
+      expect(response.status).not.toBe(200);
+      const entries = info.mock.calls.map(([entry]) => JSON.parse(String(entry)));
+      expect(entries).toContainEqual({
+        event: "api.legacy_bridge",
+        method: "POST",
+        route: "/api/cqu/quicklogin/devices/:id/status",
+        status: response.status,
+      });
+      const serialized = JSON.stringify(entries);
+      for (const secret of [
+        "device-secret", "query-secret", "bearer-secret", "cookie-secret", "body-secret",
+      ]) expect(serialized).not.toContain(secret);
+
+      await createApp().request("/api/auth/get-session?token=another-secret", {
+        headers: { cookie: "session=another-cookie" },
+      }, fixture.env);
+      expect(info.mock.calls.map(([entry]) => JSON.parse(String(entry))))
+        .toContainEqual({
+          event: "api.legacy_rejected",
+          method: "GET",
+          route: "/api/auth/*",
+          status: 404,
+        });
+    } finally {
+      info.mockRestore();
       await fixture.close();
     }
   });

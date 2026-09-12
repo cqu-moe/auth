@@ -5,6 +5,9 @@ import { userEntitlement } from "../db/schema";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, and } from "drizzle-orm";
 import { requireSession } from "../middleware/authentication";
+import { QuickloginAccountClient } from "../services/quicklogin/account-client";
+import { quickloginDeviceModeEnabled } from "../services/quicklogin/mode";
+import { parseEnabled, QuickloginHttpError, readJson } from "../services/quicklogin/http";
 
 // 用户自助快捷登录开关 /api/cqu/quicklogin。
 //
@@ -33,7 +36,13 @@ const VALUE_ON = "1";
 
 // session-only 鉴权中间件。无有效 Better Auth session → 401。
 // 故意不解析 Authorization: Bearer —— 见上方安全契约。
-cquQuicklogin.use("/*", requireSession);
+cquQuicklogin.use("/*", async (c, next) => {
+  c.header("Cache-Control", "no-store");
+  if (c.req.header("Authorization")) {
+    return errorResponse(c, "UNAUTHORIZED", "未登录", 401);
+  }
+  return requireSession(c, next);
+});
 
 // 读调用者自己的一条 cqu entitlement 行;行缺失返回 undefined(约定:缺失 = 关/未授予)。
 async function getOwnFlag(
@@ -59,6 +68,14 @@ async function getOwnFlag(
 // enabled = cqu.quicklogin === "1"(用户本人的同意开关,行缺失视为关)。
 cquQuicklogin.get("/", async (c) => {
   const user = c.get("user") as { id: string };
+  if (quickloginDeviceModeEnabled(c.env)) {
+    const list = await new QuickloginAccountClient(c.env).listDevices(user.id, Date.now());
+    return c.json({
+      masterEnabled: list.masterEnabled,
+      deviceLimit: list.deviceLimit,
+      used: list.used,
+    });
+  }
   const db = drizzle(c.env.DATABASE);
   const [access, consent] = await Promise.all([
     getOwnFlag(db, user.id, ACCESS_CAPABILITY),
@@ -75,6 +92,29 @@ cquQuicklogin.get("/", async (c) => {
 // 只动调用者自己的这一条 entitlement。
 cquQuicklogin.put("/", async (c) => {
   const user = c.get("user") as { id: string };
+
+  const origin = c.req.header("Origin");
+  if (!origin || origin !== new URL(c.env.BETTER_AUTH_URL).origin) {
+    return errorResponse(c, "FORBIDDEN", "禁止访问", 403);
+  }
+
+  if (quickloginDeviceModeEnabled(c.env)) {
+    try {
+      const enabled = parseEnabled(await readJson(c.req.raw));
+      const list = await new QuickloginAccountClient(c.env)
+        .setMasterEnabled(user.id, enabled);
+      return c.json({
+        masterEnabled: list.masterEnabled,
+        deviceLimit: list.deviceLimit,
+        used: list.used,
+      });
+    } catch (error) {
+      if (error instanceof QuickloginHttpError) {
+        return errorResponse(c, error.code, error.code, error.status);
+      }
+      throw error;
+    }
+  }
 
   const db = drizzle(c.env.DATABASE);
 
