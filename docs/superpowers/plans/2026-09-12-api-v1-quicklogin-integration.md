@@ -4,7 +4,7 @@
 
 ## 目标
 
-把 `codex/quicklogin-implementation` 中已经部署并由 canary 使用的 QuickLogin 设备能力选择性整合进 `codex/api-v1-refactor`，为设备与管理接口提供 `/api/v1` 正式入口，同时保留现有旧入口兼容；把 QuickLogin 扩展仓库的 OAuth 与设备请求迁到 v1。最终只交付本地分支、提交、测试和文档，不 push、不部署、不读取生产 D1/KV、不修改 Cloudflare 线上配置。
+把 `codex/quicklogin-implementation` 中已经部署并由 canary 使用的 QuickLogin 设备能力选择性整合进 `codex/api-v1-refactor`，为设备与管理接口提供 `/api/v1` 正式入口，同时保留现有旧入口兼容；把 QuickLogin 扩展仓库的 OAuth 与设备请求迁到 v1。用户随后于 2026-09-12 明确授权在全部本地门禁通过后上线 Auth API v1。扩展只调整、构建和留本地提交，不发布商店；不下线 legacy、不上传 Cloudflare schema、不改 WAF。
 
 ## 已核实基线
 
@@ -27,6 +27,7 @@
 - 稳定 issuer 仍为 `https://auth.cqu.moe/api/auth`；D01–D05 discovery 永久保留。
 - 生产已应用的 D1/DO 迁移历史只追加/对齐，不重编号、不删除、不重写表；`v3` 必须保留 `CquQuickloginAccountDO` 与 `CquQuickloginDeviceDO`。
 - legacy 没有自动 Sunset；生产退役仍需部署后的路由计数、OAuth client 清单和单独授权。
+- Auth 部署必须在 Task 1–5 本地门禁、任务审查和整分支审查全部通过后执行；优先使用仓库现有 Wrangler/CI 所定义的生产配置，不顺带变更 D1/KV/WAF/Endpoint Management。部署不等于流量验收。
 - 所有新行为先写或移植会失败的测试并观察 RED，再移植最小实现变 GREEN；每项本地提交前审查 staged diff，不改其他 worktree。
 
 ## Task 1：移植 QuickLogin 核心状态、迁移与 DO
@@ -81,4 +82,5 @@
 2. `generate:api` 后检查 runtime ↔ OpenAPI ↔ endpoints ↔ Cloudflare 集合；连续生成无漂移。永久 discovery 与仍保留 legacy 明确登记。
 3. 更新原 API v1 execution-log、acceptance-results、cleanup-ledger 和当前接入文档，说明原计划前提为何被修正、QuickLogin 哪些能力被保留、哪些退役条件仍未满足。
 4. 运行原 API v1 验收命令全集，加 QuickLogin Auth 全部 Node/Workers 测试和扩展全部门禁；记录实际退出码、测试数和已知环境噪声。
-5. 最终做任务级审查和整分支审查。报告两个工作区/分支/commit，并明确未 push、未部署、未上传 Cloudflare schema、旧路由仍未退役。
+5. 最终做任务级审查和整分支审查。全部通过后部署 Auth Worker；不上传 Cloudflare schema、不启用 WAF、不下线旧路由。
+6. 部署后只做 health、静态页面、v1/legacy/discovery 和未登录拒绝等无凭据安全探针，记录 Worker version。真实用户流量、生产 OAuth client/D1 清单及退役判断留待用户晚上回来共同检查。
