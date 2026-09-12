@@ -262,13 +262,25 @@ export class CquSessionDO extends DurableObject<Env> {
   // 全部浏览器出站均经 CF 容器 stub;此直连客户端仅作历史回滚窗口保留。
   private ssoClient = new CquSsoClient();
   private quickloginFlights = new Map<string, Promise<DeviceLoginResult>>();
+  private orphanedAtrustLoginToken: string | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    // `codePermitPending` is a durable outbox marker. Replaying the same token is
-    // idempotent on the node, so an activation after a crash can finish the
-    // acknowledgement without ever handing the shared channel to a successor.
     ctx.blockConcurrencyWhile(async () => {
+      // A persisted aTrust lock has no owning JS continuation in this freshly
+      // activated instance. Recover it before replaying the permit outbox, but
+      // preserve a still-live external code-owner fence until its own TTL.
+      try {
+        await this.recoverOrphanedAtrustLogin(true);
+      } catch (error) {
+        console.warn(
+          `[CquSession] orphaned aTrust login recovery deferred (${error instanceof Error ? error.name : "unknown"})`
+        );
+        return;
+      }
+      // `codePermitPending` is a durable outbox marker. Replaying the same token
+      // is idempotent, so recovery can finish an acknowledgement without handing
+      // the shared channel to a second owner.
       try {
         await this.recoverPendingCodePermit();
       } catch (error) {
@@ -450,6 +462,16 @@ export class CquSessionDO extends DurableObject<Env> {
         }
       }
       return new Response(null, { status: 101, webSocket: pair[0] });
+    }
+
+    try {
+      if (await this.recoverOrphanedAtrustLogin()) {
+        await this.recoverPendingCodePermit();
+      }
+    } catch (error) {
+      console.warn(
+        `[CquSession] orphaned aTrust login retry recovery deferred (${error instanceof Error ? error.name : "unknown"})`
+      );
     }
 
     const action = url.pathname.split("/").pop();
@@ -2484,6 +2506,107 @@ export class CquSessionDO extends DurableObject<Env> {
     if (pending?.kind === "login_2fa") {
       await this.ctx.storage.delete("pendingCode");
     }
+  }
+
+  /**
+   * Recover an aTrust login lock left by a previous DO activation.
+   *
+   * The new instance has no in-memory continuation capable of completing that
+   * login. Remove only the orphan token and its route, rotate the aTrust
+   * generation to fence late work, and advance the persisted code lease in one
+   * transaction. Any promoted owner receives its permit through the existing
+   * durable outbox after this transaction commits.
+   */
+  private async recoverOrphanedAtrustLogin(
+    captureActivationLock = false
+  ): Promise<boolean> {
+    if (captureActivationLock) {
+      const lock =
+        (await this.ctx.storage.get<LoginInFlight>(
+          "atrustLoginInFlight"
+        )) ?? null;
+      this.orphanedAtrustLoginToken = lock?.token ?? null;
+    }
+    const orphanToken = this.orphanedAtrustLoginToken;
+    if (!orphanToken) return false;
+
+    const now = Date.now();
+    let recovered = false;
+    let matched = false;
+    let deferredByLiveOwner = false;
+    let promotedOwnerKind: LoginKind | null = null;
+
+    await this.ctx.storage.transaction(async (tx) => {
+      const lock =
+        (await tx.get<LoginInFlight>("atrustLoginInFlight")) ?? null;
+      if (lock?.token !== orphanToken) return;
+      matched = true;
+
+      const lease = (await tx.get<CodeLease>("codeLease")) ?? null;
+      if (
+        lease?.ownerToken === orphanToken &&
+        pruneCodeLease(lease, now)?.ownerToken === orphanToken
+      ) {
+        deferredByLiveOwner = true;
+        return;
+      }
+      const pendingToken =
+        (await tx.get<string>("codePermitPending")) ?? null;
+      const provenToken =
+        (await tx.get<string>("codePermitProven")) ?? null;
+      const pendingCode =
+        (await tx.get<PendingCode>("pendingCode")) ?? null;
+      const nextLease = releaseCodeLease(lease, orphanToken, now);
+      const ownerChanged = lease?.ownerToken === orphanToken;
+
+      const deletes = [
+        "atrustLoginInFlight",
+        this.browserRouteKey(orphanToken),
+      ];
+      if (!nextLease) deletes.push("codeLease");
+      if (ownerChanged || pendingToken === orphanToken) {
+        deletes.push("codePermitPending");
+      }
+      if (ownerChanged || provenToken === orphanToken) {
+        deletes.push("codePermitProven");
+      }
+      await tx.delete(deletes);
+
+      const writes: Record<string, unknown> = {
+        atrustGeneration: crypto.randomUUID(),
+      };
+      if (nextLease) writes.codeLease = nextLease;
+      if (ownerChanged && nextLease) {
+        writes.codePermitPending = nextLease.ownerToken;
+        promotedOwnerKind = nextLease.ownerKind;
+      }
+      if (pendingCode?.ownerToken === orphanToken) {
+        const { ownerToken: _orphanOwner, ...unownedCode } = pendingCode;
+        writes.pendingCode = unownedCode;
+      }
+      await tx.put(writes);
+      recovered = true;
+    });
+
+    if (!matched || recovered) {
+      this.orphanedAtrustLoginToken = null;
+    }
+    if (recovered) {
+      console.warn(
+        JSON.stringify({
+          event: "cqu.atrust.orphaned_login_recovered",
+          promotedOwnerKind,
+        })
+      );
+    } else if (deferredByLiveOwner && captureActivationLock) {
+      console.warn(
+        JSON.stringify({
+          event: "cqu.atrust.orphaned_login_recovery_deferred",
+          reason: "code_owner_fence_live",
+        })
+      );
+    }
+    return recovered;
   }
 
   /** 清理某类登录在 owner/队列中的所有租约，保留另一类登录的顺序。 */

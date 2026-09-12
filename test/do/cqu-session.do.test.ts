@@ -18,7 +18,7 @@
 //     入口同 DO(会抛 "Cannot perform I/O on behalf of a different Durable Object")。故 M7 不靠
 //     input-gate 真交错, 而是让 keepalive spy 往【同一 state.storage】写 revoked(同 DO 上下文)
 //     来复现「探活在途 status 被改写」的因果, 断言写回分支命中撤销守卫。
-import { runInDurableObject } from "cloudflare:test";
+import { abortAllDurableObjects, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:test";
 import { describe, it, expect, afterEach, vi, type MockInstance } from "vitest";
 import { encrypt } from "../../src/services/crypto";
@@ -78,6 +78,202 @@ async function seedLease(
   }
   return seedSession(stub, { ...opts, extra });
 }
+
+async function restartDurableObject(stub: DurableObjectStub) {
+  const id = stub.id;
+  await abortAllDurableObjects();
+  return env.CQU_SESSION.get(id);
+}
+
+describe("aTrust activation recovery", () => {
+  it("releases an orphaned aTrust owner after eviction without touching direct CAS state", async () => {
+    const stub = freshStub("atrust-orphan-owner");
+    const now = Date.now();
+    await seedLease(stub, {
+      status: "active",
+      extra: {
+        atrustGeneration: "generation-before-eviction",
+        atrustSession: {
+          status: "active",
+          storageState: validAtrustStorageState(),
+          loginAt: now,
+          lastUsedAt: 0,
+          consecutiveFailures: 0,
+        },
+        loginInFlight: { token: "cas-live", startedAt: now },
+        atrustLoginInFlight: { token: "atrust-orphan", startedAt: now },
+        codeLease: {
+          ownerToken: "atrust-orphan",
+          ownerKind: "atrust",
+          acquiredAt: 0,
+          queue: [],
+        },
+        codePermitPending: "atrust-orphan",
+        codePermitProven: "atrust-orphan",
+        pendingCode: {
+          code: "123456",
+          kind: "login_2fa",
+          ownerToken: "atrust-orphan",
+          ts: now,
+          expiresAt: now + 60_000,
+        },
+        quickloginBindingEpoch: 7,
+      },
+    });
+
+    const restarted = await restartDurableObject(stub);
+    const response = await restarted.fetch("http://do/status");
+
+    expect(response.status).toBe(200);
+    expect(await readStorage(restarted, "atrustLoginInFlight")).toBeUndefined();
+    expect(await readStorage(restarted, "browserRoute:atrust-orphan")).toBeUndefined();
+    expect(await readStorage(restarted, "codeLease")).toBeUndefined();
+    expect(await readStorage(restarted, "codePermitPending")).toBeUndefined();
+    expect(await readStorage(restarted, "codePermitProven")).toBeUndefined();
+    expect(await readStorage(restarted, "pendingCode")).toEqual({
+      code: "123456",
+      kind: "login_2fa",
+      ts: now,
+      expiresAt: now + 60_000,
+    });
+    expect(await readStorage(restarted, "loginInFlight")).toMatchObject({
+      token: "cas-live",
+    });
+    expect(await readStorage(restarted, "atrustSession")).toMatchObject({
+      status: "active",
+    });
+    expect(await readStorage(restarted, "quickloginBindingEpoch")).toBe(7);
+    expect(await readStorage(restarted, "atrustGeneration")).not.toBe(
+      "generation-before-eviction"
+    );
+  });
+
+  it("removes only the queued orphaned aTrust token while preserving the CAS owner fence", async () => {
+    const stub = freshStub("atrust-orphan-queued");
+    const now = Date.now();
+    await seedLease(stub, {
+      status: "active",
+      extra: {
+        atrustLoginInFlight: { token: "atrust-orphan", startedAt: now },
+        codeLease: {
+          ownerToken: "cas-live",
+          ownerKind: "cas",
+          acquiredAt: now,
+          queue: [
+            { token: "atrust-orphan", kind: "atrust", queuedAt: now },
+          ],
+        },
+        codePermitPending: "cas-live",
+      },
+    });
+    const restarted = await restartDurableObject(stub);
+    const permits: string[] = [];
+    spyBrowserFetch({
+      "/code-permit": async (request) => {
+        permits.push((await request.json<{ session: string }>()).session);
+        return Response.json({ ok: true });
+      },
+    });
+    await restarted.fetch("http://do/status");
+
+    expect(await readStorage(restarted, "atrustLoginInFlight")).toBeUndefined();
+    expect(await readStorage(restarted, "browserRoute:atrust-orphan")).toBeUndefined();
+    expect(await readStorage(restarted, "codeLease")).toMatchObject({
+      ownerToken: "cas-live",
+      ownerKind: "cas",
+      queue: [],
+    });
+    expect(permits).toEqual(["cas-live"]);
+  });
+
+  it("promotes the next CAS owner when an evicted aTrust login owned the code lease", async () => {
+    const stub = freshStub("atrust-orphan-promote-cas");
+    const now = Date.now();
+    await seedLease(stub, {
+      status: "active",
+      extra: {
+        atrustLoginInFlight: { token: "atrust-orphan", startedAt: now },
+        codeLease: {
+          ownerToken: "atrust-orphan",
+          ownerKind: "atrust",
+          acquiredAt: 0,
+          queue: [{ token: "cas-next", kind: "cas", queuedAt: now }],
+        },
+        codePermitPending: "atrust-orphan",
+      },
+    });
+    const restarted = await restartDurableObject(stub);
+    const permits: string[] = [];
+    spyBrowserFetch({
+      "/code-permit": async (request) => {
+        permits.push((await request.json<{ session: string }>()).session);
+        return Response.json({ ok: true });
+      },
+    });
+    await restarted.fetch("http://do/status");
+
+    expect(await readStorage(restarted, "atrustLoginInFlight")).toBeUndefined();
+    expect(await readStorage(restarted, "codeLease")).toMatchObject({
+      ownerToken: "cas-next",
+      ownerKind: "cas",
+      queue: [],
+    });
+    expect(await readStorage(restarted, "codePermitPending")).toBeUndefined();
+    expect(permits).toEqual(["cas-next"]);
+  });
+
+  it("keeps a live orphan owner fenced, then releases it on the first request after lease expiry", async () => {
+    const stub = freshStub("atrust-orphan-live-owner");
+    const now = Date.now();
+    await seedLease(stub, {
+      status: "active",
+      extra: {
+        atrustLoginInFlight: { token: "atrust-orphan", startedAt: now },
+        codeLease: {
+          ownerToken: "atrust-orphan",
+          ownerKind: "atrust",
+          acquiredAt: now,
+          queue: [{ token: "cas-next", kind: "cas", queuedAt: now }],
+        },
+        codePermitPending: "atrust-orphan",
+        codePermitProven: "atrust-orphan",
+      },
+    });
+    const restarted = await restartDurableObject(stub);
+    const permits: string[] = [];
+    spyBrowserFetch({
+      "/code-permit": async (request) => {
+        permits.push((await request.json<{ session: string }>()).session);
+        return Response.json({ ok: true });
+      },
+    });
+
+    await restarted.fetch("http://do/status");
+
+    expect(await readStorage(restarted, "atrustLoginInFlight")).toMatchObject({
+      token: "atrust-orphan",
+    });
+    expect(await readStorage(restarted, "codeLease")).toMatchObject({
+      ownerToken: "atrust-orphan",
+      queue: [{ token: "cas-next", kind: "cas" }],
+    });
+    expect(permits).toEqual([]);
+
+    await runInDurableObject(restarted, async (_instance, state) => {
+      const lease = await state.storage.get<Record<string, unknown>>("codeLease");
+      await state.storage.put("codeLease", { ...lease, acquiredAt: 0 });
+    });
+    await restarted.fetch("http://do/status");
+
+    expect(await readStorage(restarted, "atrustLoginInFlight")).toBeUndefined();
+    expect(await readStorage(restarted, "codeLease")).toMatchObject({
+      ownerToken: "cas-next",
+      ownerKind: "cas",
+      queue: [],
+    });
+    expect(permits).toEqual(["cas-next"]);
+  });
+});
 
 describe("verification-code lease orchestration", () => {
   it("deposit-code sends the code only to the lease owner token", async () => {
