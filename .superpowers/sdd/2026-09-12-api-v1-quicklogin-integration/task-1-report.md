@@ -144,3 +144,53 @@ npm run test:do
 - Workers 全套 exit 0，但测试环境仍打印既有 Containers sourcemap、未启用容器实例与 overdue alarm 背景噪音；未造成测试失败。
 - `QUICKLOGIN_DEVICE_MODE` / client / extension origin 使用来源部署值，但本任务没有部署。
 - OAuth grant helper 位于 `src/services/quicklogin/**` 并已编译；实际 auth hook、HTTP routes 与端到端 OAuth/revocation 测试仍由后续任务接入。
+
+## Fix round 1/5（Task 1 审查修复）
+
+### 修复
+
+1. `CquSessionDO.revoke()` 不再在本地撤销前等待 Account DO。现在先递增 binding epoch、清 QuickLogin/browser 登录锁，再提交 `status=revoked`、删除 alarm 与登录状态；最后 best-effort 通知账号 DO。通知失败只写结构化告警，不改变本地撤销结果。
+2. Device DO 在浏览器 keepalive 成功后，先把 `pendingKeepaliveMint`（operation ID、铸票时刻和待提交 storage state）持久化。broker 回包丢失时，下次 alarm 先用同一 ID 重试确认，不重复调用浏览器 keepalive；确认后才清 pending 并更新 session。
+3. CquSession 的 mint 幂等记录改为单个紧凑 receipt 列表：24 小时 TTL、最多 64 条，并在 CquSession alarm/每次记录时清理；旧 `quickloginMint:*` 单键会被惰性删除。
+4. 删除 Task 1 无生产引用的 `client-registration.ts`、`http.ts`、`quota-admin.ts` 及前两者对应的 Task 1 测试；留待 OAuth/HTTP/admin 实际接线任务加入。`oauth-grants.ts` 因 Account DO 直接依赖保留。
+5. `quicklogin-login-broker.do.test.ts` 的 coalescing 用例改为悬挂首个 `/run`，在其完成前发出第二请求，验证并发请求只触发一次容器运行。
+
+### RED
+
+命令：
+
+```sh
+npm run test:do -- test/do/cqu-session.do.test.ts test/do/quicklogin-device.do.test.ts test/do/quicklogin-login-broker.do.test.ts
+```
+
+有效 RED：exit 1；73 tests passed、3 tests failed。
+
+- Account DO 通知故障时 revoke 实际返回 500，期望 200；
+- 70 个 `quickloginMint:*` 收据全部残留，期望最多 64；
+- broker 回包丢失后 session 没有 `pendingKeepaliveMint`。
+
+首次测试夹具尝试跨 DO 复用 Response/Promise，触发 workerd I/O 上下文限制；调整为无跨上下文对象的 binding stub 后，重新运行得到上述有效产品 RED。并发 single-flight 测试直接通过，证明实现已有 single-flight，原缺口仅是测试未真正覆盖。
+
+### GREEN
+
+```sh
+npm run test:do -- test/do/cqu-session.do.test.ts test/do/quicklogin-device.do.test.ts test/do/quicklogin-login-broker.do.test.ts
+npm run test:do -- test/do/cqu-session.do.test.ts test/do/quicklogin-device.do.test.ts test/do/quicklogin-login-broker.do.test.ts test/do/quicklogin-account.do.test.ts test/do/quicklogin-migration.do.test.ts test/do/quicklogin-projection.do.test.ts test/do/quicklogin-regression.do.test.ts
+npm test -- src/services/quicklogin/*.test.ts
+npm run typecheck
+npm run typecheck:do
+```
+
+结果：
+
+- 修复 focused Workers：3 files、76 tests passed；
+- Task 1 Workers 回归：7 files、87 tests passed；
+- QuickLogin Node：8 files、56 tests passed；
+- 两项 TypeScript 检查均 exit 0。
+
+### 自审与担忧
+
+- `git diff --check` 通过；全仓检索确认三个越界模块已无代码/测试残留引用。
+- receipt 上限使存储条数有硬边界；TTL 清理由正常 alarm 和后续 mint 调用触发，长期无活动的最后一组收据会保留到下一次唤醒，但最多 64 条。
+- best-effort 账号通知失败时，CquSession 已 fail-closed；Account DO 投影/设备 fencing 会在后续同步机会收敛，本轮没有新增跨 DO outbox。
+- Workers 仍打印既有 Containers sourcemap/未启用容器背景噪音，测试 exit 0。

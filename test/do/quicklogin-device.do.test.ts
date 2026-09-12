@@ -1,9 +1,13 @@
 import { env, runInDurableObject } from "cloudflare:test";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { QuickloginAccountClient } from "../../src/services/quicklogin/account-client";
 import { QuickloginDeviceClient } from "../../src/services/quicklogin/device-client";
 import { QuickloginLoginBrokerClient } from "../../src/services/quicklogin/login-broker-client";
 import { readStorage, seedCredentials, seedSession, spyBrowserFetch, validStorageState } from "./helpers";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function exportableStorageState(marker = "") {
   const state = validStorageState();
@@ -111,6 +115,88 @@ describe("CquQuickloginDeviceDO", () => {
     const mintLog =
       (await readStorage<unknown[]>(sessionStub, "stMintLog")) ?? [];
     expect(mintLog).toHaveLength(2);
+  });
+
+  it("reuses a pending keepalive mint operation after the broker response is lost", async () => {
+    const { userId, authority } = await setupDevice();
+    const sessionStub = env.CQU_SESSION.get(env.CQU_SESSION.idFromName(userId));
+    await seedSession(sessionStub, { status: "active" });
+    await seedCredentials(sessionStub);
+    await runInDurableObject(sessionStub, async (_instance, state) => {
+      const current = await state.storage.get<Record<string, unknown>>("state");
+      await state.storage.put("state", { ...current, userId });
+    });
+    let keepaliveCalls = 0;
+    spyBrowserFetch({
+      "/health": () => Response.json({
+        ok: true,
+        bootId: "lost-response-boot",
+        browserProfile: "cloudflare",
+        capabilities: ["browser-route-v1", "operation-deadline-v1"],
+      }),
+      "/code-permit": () => Response.json({ ok: true }),
+      "/run": () => Response.json({ ok: true, state: exportableStorageState() }),
+      "/keepalive": () => {
+        keepaliveCalls += 1;
+        return Response.json({
+          ok: true,
+          status: "alive",
+          state: exportableStorageState("-pending"),
+        });
+      },
+    });
+    const devices = new QuickloginDeviceClient(env);
+    await devices.notifyDevice(authority);
+    const stub = env.CQU_QUICKLOGIN_DEVICE.get(
+      env.CQU_QUICKLOGIN_DEVICE.idFromName(`${userId}:${authority.deviceId}`)
+    );
+    await runInDurableObject(stub, async (instance) => {
+      await (instance as unknown as { alarm(): Promise<void> }).alarm();
+    });
+    const ready = await devices.readDeviceSession(userId, authority.deviceId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      await state.storage.put("session", { ...ready, lastKeepAliveAt: 0 });
+    });
+
+    let loseFirstResponse = true;
+    const operationIds: string[] = [];
+    vi.spyOn(env.CQU_SESSION, "get").mockReturnValue({
+      fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request
+          ? input
+          : new Request(input as string | URL, init);
+        if (new URL(request.url).pathname === "/quicklogin-keepalive-mint") {
+          const body = await request.clone().json<{ operationId: string }>();
+          operationIds.push(body.operationId);
+          if (loseFirstResponse) {
+            loseFirstResponse = false;
+            throw new Error("broker response lost");
+          }
+          return Response.json({ success: true });
+        }
+        throw new Error(`unexpected CQU_SESSION path: ${new URL(request.url).pathname}`);
+      },
+    } as never);
+
+    await expect(
+      runInDurableObject(stub, async (instance) => {
+        await (instance as unknown as { alarm(): Promise<void> }).alarm();
+      })
+    ).rejects.toThrow("broker response lost");
+    const pending = await readStorage<Record<string, unknown>>(stub, "session");
+    expect(pending?.pendingKeepaliveMint).toMatchObject({
+      operationId: expect.any(String),
+    });
+
+    await runInDurableObject(stub, async (instance) => {
+      await (instance as unknown as { alarm(): Promise<void> }).alarm();
+    });
+
+    expect(keepaliveCalls).toBe(1);
+    expect(operationIds).toHaveLength(2);
+    expect(operationIds[1]).toBe(operationIds[0]);
+    expect(await readStorage<Record<string, unknown>>(stub, "session"))
+      .not.toHaveProperty("pendingKeepaliveMint");
   });
 
   it("uses the elapsed failure window and resets it after recovery", async () => {

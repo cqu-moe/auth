@@ -74,11 +74,15 @@ describe("quicklogin login broker", () => {
     const stub = freshStub("quicklogin-broker-merge");
     await seedSession(stub, { status: "active" });
     await seedCredentials(stub);
+    let runStarted = false;
     const fetchMock = spyBrowserFetch({
       "/health": health,
       "/code-permit": () => Response.json({ ok: true }),
-      "/run": () =>
-        Response.json({ ok: true, state: freshDeviceState("merged") }),
+      "/run": async () => {
+        runStarted = true;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return Response.json({ ok: true, state: freshDeviceState("merged") });
+      },
     });
     const client = await broker(stub);
     const input = {
@@ -86,8 +90,13 @@ describe("quicklogin login broker", () => {
       deviceId: "device-a",
       generation: 4,
     };
-    const first = await client.quickloginLogin(input);
-    const second = await client.quickloginLogin(input);
+    const firstPromise = client.quickloginLogin(input);
+    for (let attempt = 0; attempt < 20 && !runStarted; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(runStarted).toBe(true);
+    const secondPromise = client.quickloginLogin(input);
+    const [first, second] = await Promise.all([firstPromise, secondPromise]);
     expect(second).toEqual(first);
     expect(
       fetchMock.mock.calls.filter(

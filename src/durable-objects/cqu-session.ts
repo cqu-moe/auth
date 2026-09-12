@@ -97,6 +97,9 @@ const MAX_FAST_RETRIES = 5;
 // 限流桶 key 与审计 key 共用同一常量, 杜绝改一处漏一处导致桶/审计错配。
 const KEEPALIVE_CLIENT_ID = "__keepalive__";
 const KEEPALIVE_SOURCE = "keepalive";
+const QUICKLOGIN_MINT_RECEIPTS_KEY = "quickloginMintReceipts";
+const QUICKLOGIN_MINT_RECEIPT_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_QUICKLOGIN_MINT_RECEIPTS = 64;
 // 熔断: transient(瑞数/网络)连续失败时 keepalive 退避封顶(从 KEEPALIVE_INTERVAL_MS 指数涨到 6h)。
 const KEEPALIVE_MAX_BACKOFF_MS = 6 * 60 * 60 * 1000;
 // TGT 绝对寿命 ~8h；在 7h 处主动重铸, 留 ~1h 余量给重登流程(容器点火 + 发码 + 邮件到达 + 提交)。
@@ -162,6 +165,11 @@ interface QuickloginLoginInFlight extends LoginInFlight {
 
 interface QuickloginCachedLoginResult {
   result: Extract<DeviceLoginResult, { kind: "success" }>;
+  expiresAt: number;
+}
+
+interface QuickloginMintReceipt {
+  operationId: string;
   expiresAt: number;
 }
 
@@ -1776,8 +1784,9 @@ export class CquSessionDO extends DurableObject<Env> {
    */
   private async revoke(): Promise<void> {
     await this.loadState();
+    const ownerUserId = this.state?.userId;
     const fence = await this.snapshotLiveCodeLeaseOwner();
-    await this.bumpQuickloginBindingEpoch(this.state?.userId);
+    await this.bumpQuickloginBindingEpoch();
     // 刻意直写 setStatus("revoked") 而非走 nextStatus 状态机: 撤销要从任意状态(含空/
     // unbound 的 DO, admin 端点对未初始化的 DO 也会发 revoke)强制置位; 状态机表里
     // unbound 无 REVOKE 转移, 走表会停在 unbound 而漏置墓碑。勿"修回"成走表。
@@ -1793,6 +1802,16 @@ export class CquSessionDO extends DurableObject<Env> {
       "codePermitProven",
     ]);
     await this.restoreCodeLeaseOwnerFence(fence);
+    if (ownerUserId) {
+      try {
+        await new QuickloginAccountClient(this.env)
+          .notifyBindingChanged(ownerUserId);
+      } catch {
+        console.warn(JSON.stringify({
+          event: "quicklogin.binding_change_notify_failed",
+        }));
+      }
+    }
   }
 
   /**
@@ -1814,6 +1833,7 @@ export class CquSessionDO extends DurableObject<Env> {
   }
 
   async alarm(): Promise<void> {
+    await this.pruneQuickloginMintReceipts(Date.now());
     await this.loadState();
     if (!this.state) return;
     // alarm 的 13 分钟平台预算在入口建立一次,贯穿保活/主动重登;
@@ -2064,18 +2084,56 @@ export class CquSessionDO extends DurableObject<Env> {
     ) {
       throw new CquSsoError("INVALID_REQUEST", "invalid quicklogin mint");
     }
-    const key = `quickloginMint:${input.operationId}`;
-    if (await this.ctx.storage.get(key)) return;
-    await this.ctx.storage.put(key, {
-      deviceId: input.deviceId,
-      mintedAt: input.mintedAt,
-    });
+    const now = Date.now();
+    const receipts = await this.pruneQuickloginMintReceipts(now);
+    if (receipts.some((receipt) => receipt.operationId === input.operationId)) {
+      return;
+    }
+    const next = [
+      ...receipts.slice(-(MAX_QUICKLOGIN_MINT_RECEIPTS - 1)),
+      {
+        operationId: input.operationId,
+        expiresAt: now + QUICKLOGIN_MINT_RECEIPT_TTL_MS,
+      },
+    ];
+    await this.ctx.storage.put(QUICKLOGIN_MINT_RECEIPTS_KEY, next);
     try {
       await this.recordKeepaliveMint();
     } catch (error) {
-      await this.ctx.storage.delete(key);
+      if (receipts.length === 0) {
+        await this.ctx.storage.delete(QUICKLOGIN_MINT_RECEIPTS_KEY);
+      } else {
+        await this.ctx.storage.put(QUICKLOGIN_MINT_RECEIPTS_KEY, receipts);
+      }
       throw error;
     }
+  }
+
+  private async pruneQuickloginMintReceipts(
+    now: number
+  ): Promise<QuickloginMintReceipt[]> {
+    const stored =
+      (await this.ctx.storage.get<QuickloginMintReceipt[]>(
+        QUICKLOGIN_MINT_RECEIPTS_KEY
+      )) ?? [];
+    const receipts = stored
+      .filter((receipt) =>
+        typeof receipt?.operationId === "string" &&
+        receipt.operationId.length > 0 &&
+        Number.isSafeInteger(receipt.expiresAt) &&
+        receipt.expiresAt > now
+      )
+      .slice(-MAX_QUICKLOGIN_MINT_RECEIPTS);
+    const legacy = await this.ctx.storage.list({ prefix: "quickloginMint:" });
+    if (legacy.size > 0) {
+      await this.ctx.storage.delete([...legacy.keys()]);
+    }
+    if (receipts.length === 0) {
+      await this.ctx.storage.delete(QUICKLOGIN_MINT_RECEIPTS_KEY);
+    } else if (receipts.length !== stored.length) {
+      await this.ctx.storage.put(QUICKLOGIN_MINT_RECEIPTS_KEY, receipts);
+    }
+    return receipts;
   }
 
   private async recordKeepaliveMint(): Promise<void> {

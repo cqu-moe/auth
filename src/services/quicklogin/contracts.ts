@@ -157,6 +157,11 @@ export interface StoredDeviceSession {
   transientStartedAt: EpochMs | null;
   fastRetries: number;
   nextAttemptAt: EpochMs | null;
+  pendingKeepaliveMint?: {
+    operationId: string;
+    mintedAt: EpochMs;
+    storageState?: string;
+  };
 }
 
 export interface DeviceLoginRequest {

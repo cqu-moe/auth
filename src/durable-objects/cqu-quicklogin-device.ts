@@ -232,11 +232,14 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     session: StoredDeviceSession,
     authority: DeviceAuthority
   ): Promise<void> {
+    if (session.pendingKeepaliveMint) {
+      await this.confirmKeepaliveMint(session, authority);
+      return;
+    }
     if (!session.storageState) {
       await this.performLogin(session, authority);
       return;
     }
-    const operationId = crypto.randomUUID();
     let response: Response;
     try {
       response = await fetchBrowser(
@@ -292,26 +295,44 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       await this.notify(current);
       return;
     }
+    session.pendingKeepaliveMint = {
+      operationId: crypto.randomUUID(),
+      mintedAt: Date.now(),
+      ...(body.state === undefined
+        ? {}
+        : { storageState: JSON.stringify(body.state) }),
+    };
+    await this.ctx.storage.put(SESSION_KEY, session);
+    await this.confirmKeepaliveMint(session, authority);
+  }
+
+  private async confirmKeepaliveMint(
+    session: StoredDeviceSession,
+    authority: DeviceAuthority
+  ): Promise<void> {
+    const pending = session.pendingKeepaliveMint;
+    if (!pending) return;
     await new QuickloginLoginBrokerClient(this.env)
       .recordQuickloginKeepaliveMint(authority.ownerUserId, {
         deviceId: authority.deviceId,
-        operationId,
-        mintedAt: Date.now(),
+        operationId: pending.operationId,
+        mintedAt: pending.mintedAt,
       });
-    if (body.state !== undefined) {
-      const serialized = JSON.stringify(body.state);
+    if (pending.storageState !== undefined) {
+      const serialized = pending.storageState;
       const cookies = extractSsoCookies(serialized, Date.now());
       const digest = await digestSsoCookies(cookies);
       if (digest !== session.exportDigest) session.sessionVersion += 1;
       session.storageState = serialized;
       session.exportDigest = digest;
     }
-    session.lastKeepAliveAt = Date.now();
+    session.lastKeepAliveAt = pending.mintedAt;
     session.state = "ready";
     session.transientFailures = 0;
     session.transientStartedAt = null;
     session.fastRetries = 0;
     session.nextAttemptAt = null;
+    delete session.pendingKeepaliveMint;
     await this.ctx.storage.put(SESSION_KEY, session);
     await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_MS);
   }
@@ -372,6 +393,13 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       emptySession(authority);
     if (authority.generation < current.generation) return;
     const next = { ...current, generation: authority.generation };
+    if (
+      authority.generation !== current.generation ||
+      !authority.allowed ||
+      !quickloginDeviceModeEnabled(this.env)
+    ) {
+      delete next.pendingKeepaliveMint;
+    }
     if (!quickloginDeviceModeEnabled(this.env)) {
       next.state = authority.enabled ? "paused" : "disabled";
       await this.ctx.storage.put(SESSION_KEY, next);

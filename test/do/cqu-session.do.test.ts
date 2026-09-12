@@ -670,6 +670,85 @@ describe("verification-code lease orchestration", () => {
       }
     }
   );
+
+  it("commits revoke locally when the QuickLogin account notification is unavailable", async () => {
+    const stub = freshStub("quicklogin-revoke-account-outage");
+    await seedSession(stub, {
+      status: "active",
+      extra: {
+        quickloginBindingEpoch: 3,
+        "quickloginLogin:device-a": {
+          token: "quicklogin-token",
+          deviceId: "device-a",
+          generation: 4,
+          bindingEpoch: 3,
+          startedAt: Date.now(),
+          browserRouteVersion: 1,
+        },
+        "browserRoute:quicklogin-token": {
+          token: "quicklogin-token",
+          kind: "quicklogin",
+          route: {
+            version: 1,
+            backend: "cloudflare",
+            userId: "u1",
+            containerKey: "quicklogin:u1:device-a",
+          },
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 60_000,
+        },
+      },
+    });
+    await runInDurableObject(stub, async (_instance, state) => {
+      await state.storage.setAlarm(Date.now() + 60_000);
+    });
+    const notifyFetch = vi.fn().mockRejectedValue(new Error("account unavailable"));
+    vi.spyOn(env.CQU_QUICKLOGIN_ACCOUNT, "get").mockReturnValue({
+      fetch: notifyFetch,
+    } as never);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const response = await stub.fetch("https://do/revoke", { method: "POST" });
+
+    expect(response.status).toBe(200);
+    expect(await readStatus(stub)).toBe("revoked");
+    expect(await readStorage(stub, "quickloginLogin:device-a")).toBeUndefined();
+    expect(await readStorage(stub, "browserRoute:quicklogin-token")).toBeUndefined();
+    expect(await readAlarm(stub)).toBeNull();
+    expect(notifyFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds QuickLogin keepalive mint idempotency receipts", async () => {
+    const stub = freshStub("quicklogin-mint-receipts");
+    await seedSession(stub, { status: "active" });
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    await runInDurableObject(stub, async (instance, state) => {
+      const target = instance as unknown as {
+        recordQuickloginKeepaliveMint(input: {
+          deviceId: string;
+          operationId: string;
+          mintedAt: number;
+        }): Promise<void>;
+      };
+      for (let index = 0; index < 70; index += 1) {
+        await target.recordQuickloginKeepaliveMint({
+          deviceId: "device-a",
+          operationId: `operation-${index}`,
+          mintedAt: Date.now(),
+        });
+      }
+      const legacy = await state.storage.list({ prefix: "quickloginMint:" });
+      const compact =
+        (await state.storage.get<Array<{ operationId: string }>>(
+          "quickloginMintReceipts"
+        )) ?? [];
+      expect(legacy.size + compact.length).toBeLessThanOrEqual(64);
+      expect(compact).toContainEqual(
+        expect.objectContaining({ operationId: "operation-69" })
+      );
+    });
+  });
 });
 
 describe("persistent browser route records", () => {
