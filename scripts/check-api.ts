@@ -2,6 +2,9 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { createApp } from "../src/app";
+import { listHttpOperations } from "../src/api/operations";
+import { assertApiArtifactConsistency } from "../src/api/openapi/artifacts";
 
 const temp = mkdtempSync(resolve(tmpdir(), "auth-api-check-"));
 execFileSync(process.execPath, ["--import", "tsx", "scripts/generate-api.ts"], {
@@ -20,3 +23,14 @@ for (const file of [
   const actual = readFileSync(resolve(temp, file));
   if (!expected.equals(actual)) throw new Error(`Generated API artifact is stale: ${file}`);
 }
+
+const readJson = (file: string) => JSON.parse(
+  readFileSync(resolve(process.cwd(), file), "utf8")
+);
+assertApiArtifactConsistency({
+  runtime: listHttpOperations(createApp()),
+  openapi: readJson("docs/api/openapi.json"),
+  cloudflare: readJson("docs/api/cloudflare.openapi.json"),
+  endpoints: readJson("docs/api/endpoints.json"),
+  coverage: readJson("docs/api/coverage.json"),
+});

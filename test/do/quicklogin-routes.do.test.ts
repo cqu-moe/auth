@@ -72,7 +72,7 @@ describe("quicklogin device HTTP", () => {
     });
     expect(root.status).toBe(200);
     await expect(root.json()).resolves.toEqual({
-      data: { masterEnabled: true, deviceLimit: 1, used: 0 },
+      data: { eligible: true, masterEnabled: true, deviceLimit: 1, used: 0 },
     });
 
     const enabled = await SELF.fetch(

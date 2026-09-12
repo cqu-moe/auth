@@ -59,14 +59,18 @@ router.use("*", async (c, next) => {
   await next();
 });
 
-router.options("*", (c) => {
+const devicePreflight = (c: Context<HonoEnv>) => {
   if (c.req.header("Origin") !== c.env.QUICKLOGIN_EXTENSION_ORIGIN) {
     return apiError(c, "FORBIDDEN", 403);
   }
   c.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   c.header("Access-Control-Allow-Headers", "Authorization, Content-Type");
   return c.body(null, 204);
-});
+};
+
+for (const path of ["/", "/:id", "/:id/status", "/:id/refresh", "/:id/export"]) {
+  router.options(path, devicePreflight);
+}
 
 async function devicePrincipal(c: Context<HonoEnv>) {
   if (c.req.header("Origin") !== c.env.QUICKLOGIN_EXTENSION_ORIGIN) {

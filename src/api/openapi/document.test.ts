@@ -3,6 +3,58 @@ import { createApp } from "../../app";
 import { listHttpOperations } from "../operations";
 import { buildOpenApiDocument } from "./document";
 import { createHttpFixture } from "../../test-utils/http";
+import { buildCloudflareSchema } from "./cloudflare";
+
+function schemaAccepts(
+  schema: Record<string, any>,
+  value: unknown,
+  components: Record<string, any>
+): boolean {
+  if (schema.$ref) {
+    const name = schema.$ref.replace("#/components/schemas/", "");
+    return schemaAccepts(components[name], value, components);
+  }
+  if (schema.nullable && value === null) return true;
+  if (schema.const !== undefined && value !== schema.const) return false;
+  if (schema.enum && !schema.enum.includes(value)) return false;
+  if (schema.oneOf) {
+    return schema.oneOf.filter((entry: Record<string, any>) =>
+      schemaAccepts(entry, value, components)
+    ).length === 1;
+  }
+  if (schema.anyOf) {
+    return schema.anyOf.some((entry: Record<string, any>) =>
+      schemaAccepts(entry, value, components)
+    );
+  }
+  const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+  if (value === null) return types.includes("null");
+  const type = Array.isArray(value) ? "array" : typeof value === "object"
+    ? "object" : Number.isInteger(value) ? "integer" : typeof value;
+  if (schema.type && !types.includes(type) && !(type === "integer" && types.includes("number"))) {
+    return false;
+  }
+  if (typeof value === "string") {
+    if (schema.minLength !== undefined && value.length < schema.minLength) return false;
+    if (schema.maxLength !== undefined && value.length > schema.maxLength) return false;
+  }
+  if (typeof value === "number" && schema.minimum !== undefined && value < schema.minimum) {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return value.every((entry) => schemaAccepts(schema.items ?? {}, entry, components));
+  }
+  if (value && typeof value === "object") {
+    const object = value as Record<string, unknown>;
+    if ((schema.required ?? []).some((key: string) => !(key in object))) return false;
+    if (schema.additionalProperties === false &&
+        Object.keys(object).some((key) => !(key in (schema.properties ?? {})))) return false;
+    return Object.entries(schema.properties ?? {}).every(([key, property]) =>
+      !(key in object) || schemaAccepts(property as Record<string, any>, object[key], components)
+    );
+  }
+  return true;
+}
 
 describe("complete API document", () => {
   it("matches the runtime method/path set without phantom get-session POST", () => {
@@ -43,8 +95,155 @@ describe("complete API document", () => {
         .toMatchObject({ type: "string", pattern: "^[A-Z0-9]{8}$" });
       expect(paths["/api/v1/auth/error"].get.responses).toHaveProperty("302");
       expect(JSON.stringify(body)).not.toContain('"nullable"');
+      expect(Object.keys(paths["/api/v1/auth/oauth2/token"].post.requestBody.content))
+        .toEqual(["application/x-www-form-urlencoded"]);
+      expect(Object.keys(paths["/api/v1/auth/oauth2/introspect"].post.requestBody.content))
+        .toEqual(["application/x-www-form-urlencoded"]);
+      expect(Object.keys(paths["/api/v1/auth/oauth2/revoke"].post.requestBody.content))
+        .toEqual(["application/x-www-form-urlencoded"]);
+      const cloudflare = buildCloudflareSchema(body);
+      expect(cloudflare.paths["/api/v1/auth/oauth2/token"].post)
+        .not.toHaveProperty("requestBody");
+      expect(cloudflare.paths["/api/v1/cqu/quicklogin/devices"].post.requestBody
+        .content["application/json"].schema)
+        .toEqual({ $ref: "#/components/schemas/QuickloginDeviceRegistration" });
+
+      const documented = Object.entries(paths).flatMap(([path, item]) =>
+        Object.keys(item as Record<string, unknown>)
+          .map((method) => `${method.toUpperCase()} ${path}`)
+      ).sort();
+      const runtime = listHttpOperations(createApp()).map(({ method, path }) =>
+        `${method} ${path.replace(/:([A-Za-z0-9_]+)/g, "{$1}")}`
+      ).sort();
+      expect(documented).toEqual(runtime);
     } finally {
       await fixture.close();
+    }
+  });
+
+  it("documents QuickLogin native and enveloped contracts without internal state", () => {
+    const document = buildOpenApiDocument(listHttpOperations(createApp()));
+    const paths = document.paths as Record<string, Record<string, any>>;
+    const schemas = document.components.schemas as Record<string, any>;
+
+    expect(Object.keys(schemas)).toEqual(expect.arrayContaining([
+      "QuickloginNativeError", "PublicDevice", "DeviceStatus", "DeviceListData",
+      "QuickloginPreference", "QuickloginQuotaPreview", "QuickloginMigrationPreview",
+      "QuickloginCookieEnvelope",
+    ]));
+    expect(Object.keys(schemas)).not.toEqual(expect.arrayContaining([
+      "GrantRecord", "AccountState", "StoredDeviceSession",
+    ]));
+    expect(schemas.PublicDevice).toMatchObject({
+      additionalProperties: false,
+      required: expect.arrayContaining([
+        "deviceId", "deviceName", "enabledAt", "lastSeenAt", "lastIp", "revokedAt",
+        "disabledReason", "appliedVersion", "online",
+      ]),
+    });
+    expect(schemas.QuickloginPreference.oneOf).toHaveLength(3);
+    expect(schemas.QuickloginQuotaPreview.properties.keptDevices.items)
+      .toEqual({ $ref: "#/components/schemas/QuickloginQuotaDevice" });
+    expect(schemas.QuickloginMigrationPreview.properties.initializations.items)
+      .toEqual({ $ref: "#/components/schemas/QuickloginPolicyInitialization" });
+
+    const register = paths["/api/v1/cqu/quicklogin/devices"].post;
+    expect(register.security).toEqual([{ bearerAuth: [] }]);
+    expect(register["x-runtime-origin"]).toBe("configured-extension-origin");
+    expect(register.requestBody.content["application/json"].schema)
+      .toEqual({ $ref: "#/components/schemas/QuickloginDeviceRegistration" });
+    expect(register.responses["200"].content["application/json"].schema)
+      .toEqual({ $ref: "#/components/schemas/DeviceStatus" });
+    expect(register.responses["422"].content["application/json"].schema)
+      .toEqual({ $ref: "#/components/schemas/QuickloginNativeError" });
+    expect(register.responses["422"].content).not.toHaveProperty("application/problem+json");
+
+    const websiteList = paths["/api/v1/cqu/quicklogin/devices"].get;
+    expect(websiteList.security).toEqual([{ cookieAuth: [] }]);
+    expect(websiteList.responses["200"].content["application/json"].schema)
+      .toEqual({ $ref: "#/components/schemas/DeviceListData" });
+    const websiteDelete = paths["/api/v1/cqu/quicklogin/devices/{id}"].delete;
+    expect(websiteDelete.security).toEqual([{ cookieAuth: [] }]);
+    expect(websiteDelete.responses).toHaveProperty("204");
+    expect(websiteDelete.responses["204"]).not.toHaveProperty("content");
+
+    for (const [path, method] of [
+      ["/api/v1/cqu/quicklogin/devices/{id}", "put"],
+      ["/api/v1/cqu/quicklogin/devices/{id}/status", "post"],
+      ["/api/v1/cqu/quicklogin/devices/{id}/refresh", "post"],
+      ["/api/v1/cqu/quicklogin/devices/{id}/export", "post"],
+    ] as const) {
+      expect(paths[path][method].security).toEqual([{ bearerAuth: [] }]);
+      expect(paths[path][method]["x-runtime-origin"]).toBe("configured-extension-origin");
+    }
+    expect(paths["/api/v1/cqu/quicklogin/devices/{id}/refresh"].post.responses)
+      .toHaveProperty("202");
+    expect(paths["/api/v1/cqu/quicklogin/devices/{id}/refresh"].post.responses["429"].headers)
+      .toEqual({ "Retry-After": { schema: { type: "string", const: "60" } } });
+    expect(paths["/api/v1/cqu/quicklogin/devices/{id}/export"].post.responses["200"]
+      .content["application/json"].schema)
+      .toEqual({ $ref: "#/components/schemas/QuickloginCookieEnvelope" });
+
+    const root = paths["/api/v1/cqu/quicklogin"].get;
+    expect(root.security).toEqual([{ cookieAuth: [] }]);
+    expect(root.responses["200"].content["application/json"].schema.properties.data)
+      .toEqual({ $ref: "#/components/schemas/QuickloginPreference" });
+    expect(root.responses["401"].content["application/problem+json"].schema)
+      .toEqual({ $ref: "#/components/schemas/ApiProblem" });
+
+    for (const path of [
+      "/api/v1/admin/users/{id}/quicklogin-policy/preview",
+      "/api/v1/admin/users/{id}/quicklogin-policy/initialize",
+      "/api/v1/admin/users/{id}/quicklogin-quota/preview",
+      "/api/v1/admin/users/{id}/quicklogin-quota",
+    ]) {
+      const operation = Object.values(paths[path])[0] as any;
+      expect(operation.security).toEqual([{ cookieAuth: [] }]);
+      expect(operation["x-required-permissions"]).toEqual(["entitlement:assign"]);
+      expect(operation.parameters).toContainEqual({
+        name: "id", in: "path", required: true,
+        schema: { type: "string", minLength: 1 },
+      });
+      expect(operation.responses["400"].content["application/problem+json"].schema)
+        .toEqual({ $ref: "#/components/schemas/ApiProblem" });
+    }
+    expect(paths["/api/v1/admin/users/{id}/quicklogin-quota"].put.responses["409"]
+      .content["application/problem+json"].schema)
+      .toEqual({ $ref: "#/components/schemas/QuickloginQuotaProblem" });
+
+    const legacyRegister = paths["/api/cqu/quicklogin/devices"].post;
+    expect(legacyRegister.security).toEqual([{ bearerAuth: [] }]);
+    expect(legacyRegister.responses["422"].content["application/json"].schema)
+      .toEqual({ $ref: "#/components/schemas/QuickloginNativeError" });
+  });
+
+  it("keeps QuickLogin JSON sample acceptance equivalent in 3.1 and Cloudflare 3.0", () => {
+    const openapi = buildOpenApiDocument(listHttpOperations(createApp())) as Record<string, any>;
+    const cloudflare = buildCloudflareSchema(openapi) as Record<string, any>;
+    const validDevice = {
+      deviceId: "device-a", deviceName: "macOS Chrome", browserFamily: "chrome",
+      browserVersion: "140.0.0.0", enabled: true, enabledAt: 1_800_000_000_000,
+      lastSeenAt: null, lastIp: null, revokedAt: null, generation: 2,
+      disabledReason: null, appliedVersion: null, online: false,
+    };
+    const invalidDevice = { ...validDevice, ownerUserId: "internal-user" };
+    const validHeartbeat = {
+      protocolVersion: 1, appliedVersion: null, generation: 2,
+      browserVersion: "140.0.0.0",
+    };
+    const invalidHeartbeat = { ...validHeartbeat, protocolVersion: 2 };
+    for (const [name, valid, invalid] of [
+      ["PublicDevice", validDevice, invalidDevice],
+      ["QuickloginDeviceHeartbeat", validHeartbeat, invalidHeartbeat],
+    ] as const) {
+      expect(schemaAccepts(openapi.components.schemas[name], valid, openapi.components.schemas))
+        .toBe(true);
+      expect(schemaAccepts(openapi.components.schemas[name], invalid, openapi.components.schemas))
+        .toBe(false);
+      expect(schemaAccepts(cloudflare.components.schemas[name], valid, cloudflare.components.schemas))
+        .toBe(true);
+      expect(schemaAccepts(cloudflare.components.schemas[name], invalid, cloudflare.components.schemas))
+        .toBe(false);
     }
   });
 });

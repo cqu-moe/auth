@@ -53,5 +53,16 @@ export function toCloudflareSchema(
 export function buildCloudflareSchema(document: Record<string, unknown>) {
   const converted = toCloudflareSchema(document, "#");
   converted.openapi = "3.0.3";
+  const paths = converted.paths as Record<string, Record<string, any>> | undefined;
+  for (const pathItem of Object.values(paths ?? {})) {
+    for (const operation of Object.values(pathItem)) {
+      if (!operation || typeof operation !== "object" || !operation.requestBody?.content) {
+        continue;
+      }
+      const json = operation.requestBody.content["application/json"];
+      if (json) operation.requestBody.content = { "application/json": json };
+      else delete operation.requestBody;
+    }
+  }
   return converted;
 }

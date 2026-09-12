@@ -47,4 +47,47 @@ describe("HTTP operation inventory", () => {
     expect(keys.has("GET /api/v1/auth/token")).toBe(false);
     expect(keys.has("POST /api/v1/auth/sign-in/email-otp")).toBe(false);
   });
+
+  it("exposes only exact QuickLogin device preflights and the approved legacy bridge", () => {
+    const operations = listHttpOperations(createApp());
+    const quicklogin = operations
+      .filter(({ path }) => path.includes("quicklogin"))
+      .map(({ method, path }) => `${method} ${path}`)
+      .sort();
+
+    expect(quicklogin).toEqual([
+      "DELETE /api/cqu/quicklogin/devices/:id",
+      "DELETE /api/v1/cqu/quicklogin/devices/:id",
+      "GET /api/cqu/quicklogin/devices",
+      "GET /api/v1/cqu/quicklogin",
+      "GET /api/v1/cqu/quicklogin/devices",
+      "OPTIONS /api/cqu/quicklogin/devices",
+      "OPTIONS /api/cqu/quicklogin/devices/:id",
+      "OPTIONS /api/cqu/quicklogin/devices/:id/export",
+      "OPTIONS /api/cqu/quicklogin/devices/:id/refresh",
+      "OPTIONS /api/cqu/quicklogin/devices/:id/status",
+      "OPTIONS /api/v1/cqu/quicklogin/devices",
+      "OPTIONS /api/v1/cqu/quicklogin/devices/:id",
+      "OPTIONS /api/v1/cqu/quicklogin/devices/:id/export",
+      "OPTIONS /api/v1/cqu/quicklogin/devices/:id/refresh",
+      "OPTIONS /api/v1/cqu/quicklogin/devices/:id/status",
+      "POST /api/cqu/quicklogin/devices",
+      "POST /api/cqu/quicklogin/devices/:id/export",
+      "POST /api/cqu/quicklogin/devices/:id/refresh",
+      "POST /api/cqu/quicklogin/devices/:id/status",
+      "POST /api/v1/admin/users/:id/quicklogin-policy/preview",
+      "POST /api/v1/admin/users/:id/quicklogin-quota/preview",
+      "POST /api/v1/cqu/quicklogin/devices",
+      "POST /api/v1/cqu/quicklogin/devices/:id/export",
+      "POST /api/v1/cqu/quicklogin/devices/:id/refresh",
+      "POST /api/v1/cqu/quicklogin/devices/:id/status",
+      "PUT /api/cqu/quicklogin/devices/:id",
+      "PUT /api/v1/admin/users/:id/quicklogin-policy/initialize",
+      "PUT /api/v1/admin/users/:id/quicklogin-quota",
+      "PUT /api/v1/cqu/quicklogin",
+      "PUT /api/v1/cqu/quicklogin/devices/:id",
+    ]);
+    expect(quicklogin.some((entry) => entry.includes("*"))).toBe(false);
+    expect(quicklogin).not.toContain("GET /api/cqu/quicklogin");
+  });
 });

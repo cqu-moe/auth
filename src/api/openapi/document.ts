@@ -1,4 +1,8 @@
 import type { HttpOperation } from "../operations";
+import {
+  QUICKLOGIN_SCHEMAS,
+  quickloginOperationContract,
+} from "./quicklogin";
 
 function openApiPath(path: string) {
   return path.replace(/:([A-Za-z0-9_]+)/g, "{$1}");
@@ -106,7 +110,8 @@ export function buildOpenApiDocument(operations: readonly HttpOperation[]) {
   for (const operation of operations) {
     const path = openApiPath(operation.path);
     const parameters: Array<Record<string, unknown>> = [...path.matchAll(/\{([^}]+)\}/g)].map((match) => ({
-      name: match[1], in: "path", required: true, schema: { type: "string" },
+      name: match[1], in: "path", required: true,
+      schema: { type: "string", minLength: 1 },
     }));
     if (operation.path === "/api/cqu/service-ticket" && operation.method === "GET") {
       parameters.push(
@@ -156,6 +161,8 @@ export function buildOpenApiDocument(operations: readonly HttpOperation[]) {
     if (operation.path.includes("/oauth-clients/") && operation.path.endsWith("/scopes") && operation.method === "PUT") {
       entry["x-required-permissions"] = ["cquScope:assign", "cquScope:revoke"];
     }
+    const quickloginContract = quickloginOperationContract(operation);
+    if (quickloginContract) Object.assign(entry, quickloginContract);
     paths[path] ??= {};
     paths[path][operation.method.toLowerCase()] = entry;
   }
@@ -226,6 +233,7 @@ export function buildOpenApiDocument(operations: readonly HttpOperation[]) {
             skip_consent: { type: "boolean" }, enable_end_session: { type: "boolean" }, disabled: { type: "boolean" },
           },
         },
+        ...QUICKLOGIN_SCHEMAS,
       },
     },
   };

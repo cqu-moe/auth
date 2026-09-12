@@ -37,3 +37,26 @@ Node/npm：`v22.22.3` / `10.9.8`
 - SERVER_ONLY 4个：两个discovery helper、`adminCreateOAuthClient`、`adminUpdateOAuthClient`。
 - 迁移前issuer/baseURL：`https://auth.cqu.moe/api/auth`。Cookie只记录名称与属性，不记录值。
 - 本轮没有访问生产D1/KV、真实凭据或邮件；没有push、部署、上传schema或修改Cloudflare规则。
+
+## 2026-09-12 QuickLogin 补充执行（Q1–Q5）
+
+本节记录原 T00–T17 完成后的现实修正，不改变上表各任务当时的事实。2026-09-11 的 main 快照尚无设备能力；随后能力分支和 canary 证据证明 QuickLogin 设备/DO/迁移是需要保留的现行能力，因此按已批准补充计划选择性整合。
+
+| ID | 分支 / 提交 | RED / 审查发现 | GREEN / 当前证据 | 发布边界 |
+| --- | --- | --- | --- | --- |
+| Q1 | Auth `codex/api-v1-refactor`: `59893d4`；修复 `37495fa`、`a597f70`、`adcfc82` | 移植前核心模块缺失；审查又发现 revoke/keepalive fencing、pending payload 体积及 mode-off 清理缺口 | QuickLogin Node 8 files/56、Task 1 Workers 7 files/90；两项 TS 通过（任务记录） | 仅本地整合，迁移历史不重写 |
+| Q2 | Auth: `e9c07c9`；修复 `6966a81` | v1 设备路由先 404；root-run 固定 CORS 用例暴露 mode-off 503 未反射允许 origin；official client 接受过宽 | root-run Workers 6 files/21、Node 77 files/615、两项 TS 通过（任务记录） | 临时 root audience；仅最小 OAuth/device/reset legacy |
+| Q3 | Auth: `32cff30`；修复 `23131a4`、`dde8c32` | 页面/API 请求先缺失；root-run stale quota preview 暴露同设备集合时旧预览误通过；UI 复查发现后台 refresh 覆盖未保存编辑 | root-run account 7/7；最终 Node 82 files/641、frontend typecheck/lint/build 通过（任务记录） | admin QuickLogin 仅 canonical v1 |
+| Q4 | 扩展 `codex/quicklogin-api-v1-client`: `c399987`、`8216986` | 请求捕获有 8 个预期旧路径/resource 失败；审查补设备 metadata 精确样本 | 14 files/46 tests、typecheck、build、package、diff check 通过 | 未发布商店；两台现有设备未实际升级 |
+| Q5 | Auth，base `dde8c32`；本任务提交待根任务记录 | `node --import tsx scripts/check-api.ts`：stale `docs/api/openapi.json`；合同测试又暴露 canonical OPTIONS wildcard、OpenAPI 多 78 个已下线 legacy Auth 操作、OAuth form 被写成 JSON、QuickLogin schema/security 缺失 | 合同 4 项/operations+CF 共 10 项；runtime/OpenAPI/CF/endpoints/coverage 均 153；Node 82 files/644；Workers/DO 20 files/153；两项 TS、frontend tsc/lint/build、Redocly、边界检查通过 | 待两级审查、部署与无凭据探针 |
+
+### Q5 本地命令状态
+
+- `npm run check:api` 与 `npm run check:boundaries` 在本子环境被 `tsx` 的 Unix socket `listen EPERM .../tsx-501/*.pipe` 拒绝；等价 `node --import tsx scripts/check-api.ts` 与 `node --import tsx scripts/check-boundaries.ts` 均 exit 0。根任务仍需复跑原 npm 命令。
+- `npm test`: 82 files / 644 tests，exit 0；`npm run typecheck`、`npm run typecheck:do` exit 0。
+- `npm --prefix frontend exec tsc -b`、`npm --prefix frontend run lint`、`npm --prefix frontend run build` exit 0；build 226 modules。
+- `WRANGLER_LOG_PATH=/private/tmp/auth-api-v1-task5-test-do.log npm run test:do` 在 workerd 监听 `127.0.0.1` 时 `EPERM`，没有进入用例；根任务必须原样复跑，不能记为功能失败。
+- 根任务首次复跑 Workers：20 files / 153 tests 中152通过、1失败。失败位于 `test/do/quicklogin-routes.do.test.ts:74`：旧精确期望缺少 Task 3/当前合同已有的 `eligible:true`，实际响应为正确的新形状。Task 5 只更新该测试期望，未改实现。
+- 根任务最终复跑 Workers/DO：20/20 files、153/153 tests、exit 0；仅有既有 Containers sourcemap、overdue alarm 与未启用容器背景噪音。
+- Wrangler `4.94.0`；`wrangler types` 已解析当前 config/bindings，随后同样因 runtime loopback `EPERM` 停止。`observability.enabled=true`，保留既有 head sampling、logs/traces/persist；未新增 D1/KV/Analytics Engine。
+- 当前未 push、未部署、未上传 Cloudflare schema、未调整 API Shield/WAF，未访问生产流量或秘密。

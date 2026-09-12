@@ -13,13 +13,18 @@
 | Settings/Wizard/Admin 三份剪贴板timer实现 | 合并 | `frontend/src/components/CopyButton.tsx`；admin compact wrapper只保留视觉差异；卸载timer测试 |
 | 前端散落旧 `/api/auth`、`/api/cqu`、`/api/admin` fetch | 删除业务页面直接旧路径 | `frontend/src/lib/api/*` 与显式 auth basePath；静态扫描、transport测试 |
 | `db:generate` 与 build阶段隐式 `npm install` | 删除 | SQL迁移仍手写；`build:frontend` 仅运行已安装依赖的build |
-| API产物人工更新风险 | 增加生成/漂移门禁 | `generate:api`、`check:api`、`lint:api` 与CI |
+| API产物人工更新风险 | 增加生成/漂移门禁 | `generate:api`、`check:api`、`lint:api` 与CI；2026-09-12 补充为 runtime/OpenAPI/CF/endpoints/coverage 精确集合比较 |
+| frontend 手写 QuickLogin `PublicDevice`/list/preference/quota DTO | 删除重复声明 | 改为 `shared/api-types.generated.ts` 的 `components["schemas"]` 索引；生成、frontend typecheck 和组件测试约束 |
+| 全量 115-operation legacy Auth 文档投影 | 从当前生成物删除 | 当前仅 15 个批准过渡操作；运行时、两份 OpenAPI、endpoint/coverage manifests 集合均为 153 |
+| canonical QuickLogin OPTIONS 通配注册 | 改为五个精确资源 | 固定-origin handler 复用；operation inventory 与 Workers CORS/404/405 回归约束 |
 
 ## 明确保留
 
 - `src/routes/{admin,cqu,cqu-bind,cqu-quicklogin}.ts`：迁移期 legacy 映射和部分 canonical adapter 仍复用这些 handler；删除会复制或破坏兼容逻辑。旧地址退役后再反转/移除。
 - `src/utils/error.ts`：仅供 legacy 成功/错误形状；canonical 使用 `src/api/problem.ts`。
-- 9个既有 SQL migration、Durable Object migration graph、`CquQuickloginAccountDO` / `CquQuickloginDeviceDO` 兼容导出、`NODE_RETIRED` 拒绝分支、旧 forward 数据读取和邮件处理、Schedule RPC。
+- 原有9个 SQL migration 加现有 `0009_quicklogin_devices.sql`、Durable Object migration graph、`CquQuickloginAccountDO` / `CquQuickloginDeviceDO` 兼容导出、`NODE_RETIRED` 拒绝分支、旧 forward 数据读取和邮件处理、Schedule RPC。
+- QuickLogin 公开 export envelope 仅描述扩展必须消费的协议字段；grant、账号 DO state、存储的 browser state、pending state 均不进入公开 schema。
+- D01–D05 issuer discovery 永久保留；QuickLogin 0.1.2 OAuth/device 与旧 reset callback 暂时保留，待真实流量和两设备升级证据后单独移除。
 - 历史设计/计划/HANDOFF 内容：仅在当前文档顶部标注新状态，历史证据不批量改写。
 
 ## 规模与责任

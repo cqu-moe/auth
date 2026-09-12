@@ -7,6 +7,11 @@ import { buildOpenApiDocument } from "../src/api/openapi/document";
 import { buildCloudflareSchema } from "../src/api/openapi/cloudflare";
 import { DatabaseSync } from "node:sqlite";
 import { getBetterAuthOpenApi, mergeBetterAuthOpenApi } from "../src/api/openapi/auth";
+import {
+  assertApiArtifactConsistency,
+  buildCoverageManifest,
+  buildEndpointManifest,
+} from "../src/api/openapi/artifacts";
 import type { Env } from "../src/types";
 
 async function main() {
@@ -33,24 +38,15 @@ const document = mergeBetterAuthOpenApi(
 );
 database.close();
 const cloudflare = buildCloudflareSchema(document as unknown as Record<string, unknown>);
-const kind = (path: string) => path.includes("/binding/events")
-  ? "websocket"
-  : path.startsWith("/.well-known") || path.includes("/.well-known/")
-    ? "discovery"
-    : path.startsWith("/api/v1") ? "canonical" : "legacy";
-const endpoints = operations.map((operation) => ({
-  host: "auth.cqu.moe",
-  method: operation.method,
-  path: operation.path.replace(/:([A-Za-z0-9_]+)/g, "{$1}"),
-  operationId: `${operation.method.toLowerCase()}_${operation.path}`.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_|_$/g, ""),
-  kind: kind(operation.path),
-}));
-const coverage = endpoints.map((endpoint) => ({
-  method: endpoint.method,
-  path: endpoint.path,
-  requestBody: endpoint.path.includes("/oauth2/token") ? "form-not-validated-by-cloudflare" : endpoint.kind === "websocket" ? "websocket-message-not-validated" : "documented",
-  responseValidation: "not-supported-by-cloudflare",
-}));
+const endpoints = buildEndpointManifest(operations, document);
+const coverage = buildCoverageManifest(endpoints, document);
+assertApiArtifactConsistency({
+  runtime: operations,
+  openapi: document,
+  cloudflare,
+  endpoints,
+  coverage,
+});
 const writeJson = (name: string, value: unknown) =>
   writeFileSync(resolve(docsDir, name), `${JSON.stringify(value, null, 2)}\n`);
 writeJson("openapi.json", document);

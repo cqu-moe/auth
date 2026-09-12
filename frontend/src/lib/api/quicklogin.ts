@@ -1,65 +1,16 @@
 import type { ApiSuccess } from "../../../../shared/api-response";
+import type { components } from "../../../../shared/api-types.generated";
 import { ApiError, apiRequest } from "./http";
 
-export interface PublicDevice {
-  deviceId: string;
-  deviceName: string;
-  browserFamily: "chrome";
-  browserVersion: string;
-  enabled: boolean;
-  enabledAt: number | null;
-  lastSeenAt: number | null;
-  lastIp: string | null;
-  revokedAt: number | null;
-  generation: number;
-  disabledReason: "user" | "quota_reduced" | null;
-  appliedVersion: number | null;
-  online: boolean;
-}
-
-export interface DeviceListData {
-  masterEnabled: boolean;
-  deviceLimit: number;
-  used: number;
-  revision: number;
-  devices: PublicDevice[];
-}
-
-export interface DeviceQuickloginPreference {
-  eligible: true;
-  masterEnabled: boolean;
-  deviceLimit: number;
-  used: number;
-}
-
-export interface LegacyQuickloginPreference {
-  eligible: boolean;
-  enabled: boolean;
-}
-
-export type QuickloginPreference =
-  | { eligible: false; enabled?: boolean }
-  | DeviceQuickloginPreference
-  | LegacyQuickloginPreference;
-
-export interface QuotaPreview {
-  token: string;
-  expiresAt: number;
-  revision: number;
-  oldLimit: number;
-  newLimit: number;
-  kept: string[];
-  disabled: string[];
-  keptDevices: QuotaPreviewDevice[];
-  disabledDevices: QuotaPreviewDevice[];
-}
-
-export interface QuotaPreviewDevice {
-  deviceId: string;
-  deviceName: string;
-  browserVersion: string;
-  lastSeenAt: number | null;
-}
+export type PublicDevice = components["schemas"]["PublicDevice"];
+export type DeviceListData = components["schemas"]["DeviceListData"];
+export type DeviceQuickloginPreference =
+  components["schemas"]["QuickloginDevicePreference"];
+export type LegacyQuickloginPreference =
+  components["schemas"]["QuickloginLegacyPreference"];
+export type QuickloginPreference = components["schemas"]["QuickloginPreference"];
+export type QuotaPreview = components["schemas"]["QuickloginQuotaPreview"];
+export type QuotaPreviewDevice = components["schemas"]["QuickloginQuotaDevice"];
 
 export function isDeviceQuickloginPreference(
   value: QuickloginPreference

@@ -2,6 +2,8 @@
 
 状态：用户于 2026-09-12 在核对现有调用方后批准执行。本计划是已完成的 API v1 T00–T17 的补充，不重开原设计审批。
 
+执行状态（2026-09-12）：Q1–Q4 已在各自隔离分支完成本地实现、审查修复与提交；Q5 的合同/生成物/配置和本地门禁正在 `codex/api-v1-refactor` 收尾，尚待根任务复跑 Workers、任务级/整分支审查、部署和无凭据探针。本状态行是执行期补充，不回写为原设计阶段已知事实。
+
 ## 目标
 
 把 `codex/quicklogin-implementation` 中已经部署并由 canary 使用的 QuickLogin 设备能力选择性整合进 `codex/api-v1-refactor`，为设备与管理接口提供 `/api/v1` 正式入口，同时保留现有旧入口兼容；把 QuickLogin 扩展仓库的 OAuth 与设备请求迁到 v1。用户随后于 2026-09-12 明确授权在全部本地门禁通过后上线 Auth API v1。扩展只调整、构建和留本地提交，不发布商店；不下线 legacy、不上传 Cloudflare schema、不改 WAF。
@@ -89,3 +91,15 @@
 5. 运行原 API v1 验收命令全集，加 QuickLogin Auth 全部 Node/Workers 测试和扩展全部门禁；记录实际退出码、测试数和已知环境噪声。
 6. 最终做任务级审查和整分支审查。全部通过后部署 Auth Worker；不上传 Cloudflare schema、不启用 WAF；通用 legacy 下线，只保留本计划列出的过渡桥与永久 discovery。
 7. 部署后只做 health、静态页面、v1/legacy/discovery 和未登录拒绝等无凭据安全探针，记录 Worker version。真实用户流量、生产 OAuth client/D1 清单及退役判断留待用户晚上回来共同检查。
+
+## Q1–Q5 执行记录
+
+| 补充任务 | 分支 / 提交 | 当前状态 |
+| --- | --- | --- |
+| Q1 核心状态、迁移与 DO | `codex/api-v1-refactor`: `59893d4`，维护修复 `37495fa`、`a597f70`、`adcfc82` | 本地实现及审查修复完成；生产迁移历史只追加 |
+| Q2 v1 HTTP/OAuth/minimal legacy | `codex/api-v1-refactor`: `e9c07c9`，审查修复 `6966a81` | 本地完成；root audience 和旧设备/OAuth/reset 仅为临时兼容 |
+| Q3 网页设备管理/admin 配额 | `codex/api-v1-refactor`: `32cff30`，审查修复 `23131a4`、`dde8c32` | 本地完成；并发与未保存表单状态修复已回归 |
+| Q4 扩展 v1 客户端 | `codex/quicklogin-api-v1-client`: `c399987`、`8216986` | 14 files / 46 tests、typecheck/build/package 通过；未发布商店，未实际升级两台设备 |
+| Q5 合同/Cloudflare/最终验收 | `codex/api-v1-refactor`，Task base `dde8c32` | 本地合同与常规门禁收尾；根任务 Workers/审查/部署待执行 |
+
+Q5 生成集合固定为 153 个操作：canonical 132、websocket 1、legacy 15、永久 discovery 5。通用 legacy 会在拟部署 build 中下线；QuickLogin 0.1.2 authorize/token/devices、旧 reset callback 暂留，D01–D05 永久保留。部署、健康探针、真实流量观察和最终 bridge 移除都不属于 Q5 子任务的本地完成声明。

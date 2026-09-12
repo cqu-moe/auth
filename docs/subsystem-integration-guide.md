@@ -290,6 +290,32 @@ Body: { "serviceUrl": "<完整CQU服务URL>" }
   - 瑞数 WAF 挑战页 → 退回正常登录页(插件无法headless解挑战)。
 - 插件运行时视为**低信任**:token 短 TTL;最小 host 权限(`https://auth.cqu.moe/*`)。
 
+### 5.4 QuickLogin 设备协议入口（当前待部署 build）
+
+新扩展固定使用 `/api/v1/auth/oauth2/authorize`、`/api/v1/auth/oauth2/token`
+和以下设备入口；OAuth `resource` 固定为稳定 issuer audience
+`https://auth.cqu.moe/api/auth`。路径、client ID、extension ID、redirect URI、
+scope 与 protocolVersion 都不能由远端内容改写。
+
+| 操作 | 鉴权 / origin | 成功响应 |
+| --- | --- | --- |
+| `POST /api/v1/cqu/quicklogin/devices` | device Bearer + 固定 extension origin | 原生 `DeviceStatus` 200 |
+| `GET /api/v1/cqu/quicklogin/devices` | Auth website Cookie | 原生 `DeviceListData` 200 |
+| `PUT /api/v1/cqu/quicklogin/devices/{id}` | 本设备 Bearer + 固定 extension origin | 原生 `DeviceStatus` 200 |
+| `DELETE /api/v1/cqu/quicklogin/devices/{id}` | Auth website Cookie + 同源 | 204 |
+| `POST .../{id}/status` | 本设备 Bearer + 固定 extension origin | 原生 `DeviceStatus` 200 |
+| `POST .../{id}/refresh` | 本设备 Bearer + 固定 extension origin | 原生 `DeviceStatus` 202 |
+| `POST .../{id}/export` | 本设备 Bearer + 固定 extension origin | 原生 Cookie export envelope 200 |
+
+设备错误保持 `{error:{code,message,retryAfterMs?}}`，不包 `{data}` 或 Problem。
+网页 QuickLogin root 和 admin policy/quota 仍按 API v1 使用 `{data}` / Problem。
+生成合同见 `docs/api/README.md`。
+
+过渡期只暂留 QuickLogin 0.1.2 的旧 authorize/token/device exact routes 与旧
+reset callback；通用 legacy 在该 build 部署后下线。D01–D05 discovery 永久保留。
+新扩展源码已迁移但尚未发布商店，两台现有设备尚未实际升级，因此 root audience
+兼容和临时 bridge 现在不能移除。
+
 > 插件本体(MV3 manifest、`launchWebAuthFlow`、内容脚本检测、跳转)由插件项目自行实现,本指南只定 auth 侧契约。实现前用 Context7 核对 `chrome.identity` / `@better-auth/oauth-provider` PKCE 参数名(snake_case:`client_id`/`code_challenge`)。
 
 ---

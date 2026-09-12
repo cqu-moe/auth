@@ -144,14 +144,50 @@ export function mergeBetterAuthOpenApi(
       const schema = rewritten.post.requestBody?.content?.["application/json"]?.schema;
       if (schema?.properties) schema.properties.code = { type: "string", pattern: "^[A-Z0-9]{8}$" };
     }
-    document.paths[`/api/v1/auth${suffix}`] = rewritten;
-    const legacy = structuredClone(rewritten);
-    for (const [method, operation] of Object.entries(legacy)) {
-      if (operation && typeof operation === "object" && "operationId" in operation) {
-        operation.operationId = `legacy_${operation.operationId}`;
-      }
+    if (["/oauth2/token", "/oauth2/introspect", "/oauth2/revoke"].includes(suffix) &&
+        rewritten.post?.requestBody?.content?.["application/json"]) {
+      rewritten.post.requestBody.content = {
+        "application/x-www-form-urlencoded":
+          rewritten.post.requestBody.content["application/json"],
+      };
     }
-    document.paths[`/api/auth${suffix}`] = legacy;
+    const canonicalPath = `/api/v1/auth${suffix}`;
+    const canonicalRuntime = document.paths[canonicalPath] as Record<string, any> | undefined;
+    if (canonicalRuntime) {
+      const canonical: Record<string, any> = {};
+      for (const [method, runtimeOperation] of Object.entries(canonicalRuntime)) {
+        const generated = rewritten[method];
+        if (!generated || typeof generated !== "object") {
+          canonical[method] = runtimeOperation;
+          continue;
+        }
+        canonical[method] = {
+          ...generated,
+          operationId: runtimeOperation.operationId,
+          summary: generated.summary ?? runtimeOperation.summary,
+        };
+      }
+      document.paths[canonicalPath] = canonical;
+    }
+
+    const legacyPath = `/api/auth${suffix}`;
+    const legacyRuntime = document.paths[legacyPath] as Record<string, any> | undefined;
+    if (legacyRuntime) {
+      const legacy: Record<string, any> = {};
+      for (const [method, runtimeOperation] of Object.entries(legacyRuntime)) {
+        const generated = rewritten[method];
+        if (!generated || typeof generated !== "object") {
+          legacy[method] = runtimeOperation;
+          continue;
+        }
+        legacy[method] = {
+          ...structuredClone(generated),
+          operationId: runtimeOperation.operationId,
+          summary: generated.summary ?? runtimeOperation.summary,
+        };
+      }
+      document.paths[legacyPath] = legacy;
+    }
   }
   pruneSchemas(document);
   return document;

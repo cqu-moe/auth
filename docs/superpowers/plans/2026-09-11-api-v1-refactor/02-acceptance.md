@@ -2,6 +2,17 @@
 
 本稿用于独立验收，与[执行计划](../2026-09-11-api-v1-refactor-plan.md)和[逐端点清单](01-migration-inventory.md)配套。设计已获用户确认；本稿中的“必须”“通过”是未来执行的判据，所有项当前均未执行。元数据探针通过不等于这里的业务验收通过。
 
+## 2026-09-12 当前验收补充
+
+本节只追加原 T00–T17 完成后的 QuickLogin 现实修正，不伪造原设计时间点。Q1–Q5 的详细执行状态见 [补充计划](../2026-09-12-api-v1-quicklogin-integration.md)、`execution-log.md` 与 `acceptance-results.md`。
+
+- Q1–Q3 Auth 与 Q4 扩展已分别在 `codex/api-v1-refactor`、`codex/quicklogin-api-v1-client` 完成本地实现和审查修复；扩展全套14 files/46 tests通过，但未发布商店、未实际升级两台设备。
+- Q5 必须证明 runtime/OpenAPI/Cloudflare/endpoints/coverage 集合相等、operationId唯一、无外部ref/通配业务路径，并分别核对 Cookie、Bearer、fixed-origin、admin permission。当前本地集合是153=132 canonical+1 websocket+15 temporary legacy+5 discovery。
+- QuickLogin JSON schema 样本必须覆盖 nullable 时间字段、严格对象、协议版本、preference mode union、quota kept/disabled metadata 与 migration preview；不得把 grant、DO account/stored browser/pending state 公布为组件。
+- Cloudflare 3.0.3 只把 JSON body 和参数计入 schema validation；OAuth form、WS messages、所有 responses（含 QuickLogin native DTO/error）逐操作登记为例外，不借此声称全覆盖。
+- 本子环境若因 `tsx` IPC 或 workerd loopback `EPERM` 不能执行，必须由根任务原样复跑 `npm run generate:api`（两次）、`npm run check:api`、`npm run check:boundaries` 和带 `WRANGLER_LOG_PATH` 的 `npm run test:do`。环境失败不记为功能失败，也不能据此宣布部署准备完成。
+- 只有根任务完成 Workers 全套、任务级/整分支审查并实际部署后，才可记录 production health/静态/v1/legacy/discovery/未登录拒绝探针。真实流量与最终 QuickLogin bridge 移除留待今晚。
+
 ## 1. 完成判定
 
 本轮完成必须同时满足：正式v1接口/前端迁移完成、旧地址兼容测试通过、必需行为矩阵通过、清理证据齐全、自动门禁通过。只更换前缀、只有单元测试通过、只有OpenAPI文件、或只有前端能打开，均不算完成。
