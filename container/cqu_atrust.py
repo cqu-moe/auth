@@ -17,6 +17,9 @@ import cqu_login
 ATRUST_APP_URL = (
     "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/workspace/curriculum"
 )
+ATRUST_CAS_LOGIN_URL = (
+    "https://atrust.cqu.edu.cn/passport/v1/public/casLogin?sfDomain=CAS"
+)
 ATRUST_PORTAL_HOST = "atrust.cqu.edu.cn"
 ATRUST_SSO_HOST = "sso-cqu-edu-cn-s.atrust.cqu.edu.cn"
 ATRUST_APP_HOST = "my-cqu-edu-cn-s.atrust.cqu.edu.cn"
@@ -53,6 +56,12 @@ def is_atrust_login_done(url: str) -> bool:
     return _safe_host(url) == ATRUST_APP_HOST
 
 
+def is_forced_client_page(url: str) -> bool:
+    if _safe_host(url) != ATRUST_PORTAL_HOST:
+        return False
+    return urllib.parse.urlparse(url).fragment.partition("?")[0] == "/down_client_pc"
+
+
 def classify_first_factor_failure(verdict: str) -> str:
     # 只接受 do_first_factor 的判别前缀；自由诊断文本即使含“密码错误”也不能熔断。
     return (
@@ -70,6 +79,8 @@ async def click_unified_identity(page) -> None:
         # forward straight to rewritten CAS without rendering the portal list.
         if is_rewritten_sso_url(page.url):
             return
+        if is_forced_client_page(page.url):
+            break
         candidates = page.locator("li.server-container .server-name")
         for index in range(await candidates.count()):
             candidate = candidates.nth(index)
@@ -81,7 +92,21 @@ async def click_unified_identity(page) -> None:
             await exact.first.click(timeout=5_000)
             return
         await page.wait_for_timeout(500)
-    raise RuntimeError("ATRUST_PORTAL_OPTION_MISSING")
+
+    # The portal may force a native-client download and render no auth-server
+    # choices at all. Its public auth configuration exposes this fixed CAS
+    # route; visiting it in the same context preserves the application redirect
+    # established by ATRUST_APP_URL while bypassing only the client-download UI.
+    if _safe_host(page.url) != ATRUST_PORTAL_HOST:
+        raise RuntimeError("ATRUST_PORTAL_FALLBACK_FAILED")
+    await page.goto(
+        ATRUST_CAS_LOGIN_URL,
+        wait_until="domcontentloaded",
+        timeout=browser_profile.ATRUST_NAV_TIMEOUT_MS,
+    )
+    if is_rewritten_sso_url(page.url):
+        return
+    raise RuntimeError("ATRUST_PORTAL_FALLBACK_FAILED")
 
 
 async def wait_for_rewritten_sso(page) -> None:

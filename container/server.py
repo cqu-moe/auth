@@ -182,6 +182,7 @@ class InvalidOperationTimeout(Exception):
 
 ATRUST_FAILURE_STAGE_BY_MESSAGE = {
     "ATRUST_PORTAL_OPTION_MISSING": "portal_option_missing",
+    "ATRUST_PORTAL_FALLBACK_FAILED": "portal_fallback_failed",
     "ATRUST_SSO_NOT_READY": "sso_not_ready",
     "ATRUST_APP_NOT_REACHED": "app_not_reached",
     "ATRUST_APP_NOT_READY": "app_not_ready",

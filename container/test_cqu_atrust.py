@@ -34,6 +34,12 @@ def test_first_factor_failure_classification_only_marks_explicit_password_reject
     assert cqu_atrust.is_atrust_login_done(
         "https://atrust.cqu.edu.cn/portal/?#!/login"
     ) is False
+    assert cqu_atrust.is_forced_client_page(
+        "https://atrust.cqu.edu.cn/portal/?redirectid=opaque#/down_client_pc"
+    ) is True
+    assert cqu_atrust.is_forced_client_page(
+        "https://atrust.cqu.edu.cn.evil.example/portal/#/down_client_pc"
+    ) is False
 
 
 class _Candidate:
@@ -136,7 +142,54 @@ def test_click_unified_identity_rejects_auto_forward_to_similar_host():
         "https://sso-cqu-edu-cn-s.atrust.cqu.edu.cn.evil.example/login"
     )
 
-    with pytest.raises(RuntimeError, match="ATRUST_PORTAL_OPTION_MISSING"):
+    with pytest.raises(RuntimeError, match="ATRUST_PORTAL_FALLBACK_FAILED"):
+        asyncio.run(cqu_atrust.click_unified_identity(page))
+
+
+class _ForcedClientPortalPage:
+    def __init__(self, fallback_destination):
+        self.url = "about:blank"
+        self.fallback_destination = fallback_destination
+        self.goto_urls = []
+        self.waits = 0
+
+    async def goto(self, url, **_kwargs):
+        self.goto_urls.append(url)
+        self.url = (
+            "https://atrust.cqu.edu.cn/portal/?redirectid=opaque#/down_client_pc"
+            if url == cqu_atrust.ATRUST_APP_URL
+            else self.fallback_destination
+        )
+
+    def locator(self, selector):
+        assert selector == "li.server-container .server-name"
+        return _Candidates([])
+
+    def get_by_text(self, *_args, **_kwargs):
+        return _ExactText()
+
+    async def wait_for_timeout(self, _timeout):
+        self.waits += 1
+
+
+def test_click_unified_identity_bypasses_forced_client_page_via_fixed_cas_route():
+    page = _ForcedClientPortalPage(
+        "https://sso-cqu-edu-cn-s.atrust.cqu.edu.cn/login?service=x"
+    )
+
+    asyncio.run(cqu_atrust.click_unified_identity(page))
+
+    assert page.goto_urls == [
+        cqu_atrust.ATRUST_APP_URL,
+        cqu_atrust.ATRUST_CAS_LOGIN_URL,
+    ]
+    assert page.waits == 0
+
+
+def test_click_unified_identity_rejects_fallback_redirect_to_untrusted_host():
+    page = _ForcedClientPortalPage("https://evil.example/login")
+
+    with pytest.raises(RuntimeError, match="ATRUST_PORTAL_FALLBACK_FAILED"):
         asyncio.run(cqu_atrust.click_unified_identity(page))
 
 

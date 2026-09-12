@@ -204,6 +204,7 @@ interface ContainerRunResult {
 
 const ATRUST_FAILURE_STAGES = new Set([
   "portal_option_missing",
+  "portal_fallback_failed",
   "sso_not_ready",
   "app_not_reached",
   "app_not_ready",
