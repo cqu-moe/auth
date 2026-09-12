@@ -157,14 +157,14 @@
 
 ## 2026-09-12 QuickLogin 补充验收
 
-当前结论：Q1–Q4 已在两个隔离分支完成本地实现、审查修复与提交；Q5 的本地合同、Node、Workers/DO、两项 TypeScript、frontend、Redocly 与边界检查均有通过证据，仍须完成任务级/整分支审查后才能部署。本节不把旧 T00–T17 的测试计数改写为新时间点。
+当前结论：Q1–Q5 已在两个隔离分支完成实现、审查修复与本地门禁；Auth HEAD `cff2a87` 已部署为 production version `08ac7991-689c-41fa-b235-ccc062f2cdda` 并接管100%流量。扩展仍只在本地分支，未发布或升级现有两台设备。本节不把旧 T00–T17 的测试计数改写为新时间点。
 
 ### Final whole-branch review 修复波
 
-- 本地已验证：Node 85 files / 678 tests、root/DO TypeScript、frontend tsc/lint/build、OpenAPI/Cloudflare Redocly、API漂移和边界检查；153个runtime操作均有auth-policy且完整文档无空1xx/2xx body（101/204除外）。
+- 本地已验证：最终 Node 85 files / 683 tests、Workers/DO 20 files / 160 tests、root/DO TypeScript、frontend tsc/lint/build、OpenAPI/Cloudflare Redocly、API漂移和边界检查；153个runtime操作均有auth-policy且完整文档无空1xx/2xx body（101/204除外）。
 - 生成确定性：`openapi.json`、`cloudflare.openapi.json`、`endpoints.json`、`coverage.json`、`auth-policy.json`、generated types 连续生成SHA不变。
 - Workers/DO最终通过：子环境workerd监听被EPERM阻止后由根任务执行；首轮full为156/158，暴露测试表名误写及admin-create strict schema漏`require_pkce`。修正后focused 2 files/9 tests通过，最终full 20/20 files、158/158 tests、exit 0；新增Device DO keepalive/login竞态、1000波outbox持久化收敛、admin strict/no-store和QuickLogin逐资源OPTIONS均已执行。仅有既有sourcemap、overdue alarm与disabled-container噪音。
-- 发布边界不变：未push、未部署、未上传schema、未改WAF/API Shield，也没有把本地合同结果写成线上验收。
+- 已部署 Auth Worker、assets 和现有 Container 镜像；未push、未发布扩展、未上传schema、未改WAF/API Shield。生产验证只覆盖无凭据路由与静态资源，不冒充真实登录/学校业务/扩展设备验收。
 
 | 补充项 | 状态 | 当前证据 |
 | --- | --- | --- |
@@ -175,14 +175,14 @@
 | Q5 精确集合 | 本地通过 | runtime/OpenAPI 3.1.1/Cloudflare 3.0.3/endpoints/coverage 都是153个操作：132 canonical、1 websocket、15 temporary legacy、5 permanent discovery；无 wildcard、外部 ref、重复 operationId |
 | Q5 QuickLogin schema | 本地通过 | native device DTO/error 与 root/admin envelope/Problem 分离；合法/非法样本在3.1/3.0投影等价；frontend DTO 改消费 generated components |
 | Q5 Cloudflare config | 本地通过 | Wrangler 4.94.0；config 被 `wrangler types` 读取后 runtime loopback EPERM；`observability.enabled=true`，原 sampling/logs/traces/persist 保留，无新数据 binding |
-| Q5 本地命令 | 通过 | 审查修复后 Node 82/646、Workers/DO 20 files/153 tests、root/DO TS、frontend tsc/lint/build、Redocly、node-import-tsx API/boundary checks 通过；Workers 由可监听 workerd 的根任务执行 |
-| Q5 root Workers 复跑 | 通过 | 首次152/153暴露 QuickLogin root 旧精确 fixture 缺 `eligible:true`；只更新期望、实现未改。最终20/20 files、153/153 tests、exit 0；仅既有 Containers sourcemap、overdue alarm、未启用容器噪音 |
+| Q5 本地命令 | 通过 | 最终 Node 85/683、Workers/DO 20/160、root/DO TS、frontend tsc/lint/build、Redocly、原生 npm API/boundary checks 通过；六份生成物连续两次SHA一致 |
+| Q5 root Workers 复跑 | 通过 | 最终审查修复后20/20 files、160/160 tests、exit 0；仅既有 Containers sourcemap、overdue alarm、未启用容器噪音 |
 
 ### 当前兼容和发布边界
 
-- 即将部署的 build 会关闭通用 legacy；只保留 QuickLogin 0.1.2 的旧 authorize/token/device exact methods+OPTIONS，以及仍有效旧密码重置链接需要的 callback。D01–D05 是永久 discovery。
+- 已部署 build 已关闭通用 legacy；只保留 QuickLogin 0.1.2 的旧 authorize/token/device exact methods+OPTIONS，以及仍有效旧密码重置链接需要的 callback。D01–D05 是永久 discovery。
 - 稳定 issuer 不变；root audience 只是旧扩展临时兼容。新扩展源码已改 stable issuer audience，但未发布且两台设备未实际升级。
-- Q5 本地结束时没有 push、部署、生产 health/静态资源/真实路径验收、schema 上传或 WAF/API Shield 变更。生产流量核对和最终 QuickLogin bridge 移除留待今晚。
+- 未push、未上传schema或改WAF/API Shield。Ego Lite 无凭据探针已验证 v1 health/OpenAPI/JWKS、5个discovery、通用旧路由404、API OPTIONS边界、QuickLogin保护/过渡桥拒绝和静态bundle；生产流量核对、真实登录/学校业务及最终QuickLogin bridge移除留待今晚。
 
 ## 原 T00–T17 浏览器证据
 

@@ -48,8 +48,8 @@ Node/npm：`v22.22.3` / `10.9.8`
 | Q2 | Auth: `e9c07c9`；修复 `6966a81` | v1 设备路由先 404；root-run 固定 CORS 用例暴露 mode-off 503 未反射允许 origin；official client 接受过宽 | root-run Workers 6 files/21、Node 77 files/615、两项 TS 通过（任务记录） | 临时 root audience；仅最小 OAuth/device/reset legacy |
 | Q3 | Auth: `32cff30`；修复 `23131a4`、`dde8c32` | 页面/API 请求先缺失；root-run stale quota preview 暴露同设备集合时旧预览误通过；UI 复查发现后台 refresh 覆盖未保存编辑 | root-run account 7/7；最终 Node 82 files/641、frontend typecheck/lint/build 通过（任务记录） | admin QuickLogin 仅 canonical v1 |
 | Q4 | 扩展 `codex/quicklogin-api-v1-client`: `c399987`、`8216986` | 请求捕获有 8 个预期旧路径/resource 失败；审查补设备 metadata 精确样本 | 14 files/46 tests、typecheck、build、package、diff check 通过 | 未发布商店；两台现有设备未实际升级 |
-| Q5 | Auth，base `dde8c32`；`6808ef7` + 本轮审查修复待提交 | `node --import tsx scripts/check-api.ts`：stale `docs/api/openapi.json`；合同测试又暴露 canonical OPTIONS wildcard、OpenAPI 多 78 个已下线 legacy Auth 操作、OAuth form 被写成 JSON、QuickLogin schema/security 缺失；审查修复补获 runtime/schema 校验漂移 | runtime/OpenAPI/CF/endpoints/coverage 均153；Node 82 files/646；Workers/DO 20 files/153；两项 TS、frontend tsc/lint/build、Redocly、边界检查通过 | 待两级审查、部署与无凭据探针 |
-| FINAL-REVIEW-FIX | Auth，base `bfd531e`；linked index EPERM，改动待根任务提交 | 7项RED分别确认：37个custom空成功体/错误状态，auth-policy缺失且security猜测，unknown OPTIONS=204，写入媒体/strict漂移，敏感响应缺no-store，Device DO两条陈旧final write，Account DO outbox追加无界 | Node 85 files/678；两项TS、frontend tsc/lint/build、Redocly、node-import-tsx API/boundary checks通过；153操作/0空成功体，六份生成产物二次SHA完全一致；根workerd首轮156/158，修正测试表名与admin-create `require_pkce` schema后focused 9/9，最终20 files/158 tests exit 0 | 未push、未部署、未上传schema；报告见`.superpowers/sdd/2026-09-12-api-v1-quicklogin-integration/final-review-fix-report.md` |
+| Q5 | Auth，base `dde8c32` 至最终 `cff2a87` | stale产物、OPTIONS wildcard、78个多余legacy、OAuth form、QuickLogin schema/runtime漂移及审查残余均有RED | runtime/OpenAPI/CF/endpoints/coverage/auth-policy均153；最终Node85/683、Workers20/160、两项TS、frontend/Redocly/API/boundary全通过 | 已随production version `08ac7991…`部署；schema未/WAF未改 |
+| FINAL-REVIEW-FIX | Auth `cab8e6e`、`afddb0c`、`ddeda4a`、`184f0b2`、`cff2a87` | 7项审查 finding及残余合同/auth-policy/transient race均有定点RED | scoped re-review全部ADDRESSED；final Node683、Workers160、扩展46，dry-run含Container通过 | 已部署；未push，报告见`.superpowers/sdd/2026-09-12-api-v1-quicklogin-integration/final-review-fix-report.md` |
 
 ### Q5 本地命令状态
 
@@ -60,5 +60,12 @@ Node/npm：`v22.22.3` / `10.9.8`
 - 根任务首次复跑 Workers：20 files / 153 tests 中152通过、1失败。失败位于 `test/do/quicklogin-routes.do.test.ts:74`：旧精确期望缺少 Task 3/当前合同已有的 `eligible:true`，实际响应为正确的新形状。Task 5 只更新该测试期望，未改实现。
 - 根任务最终复跑 Workers/DO：20/20 files、153/153 tests、exit 0；仅有既有 Containers sourcemap、overdue alarm 与未启用容器背景噪音。
 - Wrangler `4.94.0`；`wrangler types` 已解析当前 config/bindings，随后同样因 runtime loopback `EPERM` 停止。`observability.enabled=true`，保留既有 head sampling、logs/traces/persist；未新增 D1/KV/Analytics Engine。
-- 当前未 push、未部署、未上传 Cloudflare schema、未调整 API Shield/WAF，未访问生产流量或秘密。
+- 当前未push、未上传Cloudflare schema、未调整API Shield/WAF，未访问生产D1/KV或秘密；Auth已完成明确授权的production部署。
 - Final review fix wave 的 `npm run test:do` 在本子环境因 workerd `listen 127.0.0.1 EPERM` 未进入用例；根任务随后实际执行全部用例。首次full为156/158：测试查询误写`oauth_client`，OAuth admin-create strict schema漏`require_pkce`；修正后focused `admin-oauth-api`+`auth-api-migration` 2 files/9 tests exit 0，最终full 20/20 files、158/158 tests、exit 0。仅保留既有sourcemap、overdue alarm与disabled-container噪音。
+
+### 生产部署与无凭据探针
+
+- `wrangler deploy --dry-run`：Worker/assets/四个DO binding/Container配置与镜像构建成功；正式`npm run deploy`上传3个assets和Worker/Container，production version=`08ac7991-689c-41fa-b235-ccc062f2cdda`。
+- `wrangler deployments status --json`：deployment `e7c63b0e-972a-4fe1-b691-e33776946c6a`，新version接管100%；部署前version=`4d02e29d-c1e2-4176-a7ab-308e36ea4c13`。
+- Ego Lite TaskSpace 27、`credentials:omit`：v1 health/OpenAPI/JWKS和D01–D05均200；旧health/auth get-session/admin与未知v1均Problem404；未知/retired OPTIONS 404，health OPTIONS 204；v1 QuickLogin无会话401、旧device bridge无会话401、旧OAuth bridge缺参数400；登录页与新静态bundle200。
+- 普通页面不能伪造`chrome-extension://` Origin，线上QuickLogin preflight没有冒充通过；本地真实workerd已在最终160项中覆盖固定extension origin/CORS。真实流量、登录/OTP/学校业务和两台扩展升级留待今晚。
