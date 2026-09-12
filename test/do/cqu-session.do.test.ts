@@ -2343,6 +2343,42 @@ describe("data-harvest action", () => {
     expect((await readState(stub))?.storageState).toEqual(validStorageState());
   });
 
+  it("logs a controlled aTrust failure stage without changing the public error", async () => {
+    const stub = freshStub("atrust-failure-stage");
+    await seedSession(stub, { status: "active" });
+    await seedCredentials(stub);
+    spyCfLogin({
+      "/atrust-login": async () =>
+        Response.json(
+          {
+            ok: false,
+            error: "ATRUST_TRANSIENT",
+            failureStage: "sso_not_ready",
+          },
+          { status: 502 }
+        ),
+      "/code-permit": async () => Response.json({ ok: true }),
+    });
+    const warnings: string[] = [];
+    vi.spyOn(console, "warn").mockImplementation((value) => {
+      warnings.push(String(value));
+    });
+
+    const response = await postAtrustHarvest(stub);
+
+    expect(response.status).toBe(503);
+    expect(((await response.json()) as { code?: string }).code).toBe(
+      "ATRUST_TRANSIENT"
+    );
+    expect(
+      warnings.map((value) => JSON.parse(value) as Record<string, unknown>)
+    ).toContainEqual({
+      event: "cqu.atrust.login_failed",
+      status: 502,
+      failureStage: "sso_not_ready",
+    });
+  });
+
   it("expired aTrust state relogs once, retries once, and consumes one rate-limit slot", async () => {
     const stub = freshStub("atrust-recover");
     const oldState = validAtrustStorageState("old");

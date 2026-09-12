@@ -199,7 +199,25 @@ interface ContainerRunResult {
   state?: CquStorageState;
   ticket?: string;
   error?: string;
+  failureStage?: string;
 }
+
+const ATRUST_FAILURE_STAGES = new Set([
+  "portal_option_missing",
+  "sso_not_ready",
+  "app_not_reached",
+  "app_not_ready",
+  "code_button_missing",
+  "code_request_failed",
+  "code_missing",
+  "first_factor_failed",
+  "code_wait_timeout",
+  "permit_wait_timeout",
+  "async_timeout",
+  "unexpected_runtime_error",
+  "unexpected_timeout_error",
+  "unexpected_error",
+]);
 
 interface AtrustSessionRecord {
   status: "missing" | "active" | "needs_reauth";
@@ -2935,6 +2953,18 @@ export class CquSessionDO extends DurableObject<Env> {
         !result?.ok ||
         !isStorageState(result.state)
       ) {
+        const failureStage =
+          typeof result?.failureStage === "string" &&
+          ATRUST_FAILURE_STAGES.has(result.failureStage)
+            ? result.failureStage
+            : "unknown";
+        console.warn(
+          JSON.stringify({
+            event: "cqu.atrust.login_failed",
+            status: response.status,
+            failureStage,
+          })
+        );
         throw new CquSsoError(
           "ATRUST_TRANSIENT",
           "aTrust login node returned a transient failure"

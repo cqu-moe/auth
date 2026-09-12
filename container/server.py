@@ -180,6 +180,35 @@ class InvalidOperationTimeout(Exception):
     """operationTimeoutMs 入参非法(非整数/越界/该给未给)。"""
 
 
+ATRUST_FAILURE_STAGE_BY_MESSAGE = {
+    "ATRUST_PORTAL_OPTION_MISSING": "portal_option_missing",
+    "ATRUST_SSO_NOT_READY": "sso_not_ready",
+    "ATRUST_APP_NOT_REACHED": "app_not_reached",
+    "ATRUST_APP_NOT_READY": "app_not_ready",
+    "ATRUST_CODE_BUTTON_MISSING": "code_button_missing",
+    "ATRUST_CODE_REQUEST_FAILED": "code_request_failed",
+    "ATRUST_CODE_MISSING": "code_missing",
+    "ATRUST_FIRST_FACTOR_FAILED": "first_factor_failed",
+}
+
+
+def atrust_failure_stage(error: Exception) -> str:
+    """Return a bounded, non-sensitive stage label for aTrust diagnostics."""
+    if isinstance(error, CodeWaitTimeout):
+        return "code_wait_timeout"
+    if isinstance(error, PermitWaitTimeout):
+        return "permit_wait_timeout"
+    if isinstance(error, asyncio.TimeoutError):
+        return "async_timeout"
+    controlled = ATRUST_FAILURE_STAGE_BY_MESSAGE.get(str(error))
+    if controlled:
+        return controlled
+    return {
+        "RuntimeError": "unexpected_runtime_error",
+        "TimeoutError": "unexpected_timeout_error",
+    }.get(type(error).__name__, "unexpected_error")
+
+
 def boot_guard_response(request: web.Request) -> web.Response | None:
     """校验 X-Cqu-Expected-Boot-Id;不匹配返回 409 BROWSER_INSTANCE_REPLACED。
 
@@ -669,15 +698,27 @@ async def atrust_login_handler(request: web.Request) -> web.Response:
         return web.json_response(
             {"ok": False, "error": "PASSWORD_REJECTED"}, status=401
         )
-    except (CodeWaitTimeout, PermitWaitTimeout, asyncio.TimeoutError):
-        log.warning("atrust-login timeout")
+    except (CodeWaitTimeout, PermitWaitTimeout, asyncio.TimeoutError) as error:
+        failure_stage = atrust_failure_stage(error)
+        log.warning("atrust-login timeout stage=%s", failure_stage)
         return web.json_response(
-            {"ok": False, "error": "ATRUST_TRANSIENT"}, status=504
+            {
+                "ok": False,
+                "error": "ATRUST_TRANSIENT",
+                "failureStage": failure_stage,
+            },
+            status=504,
         )
     except Exception as error:  # noqa: BLE001 - map browser/network failures to stable transient
-        log.warning("atrust-login transient error=%s", type(error).__name__)
+        failure_stage = atrust_failure_stage(error)
+        log.warning("atrust-login transient stage=%s", failure_stage)
         return web.json_response(
-            {"ok": False, "error": "ATRUST_TRANSIENT"}, status=502
+            {
+                "ok": False,
+                "error": "ATRUST_TRANSIENT",
+                "failureStage": failure_stage,
+            },
+            status=502,
         )
     finally:
         CODE_EVENTS.pop(session, None)

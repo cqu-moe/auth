@@ -107,10 +107,27 @@ class AtrustLoginServerTestCase(AioHTTPTestCase):
         with self.assertLogs("cqu-login-server", level="INFO") as logs:
             resp = await self.client.post("/atrust-login", json=_BODY)
         assert resp.status == 502
-        assert await resp.json() == {"ok": False, "error": "ATRUST_TRANSIENT"}
+        assert await resp.json() == {
+            "ok": False,
+            "error": "ATRUST_TRANSIENT",
+            "failureStage": "unexpected_runtime_error",
+        }
         joined = "\n".join(logs.output)
         assert _BODY["session"] not in joined
         assert "SECRET" not in joined
+
+    async def test_controlled_atrust_failure_exposes_only_a_stable_stage(self):
+        async def failed(**_kwargs):
+            raise RuntimeError("ATRUST_SSO_NOT_READY")
+
+        server.cqu_atrust.run_atrust_login = failed
+        resp = await self.client.post("/atrust-login", json=_BODY)
+        assert resp.status == 502
+        assert await resp.json() == {
+            "ok": False,
+            "error": "ATRUST_TRANSIENT",
+            "failureStage": "sso_not_ready",
+        }
 
     async def test_code_permit_requires_session(self):
         resp = await self.client.post("/code-permit", json={})
