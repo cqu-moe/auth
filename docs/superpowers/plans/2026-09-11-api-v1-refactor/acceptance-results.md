@@ -159,6 +159,13 @@
 
 当前结论：Q1–Q4 已在两个隔离分支完成本地实现、审查修复与提交；Q5 的本地合同、Node、Workers/DO、两项 TypeScript、frontend、Redocly 与边界检查均有通过证据，仍须完成任务级/整分支审查后才能部署。本节不把旧 T00–T17 的测试计数改写为新时间点。
 
+### Final whole-branch review 修复波
+
+- 本地已验证：Node 85 files / 678 tests、root/DO TypeScript、frontend tsc/lint/build、OpenAPI/Cloudflare Redocly、API漂移和边界检查；153个runtime操作均有auth-policy且完整文档无空1xx/2xx body（101/204除外）。
+- 生成确定性：`openapi.json`、`cloudflare.openapi.json`、`endpoints.json`、`coverage.json`、`auth-policy.json`、generated types 连续生成SHA不变。
+- Workers/DO最终通过：子环境workerd监听被EPERM阻止后由根任务执行；首轮full为156/158，暴露测试表名误写及admin-create strict schema漏`require_pkce`。修正后focused 2 files/9 tests通过，最终full 20/20 files、158/158 tests、exit 0；新增Device DO keepalive/login竞态、1000波outbox持久化收敛、admin strict/no-store和QuickLogin逐资源OPTIONS均已执行。仅有既有sourcemap、overdue alarm与disabled-container噪音。
+- 发布边界不变：未push、未部署、未上传schema、未改WAF/API Shield，也没有把本地合同结果写成线上验收。
+
 | 补充项 | 状态 | 当前证据 |
 | --- | --- | --- |
 | Q1 核心/DO | 本地通过 | Auth `59893d4` + 三轮维护修复；Task 1 Workers 7 files/90、QuickLogin Node 8 files/56、两项 TS（任务报告） |

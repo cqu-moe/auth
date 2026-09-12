@@ -4,12 +4,18 @@
 `cloudflare.openapi.json` is the OpenAPI 3.0.3 projection prepared for a later API Shield import.
 `endpoints.json` is the exact runtime method/path/operationId manifest.
 `coverage.json` records, per operation, what Cloudflare can validate and what remains application-validated.
+`auth-policy.json` records the exact authentication policy and evidence source for every runtime operation.
 `shared/api-types.generated.ts` is generated from the complete contract and must not be edited manually.
 
 The current local build has 153 operations: 132 canonical, one WebSocket handshake,
 15 temporary legacy operations, and five permanent discovery operations. Generation
 fails unless the runtime, complete OpenAPI, Cloudflare projection, endpoint manifest,
-and coverage manifest have exactly the same operation set and operation IDs.
+coverage manifest, and authentication policy have exactly the same operation set and operation IDs.
+
+Custom JSON request schemas are generated from the same strict Zod definitions used by
+the handlers. Better Auth operations retain the locked 1.6.11 plugin schemas; their
+OpenAPI security is replaced only by the explicit policy ledger, including public,
+optional-session, session-only, admin, Bearer, OAuth client, and two-factor-cookie cases.
 
 ## QuickLogin contract boundaries
 
@@ -17,7 +23,7 @@ and coverage manifest have exactly the same operation set and operation IDs.
   configured website origin at runtime where applicable.
 - Register, device `PUT`, status, refresh, and export use Bearer authentication and
   the single configured extension origin. OPTIONS is registered only for the five
-  exact device resources.
+  exact device resources and advertises only that resource's methods.
 - Device success and error responses are native QuickLogin DTOs, including
   `QuickloginNativeError`; they are not wrapped in `{data}` or Problem Details.
 - The QuickLogin root and four canonical admin policy/quota operations use `{data}`

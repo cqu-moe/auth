@@ -17,10 +17,15 @@
 | frontend 手写 QuickLogin `PublicDevice`/list/preference/quota DTO | 删除重复声明 | 改为 `shared/api-types.generated.ts` 的 `components["schemas"]` 索引；生成、frontend typecheck 和组件测试约束 |
 | 全量 115-operation legacy Auth 文档投影 | 从当前生成物删除 | 当前仅 15 个批准过渡操作；运行时、两份 OpenAPI、endpoint/coverage manifests 集合均为 153 |
 | canonical QuickLogin OPTIONS 通配注册 | 改为五个精确资源 | 固定-origin handler 复用；operation inventory 与 Workers CORS/404/405 回归约束 |
+| 全局Hono CORS提前吞掉未知OPTIONS | 删除全局自动preflight | 只在runtime精确path和请求method匹配时返回204；QuickLogin按资源返回实际methods |
+| handler手写JSON解析与OpenAPI请求体复制 | 合并 | `src/api/validation.ts` + route Zod schema；OAuth/entitlement/CQU/QuickLogin统一媒体与strict合同 |
+| OpenAPI路径鉴权猜测 | 删除 | `docs/api/auth-policy.json`覆盖153个runtime operation并参与`check:api`集合/security漂移检查 |
+| Account DO追加式outbox | 改为稳定key有界合并 | projection按revision、device按deviceId、revoke按grantId保留最新；256 critical硬上限采用失败背压，不静默丢撤销 |
 
 ## 明确保留
 
 - `src/routes/{admin,cqu,cqu-bind,cqu-quicklogin}.ts`：迁移期 legacy 映射和部分 canonical adapter 仍复用这些 handler；删除会复制或破坏兼容逻辑。旧地址退役后再反转/移除。
+- `src/routes/admin.ts` 的旧公开挂载虽已退役，但OAuth与CQU绑定的canonical adapter仍调用其中已审计handler/helper；本修复波不为减行拆除，留待反转依赖后单独清理。
 - `src/utils/error.ts`：仅供 legacy 成功/错误形状；canonical 使用 `src/api/problem.ts`。
 - 原有9个 SQL migration 加现有 `0009_quicklogin_devices.sql`、Durable Object migration graph、`CquQuickloginAccountDO` / `CquQuickloginDeviceDO` 兼容导出、`NODE_RETIRED` 拒绝分支、旧 forward 数据读取和邮件处理、Schedule RPC。
 - QuickLogin 公开 export envelope 仅描述扩展必须消费的协议字段；grant、账号 DO state、存储的 browser state、pending state 均不进入公开 schema。
