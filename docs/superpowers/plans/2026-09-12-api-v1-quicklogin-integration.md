@@ -53,7 +53,8 @@
 3. 设备 API 使用当前 v1 验证/错误层；扩展 Bearer 路径保持协议错误体，网站 session 路径保持 no-store、同源要求和用户隔离。不得把坏 Bearer 降级成 session。
 4. v1 路由只实现一份业务 handler；旧设备路径及 QuickLogin 旧 OAuth authorize/token 由集中最小 legacy 路由精确转发，不使用 HTTP redirect，不复制 DO 调用。除短期密码重置 callback 外，删除其它通用 legacy 映射。
 5. 更新 runtime 操作枚举与负例：错误方法 405、未知子路径 JSON 404、OPTIONS CORS 只允许固定 extension origin、禁用模式 503。
-6. 运行 OAuth、设备路由、认证、legacy、OTP/2FA 和 Workers 集成测试及类型检查；提交 Conventional Commit。
+6. 对最小兼容桥和被拒绝的旧前缀输出结构化匿名日志，只记录事件名、method、归一化 route template/类别和 status；不得记录原始 path、用户/设备 ID、reset token、query、headers、Cookie、Bearer 或请求体。
+7. 运行 OAuth、设备路由、认证、legacy、OTP/2FA 和 Workers 集成测试及类型检查；提交 Conventional Commit。
 
 ## Task 3：迁移 Auth 网页设备管理与管理员配额入口
 
@@ -82,7 +83,8 @@
 
 1. 为所有新 v1/legacy/admin QuickLogin 操作补同源运行时 schema、OpenAPI、Cloudflare 投影、auth policy、endpoint kind 和覆盖说明；扩展协议错误响应不得被错误包装。
 2. `generate:api` 后检查 runtime ↔ OpenAPI ↔ endpoints ↔ Cloudflare 集合；连续生成无漂移。永久 discovery 与最小 QuickLogin/密码重置兼容桥明确登记，旧的全量 115-operation legacy 清单不得残留。
-3. 更新原 API v1 execution-log、acceptance-results、cleanup-ledger 和当前接入文档，说明原计划前提为何被修正、QuickLogin 哪些能力被保留、哪些退役条件仍未满足。
-4. 运行原 API v1 验收命令全集，加 QuickLogin Auth 全部 Node/Workers 测试和扩展全部门禁；记录实际退出码、测试数和已知环境噪声。
-5. 最终做任务级审查和整分支审查。全部通过后部署 Auth Worker；不上传 Cloudflare schema、不启用 WAF；通用 legacy 下线，只保留本计划列出的过渡桥与永久 discovery。
-6. 部署后只做 health、静态页面、v1/legacy/discovery 和未登录拒绝等无凭据安全探针，记录 Worker version。真实用户流量、生产 OAuth client/D1 清单及退役判断留待用户晚上回来共同检查。
+3. 依据 Cloudflare 官方配置把 Workers Logs persistence 明确启用，保留当前采样率；只用 Task 2 的脱敏结构化 legacy 事件供晚上观察，不增加 D1/KV/Analytics Engine 写入。
+4. 更新原 API v1 execution-log、acceptance-results、cleanup-ledger 和当前接入文档，说明原计划前提为何被修正、QuickLogin 哪些能力被保留、哪些退役条件仍未满足。
+5. 运行原 API v1 验收命令全集，加 QuickLogin Auth 全部 Node/Workers 测试和扩展全部门禁；记录实际退出码、测试数和已知环境噪声。
+6. 最终做任务级审查和整分支审查。全部通过后部署 Auth Worker；不上传 Cloudflare schema、不启用 WAF；通用 legacy 下线，只保留本计划列出的过渡桥与永久 discovery。
+7. 部署后只做 health、静态页面、v1/legacy/discovery 和未登录拒绝等无凭据安全探针，记录 Worker version。真实用户流量、生产 OAuth client/D1 清单及退役判断留待用户晚上回来共同检查。
