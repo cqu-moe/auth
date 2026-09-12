@@ -2,7 +2,7 @@
 
 范围：本地隔离工作区，仅假邮件、假 CQU 出站、真实本地 HTTP/Auth/D1/KV/DO/WS。未访问生产 D1/KV、真实学校凭据或真实邮件。
 
-结论：代码、协议、契约和全部命令门禁通过；WEB-13 的桌面 fixture 截图已保存，移动端初次截图发现裁切并已修复为卡片布局，但 ego-browser TaskSpace 随后转为用户控制，按工具硬性规则不能擅自重新取得控制，因此缺少修复后的第二张移动截图。该项严格记为环境阻塞，不以 build 代替视觉验收。
+结论：代码、协议、契约、全部命令门禁和 WEB-13 浏览器验收均通过。Admin 使用同一固定 fixture 完成桌面与 390px 移动截图；移动端初次发现表格裁切后改为卡片布局，复验确认页面宽度等于 viewport、无横向溢出、隐藏表格无布局盒，姓名、角色、状态、日期及4个操作按钮全部可达。
 
 | ID | 状态 | 当前证据 |
 | --- | --- | --- |
@@ -122,7 +122,7 @@
 | WEB-10 | 通过 | frontend API/continuation/Wizard/transport/CopyButton tests; tsc -b, lint, build |
 | WEB-11 | 通过 | frontend API/continuation/Wizard/transport/CopyButton tests; tsc -b, lint, build |
 | WEB-12 | 通过 | frontend API/continuation/Wizard/transport/CopyButton tests; tsc -b, lint, build |
-| WEB-13 | 环境阻塞 | desktop fixture screenshot passed; mobile screenshot exposed clipping, responsive card fix compiles/lints/builds, but ego TaskSpace ownership ended before post-fix screenshot |
+| WEB-13 | 通过 | local Vite + fixed fixture desktop/mobile screenshots; 390px documentWidth=viewport=390, visible table rects=0, all fields and 4 action buttons visible |
 | WEB-14 | 通过 | frontend API/continuation/Wizard/transport/CopyButton tests; tsc -b, lint, build |
 | WEB-15 | 通过 | frontend API/continuation/Wizard/transport/CopyButton tests; tsc -b, lint, build |
 | WEB-16 | 通过 | frontend API/continuation/Wizard/transport/CopyButton tests; tsc -b, lint, build |
@@ -159,7 +159,7 @@
 
 - screenshots/admin-desktop.png: 本地 Vite + 固定非生产 session/users fixture，真实 React Admin 页面。
 - screenshots/admin-mobile-before-responsive-fix.png: 同一 fixture 的初次移动截图，记录了被裁切问题；随后代码改为移动卡片、桌面表格。
-- 修复后移动截图：环境阻塞，原因见结论；不把初次截图冒充修复后证据。
+- screenshots/admin-mobile.png: 修复后390px移动截图；`documentWidth=viewport=390`、可见table布局盒为0、4个操作按钮全部可见。
 
 ## 发布边界
 
