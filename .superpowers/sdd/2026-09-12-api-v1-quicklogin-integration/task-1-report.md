@@ -233,3 +233,36 @@ npm run typecheck:do
 - 大 state 测试确认 session 主 value 低于 120 KiB，独立 pending payload 大于 64 KiB；重试两次发送相同 operation ID，浏览器 keepalive 只执行一次。
 - 当前正式 `storageState` 本身仍按既有协议保存在 session；本轮只消除“正式 state + pending state”在同一 value 的重复。
 - Workers 仍有既有 Containers sourcemap/未启用容器及 overdue alarm 背景噪音，测试 exit 0。
+
+## Fix round 3/5（mode-off alarm pending 清理）
+
+### 修复
+
+`CquQuickloginDeviceDO.alarm()` 的 mode-off 早退分支现在先运行 storage transaction：读取正式 session，仅删除 `pendingKeepaliveMint` metadata，并删除独立 `pendingKeepaliveState`；随后保持原有 `deleteAlarm()` 和返回语义。正式 `storageState`、session 版本及其他状态字段不变；即使 session 不存在，也会删除孤儿 pending payload。
+
+### RED
+
+```sh
+npm run test:do -- test/do/quicklogin-device.do.test.ts
+```
+
+有效 RED：exit 1；10 tests passed、1 test failed。真实 Device DO storage 在 mode-off alarm 后保留正式 `storageState`，但 `pendingKeepaliveMint` 仍存在，证明早退分支没有执行 pending 清理。
+
+测试最初通过 account notify 建立 fixture，受到其即时 alarm 竞争；最终改为直接创建隔离 Device DO stub、写入完整正式 session/pending payload，再共享修改 `QUICKLOGIN_DEVICE_MODE=off` 并在 `finally` 恢复，确保失败只来自目标分支。
+
+### GREEN
+
+```sh
+npm run test:do -- test/do/quicklogin-device.do.test.ts
+npm run test:do -- test/do/cqu-session.do.test.ts test/do/quicklogin-device.do.test.ts test/do/quicklogin-login-broker.do.test.ts test/do/quicklogin-account.do.test.ts test/do/quicklogin-migration.do.test.ts test/do/quicklogin-projection.do.test.ts test/do/quicklogin-regression.do.test.ts
+npm run typecheck
+npm run typecheck:do
+```
+
+结果：Device DO 1 file / 11 tests passed；Task 1 Workers 7 files / 90 tests passed；两项 TypeScript 检查 exit 0。
+
+### 自审与担忧
+
+- 测试从真实 storage 读回并分别断言：正式 state 原样保留、pending metadata 删除、独立 payload 删除、alarm 为 null。
+- 改动只触及 mode-off 早退分支和一个回归测试；既有 mode-on/确认/失败/authority/expiry 路径未改。
+- Workers 仍打印既有 Containers sourcemap/未启用容器与 overdue alarm 背景噪音，测试 exit 0。

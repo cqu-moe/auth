@@ -133,6 +133,14 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
 
   async alarm(): Promise<void> {
     if (!quickloginDeviceModeEnabled(this.env)) {
+      await this.ctx.storage.transaction(async (tx) => {
+        const session = await tx.get<StoredDeviceSession>(SESSION_KEY);
+        if (session?.pendingKeepaliveMint) {
+          delete session.pendingKeepaliveMint;
+          await tx.put(SESSION_KEY, session);
+        }
+        await tx.delete(PENDING_KEEPALIVE_STATE_KEY);
+      });
       await this.ctx.storage.deleteAlarm();
       return;
     }

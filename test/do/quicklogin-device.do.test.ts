@@ -291,6 +291,68 @@ describe("CquQuickloginDeviceDO", () => {
     expect(await readStorage(stub, "pendingKeepaliveState")).toBeUndefined();
   });
 
+  it("clears pending keepalive data on a mode-off alarm without deleting the live session", async () => {
+    const userId = `mode-off-${crypto.randomUUID()}`;
+    const deviceId = "device-mode-off";
+    const stub = env.CQU_QUICKLOGIN_DEVICE.get(
+      env.CQU_QUICKLOGIN_DEVICE.idFromName(`${userId}:${deviceId}`)
+    );
+    const storageState = JSON.stringify(exportableStorageState("live"));
+    const session = {
+      schemaVersion: 1 as const,
+      ownerUserId: userId,
+      deviceId,
+      generation: 4,
+      bindingEpoch: 2,
+      sessionVersion: 3,
+      state: "ready" as const,
+      loginAt: Date.now(),
+      lastKeepAliveAt: Date.now(),
+      storageState,
+      exportDigest: "live-digest",
+      transientFailures: 0,
+      transientStartedAt: null,
+      fastRetries: 0,
+      nextAttemptAt: null,
+      pendingKeepaliveMint: {
+        operationId: "pending-before-mode-off",
+        mintedAt: Date.now(),
+        expiresAt: Date.now() + 60_000,
+        hasStorageState: true,
+      },
+    };
+    await runInDurableObject(stub, async (_instance, state) => {
+      await state.storage.put({
+        session,
+        pendingKeepaliveState: JSON.stringify(
+          largeExportableStorageState("mode-off-pending")
+        ),
+      });
+      await state.storage.setAlarm(Date.now() + 60_000);
+    });
+
+    expect(await readStorage<Record<string, unknown>>(stub, "session"))
+      .toMatchObject({ storageState });
+    const originalMode = env.QUICKLOGIN_DEVICE_MODE;
+    env.QUICKLOGIN_DEVICE_MODE = "off";
+    try {
+      await runInDurableObject(stub, async (instance) => {
+        await (instance as unknown as { alarm(): Promise<void> }).alarm();
+      });
+    } finally {
+      env.QUICKLOGIN_DEVICE_MODE = originalMode;
+    }
+
+    expect(await readStorage<Record<string, unknown>>(stub, "session"))
+      .toMatchObject({ storageState });
+    expect(await readStorage<Record<string, unknown>>(stub, "session"))
+      .not.toHaveProperty("pendingKeepaliveMint");
+    expect(await readStorage(stub, "pendingKeepaliveState")).toBeUndefined();
+    await expect(
+      runInDurableObject(stub, async (_instance, state) => state.storage.getAlarm())
+    ).resolves.toBeNull();
+  });
+
   it("uses the elapsed failure window and resets it after recovery", async () => {
     const minute = 60_000;
     let currentTime = 1_800_000_000_000;
