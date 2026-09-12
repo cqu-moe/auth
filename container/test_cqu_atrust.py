@@ -225,20 +225,20 @@ class _ReadyResponse:
         "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/"
         "api/timetable/class/timetable/student/my-table-detail"
     )
-    status = 200
-
-    def __init__(self, payload):
+    def __init__(self, payload, status=200):
         self.payload = payload
+        self.status = status
 
     async def json(self):
         return self.payload
 
 
 class _ReadyPage:
-    def __init__(self, payload):
+    def __init__(self, payload, status=200, emit=True):
         self.url = cqu_atrust.ATRUST_APP_URL
-        self.response = _ReadyResponse(payload)
+        self.response = _ReadyResponse(payload, status)
         self.handler = None
+        self.emit = emit
 
     def on(self, event, handler):
         assert event == "response"
@@ -250,7 +250,8 @@ class _ReadyPage:
 
     async def goto(self, url, **_kwargs):
         self.url = url
-        self.handler(self.response)
+        if self.emit:
+            self.handler(self.response)
 
     async def wait_for_timeout(self, _timeout):
         return None
@@ -262,11 +263,23 @@ def test_atrust_ready_gate_requires_the_real_timetable_success_shape():
             _ReadyPage({"classTimetableVOList": []}), timeout_seconds=0.1
         )
     )
-    with pytest.raises(RuntimeError, match="ATRUST_APP_NOT_READY"):
+    with pytest.raises(RuntimeError, match="ATRUST_APP_API_INVALID"):
         asyncio.run(
             cqu_atrust.verify_atrust_app_ready(
                 _ReadyPage({"status": "failed", "message": "expired"}),
                 timeout_seconds=0.01,
+            )
+        )
+    with pytest.raises(RuntimeError, match="ATRUST_APP_API_REJECTED"):
+        asyncio.run(
+            cqu_atrust.verify_atrust_app_ready(
+                _ReadyPage({}, status=412), timeout_seconds=0.01
+            )
+        )
+    with pytest.raises(RuntimeError, match="ATRUST_APP_API_MISSING"):
+        asyncio.run(
+            cqu_atrust.verify_atrust_app_ready(
+                _ReadyPage({}, emit=False), timeout_seconds=0.01
             )
         )
 

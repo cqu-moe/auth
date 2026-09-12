@@ -148,6 +148,7 @@ async def verify_atrust_app_ready(page, timeout_seconds: float | None = None) ->
     if timeout_seconds is None:
         timeout_seconds = browser_profile.ATRUST_APP_READY_TIMEOUT_S
     ready = asyncio.Event()
+    observed = {"matched": False, "status": None, "invalid": False}
 
     async def inspect_response(response) -> None:
         try:
@@ -155,16 +156,25 @@ async def verify_atrust_app_ready(page, timeout_seconds: float | None = None) ->
             if (
                 _safe_host(response.url) == ATRUST_APP_HOST
                 and "my-table-detail" in parsed.path
-                and response.status == 200
             ):
+                observed["matched"] = True
+                observed["status"] = response.status
+                if response.status != 200:
+                    return
                 # A gateway HTML/error shell on the right hostname is not enough.
                 # Requiring parseable JSON proves the rewritten application can use
                 # the freshly established aTrust state for its target API.
-                payload = await response.json()
+                try:
+                    payload = await response.json()
+                except Exception:
+                    observed["invalid"] = True
+                    return
                 if isinstance(payload, dict) and isinstance(
                     payload.get("classTimetableVOList"), list
                 ):
                     ready.set()
+                else:
+                    observed["invalid"] = True
         except Exception:
             return
 
@@ -184,7 +194,18 @@ async def verify_atrust_app_ready(page, timeout_seconds: float | None = None) ->
         # Let the SPA finish any immediate localStorage writes before export.
         await page.wait_for_timeout(500)
     except asyncio.TimeoutError as error:
-        raise RuntimeError("ATRUST_APP_NOT_READY") from error
+        status = observed["status"]
+        if not observed["matched"]:
+            reason = "ATRUST_APP_API_MISSING"
+        elif isinstance(status, int) and 400 <= status < 500:
+            reason = "ATRUST_APP_API_REJECTED"
+        elif isinstance(status, int) and status >= 500:
+            reason = "ATRUST_APP_API_UNAVAILABLE"
+        elif observed["invalid"]:
+            reason = "ATRUST_APP_API_INVALID"
+        else:
+            reason = "ATRUST_APP_NOT_READY"
+        raise RuntimeError(reason) from error
     finally:
         page.remove_listener("response", on_response)
 
