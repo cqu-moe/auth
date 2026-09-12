@@ -65,6 +65,7 @@ function emptySession(authority: DeviceAuthority): StoredDeviceSession {
 
 export class CquQuickloginDeviceDO extends DurableObject<Env> {
   private owner: DeviceOwner | null = null;
+  private loginInFlight: Promise<void> | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -220,13 +221,20 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
 
   private async recordTransient(session: StoredDeviceSession): Promise<void> {
     const now = Date.now();
-    session.state = "temporary_unavailable";
-    session.transientFailures += 1;
-    session.transientStartedAt ??= now;
-    const delay = nextQuickloginRetryDelayMs(session.transientStartedAt, now);
-    session.nextAttemptAt = now + delay;
-    await this.ctx.storage.put(SESSION_KEY, session);
-    await this.ctx.storage.setAlarm(session.nextAttemptAt);
+    await this.ctx.storage.transaction(async (tx) => {
+      const current = await tx.get<StoredDeviceSession>(SESSION_KEY);
+      if (!current || current.generation !== session.generation ||
+          current.state === "disabled" || current.state === "revoked" ||
+          !quickloginDeviceModeEnabled(this.env)) return;
+      const next = { ...current };
+      next.state = "temporary_unavailable";
+      next.transientFailures += 1;
+      next.transientStartedAt ??= now;
+      const delay = nextQuickloginRetryDelayMs(next.transientStartedAt, now);
+      next.nextAttemptAt = now + delay;
+      await tx.put(SESSION_KEY, next);
+      await tx.setAlarm(next.nextAttemptAt);
+    });
   }
 
   private async requestRefresh(authority: DeviceAuthority): Promise<void> {
@@ -393,8 +401,33 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     session: StoredDeviceSession,
     authority: DeviceAuthority
   ): Promise<void> {
-    session.state = session.storageState ? "refreshing" : "preparing";
-    await this.ctx.storage.put(SESSION_KEY, session);
+    if (this.loginInFlight) return this.loginInFlight;
+    const operation = this.performLoginOnce(session, authority);
+    this.loginInFlight = operation;
+    try {
+      await operation;
+    } finally {
+      if (this.loginInFlight === operation) this.loginInFlight = null;
+    }
+  }
+
+  private async performLoginOnce(
+    session: StoredDeviceSession,
+    authority: DeviceAuthority
+  ): Promise<void> {
+    let started = false;
+    await this.ctx.storage.transaction(async (tx) => {
+      const current = await tx.get<StoredDeviceSession>(SESSION_KEY);
+      if (!current || current.generation !== session.generation ||
+          current.state === "disabled" || current.state === "revoked" ||
+          !quickloginDeviceModeEnabled(this.env)) return;
+      await tx.put(SESSION_KEY, {
+        ...current,
+        state: current.storageState ? "refreshing" : "preparing",
+      });
+      started = true;
+    });
+    if (!started) return;
     const result = await new QuickloginLoginBrokerClient(this.env)
       .quickloginLogin({
         ownerUserId: authority.ownerUserId,

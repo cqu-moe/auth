@@ -56,6 +56,98 @@ async function setupDevice() {
 }
 
 describe("CquQuickloginDeviceDO", () => {
+  it("does not restore temporary_unavailable after a delayed keepalive failure disables the device", async () => {
+    const { userId, authority } = await setupDevice();
+    const devices = new QuickloginDeviceClient(env);
+    await devices.notifyDevice(authority);
+    const stub = env.CQU_QUICKLOGIN_DEVICE.get(
+      env.CQU_QUICKLOGIN_DEVICE.idFromName(`${userId}:${authority.deviceId}`)
+    );
+    const session = {
+      ...(await devices.readDeviceSession(userId, authority.deviceId)),
+      state: "ready" as const,
+      storageState: JSON.stringify(exportableStorageState("transient-race")),
+    };
+    await runInDurableObject(stub, async (_instance, state) => state.storage.put("session", session));
+    let release!: () => void;
+    let started!: () => void;
+    const began = new Promise<void>((resolve) => { started = resolve; });
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    spyBrowserFetch({
+      "/keepalive": async () => {
+        started();
+        await hold;
+        return Response.json({ ok: false, status: "unreachable" }, { status: 503 });
+      },
+    });
+
+    await runInDurableObject(stub, async (instance) => {
+      const internal = instance as unknown as {
+        performKeepalive(value: typeof session, input: typeof authority): Promise<void>;
+        notify(input: typeof authority): Promise<void>;
+      };
+      const keepalive = internal.performKeepalive(session, authority);
+      await began;
+      await internal.notify({
+        ...authority,
+        generation: authority.generation + 1,
+        enabled: false,
+        allowed: false,
+        reason: "DEVICE_DISABLED",
+      });
+      release();
+      await keepalive;
+    });
+
+    expect(await readStorage<Record<string, unknown>>(stub, "session"))
+      .toMatchObject({ state: "disabled", storageState: null, generation: authority.generation + 1 });
+    await expect(runInDurableObject(stub, async (_instance, state) => state.storage.getAlarm()))
+      .resolves.toBeNull();
+  });
+
+  it("does not restore temporary_unavailable after a delayed login failure revokes the device", async () => {
+    const { userId, authority } = await setupDevice();
+    const devices = new QuickloginDeviceClient(env);
+    await devices.notifyDevice(authority);
+    const stub = env.CQU_QUICKLOGIN_DEVICE.get(
+      env.CQU_QUICKLOGIN_DEVICE.idFromName(`${userId}:${authority.deviceId}`)
+    );
+    const session = await devices.readDeviceSession(userId, authority.deviceId);
+    let release!: () => void;
+    let started!: () => void;
+    const began = new Promise<void>((resolve) => { started = resolve; });
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    vi.spyOn(QuickloginLoginBrokerClient.prototype, "quickloginLogin")
+      .mockImplementation(async () => {
+        started();
+        await hold;
+        return { kind: "temporary_unavailable", retryAfterMs: 60_000 };
+      });
+
+    await runInDurableObject(stub, async (instance) => {
+      const internal = instance as unknown as {
+        performLogin(value: typeof session, input: typeof authority): Promise<void>;
+        notify(input: typeof authority): Promise<void>;
+      };
+      const login = internal.performLogin(session, authority);
+      await began;
+      await internal.notify({
+        ...authority,
+        generation: authority.generation + 1,
+        enabled: false,
+        allowed: false,
+        reason: "DEVICE_REVOKED",
+      });
+      release();
+      await login;
+    });
+
+    expect(await readStorage<Record<string, unknown>>(stub, "session"))
+      .toMatchObject({ state: "revoked", storageState: null, generation: authority.generation + 1 });
+    await expect(runInDurableObject(stub, async (_instance, state) => state.storage.getAlarm()))
+      .resolves.toBeNull();
+  });
+
   it("does not restore a disabled session after a delayed keepalive confirmation", async () => {
     const { userId, authority } = await setupDevice();
     const devices = new QuickloginDeviceClient(env);
