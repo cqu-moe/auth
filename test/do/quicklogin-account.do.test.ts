@@ -325,6 +325,42 @@ describe("CquQuickloginAccountDO", () => {
     expect(after.alarm).not.toBeNull();
   });
 
+  it("compacts 1000 failed event waves in storage while retaining latest projection and revocation", async () => {
+    const userId = freshUser("bounded-outbox");
+    const client = account();
+    await client.setMasterEnabled(userId, true);
+    const stub = env.CQU_QUICKLOGIN_ACCOUNT.get(
+      env.CQU_QUICKLOGIN_ACCOUNT.idFromName(userId)
+    );
+    const future = Date.now() + 60_000;
+    const events = Array.from({ length: 1000 }, (_, index) => [
+      {
+        id: `projection-${index}`, kind: "projection" as const, revision: index,
+        attempts: index, nextAttemptAt: future,
+      },
+      {
+        id: `revoke-${index}`, kind: "revoke-oauth-family" as const,
+        revision: index, grantId: "grant-latest", attempts: index,
+        nextAttemptAt: future,
+      },
+    ]).flat();
+    await runInDurableObject(stub, async (_instance, state) => {
+      await state.storage.put("outbox", events);
+      await state.storage.setAlarm(future);
+    });
+    await runInDurableObject(stub, async (instance) => {
+      await (instance as unknown as { alarm(): Promise<void> }).alarm();
+    });
+    const stored = await runInDurableObject(stub, async (_instance, state) =>
+      (await state.storage.get<OutboxEvent[]>("outbox")) ?? []
+    );
+    expect(stored).toHaveLength(2);
+    expect(stored).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "projection", revision: 999 }),
+      expect.objectContaining({ kind: "revoke-oauth-family", grantId: "grant-latest", revision: 999 }),
+    ]));
+  });
+
   it("persists one owner and rejects a mismatched internal caller", async () => {
     const client = account();
     const userId = freshUser("owner");

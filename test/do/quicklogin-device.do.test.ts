@@ -56,6 +56,106 @@ async function setupDevice() {
 }
 
 describe("CquQuickloginDeviceDO", () => {
+  it("does not restore a disabled session after a delayed keepalive confirmation", async () => {
+    const { userId, authority } = await setupDevice();
+    const devices = new QuickloginDeviceClient(env);
+    await devices.notifyDevice(authority);
+    const stub = env.CQU_QUICKLOGIN_DEVICE.get(
+      env.CQU_QUICKLOGIN_DEVICE.idFromName(`${userId}:${authority.deviceId}`)
+    );
+    const session = await devices.readDeviceSession(userId, authority.deviceId);
+    const pending = {
+      ...session,
+      state: "ready" as const,
+      pendingKeepaliveMint: {
+        operationId: "delayed-keepalive",
+        mintedAt: Date.now(),
+        expiresAt: Date.now() + 60_000,
+        hasStorageState: true,
+      },
+    };
+    await runInDurableObject(stub, async (_instance, state) => state.storage.put({
+      session: pending,
+      pendingKeepaliveState: JSON.stringify(exportableStorageState("delayed")),
+    }));
+    let release!: () => void;
+    let started!: () => void;
+    const began = new Promise<void>((resolve) => { started = resolve; });
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    vi.spyOn(QuickloginLoginBrokerClient.prototype, "recordQuickloginKeepaliveMint")
+      .mockImplementation(async () => { started(); await hold; });
+
+    await runInDurableObject(stub, async (instance) => {
+      const internal = instance as unknown as {
+        confirmKeepaliveMint(value: typeof pending, input: typeof authority): Promise<void>;
+        notify(input: typeof authority): Promise<void>;
+      };
+      const confirming = internal.confirmKeepaliveMint(pending, authority);
+      await began;
+      await internal.notify({
+        ...authority,
+        generation: authority.generation + 1,
+        enabled: false,
+        allowed: false,
+        reason: "DEVICE_DISABLED",
+      });
+      release();
+      await confirming;
+    });
+
+    expect(await readStorage<Record<string, unknown>>(stub, "session"))
+      .toMatchObject({ state: "disabled", storageState: null, generation: authority.generation + 1 });
+    expect(await readStorage(stub, "pendingKeepaliveState")).toBeUndefined();
+  });
+
+  it("does not restore a revoked session when login digest completes late", async () => {
+    const { userId, authority } = await setupDevice();
+    const devices = new QuickloginDeviceClient(env);
+    await devices.notifyDevice(authority);
+    const stub = env.CQU_QUICKLOGIN_DEVICE.get(
+      env.CQU_QUICKLOGIN_DEVICE.idFromName(`${userId}:${authority.deviceId}`)
+    );
+    const session = await devices.readDeviceSession(userId, authority.deviceId);
+    vi.spyOn(QuickloginLoginBrokerClient.prototype, "quickloginLogin")
+      .mockResolvedValue({
+        kind: "success",
+        bindingEpoch: 3,
+        storageState: JSON.stringify(exportableStorageState("late-login")),
+        loginAt: Date.now(),
+      });
+    const originalDigest = crypto.subtle.digest.bind(crypto.subtle);
+    let release!: () => void;
+    let started!: () => void;
+    const began = new Promise<void>((resolve) => { started = resolve; });
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    vi.spyOn(crypto.subtle, "digest").mockImplementation(async (...args) => {
+      started();
+      await hold;
+      return originalDigest(...args);
+    });
+
+    await runInDurableObject(stub, async (instance) => {
+      const internal = instance as unknown as {
+        performLogin(value: typeof session, input: typeof authority): Promise<void>;
+        notify(input: typeof authority): Promise<void>;
+      };
+      const login = internal.performLogin(session, authority);
+      await began;
+      await internal.notify({
+        ...authority,
+        generation: authority.generation + 1,
+        enabled: false,
+        allowed: false,
+        reason: "DEVICE_REVOKED",
+      });
+      release();
+      await login;
+    });
+
+    expect(await readStorage<Record<string, unknown>>(stub, "session"))
+      .toMatchObject({ state: "revoked", storageState: null, generation: authority.generation + 1 });
+  });
+
   it("logs in and exports validated SSO cookies", async () => {
     const { userId, authority } = await setupDevice();
     const sessionStub = env.CQU_SESSION.get(env.CQU_SESSION.idFromName(userId));

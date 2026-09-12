@@ -19,6 +19,46 @@ export interface OutboxEvent {
 export type OutboxDispatcher = (event: OutboxEvent) => Promise<boolean>;
 
 const MAX_BACKOFF_MS = 6 * 60 * 60_000;
+export const MAX_OUTBOX_EVENTS = 256;
+
+function stableKey(event: OutboxEvent): string {
+  if (event.kind === "projection") return "projection";
+  if (event.kind === "device-notify" && event.deviceId) {
+    return `device-notify:${event.deviceId}`;
+  }
+  if (event.kind === "revoke-oauth-family" && event.grantId) {
+    return `revoke-oauth-family:${event.grantId}`;
+  }
+  throw new Error(`QuickLogin outbox event lacks a stable key: ${event.kind}`);
+}
+
+function isNewer(left: OutboxEvent, right: OutboxEvent): boolean {
+  if (left.revision !== right.revision) return left.revision > right.revision;
+  return (left.generation ?? -1) >= (right.generation ?? -1);
+}
+
+export function mergeOutboxEvents(
+  current: readonly OutboxEvent[],
+  incoming: readonly OutboxEvent[],
+  limit = MAX_OUTBOX_EVENTS
+): OutboxEvent[] {
+  const latest = new Map<string, OutboxEvent>();
+  for (const event of [...current, ...incoming]) {
+    const key = stableKey(event);
+    const existing = latest.get(key);
+    if (!existing || isNewer(event, existing)) latest.set(key, event);
+  }
+  const events = [...latest.values()].sort((left, right) => {
+    const priority = (event: OutboxEvent) => event.kind === "revoke-oauth-family" ? 0 :
+      event.kind === "device-notify" ? 1 : 2;
+    return priority(left) - priority(right) || left.revision - right.revision ||
+      stableKey(left).localeCompare(stableKey(right));
+  });
+  if (events.length > limit) {
+    throw new Error("QuickLogin outbox critical capacity exceeded");
+  }
+  return events;
+}
 
 export async function dispatchOutboxEvent(
   event: OutboxEvent,

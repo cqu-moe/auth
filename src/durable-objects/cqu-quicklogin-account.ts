@@ -21,6 +21,7 @@ import type {
 import {
   deferOutboxEvent,
   dispatchOutboxEvent,
+  mergeOutboxEvents,
   nextOutboxAlarm,
   type OutboxDispatcher,
   type OutboxEvent,
@@ -342,11 +343,11 @@ export class CquQuickloginAccountDO extends DurableObject<Env> {
     await this.ctx.storage.transaction(async (tx) => {
       const current = (await tx.get<OutboxEvent[]>(OUTBOX_KEY)) ?? [];
       const dueIds = new Set(due.map((event) => event.id));
-      const next = current.flatMap((event) => {
+      const next = mergeOutboxEvents([], current.flatMap((event) => {
         if (delivered.has(event.id)) return [];
         if (dueIds.has(event.id)) return [deferOutboxEvent(event, now)];
         return [event];
-      });
+      }));
       await tx.put(OUTBOX_KEY, next);
       const alarm = nextOutboxAlarm(next);
       if (alarm === null) await tx.deleteAlarm();
@@ -444,7 +445,7 @@ export class CquQuickloginAccountDO extends DurableObject<Env> {
         Date.now()
       );
       state = quota.state;
-      const nextOutbox = [...outbox, ...master.events, ...quota.events];
+      const nextOutbox = mergeOutboxEvents(outbox, [...master.events, ...quota.events]);
       await tx.put({
         [ACCOUNT_KEY]: state,
         [OUTBOX_KEY]: nextOutbox,
@@ -463,7 +464,7 @@ export class CquQuickloginAccountDO extends DurableObject<Env> {
       const outbox = (await tx.get<OutboxEvent[]>(OUTBOX_KEY)) ?? [];
       const reduction = reduceAccount(state, command, now);
       result = reduction.result;
-      const nextOutbox = [...outbox, ...reduction.events];
+      const nextOutbox = mergeOutboxEvents(outbox, reduction.events);
       await tx.put({
         [ACCOUNT_KEY]: reduction.state,
         [OUTBOX_KEY]: nextOutbox,
@@ -554,7 +555,7 @@ export class CquQuickloginAccountDO extends DurableObject<Env> {
         now
       );
       result = reduction.result as DeviceList;
-      const nextOutbox = [...outbox, ...reduction.events];
+      const nextOutbox = mergeOutboxEvents(outbox, reduction.events);
       await tx.put({
         [ACCOUNT_KEY]: reduction.state,
         [OUTBOX_KEY]: nextOutbox,

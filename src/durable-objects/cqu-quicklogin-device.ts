@@ -346,22 +346,34 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       const serialized = pendingStorageState;
       const cookies = extractSsoCookies(serialized, Date.now());
       const digest = await digestSsoCookies(cookies);
-      if (digest !== session.exportDigest) session.sessionVersion += 1;
       session.storageState = serialized;
       session.exportDigest = digest;
     }
-    session.lastKeepAliveAt = pending.mintedAt;
-    session.state = "ready";
-    session.transientFailures = 0;
-    session.transientStartedAt = null;
-    session.fastRetries = 0;
-    session.nextAttemptAt = null;
-    delete session.pendingKeepaliveMint;
+    let committed = false;
     await this.ctx.storage.transaction(async (tx) => {
-      await tx.put(SESSION_KEY, session);
+      const current = await tx.get<StoredDeviceSession>(SESSION_KEY);
+      if (!current || current.generation !== session.generation ||
+          current.pendingKeepaliveMint?.operationId !== pending.operationId ||
+          current.state === "disabled" || current.state === "revoked" ||
+          !quickloginDeviceModeEnabled(this.env)) return;
+      const next = { ...current };
+      if (pendingStorageState !== undefined) {
+        if (session.exportDigest !== current.exportDigest) next.sessionVersion += 1;
+        next.storageState = session.storageState;
+        next.exportDigest = session.exportDigest;
+      }
+      next.lastKeepAliveAt = pending.mintedAt;
+      next.state = "ready";
+      next.transientFailures = 0;
+      next.transientStartedAt = null;
+      next.fastRetries = 0;
+      next.nextAttemptAt = null;
+      delete next.pendingKeepaliveMint;
+      await tx.put(SESSION_KEY, next);
       await tx.delete(PENDING_KEEPALIVE_STATE_KEY);
+      committed = true;
     });
-    await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_MS);
+    if (committed) await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_MS);
   }
 
   private async recoverPendingKeepalive(
@@ -396,13 +408,23 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       return;
     }
     if (result.kind === "needs_reauth") {
-      session.state = "needs_reauth";
-      session.storageState = null;
-      session.exportDigest = null;
-      session.transientFailures = 0;
-      session.transientStartedAt = null;
-      await this.ctx.storage.put(SESSION_KEY, session);
-      await this.ctx.storage.deleteAlarm();
+      let committed = false;
+      await this.ctx.storage.transaction(async (tx) => {
+        const currentSession = await tx.get<StoredDeviceSession>(SESSION_KEY);
+        if (!currentSession || currentSession.generation !== session.generation ||
+            currentSession.state === "disabled" || currentSession.state === "revoked" ||
+            !quickloginDeviceModeEnabled(this.env)) return;
+        await tx.put(SESSION_KEY, {
+          ...currentSession,
+          state: "needs_reauth",
+          storageState: null,
+          exportDigest: null,
+          transientFailures: 0,
+          transientStartedAt: null,
+        });
+        committed = true;
+      });
+      if (committed) await this.ctx.storage.deleteAlarm();
       return;
     }
     if (result.kind !== "success") {
@@ -411,19 +433,29 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     }
     const cookies = extractSsoCookies(result.storageState, Date.now());
     const digest = await digestSsoCookies(cookies);
-    session.bindingEpoch = result.bindingEpoch;
-    session.storageState = result.storageState;
-    session.exportDigest = digest;
-    session.sessionVersion += 1;
-    session.loginAt = result.loginAt;
-    session.lastKeepAliveAt = result.loginAt;
-    session.state = "ready";
-    session.transientFailures = 0;
-    session.transientStartedAt = null;
-    session.fastRetries = 0;
-    session.nextAttemptAt = null;
-    await this.ctx.storage.put(SESSION_KEY, session);
-    await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_MS);
+    let committed = false;
+    await this.ctx.storage.transaction(async (tx) => {
+      const currentSession = await tx.get<StoredDeviceSession>(SESSION_KEY);
+      if (!currentSession || currentSession.generation !== session.generation ||
+          currentSession.state === "disabled" || currentSession.state === "revoked" ||
+          !quickloginDeviceModeEnabled(this.env)) return;
+      await tx.put(SESSION_KEY, {
+        ...currentSession,
+        bindingEpoch: result.bindingEpoch,
+        storageState: result.storageState,
+        exportDigest: digest,
+        sessionVersion: currentSession.sessionVersion + 1,
+        loginAt: result.loginAt,
+        lastKeepAliveAt: result.loginAt,
+        state: "ready",
+        transientFailures: 0,
+        transientStartedAt: null,
+        fastRetries: 0,
+        nextAttemptAt: null,
+      });
+      committed = true;
+    });
+    if (committed) await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_MS);
   }
 
   private async notify(authority: DeviceAuthority): Promise<void> {
