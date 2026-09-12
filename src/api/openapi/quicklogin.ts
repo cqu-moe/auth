@@ -7,6 +7,13 @@ import {
   QuickloginQuotaApplyBody,
   QuickloginQuotaPreviewBody,
 } from "../v1/admin/quicklogin.schema";
+import {
+  QuickloginDeviceExportBody,
+  QuickloginDeviceHeartbeatBody,
+  QuickloginDeviceRefreshBody,
+  QuickloginDeviceRegistrationBody,
+  QuickloginDeviceUpdateBody,
+} from "../../services/quicklogin/http";
 
 type Schema = Record<string, unknown>;
 
@@ -149,7 +156,7 @@ export const QUICKLOGIN_SCHEMAS: Record<string, Schema> = {
   },
   QuickloginLegacyPreference: {
     type: "object", additionalProperties: false,
-    required: ["enabled"],
+    required: ["eligible", "enabled"],
     properties: { eligible: { type: "boolean" }, enabled: { type: "boolean" } },
   },
   QuickloginPreference: {
@@ -157,6 +164,17 @@ export const QUICKLOGIN_SCHEMAS: Record<string, Schema> = {
       ref("QuickloginDeviceUnavailablePreference"),
       ref("QuickloginDevicePreference"),
       ref("QuickloginLegacyPreference"),
+    ],
+  },
+  QuickloginLegacyPreferenceUpdateResult: {
+    type: "object", additionalProperties: false,
+    required: ["enabled"],
+    properties: { enabled: { type: "boolean" } },
+  },
+  QuickloginPreferenceUpdateResult: {
+    oneOf: [
+      ref("QuickloginDevicePreference"),
+      ref("QuickloginLegacyPreferenceUpdateResult"),
     ],
   },
   QuickloginQuotaDevice: {
@@ -263,46 +281,11 @@ export const QUICKLOGIN_SCHEMAS: Record<string, Schema> = {
     },
   },
   QuickloginPreferenceUpdate: runtimeSchema(QuickloginPreferenceBody),
-  QuickloginDeviceRegistration: {
-    type: "object", additionalProperties: false,
-    required: ["deviceName", "browserFamily", "browserVersion"],
-    properties: {
-      deviceName: { type: "string", minLength: 1, maxLength: 80 },
-      browserFamily: { type: "string", const: "chrome" },
-      browserVersion: { type: "string", minLength: 1, maxLength: 40 },
-    },
-  },
-  QuickloginDeviceUpdate: {
-    type: "object", additionalProperties: false, required: ["enabled"],
-    properties: { enabled: { type: "boolean" } },
-  },
-  QuickloginDeviceHeartbeat: {
-    type: "object", additionalProperties: false,
-    required: ["protocolVersion", "appliedVersion", "generation", "browserVersion"],
-    properties: {
-      protocolVersion: { type: "integer", const: 1 },
-      appliedVersion: nullableInteger,
-      generation: { type: "integer", minimum: 0 },
-      browserVersion: { type: "string", minLength: 1, maxLength: 40 },
-    },
-  },
-  QuickloginDeviceRefresh: {
-    type: "object", additionalProperties: false,
-    required: ["protocolVersion", "generation"],
-    properties: {
-      protocolVersion: { type: "integer", const: 1 },
-      generation: { type: "integer", minimum: 0 },
-    },
-  },
-  QuickloginDeviceExport: {
-    type: "object", additionalProperties: false,
-    required: ["protocolVersion", "generation", "sessionVersion"],
-    properties: {
-      protocolVersion: { type: "integer", const: 1 },
-      generation: { type: "integer", minimum: 0 },
-      sessionVersion: { type: "integer", minimum: 0 },
-    },
-  },
+  QuickloginDeviceRegistration: runtimeSchema(QuickloginDeviceRegistrationBody),
+  QuickloginDeviceUpdate: runtimeSchema(QuickloginDeviceUpdateBody),
+  QuickloginDeviceHeartbeat: runtimeSchema(QuickloginDeviceHeartbeatBody),
+  QuickloginDeviceRefresh: runtimeSchema(QuickloginDeviceRefreshBody),
+  QuickloginDeviceExport: runtimeSchema(QuickloginDeviceExportBody),
   QuickloginPolicyPreviewRequest: runtimeSchema(QuickloginPolicyPreviewBody),
   QuickloginPolicyInitializeRequest: runtimeSchema(QuickloginPolicyInitializeBody),
   QuickloginQuotaPreviewRequest: runtimeSchema(QuickloginQuotaPreviewBody),
@@ -400,7 +383,9 @@ export function quickloginOperationContract(
       security: [{ cookieAuth: [] }],
       "x-runtime-origin": method === "PUT" ? "same-origin-website" : undefined,
       ...(method === "PUT" ? { requestBody: requestBody("QuickloginPreferenceUpdate") } : {}),
-      responses: responses(200, data(ref("QuickloginPreference")),
+      responses: responses(200, data(ref(
+        method === "PUT" ? "QuickloginPreferenceUpdateResult" : "QuickloginPreference"
+      )),
         method === "PUT" ? [400, 401, 403, 415, 500, 503] : [401, 500, 503],
         "problem"),
     };

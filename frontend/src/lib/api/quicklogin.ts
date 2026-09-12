@@ -9,6 +9,8 @@ export type DeviceQuickloginPreference =
 export type LegacyQuickloginPreference =
   components["schemas"]["QuickloginLegacyPreference"];
 export type QuickloginPreference = components["schemas"]["QuickloginPreference"];
+export type QuickloginPreferenceUpdateResult =
+  components["schemas"]["QuickloginPreferenceUpdateResult"];
 export type QuotaPreview = components["schemas"]["QuickloginQuotaPreview"];
 export type QuotaPreviewDevice = components["schemas"]["QuickloginQuotaDevice"];
 
@@ -29,8 +31,8 @@ export async function getQuickloginPreference(
 
 export async function setQuickloginMasterEnabled(
   enabled: boolean
-): Promise<QuickloginPreference> {
-  return (await apiRequest<ApiSuccess<QuickloginPreference>>("/cqu/quicklogin", {
+): Promise<QuickloginPreferenceUpdateResult> {
+  return (await apiRequest<ApiSuccess<QuickloginPreferenceUpdateResult>>("/cqu/quicklogin", {
     method: "PUT",
     body: JSON.stringify({ enabled }),
   })).data;

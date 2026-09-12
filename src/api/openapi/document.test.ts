@@ -4,6 +4,14 @@ import { listHttpOperations } from "../operations";
 import { buildOpenApiDocument } from "./document";
 import { createHttpFixture } from "../../test-utils/http";
 import { buildCloudflareSchema } from "./cloudflare";
+import {
+  parseDeviceMetadata,
+  parseEnabled,
+  parseExportRequest,
+  parseHeartbeat,
+  parseRefreshRequest,
+  QuickloginHttpError,
+} from "../../services/quicklogin/http";
 
 function schemaAccepts(
   schema: Record<string, any>,
@@ -37,8 +45,12 @@ function schemaAccepts(
   if (typeof value === "string") {
     if (schema.minLength !== undefined && value.length < schema.minLength) return false;
     if (schema.maxLength !== undefined && value.length > schema.maxLength) return false;
+    if (schema.pattern !== undefined && !new RegExp(schema.pattern).test(value)) return false;
   }
   if (typeof value === "number" && schema.minimum !== undefined && value < schema.minimum) {
+    return false;
+  }
+  if (typeof value === "number" && schema.maximum !== undefined && value > schema.maximum) {
     return false;
   }
   if (Array.isArray(value)) {
@@ -142,6 +154,7 @@ describe("complete API document", () => {
       ]),
     });
     expect(schemas.QuickloginPreference.oneOf).toHaveLength(3);
+    expect(schemas.QuickloginLegacyPreference.required).toEqual(["eligible", "enabled"]);
     expect(schemas.QuickloginQuotaPreview.properties.keptDevices.items)
       .toEqual({ $ref: "#/components/schemas/QuickloginQuotaDevice" });
     expect(schemas.QuickloginMigrationPreview.properties.initializations.items)
@@ -190,6 +203,9 @@ describe("complete API document", () => {
       .toEqual({ $ref: "#/components/schemas/QuickloginPreference" });
     expect(root.responses["401"].content["application/problem+json"].schema)
       .toEqual({ $ref: "#/components/schemas/ApiProblem" });
+    expect(paths["/api/v1/cqu/quicklogin"].put.responses["200"]
+      .content["application/json"].schema.properties.data)
+      .toEqual({ $ref: "#/components/schemas/QuickloginPreferenceUpdateResult" });
 
     for (const path of [
       "/api/v1/admin/users/{id}/quicklogin-policy/preview",
@@ -244,6 +260,181 @@ describe("complete API document", () => {
         .toBe(true);
       expect(schemaAccepts(cloudflare.components.schemas[name], invalid, cloudflare.components.schemas))
         .toBe(false);
+    }
+  });
+
+  it("keeps device request schemas equivalent to the real runtime parsers", () => {
+    const openapi = buildOpenApiDocument(listHttpOperations(createApp())) as Record<string, any>;
+    const cloudflare = buildCloudflareSchema(openapi) as Record<string, any>;
+    type Parser = (value: unknown) => unknown;
+    const result = (parser: Parser, value: unknown) => {
+      try { return { ok: true, value: parser(value) }; }
+      catch (error) {
+        return error instanceof QuickloginHttpError
+          ? { ok: false, code: error.code, status: error.status }
+          : { ok: false, code: "unexpected", status: 0 };
+      }
+    };
+    const cases: Array<{
+      name: string;
+      schema: string;
+      parser: Parser;
+      input: unknown;
+      ok: boolean;
+      code?: string;
+      status?: number;
+      output?: unknown;
+    }> = [
+      {
+        name: "registration trims ordinary padding",
+        schema: "QuickloginDeviceRegistration",
+        parser: parseDeviceMetadata,
+        input: { deviceName: " macOS Chrome ", browserFamily: "chrome", browserVersion: " 140.0 " },
+        ok: true,
+        output: { deviceName: "macOS Chrome", browserFamily: "chrome", browserVersion: "140.0" },
+      },
+      {
+        name: "registration rejects whitespace-only names",
+        schema: "QuickloginDeviceRegistration",
+        parser: parseDeviceMetadata,
+        input: { deviceName: "   ", browserFamily: "chrome", browserVersion: "140" },
+        ok: false, code: "INVALID_REQUEST", status: 422,
+      },
+      {
+        name: "registration rejects control characters",
+        schema: "QuickloginDeviceRegistration",
+        parser: parseDeviceMetadata,
+        input: { deviceName: "Chrome\u0000", browserFamily: "chrome", browserVersion: "140" },
+        ok: false, code: "INVALID_REQUEST", status: 422,
+      },
+      {
+        name: "registration rejects a name beyond 80 characters",
+        schema: "QuickloginDeviceRegistration",
+        parser: parseDeviceMetadata,
+        input: { deviceName: "x".repeat(81), browserFamily: "chrome", browserVersion: "140" },
+        ok: false, code: "INVALID_REQUEST", status: 422,
+      },
+      {
+        name: "device update is strict",
+        schema: "QuickloginDeviceUpdate",
+        parser: parseEnabled,
+        input: { enabled: true, extra: false },
+        ok: false, code: "INVALID_REQUEST", status: 422,
+      },
+      {
+        name: "heartbeat accepts maximum safe integers and trims version",
+        schema: "QuickloginDeviceHeartbeat",
+        parser: parseHeartbeat,
+        input: {
+          protocolVersion: 1, appliedVersion: Number.MAX_SAFE_INTEGER,
+          generation: Number.MAX_SAFE_INTEGER, browserVersion: " 140.0 ",
+        },
+        ok: true,
+        output: {
+          protocolVersion: 1, appliedVersion: Number.MAX_SAFE_INTEGER,
+          generation: Number.MAX_SAFE_INTEGER, browserVersion: "140.0",
+        },
+      },
+      {
+        name: "heartbeat rejects unsafe generation",
+        schema: "QuickloginDeviceHeartbeat",
+        parser: parseHeartbeat,
+        input: { protocolVersion: 1, appliedVersion: null, generation: 2 ** 53, browserVersion: "140" },
+        ok: false, code: "INVALID_REQUEST", status: 422,
+      },
+      {
+        name: "heartbeat rejects whitespace-only version",
+        schema: "QuickloginDeviceHeartbeat",
+        parser: parseHeartbeat,
+        input: { protocolVersion: 1, appliedVersion: null, generation: 1, browserVersion: "   " },
+        ok: false, code: "INVALID_REQUEST", status: 422,
+      },
+      {
+        name: "heartbeat rejects a version beyond 40 characters",
+        schema: "QuickloginDeviceHeartbeat",
+        parser: parseHeartbeat,
+        input: {
+          protocolVersion: 1, appliedVersion: null, generation: 1,
+          browserVersion: "1".repeat(41),
+        },
+        ok: false, code: "INVALID_REQUEST", status: 422,
+      },
+      {
+        name: "heartbeat rejects unsupported protocol separately",
+        schema: "QuickloginDeviceHeartbeat",
+        parser: parseHeartbeat,
+        input: { protocolVersion: 2, appliedVersion: null, generation: 1, browserVersion: "140" },
+        ok: false, code: "PROTOCOL_UNSUPPORTED", status: 426,
+      },
+      {
+        name: "refresh rejects unsafe generation",
+        schema: "QuickloginDeviceRefresh",
+        parser: parseRefreshRequest,
+        input: { protocolVersion: 1, generation: 2 ** 53 },
+        ok: false, code: "INVALID_REQUEST", status: 422,
+      },
+      {
+        name: "refresh rejects unsupported protocol separately",
+        schema: "QuickloginDeviceRefresh",
+        parser: parseRefreshRequest,
+        input: { protocolVersion: 2, generation: 1 },
+        ok: false, code: "PROTOCOL_UNSUPPORTED", status: 426,
+      },
+      {
+        name: "export rejects unsafe session version",
+        schema: "QuickloginDeviceExport",
+        parser: parseExportRequest,
+        input: { protocolVersion: 1, generation: 1, sessionVersion: 2 ** 53 },
+        ok: false, code: "INVALID_REQUEST", status: 422,
+      },
+      {
+        name: "export rejects unsupported protocol separately",
+        schema: "QuickloginDeviceExport",
+        parser: parseExportRequest,
+        input: { protocolVersion: 2, generation: 1, sessionVersion: 1 },
+        ok: false, code: "PROTOCOL_UNSUPPORTED", status: 426,
+      },
+    ];
+
+    for (const sample of cases) {
+      const parsed = result(sample.parser, sample.input);
+      expect(parsed, sample.name).toMatchObject(sample.ok
+        ? { ok: true, ...(sample.output === undefined ? {} : { value: sample.output }) }
+        : { ok: false, code: sample.code, status: sample.status });
+      expect(schemaAccepts(
+        openapi.components.schemas[sample.schema],
+        sample.input,
+        openapi.components.schemas
+      ), `${sample.name} OpenAPI 3.1`).toBe(sample.ok);
+      expect(schemaAccepts(
+        cloudflare.components.schemas[sample.schema],
+        sample.input,
+        cloudflare.components.schemas
+      ), `${sample.name} Cloudflare 3.0`).toBe(sample.ok);
+    }
+  });
+
+  it("models all three preference modes without accepting a partial legacy payload", () => {
+    const openapi = buildOpenApiDocument(listHttpOperations(createApp())) as Record<string, any>;
+    const cloudflare = buildCloudflareSchema(openapi) as Record<string, any>;
+    const valid = [
+      { eligible: false },
+      { eligible: true, masterEnabled: true, deviceLimit: 3, used: 2 },
+      { eligible: true, enabled: false },
+    ];
+    for (const document of [openapi, cloudflare]) {
+      for (const sample of valid) {
+        expect(schemaAccepts(
+          document.components.schemas.QuickloginPreference,
+          sample,
+          document.components.schemas
+        )).toBe(true);
+      }
+      expect(schemaAccepts(
+        document.components.schemas.QuickloginPreference,
+        { enabled: true },
+        document.components.schemas
+      )).toBe(false);
     }
   });
 });

@@ -1204,7 +1204,7 @@
                   ],
                   "properties": {
                     "data": {
-                      "$ref": "#/components/schemas/QuickloginPreference"
+                      "$ref": "#/components/schemas/QuickloginPreferenceUpdateResult"
                     }
                   }
                 }
@@ -18387,6 +18387,7 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "eligible",
           "enabled"
         ],
         "properties": {
@@ -18408,6 +18409,28 @@
           },
           {
             "$ref": "#/components/schemas/QuickloginLegacyPreference"
+          }
+        ]
+      },
+      "QuickloginLegacyPreferenceUpdateResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "QuickloginPreferenceUpdateResult": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/QuickloginDevicePreference"
+          },
+          {
+            "$ref": "#/components/schemas/QuickloginLegacyPreferenceUpdateResult"
           }
         ]
       },
@@ -18712,17 +18735,12 @@
       },
       "QuickloginDeviceRegistration": {
         "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "deviceName",
-          "browserFamily",
-          "browserVersion"
-        ],
         "properties": {
           "deviceName": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 80
+            "maxLength": 80,
+            "pattern": "^(?=.*\\S)[^\\x00-\\x1f\\x7f]+$"
           },
           "browserFamily": {
             "type": "string",
@@ -18731,94 +18749,111 @@
           "browserVersion": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 40
+            "maxLength": 40,
+            "pattern": "^(?=.*\\S)[^\\x00-\\x1f\\x7f]+$"
           }
-        }
+        },
+        "required": [
+          "deviceName",
+          "browserFamily",
+          "browserVersion"
+        ],
+        "additionalProperties": false
       },
       "QuickloginDeviceUpdate": {
         "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "enabled"
-        ],
         "properties": {
           "enabled": {
             "type": "boolean"
           }
-        }
+        },
+        "required": [
+          "enabled"
+        ],
+        "additionalProperties": false
       },
       "QuickloginDeviceHeartbeat": {
         "type": "object",
-        "additionalProperties": false,
+        "properties": {
+          "protocolVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "appliedVersion": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "browserVersion": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40,
+            "pattern": "^(?=.*\\S)[^\\x00-\\x1f\\x7f]+$"
+          }
+        },
         "required": [
           "protocolVersion",
           "appliedVersion",
           "generation",
           "browserVersion"
         ],
-        "properties": {
-          "protocolVersion": {
-            "type": "integer",
-            "const": 1
-          },
-          "appliedVersion": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "minimum": 0
-          },
-          "generation": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "browserVersion": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 40
-          }
-        }
+        "additionalProperties": false
       },
       "QuickloginDeviceRefresh": {
         "type": "object",
-        "additionalProperties": false,
+        "properties": {
+          "protocolVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "generation": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
         "required": [
           "protocolVersion",
           "generation"
         ],
+        "additionalProperties": false
+      },
+      "QuickloginDeviceExport": {
+        "type": "object",
         "properties": {
           "protocolVersion": {
-            "type": "integer",
+            "type": "number",
             "const": 1
           },
           "generation": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "sessionVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
           }
-        }
-      },
-      "QuickloginDeviceExport": {
-        "type": "object",
-        "additionalProperties": false,
+        },
         "required": [
           "protocolVersion",
           "generation",
           "sessionVersion"
         ],
-        "properties": {
-          "protocolVersion": {
-            "type": "integer",
-            "const": 1
-          },
-          "generation": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "sessionVersion": {
-            "type": "integer",
-            "minimum": 0
-          }
-        }
+        "additionalProperties": false
       },
       "QuickloginPolicyPreviewRequest": {
         "type": "object",

@@ -37,6 +37,22 @@ export function toCloudflareSchema(
       else if (types.length > 1) output.anyOf = types.map((type) => ({ type }));
       continue;
     }
+    if (key === "anyOf" && Array.isArray(value)) {
+      const nullBranches = value.filter((entry) =>
+        entry && typeof entry === "object" &&
+        (entry as Record<string, unknown>).type === "null"
+      );
+      const nonNullBranches = value.filter((entry) => !nullBranches.includes(entry));
+      if (nullBranches.length === 1 && nonNullBranches.length === 1 &&
+          nonNullBranches[0] && typeof nonNullBranches[0] === "object") {
+        Object.assign(output, toCloudflareSchema(
+          nonNullBranches[0] as Record<string, unknown>,
+          `${pointer}/anyOf/0`
+        ));
+        output.nullable = true;
+        continue;
+      }
+    }
     if (Array.isArray(value)) {
       output[key] = value.map((entry, index) =>
         entry && typeof entry === "object"

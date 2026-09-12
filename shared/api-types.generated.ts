@@ -2530,10 +2530,14 @@ export interface components {
             used: number;
         };
         QuickloginLegacyPreference: {
-            eligible?: boolean;
+            eligible: boolean;
             enabled: boolean;
         };
         QuickloginPreference: components["schemas"]["QuickloginDeviceUnavailablePreference"] | components["schemas"]["QuickloginDevicePreference"] | components["schemas"]["QuickloginLegacyPreference"];
+        QuickloginLegacyPreferenceUpdateResult: {
+            enabled: boolean;
+        };
+        QuickloginPreferenceUpdateResult: components["schemas"]["QuickloginDevicePreference"] | components["schemas"]["QuickloginLegacyPreferenceUpdateResult"];
         QuickloginQuotaDevice: {
             deviceId: string;
             deviceName: string;
@@ -3633,7 +3637,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        data: components["schemas"]["QuickloginPreference"];
+                        data: components["schemas"]["QuickloginPreferenceUpdateResult"];
                     };
                 };
             };

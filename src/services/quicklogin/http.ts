@@ -1,4 +1,41 @@
+import { z } from "@hono/zod-openapi";
 import type { DeviceMetadata, ErrorCode, HeartbeatInput } from "./contracts";
+
+const SafeNonNegativeInteger = z.number().int().nonnegative()
+  .max(Number.MAX_SAFE_INTEGER);
+const boundedTrimmedText = (maxLength: number) => z.string()
+  .regex(/^(?=.*\S)[^\x00-\x1f\x7f]+$/)
+  .trim()
+  .min(1)
+  .max(maxLength);
+
+export const QuickloginDeviceUpdateBody = z.strictObject({
+  enabled: z.boolean(),
+});
+
+export const QuickloginDeviceRegistrationBody = z.strictObject({
+  deviceName: boundedTrimmedText(80),
+  browserFamily: z.literal("chrome"),
+  browserVersion: boundedTrimmedText(40),
+});
+
+export const QuickloginDeviceHeartbeatBody = z.strictObject({
+  protocolVersion: z.literal(1),
+  appliedVersion: SafeNonNegativeInteger.nullable(),
+  generation: SafeNonNegativeInteger,
+  browserVersion: boundedTrimmedText(40),
+});
+
+export const QuickloginDeviceRefreshBody = z.strictObject({
+  protocolVersion: z.literal(1),
+  generation: SafeNonNegativeInteger,
+});
+
+export const QuickloginDeviceExportBody = z.strictObject({
+  protocolVersion: z.literal(1),
+  generation: SafeNonNegativeInteger,
+  sessionVersion: SafeNonNegativeInteger,
+});
 
 export class QuickloginHttpError extends Error {
   constructor(public readonly code: ErrorCode, public readonly status: number) {
@@ -29,75 +66,56 @@ export async function readJson(request: Request): Promise<unknown> {
 }
 
 export function parseEnabled(value: unknown): boolean {
-  if (!record(value) || !exactKeys(value, ["enabled"]) ||
-      typeof value.enabled !== "boolean") {
+  const parsed = QuickloginDeviceUpdateBody.safeParse(value);
+  if (!parsed.success) {
     throw new QuickloginHttpError("INVALID_REQUEST", 422);
   }
-  return value.enabled;
+  return parsed.data.enabled;
 }
 
-function protocolRecord(value: unknown, keys: string[]): Record<string, unknown> {
-  if (!record(value) || !exactKeys(value, keys)) {
-    throw new QuickloginHttpError("INVALID_REQUEST", 422);
-  }
-  if (value.protocolVersion !== 1) {
+function parseProtocol<T>(
+  schema: z.ZodType<T>,
+  value: unknown,
+  keys: string[]
+): T {
+  if (record(value) && exactKeys(value, keys) && value.protocolVersion !== 1) {
     throw new QuickloginHttpError("PROTOCOL_UNSUPPORTED", 426);
   }
-  return value;
-}
-
-function nonNegativeSafeInteger(value: unknown): value is number {
-  return Number.isSafeInteger(value) && (value as number) >= 0;
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) throw new QuickloginHttpError("INVALID_REQUEST", 422);
+  return parsed.data;
 }
 
 export function parseRefreshRequest(value: unknown): {
   protocolVersion: 1; generation: number;
 } {
-  const body = protocolRecord(value, ["generation", "protocolVersion"]);
-  if (!nonNegativeSafeInteger(body.generation)) {
-    throw new QuickloginHttpError("INVALID_REQUEST", 422);
-  }
-  return body as { protocolVersion: 1; generation: number };
+  return parseProtocol(
+    QuickloginDeviceRefreshBody,
+    value,
+    ["generation", "protocolVersion"]
+  );
 }
 
 export function parseExportRequest(value: unknown): {
   protocolVersion: 1; generation: number; sessionVersion: number;
 } {
-  const body = protocolRecord(value, ["generation", "protocolVersion", "sessionVersion"]);
-  if (!nonNegativeSafeInteger(body.generation) ||
-      !nonNegativeSafeInteger(body.sessionVersion)) {
-    throw new QuickloginHttpError("INVALID_REQUEST", 422);
-  }
-  return body as { protocolVersion: 1; generation: number; sessionVersion: number };
+  return parseProtocol(
+    QuickloginDeviceExportBody,
+    value,
+    ["generation", "protocolVersion", "sessionVersion"]
+  );
 }
 
 export function parseDeviceMetadata(value: unknown): DeviceMetadata {
-  if (!record(value) ||
-      !exactKeys(value, ["browserFamily", "browserVersion", "deviceName"])) {
-    throw new QuickloginHttpError("INVALID_REQUEST", 422);
-  }
-  const deviceName = typeof value.deviceName === "string" ? value.deviceName.trim() : "";
-  const browserVersion = typeof value.browserVersion === "string"
-    ? value.browserVersion.trim() : "";
-  if (
-    value.browserFamily !== "chrome" ||
-    deviceName.length < 1 || deviceName.length > 80 ||
-    browserVersion.length < 1 || browserVersion.length > 40 ||
-    /[\x00-\x1f\x7f]/.test(deviceName + browserVersion)
-  ) throw new QuickloginHttpError("INVALID_REQUEST", 422);
-  return { deviceName, browserFamily: "chrome", browserVersion };
+  const parsed = QuickloginDeviceRegistrationBody.safeParse(value);
+  if (!parsed.success) throw new QuickloginHttpError("INVALID_REQUEST", 422);
+  return parsed.data;
 }
 
 export function parseHeartbeat(value: unknown): HeartbeatInput {
-  const body = protocolRecord(value, [
-    "appliedVersion", "browserVersion", "generation", "protocolVersion",
-  ]);
-  if (!nonNegativeSafeInteger(body.generation) ||
-      (body.appliedVersion !== null && !nonNegativeSafeInteger(body.appliedVersion)) ||
-      typeof body.browserVersion !== "string" ||
-      body.browserVersion.trim().length < 1 || body.browserVersion.trim().length > 40 ||
-      /[\x00-\x1f\x7f]/.test(body.browserVersion)) {
-    throw new QuickloginHttpError("INVALID_REQUEST", 422);
-  }
-  return { ...body, browserVersion: body.browserVersion.trim() } as HeartbeatInput;
+  return parseProtocol(
+    QuickloginDeviceHeartbeatBody,
+    value,
+    ["appliedVersion", "browserVersion", "generation", "protocolVersion"]
+  );
 }

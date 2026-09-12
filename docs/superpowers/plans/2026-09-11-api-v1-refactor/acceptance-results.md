@@ -168,7 +168,7 @@
 | Q5 精确集合 | 本地通过 | runtime/OpenAPI 3.1.1/Cloudflare 3.0.3/endpoints/coverage 都是153个操作：132 canonical、1 websocket、15 temporary legacy、5 permanent discovery；无 wildcard、外部 ref、重复 operationId |
 | Q5 QuickLogin schema | 本地通过 | native device DTO/error 与 root/admin envelope/Problem 分离；合法/非法样本在3.1/3.0投影等价；frontend DTO 改消费 generated components |
 | Q5 Cloudflare config | 本地通过 | Wrangler 4.94.0；config 被 `wrangler types` 读取后 runtime loopback EPERM；`observability.enabled=true`，原 sampling/logs/traces/persist 保留，无新数据 binding |
-| Q5 本地命令 | 通过 | Node 82/644、Workers/DO 20 files/153 tests、root/DO TS、frontend tsc/lint/build、Redocly、node-import-tsx API/boundary checks 通过；Workers 由可监听 workerd 的根任务执行 |
+| Q5 本地命令 | 通过 | 审查修复后 Node 82/646、Workers/DO 20 files/153 tests、root/DO TS、frontend tsc/lint/build、Redocly、node-import-tsx API/boundary checks 通过；Workers 由可监听 workerd 的根任务执行 |
 | Q5 root Workers 复跑 | 通过 | 首次152/153暴露 QuickLogin root 旧精确 fixture 缺 `eligible:true`；只更新期望、实现未改。最终20/20 files、153/153 tests、exit 0；仅既有 Containers sourcemap、overdue alarm、未启用容器噪音 |
 
 ### 当前兼容和发布边界
