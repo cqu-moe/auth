@@ -43,8 +43,9 @@ function schemaAccepts(
     return false;
   }
   if (typeof value === "string") {
-    if (schema.minLength !== undefined && value.length < schema.minLength) return false;
-    if (schema.maxLength !== undefined && value.length > schema.maxLength) return false;
+    const length = [...value].length;
+    if (schema.minLength !== undefined && length < schema.minLength) return false;
+    if (schema.maxLength !== undefined && length > schema.maxLength) return false;
     if (schema.pattern !== undefined && !new RegExp(schema.pattern).test(value)) return false;
   }
   if (typeof value === "number" && schema.minimum !== undefined && value < schema.minimum) {
@@ -286,12 +287,19 @@ describe("complete API document", () => {
       output?: unknown;
     }> = [
       {
-        name: "registration trims ordinary padding",
+        name: "registration rejects ordinary padding",
         schema: "QuickloginDeviceRegistration",
         parser: parseDeviceMetadata,
         input: { deviceName: " macOS Chrome ", browserFamily: "chrome", browserVersion: " 140.0 " },
+        ok: false, code: "INVALID_REQUEST", status: 422,
+      },
+      {
+        name: "registration preserves BMP Chinese and internal ordinary spaces",
+        schema: "QuickloginDeviceRegistration",
+        parser: parseDeviceMetadata,
+        input: { deviceName: "重庆 大学 Chrome", browserFamily: "chrome", browserVersion: "版本 140" },
         ok: true,
-        output: { deviceName: "macOS Chrome", browserFamily: "chrome", browserVersion: "140.0" },
+        output: { deviceName: "重庆 大学 Chrome", browserFamily: "chrome", browserVersion: "版本 140" },
       },
       {
         name: "registration rejects whitespace-only names",
@@ -315,6 +323,27 @@ describe("complete API document", () => {
         ok: false, code: "INVALID_REQUEST", status: 422,
       },
       {
+        name: "registration rejects padding after an 80-character name",
+        schema: "QuickloginDeviceRegistration",
+        parser: parseDeviceMetadata,
+        input: { deviceName: `${"x".repeat(80)} `, browserFamily: "chrome", browserVersion: "140" },
+        ok: false, code: "INVALID_REQUEST", status: 422,
+      },
+      {
+        name: "registration rejects trailing Unicode whitespace",
+        schema: "QuickloginDeviceRegistration",
+        parser: parseDeviceMetadata,
+        input: { deviceName: "Chrome\u3000", browserFamily: "chrome", browserVersion: "140" },
+        ok: false, code: "INVALID_REQUEST", status: 422,
+      },
+      {
+        name: "registration rejects non-BMP emoji",
+        schema: "QuickloginDeviceRegistration",
+        parser: parseDeviceMetadata,
+        input: { deviceName: "Chrome 🚀", browserFamily: "chrome", browserVersion: "140" },
+        ok: false, code: "INVALID_REQUEST", status: 422,
+      },
+      {
         name: "device update is strict",
         schema: "QuickloginDeviceUpdate",
         parser: parseEnabled,
@@ -322,17 +351,17 @@ describe("complete API document", () => {
         ok: false, code: "INVALID_REQUEST", status: 422,
       },
       {
-        name: "heartbeat accepts maximum safe integers and trims version",
+        name: "heartbeat accepts maximum safe integers and canonical version",
         schema: "QuickloginDeviceHeartbeat",
         parser: parseHeartbeat,
         input: {
           protocolVersion: 1, appliedVersion: Number.MAX_SAFE_INTEGER,
-          generation: Number.MAX_SAFE_INTEGER, browserVersion: " 140.0 ",
+          generation: Number.MAX_SAFE_INTEGER, browserVersion: "版本 140.0",
         },
         ok: true,
         output: {
           protocolVersion: 1, appliedVersion: Number.MAX_SAFE_INTEGER,
-          generation: Number.MAX_SAFE_INTEGER, browserVersion: "140.0",
+          generation: Number.MAX_SAFE_INTEGER, browserVersion: "版本 140.0",
         },
       },
       {
@@ -356,6 +385,26 @@ describe("complete API document", () => {
         input: {
           protocolVersion: 1, appliedVersion: null, generation: 1,
           browserVersion: "1".repeat(41),
+        },
+        ok: false, code: "INVALID_REQUEST", status: 422,
+      },
+      {
+        name: "heartbeat rejects leading Unicode whitespace",
+        schema: "QuickloginDeviceHeartbeat",
+        parser: parseHeartbeat,
+        input: {
+          protocolVersion: 1, appliedVersion: null, generation: 1,
+          browserVersion: "\u3000140",
+        },
+        ok: false, code: "INVALID_REQUEST", status: 422,
+      },
+      {
+        name: "heartbeat rejects non-BMP emoji",
+        schema: "QuickloginDeviceHeartbeat",
+        parser: parseHeartbeat,
+        input: {
+          protocolVersion: 1, appliedVersion: null, generation: 1,
+          browserVersion: "Chrome🚀",
         },
         ok: false, code: "INVALID_REQUEST", status: 422,
       },

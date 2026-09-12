@@ -3,27 +3,26 @@ import type { DeviceMetadata, ErrorCode, HeartbeatInput } from "./contracts";
 
 const SafeNonNegativeInteger = z.number().int().nonnegative()
   .max(Number.MAX_SAFE_INTEGER);
-const boundedTrimmedText = (maxLength: number) => z.string()
-  .regex(/^(?=.*\S)[^\x00-\x1f\x7f]+$/)
-  .trim()
+const boundedCanonicalText = (maxLength: number) => z.string()
   .min(1)
-  .max(maxLength);
+  .max(maxLength)
+  .regex(/^(?!\s)(?!.*\s$)[^\x00-\x1f\x7f\uD800-\uDFFF]+$/);
 
 export const QuickloginDeviceUpdateBody = z.strictObject({
   enabled: z.boolean(),
 });
 
 export const QuickloginDeviceRegistrationBody = z.strictObject({
-  deviceName: boundedTrimmedText(80),
+  deviceName: boundedCanonicalText(80),
   browserFamily: z.literal("chrome"),
-  browserVersion: boundedTrimmedText(40),
+  browserVersion: boundedCanonicalText(40),
 });
 
 export const QuickloginDeviceHeartbeatBody = z.strictObject({
   protocolVersion: z.literal(1),
   appliedVersion: SafeNonNegativeInteger.nullable(),
   generation: SafeNonNegativeInteger,
-  browserVersion: boundedTrimmedText(40),
+  browserVersion: boundedCanonicalText(40),
 });
 
 export const QuickloginDeviceRefreshBody = z.strictObject({
