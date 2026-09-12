@@ -25,6 +25,7 @@
 - QuickLogin 设备正式入口为 `/api/v1/cqu/quicklogin/devices` 及其子资源；旧 `/api/cqu/quicklogin/devices` 精确委托同一实现。
 - QuickLogin 管理正式入口位于 `/api/v1/admin/users/{id}/quicklogin-*`；旧 `/api/admin/users/:id/quicklogin-*` 精确兼容。
 - QuickLogin 扩展正式调用 `/api/v1/auth/oauth2/authorize`、`/api/v1/auth/oauth2/token` 和 `/api/v1/cqu/quicklogin/devices*`。不扩大 host permissions，不更换 client ID、extension ID、redirect URI、scope 或协议版本。
+- 当前 0.1.2 OAuth 请求的 resource/audience 是根 origin；过渡桥可同时接受根 audience 与 stable issuer audience，但 issuer 始终只能是 `https://auth.cqu.moe/api/auth`。新扩展把 resource 迁到 stable issuer audience，设备升级后再删除根 audience 兼容。
 - 稳定 issuer 仍为 `https://auth.cqu.moe/api/auth`；D01–D05 discovery 永久保留。
 - 生产已应用的 D1/DO 迁移历史只追加/对齐，不重编号、不删除、不重写表；`v3` 必须保留 `CquQuickloginAccountDO` 与 `CquQuickloginDeviceDO`。
 - 上线时关闭通用 legacy 映射；只保留当前 QuickLogin 0.1.2 实际需要的旧 `GET /api/auth/oauth2/authorize`、`POST /api/auth/oauth2/token`、旧 `/api/cqu/quicklogin/devices*`，以及已签发密码重置链接在其有效期内所需的旧 callback。其它旧 API 必须返回 JSON 404/405，不进入 ASSETS。
@@ -73,7 +74,7 @@
 **要求：**
 
 1. 先添加/修改请求捕获测试，使旧硬编码路径导致 RED；测试断言 authorize、token、register、status、enable、refresh、export 全部使用 v1。
-2. 只改固定 API 路径，不改变 PKCE、state、offline_access、grant 复用、token 存储、设备 ID/generation、重试和 Cookie 应用语义。
+2. 改固定 API 路径，并把 OAuth `resource` 从根 origin 调整为稳定 issuer `https://auth.cqu.moe/api/auth`；不改变 PKCE、state、offline_access、grant 复用、token 存储、设备 ID/generation、重试和 Cookie 应用语义。
 3. 保持现有 `https://auth.cqu.moe/*` host permission；路径变化不得新增权限或远端可控 URL。
 4. 运行扩展全部测试、typecheck、build、package/manifest 验证；不上传商店、不发布；提交 Conventional Commit。
 
