@@ -38,6 +38,43 @@ export function hasValidTgt(state: CquStorageState | null): boolean {
   );
 }
 
+const HARVEST_STATE_ORIGINS = new Set(["https://sso.cqu.edu.cn", "https://my.cqu.edu.cn"]);
+const HARVEST_COOKIE_DOMAINS = new Set([
+  "sso.cqu.edu.cn", ".sso.cqu.edu.cn", "my.cqu.edu.cn", ".my.cqu.edu.cn", ".cqu.edu.cn",
+]);
+const CAS_COOKIE_DOMAINS = new Set(["sso.cqu.edu.cn", ".sso.cqu.edu.cn", ".cqu.edu.cn"]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Validate the browser's untrusted Direct refresh before durable persistence. */
+export function isValidHarvestStorageState(value: unknown): value is CquStorageState {
+  if (!isRecord(value) || !Array.isArray(value.cookies) || !Array.isArray(value.origins)) return false;
+  const cookies = value.cookies;
+  if (!cookies.every((cookie: unknown): cookie is CquStorageState["cookies"][number] => {
+    if (!isRecord(cookie)) return false;
+    return typeof cookie.name === "string" && /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(cookie.name)
+      && typeof cookie.value === "string"
+      && typeof cookie.domain === "string" && HARVEST_COOKIE_DOMAINS.has(cookie.domain)
+      && typeof cookie.path === "string" && cookie.path.startsWith("/") && !/[\x00-\x20\x7f]/.test(cookie.path)
+      && (cookie.expires === undefined || (typeof cookie.expires === "number" && Number.isFinite(cookie.expires)))
+      && (cookie.httpOnly === undefined || typeof cookie.httpOnly === "boolean")
+      && (cookie.secure === undefined || typeof cookie.secure === "boolean")
+      && (cookie.sameSite === undefined || (typeof cookie.sameSite === "string" && ["Strict", "Lax", "None"].includes(cookie.sameSite)));
+  })) return false;
+  if (!REQUIRED_CAS_COOKIES.every((name) => cookies.some((cookie) =>
+    cookie.name === name && cookie.value.trim().length > 0
+    && CAS_COOKIE_DOMAINS.has(cookie.domain) && cookie.path === "/"
+  ))) return false;
+  return value.origins.every((origin: unknown) =>
+    isRecord(origin) && typeof origin.origin === "string" && HARVEST_STATE_ORIGINS.has(origin.origin)
+    && Array.isArray(origin.localStorage) && origin.localStorage.every((item: unknown) =>
+      isRecord(item) && typeof item.name === "string" && typeof item.value === "string"
+    )
+  );
+}
+
 // 节点 /service-ticket 响应分类结果。DO 据此映射回既有 CquSsoError 语义(对调用方无感):
 //   - "ok":        200 {ok:true, ticket} → 返回 ticket
 //   - "expired":   409 → TGT_EXPIRED(真过期, 交重登, 不重试)
@@ -107,6 +144,7 @@ export interface NodeHarvestBody {
   ok?: boolean;
   captures?: HarvestCapture[];
   fetches?: HarvestFetch[];
+  state?: CquStorageState;
   error?: string;
   diagnostics?: Record<string, unknown>;
 }
@@ -121,6 +159,7 @@ export interface NodeHarvestClassification {
   kind: NodeHarvestKind;
   captures?: HarvestCapture[];
   fetches?: HarvestFetch[];
+  state?: CquStorageState;
   detail?: string;
   diagnostics?: Record<string, unknown>;
 }
@@ -149,11 +188,12 @@ export function classifyNodeHarvestResponse(
     return { kind: "transient", detail: `non-JSON (status=${status})` };
   }
   const httpOk = status >= 200 && status < 300;
-  if (httpOk && body.ok) {
+  if (httpOk && body.ok === true) {
     return {
       kind: "ok",
       captures: body.captures ?? [],
       fetches: body.fetches ?? [],
+      ...(body.state === undefined ? {} : { state: body.state }),
     };
   }
   return {

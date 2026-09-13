@@ -166,12 +166,33 @@ async def test_fetch_only_wait_is_immediate_and_generic_capture_keeps_old_limit(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fetch_only,missing", [(False, False), (False, True), (True, False)])
+@pytest.mark.parametrize("fetch_only,missing,fetch_status,export_fails", [
+    (False, False, 200, False), (False, True, 200, False),
+    (True, False, 200, False), (False, False, 503, False),
+    (True, False, 503, False), (False, False, 200, True),
+])
 async def test_harvest_uses_one_browser_context_page_and_preserves_failure_gate(
-    monkeypatch, fetch_only, missing,
+    monkeypatch, fetch_only, missing, fetch_status, export_fails,
 ):
     page = TimelinePage(bootstrap(), reload_events=[] if missing else [(5, response(TABLE))])
     counts = {"launch": 0, "context": 0, "page": 0}
+    exports = []
+    refreshed = {"cookies": [{"name": "marker", "value": "refreshed"}], "origins": []}
+
+    async def evaluate(script, args):
+        page.fetch_times.append(page.now)
+        return {"status": fetch_status, "body": "{}"}
+
+    async def storage_state():
+        # Export cannot run before every required body and supplemental GET.
+        assert fetch_only or TABLE in page.captured
+        assert len(page.fetch_times) == 1
+        exports.append(page.now)
+        if export_fails:
+            raise RuntimeError("state export failed SECRET")
+        return refreshed
+
+    page.evaluate = evaluate
 
     async def new_page():
         counts["page"] += 1
@@ -179,7 +200,7 @@ async def test_harvest_uses_one_browser_context_page_and_preserves_failure_gate(
 
     async def new_context(**kwargs):
         counts["context"] += 1
-        return SimpleNamespace(new_page=new_page, cookies=page.cookies)
+        return SimpleNamespace(new_page=new_page, cookies=page.cookies, storage_state=storage_state)
 
     async def launch(**kwargs):
         counts["launch"] += 1
@@ -204,13 +225,20 @@ async def test_harvest_uses_one_browser_context_page_and_preserves_failure_gate(
     monkeypatch.setattr(m, "wait_for_harvest_captures", timed_wait)
     monkeypatch.setattr(m.cqu_ticket_browser, "_close_browser_driver", close)
     recipe = {"navUrl": NAV, "capture": [] if fetch_only else [TABLE],
-              "fetch": [{"url": "https://my.cqu.edu.cn/api/example"}] if fetch_only else []}
-    if missing:
+              "fetch": [{"url": "https://my.cqu.edu.cn/api/example"}]}
+    if missing or (fetch_only and fetch_status == 503):
         with pytest.raises(m.HarvestTransientError):
             await m.harvest({}, recipe)
+        assert exports == []
     else:
         result = await m.harvest({}, recipe)
         assert result["fetches" if fetch_only else "captures"]
+        if fetch_status == 200 and not export_fails:
+            assert result["state"] == refreshed
+            assert len(exports) == 1
+        else:
+            assert "state" not in result
+            assert len(exports) == (1 if export_fails else 0)
     assert counts == {"launch": 1, "context": 1, "page": 1}
     assert len(page.reloads) == (0 if fetch_only else 1)
     assert page.goto_modes == ["domcontentloaded" if fetch_only else "commit"]

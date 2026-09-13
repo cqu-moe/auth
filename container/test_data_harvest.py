@@ -50,6 +50,7 @@ class DataHarvestTestCase(AioHTTPTestCase):
             return {
                 "captures": [{"url": "u", "status": 200, "contentType": "application/json", "body": "{}"}],
                 "fetches": [{"url": "https://my.cqu.edu.cn/api/exam/x", "status": 200, "body": "[]"}],
+                "state": {"cookies": [], "origins": []},
             }
         server.cqu_data_harvest.harvest = fake_harvest
 
@@ -59,6 +60,7 @@ class DataHarvestTestCase(AioHTTPTestCase):
         assert body["ok"] is True
         assert body["captures"][0]["status"] == 200
         assert body["fetches"][0]["body"] == "[]"
+        assert body["state"] == {"cookies": [], "origins": []}
 
     async def test_data_harvest_invalid_json(self):
         resp = await self.client.post("/data-harvest", data="not json")
@@ -91,6 +93,7 @@ class DataHarvestTestCase(AioHTTPTestCase):
         # 脱敏:只回类型名,绝不回 str(e)(可能含 state/cookie 明文)。
         assert body["error"] == "RuntimeError"
         assert "SECRET" not in body["error"]
+        assert "state" not in body
 
     async def test_data_harvest_expired_is_409(self):
         # 会话过期(navUrl 落回 CAS 登录页)→ 409 {"error":"TGT_EXPIRED"} → DO 触发重登。
@@ -117,6 +120,7 @@ class DataHarvestTestCase(AioHTTPTestCase):
         body = await resp.json()
         assert body["error"] == "HARVEST_TRANSIENT"
         assert body["ok"] is False
+        assert "state" not in body
 
     async def test_data_harvest_transient_sanitizes_diagnostics_at_handler_boundary(self):
         async def transient(state, recipe):

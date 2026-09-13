@@ -61,6 +61,7 @@ import { cquErrorHttpStatus } from "../services/cqu-error-status";
 import {
   tgtFromState,
   hasValidTgt,
+  isValidHarvestStorageState,
   classifyNodeTicketResponse,
   ticketFromClassification,
   sanitizeNodeDetail,
@@ -299,7 +300,7 @@ export class CquSessionDO extends DurableObject<Env> {
     const bytes = serializedStateBytes(state);
     if (stateExceedsHardLimit(bytes)) {
       console.error(
-        `[CquSession] ${state.studentId}: ALERT storageState size ${bytes}B exceeds DO hard limit (${STATE_HARD_LIMIT_BYTES}B); SKIPPING put, keeping previous on-disk state (cookies=${state.storageState?.cookies.length ?? 0} origins=${state.storageState?.origins.length ?? 0})`
+        `[CquSession] ALERT storageState size ${bytes}B exceeds DO hard limit (${STATE_HARD_LIMIT_BYTES}B); SKIPPING put, keeping previous on-disk state (cookies=${state.storageState?.cookies.length ?? 0} origins=${state.storageState?.origins.length ?? 0})`
       );
       return false;
     }
@@ -307,16 +308,16 @@ export class CquSessionDO extends DurableObject<Env> {
       // 预警级(WARN): 接近阈值但仍 ≤ 硬上限, 本次照常 put 成功 —— 用 console.warn 与真超限/抛错
       // (console.error/ALERT)区分日志级别, 避免可恢复的预警淹没在 error 流里。
       console.warn(
-        `[CquSession] ${state.studentId}: WARN storageState size ${bytes}B > ${STORAGE_STATE_WARN_BYTES}B (approaching DO 128KiB value limit; cookies=${state.storageState?.cookies.length ?? 0} origins=${state.storageState?.origins.length ?? 0})`
+        `[CquSession] WARN storageState size ${bytes}B > ${STORAGE_STATE_WARN_BYTES}B (approaching DO 128KiB value limit; cookies=${state.storageState?.cookies.length ?? 0} origins=${state.storageState?.origins.length ?? 0})`
       );
     }
     try {
       await this.ctx.storage.put("state", state);
       return true;
-    } catch (e) {
+    } catch {
       // put 仍抛(超出我方硬上限估算的平台限制/瞬态)→ 绝不冒泡到 alarm。降级保旧态。
       console.error(
-        `[CquSession] ${state.studentId}: storage.put(state) failed, keeping previous on-disk state: ${errMsg(e)}`
+        "[CquSession] storage.put(state) failed, keeping previous on-disk state"
       );
       return false;
     }
@@ -979,9 +980,15 @@ export class CquSessionDO extends DurableObject<Env> {
     }
 
     // ⑤ 出站 /data-harvest(套容器 deadline)。Direct 409 只排 alarm。
+    const sourceSession = {
+      userId: sessionState.userId,
+      studentId: sessionState.studentId,
+      loginAt: sessionState.loginAt,
+      storageState: JSON.stringify(sessionState.storageState),
+    };
     let outcome = "INTERNAL_ERROR";
     try {
-      let result: { captures: HarvestCapture[]; fetches: HarvestFetch[] };
+      let result: { captures: HarvestCapture[]; fetches: HarvestFetch[]; state?: CquStorageState };
       try {
         result = await this.harvestViaBrowser(
           sessionState.storageState,
@@ -998,8 +1005,38 @@ export class CquSessionDO extends DurableObject<Env> {
         }
         throw error;
       }
+      if (result.state !== undefined) {
+        const complete = canonicalRecipe.capture.every((pattern) => result.captures.some((capture) =>
+          capture.url.includes(pattern) && capture.status >= 200 && capture.status < 300 && typeof capture.body === "string"
+        )) && canonicalRecipe.fetch.every((fetch) => result.fetches.some((entry) =>
+          entry.url === fetch.url && entry.status >= 200 && entry.status < 300 && typeof entry.body === "string"
+        )) && result.fetches.every((entry) => entry.status >= 200 && entry.status < 300);
+        if (!complete || !isValidHarvestStorageState(result.state)) {
+          console.warn("[CquSession] harvest state refresh skipped (incomplete data or invalid state)");
+        } else {
+          const refreshed = result.state;
+          await this.ctx.blockConcurrencyWhile(async () => {
+            // Catch inside the input gate: an escaping rejection resets the DO.
+            try {
+              const stored = await this.ctx.storage.get<SessionState | CquStatus>(["state", "status"]);
+              const latest = stored.get("state") as SessionState | undefined;
+              if (stored.get("status") !== "active" || !latest
+                || latest.userId !== sourceSession.userId || latest.studentId !== sourceSession.studentId
+                || latest.loginAt !== sourceSession.loginAt
+                || JSON.stringify(latest.storageState) !== sourceSession.storageState) {
+                console.warn("[CquSession] harvest state refresh skipped (session changed)");
+                return;
+              }
+              const candidate = { ...latest, storageState: refreshed };
+              if (await this.putStateGuarded(candidate)) this.state = candidate;
+            } catch {
+              console.warn("[CquSession] harvest state refresh skipped (storage unavailable)");
+            }
+          });
+        }
+      }
       outcome = "ok";
-      return result;
+      return { captures: result.captures, fetches: result.fetches };
     } catch (error) {
       outcome =
         error instanceof CquSsoError ? error.code : "INTERNAL_ERROR";
@@ -1027,7 +1064,7 @@ export class CquSessionDO extends DurableObject<Env> {
     recipe: { navUrl: string; capture: string[]; fetch: { method?: string; url: string }[] },
     route: BrowserRoute,
     deadlineAt: number
-  ): Promise<{ captures: HarvestCapture[]; fetches: HarvestFetch[] }> {
+  ): Promise<{ captures: HarvestCapture[]; fetches: HarvestFetch[]; state?: CquStorageState }> {
     const budget = this.browserOperationBudget(deadlineAt);
     const requestBody: Record<string, unknown> = { state, ...recipe };
     if (route.backend === "cloudflare" && budget.operationTimeoutMs) {
@@ -1077,7 +1114,7 @@ export class CquSessionDO extends DurableObject<Env> {
       }
       throw new CquSsoError("WAF_CHALLENGE", `browser /data-harvest ${c.detail ?? "transient"}`);
     }
-    return { captures: c.captures ?? [], fetches: c.fetches ?? [] };
+    return { captures: c.captures ?? [], fetches: c.fetches ?? [], state: c.state };
   }
 
   /**

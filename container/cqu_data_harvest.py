@@ -721,11 +721,19 @@ async def harvest(state: dict, recipe: dict) -> dict:
 
             trace.record("DONE", url=page.url)
             captures = [captured[p] for p in patterns if p in captured]
-            return {
+            result = {
                 "captures": captures,
                 "fetches": fetches,
                 "diagnostics": diagnostics,
             }
+            # Supplemental GETs may fail while the required captures remain usable.
+            # Preserve those data, but only export a fully successful browser state.
+            if all(200 <= status < 300 for status in fetch_statuses):
+                try:
+                    result["state"] = await ctx.storage_state()
+                except Exception:
+                    log.warning("harvest state refresh skipped (export failed)")
+            return result
         finally:
             # No response-body task may outlive the browser/context cleanup below.
             await response_collector.close()

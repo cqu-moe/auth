@@ -3,6 +3,7 @@ import { CquSsoError, type CquStorageState } from "./cqu-sso";
 import {
   tgtFromState,
   hasValidTgt,
+  isValidHarvestStorageState,
   classifyNodeTicketResponse,
   ticketFromClassification,
   sanitizeNodeDetail,
@@ -442,6 +443,19 @@ describe("classifyNodeHarvestResponse", () => {
     fetches: [{ url: "f", status: 200, body: "[]" }],
   };
 
+  it("passes refreshed state only for 2xx with literal ok:true", () => {
+    const refreshed = state(TRIPLE);
+    expect(classifyNodeHarvestResponse(200, { ...okBody, state: refreshed }).state).toEqual(refreshed);
+    for (const [status, ok, error] of [
+      [502, true, undefined], [409, true, undefined],
+      [409, false, "BROWSER_INSTANCE_REPLACED"], [200, false, undefined],
+      [200, "true", undefined],
+    ] as const) {
+      const body = { ...okBody, ok, error, state: refreshed } as NodeHarvestBody;
+      expect(classifyNodeHarvestResponse(status, body)).not.toHaveProperty("state");
+    }
+  });
+
   it("200 + ok → ok with captures/fetches", () => {
     const c = classifyNodeHarvestResponse(200, okBody);
     expect(c.kind).toBe("ok");
@@ -497,5 +511,39 @@ describe("classifyNodeHarvestResponse", () => {
   it("detail never echoes raw node error", () => {
     const c = classifyNodeHarvestResponse(502, { ok: false, error: "cookie=SECRET" } as NodeHarvestBody);
     expect(JSON.stringify(c)).not.toContain("SECRET");
+  });
+});
+
+describe("isValidHarvestStorageState", () => {
+  it("accepts CAS and Direct cookies with HTTPS sso/my origins and arbitrary localStorage keys", () => {
+    const refreshed = state(TRIPLE);
+    refreshed.cookies.push({ name: "dynamic", value: "v", domain: ".my.cqu.edu.cn", path: "/", expires: -1, secure: true, httpOnly: false, sameSite: "Lax" });
+    refreshed.origins = [
+      { origin: "https://sso.cqu.edu.cn", localStorage: [] },
+      { origin: "https://my.cqu.edu.cn", localStorage: [{ name: "unknown-key", value: "v" }] },
+    ];
+    expect(isValidHarvestStorageState(refreshed)).toBe(true);
+    expect(isValidHarvestStorageState(state(TRIPLE))).toBe(true);
+  });
+
+  it.each([
+    null, {}, { cookies: null, origins: [] }, { cookies: [], origins: [] },
+    ...[
+      { name: "" }, { name: 123 }, { value: null }, { value: "" },
+      { domain: "my.cqu.edu.cn" }, { domain: "evil.cqu.edu.cn" },
+      { domain: "sso.cqu.edu.cn.evil.com" }, { path: "relative" },
+      { expires: "never" }, { expires: Infinity }, { secure: "true" },
+      { httpOnly: 1 }, { sameSite: "invalid" },
+    ].map((patch) => ({ ...state(TRIPLE), cookies: [{ ...state(TRIPLE).cookies[0], ...patch }, ...state(TRIPLE).cookies.slice(1)] })),
+    ...[
+      "http://my.cqu.edu.cn", "https://my.cqu.edu.cn:8443", "https://evil.cqu.edu.cn",
+      "https://my.cqu.edu.cn.evil.com", "https://my.cqu.edu.cn/path",
+      "https://user@my.cqu.edu.cn", "https://sso.cqu.edu.cn?secret=1",
+    ].map((origin) => ({ ...state(TRIPLE), origins: [{ origin, localStorage: [] }] })),
+    ...[null, {}, [null], [{ name: 12, value: "v" }], [{ name: "n", value: false }]]
+      .map((localStorage) => ({ ...state(TRIPLE), origins: [{ origin: "https://my.cqu.edu.cn", localStorage }] })),
+    { ...state(TRIPLE), origins: [null] },
+  ])("rejects malformed or foreign refreshed state %# without throwing", (value) => {
+    expect(isValidHarvestStorageState(value)).toBe(false);
   });
 });
