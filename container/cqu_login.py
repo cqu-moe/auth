@@ -48,6 +48,7 @@ import argparse
 import asyncio
 import getpass
 import os
+import random
 import re
 import sys
 import time
@@ -63,6 +64,7 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 
 # 浏览器登录器要回收的 3 个 CQU SSO cookie(对齐后端 CasCookies)。
 WANTED_COOKIES = ("SOURCEID_TGC", "SESSION", "rg_objectid")
+DYNAMIC_COOKIE_PAIR = ("CtLgrmkSWHBZO", "CtLgrmkSWHBZP")
 
 # 二次验证 type / 切 tab 文案 / 发码端点关键字(按 method)
 METHOD = {
@@ -71,25 +73,103 @@ METHOD = {
 }
 
 
-async def load_login_page(pg, url):
-    """正常全量加载登录页(Angular 完整), 返回 (croypto, flowkey) 或 (None, None)。"""
-    for i in range(6):
-        try:
-            await (pg.goto(url, wait_until="networkidle", timeout=browser_profile.LOGIN_NAV_TIMEOUT_MS) if i == 0
-                   else pg.reload(wait_until="networkidle", timeout=browser_profile.LOGIN_NAV_TIMEOUT_MS))
-        except Exception:
-            pass
-        await pg.wait_for_timeout(browser_profile.LOGIN_RENDER_WAIT_MS)
-        if await pg.locator("#login-croypto").count():
-            break
-    else:
-        return None, None
+async def _read_complete_login_form(pg):
+    """读取完整第一因素表单；任一动态字段未就绪时返回空。"""
     try:
-        croypto = (await pg.locator("#login-croypto").inner_text()).strip()
-        flowkey = (await pg.locator("#login-page-flowkey").inner_text()).strip()
-        return (croypto or None), (flowkey or None)
+        croypto_locator = pg.locator("#login-croypto")
+        flowkey_locator = pg.locator("#login-page-flowkey")
+        if not await croypto_locator.count() or not await flowkey_locator.count():
+            return None, None
+        croypto = (
+            await croypto_locator.inner_text(timeout=browser_profile.LOGIN_READY_POLL_MS)
+        ).strip()
+        flowkey = (
+            await flowkey_locator.inner_text(timeout=browser_profile.LOGIN_READY_POLL_MS)
+        ).strip()
+        return (croypto, flowkey) if croypto and flowkey else (None, None)
     except Exception:
         return None, None
+
+
+def _dynamic_cookie_pair_present(cookies):
+    present = {
+        cookie.get("name")
+        for cookie in cookies
+        if cookie.get("name") in DYNAMIC_COOKIE_PAIR and cookie.get("value")
+    }
+    return all(name in present for name in DYNAMIC_COOKIE_PAIR)
+
+
+async def wait_for_login_ready(
+    pg,
+    *,
+    cookie_supplier=None,
+    sleep=asyncio.sleep,
+    monotonic=time.monotonic,
+):
+    """同时观察瑞数动态 cookie 与完整 CAS 表单，返回 (状态, croypto, flowkey)。"""
+    if cookie_supplier is None:
+        cookie_supplier = lambda: pg.context.cookies(SSO)
+
+    started = monotonic()
+    cookie_deadline = started + browser_profile.LOGIN_COOKIE_WAIT_MS / 1000
+    form_deadline = started + browser_profile.LOGIN_FORM_WAIT_MS / 1000
+    poll_seconds = browser_profile.LOGIN_READY_POLL_MS / 1000
+
+    while True:
+        try:
+            cookies_ready = _dynamic_cookie_pair_present(await cookie_supplier())
+        except Exception:
+            cookies_ready = False
+        croypto, flowkey = await _read_complete_login_form(pg)
+        if cookies_ready and croypto and flowkey:
+            return "ready", croypto, flowkey
+
+        now = monotonic()
+        if not cookies_ready and now >= cookie_deadline:
+            return "cookies_timeout", None, None
+        if now >= form_deadline:
+            return "form_timeout", None, None
+
+        next_deadline = (
+            form_deadline if cookies_ready else min(cookie_deadline, form_deadline)
+        )
+        await sleep(min(poll_seconds, max(0, next_deadline - now)))
+
+
+async def load_login_page(
+    pg,
+    url,
+    *,
+    sleep=asyncio.sleep,
+    monotonic=time.monotonic,
+    cookie_supplier=None,
+):
+    """加载登录页并等待动态 cookie pair + 完整表单；超时后至多 reload 一次。"""
+    for attempt in range(browser_profile.LOGIN_READY_ATTEMPTS):
+        try:
+            if attempt == 0:
+                await pg.goto(
+                    url,
+                    wait_until="domcontentloaded",
+                    timeout=browser_profile.LOGIN_NAV_TIMEOUT_MS,
+                )
+            else:
+                await pg.reload(
+                    wait_until="domcontentloaded",
+                    timeout=browser_profile.LOGIN_NAV_TIMEOUT_MS,
+                )
+        except Exception:
+            pass
+        status, croypto, flowkey = await wait_for_login_ready(
+            pg,
+            cookie_supplier=cookie_supplier,
+            sleep=sleep,
+            monotonic=monotonic,
+        )
+        if status == "ready":
+            return croypto, flowkey
+    return None, None
 
 
 async def formnav_submit(pg, url, fields, wait_until="networkidle", timeout=None):
@@ -165,6 +245,8 @@ async def do_first_factor(pg, url, username, password, debug_screenshot=True):
     croypto, flowkey = await load_login_page(pg, url)
     if not (croypto and flowkey):
         return "transient:登录页未渲染(疑似被瑞数挑战/限流)"
+    # 第一因素必须保留已实测通过的 hidden-form/document-navigation；它不产生可安全
+    # 调整的逐字符输入节奏，拟人延迟只应用于后续可见 tab/click 操作。
     fields = {"_eventId": "submit", "type": "UsernamePassword", "execution": flowkey,
               "geolocation": "", "username": username,
               "password": aes_encrypt_password(croypto, password), "croypto": croypto}
@@ -197,29 +279,36 @@ async def do_first_factor(pg, url, username, password, debug_screenshot=True):
     return outcome + ":" + (err or f"未判定 url={pg.url[:70]}") + diag
 
 
-async def switch_2fa_tab(pg, method):
+async def switch_2fa_tab(pg, method, *, uniform=random.uniform):
     """2FA 页切到短信/邮件 tab(等 Angular 渲染齐 tab)。"""
     tab_text = METHOD[method]["tab"]
-    for _ in range(12):
-        await pg.wait_for_timeout(browser_profile.TAB_POLL_WAIT_MS)
-        if await pg.locator(".ant-tabs-tab").filter(has_text=tab_text).count() or \
-           await pg.locator("input[placeholder='请输入验证码']").count():
-            break
     t = pg.locator(".ant-tabs-tab").filter(has_text=tab_text)
-    if await t.count():
-        try:
-            await t.first.click(timeout=browser_profile.TAB_CLICK_TIMEOUT_MS)
-            await pg.wait_for_timeout(browser_profile.TAB_POLL_WAIT_MS)
-        except Exception:
-            pass
+    try:
+        await t.first.wait_for(
+            state="visible", timeout=browser_profile.TAB_CLICK_TIMEOUT_MS
+        )
+        await pg.wait_for_timeout(uniform(150, 450))
+        await t.first.click(timeout=browser_profile.TAB_CLICK_TIMEOUT_MS)
+        code_input = pg.locator("input[placeholder='请输入验证码']")
+        await code_input.first.wait_for(
+            state="visible", timeout=browser_profile.TAB_CLICK_TIMEOUT_MS
+        )
+        await pg.wait_for_timeout(uniform(200, 500))
+    except Exception:
+        pass
 
 
-async def request_code(pg, sms_state):
+async def request_code(pg, sms_state, *, uniform=random.uniform):
     """原生点「获取验证码」, 发码 XHR 自带 CAqWHAeT。返回是否点到。"""
     for sel in [".font-class-text-button", "button:has-text('获取验证码')", "span:has-text('获取验证码')"]:
         if await pg.locator(sel).count():
             try:
-                await pg.locator(sel).first.click(timeout=browser_profile.TAB_CLICK_TIMEOUT_MS)
+                button = pg.locator(sel).first
+                await button.wait_for(
+                    state="visible", timeout=browser_profile.TAB_CLICK_TIMEOUT_MS
+                )
+                await pg.wait_for_timeout(uniform(150, 450))
+                await button.click(timeout=browser_profile.TAB_CLICK_TIMEOUT_MS)
                 await pg.wait_for_timeout(3500)
                 return True
             except Exception:

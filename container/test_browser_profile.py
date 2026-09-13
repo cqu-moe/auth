@@ -14,10 +14,12 @@ PROFILE_PROBE = (
     "    'cloudflare': browser_profile.CLOUDFLARE_PROFILE, "
     "    'name': browser_profile.PROFILE_NAME, "
     "    'login_nav': browser_profile.LOGIN_NAV_TIMEOUT_MS, "
-    "    'render_wait': browser_profile.LOGIN_RENDER_WAIT_MS, "
+    "    'cookie_wait': browser_profile.LOGIN_COOKIE_WAIT_MS, "
+    "    'form_wait': browser_profile.LOGIN_FORM_WAIT_MS, "
+    "    'ready_poll': browser_profile.LOGIN_READY_POLL_MS, "
+    "    'ready_attempts': browser_profile.LOGIN_READY_ATTEMPTS, "
     "    'formnav': browser_profile.FORMNAV_TIMEOUT_MS, "
     "    'post_submit': browser_profile.POST_SUBMIT_WAIT_MS, "
-    "    'tab_poll': browser_profile.TAB_POLL_WAIT_MS, "
     "    'tab_click': browser_profile.TAB_CLICK_TIMEOUT_MS, "
     "    'launch': browser_profile.BROWSER_LAUNCH_TIMEOUT_MS, "
     "    'capture_wait': browser_profile.CAPTURE_WAIT_MS, "
@@ -47,10 +49,12 @@ DEFAULTS = {
     "cloudflare": False,
     "name": "default",
     "login_nav": 25_000,
-    "render_wait": 1_500,
+    "cookie_wait": 20_000,
+    "form_wait": 30_000,
+    "ready_poll": 100,
+    "ready_attempts": 2,
     "formnav": 25_000,
     "post_submit": 2_500,
-    "tab_poll": 1_500,
     "tab_click": 4_000,
     "launch": 30_000,
     "capture_wait": 8_000,
@@ -67,10 +71,12 @@ CLOUDFLARE = {
     "cloudflare": True,
     "name": "cloudflare",
     "login_nav": 60_000,
-    "render_wait": 3_000,
+    "cookie_wait": 20_000,
+    "form_wait": 30_000,
+    "ready_poll": 100,
+    "ready_attempts": 2,
     "formnav": 60_000,
     "post_submit": 20_000,
-    "tab_poll": 3_000,
     "tab_click": 10_000,
     "launch": 60_000,
     "capture_wait": 30_000,
