@@ -9,17 +9,17 @@ def test_host_allowed_exact_my_cqu():
     assert m.is_harvest_host_allowed("https://my.cqu.edu.cn/workspace/curriculum") is True
 
 
-def test_host_allowed_exact_atrust_rewritten_app():
+def test_host_rejects_retired_atrust_rewritten_app():
     assert m.is_harvest_host_allowed(
         "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/workspace/curriculum"
-    ) is True
+    ) is False
 
 
-def test_classify_harvest_host_distinguishes_direct_and_atrust():
+def test_classify_harvest_host_accepts_only_direct():
     assert m.classify_harvest_host("https://my.cqu.edu.cn/x") == "direct"
     assert m.classify_harvest_host(
         "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/x"
-    ) == "atrust"
+    ) is None
     assert m.classify_harvest_host("https://evil.example/x") is None
 
 
@@ -94,7 +94,7 @@ def _good():
     }
 
 
-def _atrust_good():
+def _retired_atrust_recipe():
     origin = "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn"
     return {
         "navUrl": f"{origin}/workspace/curriculum",
@@ -114,23 +114,11 @@ def test_parse_recipe_ok_returns_normalized():
         {"method": "GET",
          "url": "https://my.cqu.edu.cn/api/exam/examTask/get-student-exam-list"},
     ]
-    assert r["hostKind"] == "direct"
 
 
-def test_parse_recipe_accepts_single_host_atrust_recipe():
-    r = m.parse_harvest_recipe(_atrust_good())
-    assert r["hostKind"] == "atrust"
-    assert r["navUrl"].startswith(
-        "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/"
-    )
-
-
-def test_parse_recipe_rejects_mixed_direct_and_atrust_hosts():
-    bad = _atrust_good() | {
-        "fetch": [{"method": "GET", "url": "https://my.cqu.edu.cn/api/x"}]
-    }
-    with pytest.raises(m.HarvestRecipeError, match="same host"):
-        m.parse_harvest_recipe(bad)
+def test_parse_recipe_rejects_retired_atrust_host():
+    with pytest.raises(m.HarvestRecipeError, match="host not allowed"):
+        m.parse_harvest_recipe(_retired_atrust_recipe())
 
 
 def test_parse_recipe_allows_empty_capture_and_fetch():
@@ -266,21 +254,6 @@ def test_is_expired_true_when_empty_and_login_markers():
 def test_is_expired_true_when_empty_and_sso_host():
     # 无 capture + 落到 SSO host(被重定向到登录) → 过期(即便 page_content 抓不到/为空)。
     assert m.is_expired_harvest({}, "", "https://sso.cqu.edu.cn/login?service=x") is True
-
-
-def test_classify_outcome_atrust_portal_redirect_is_atrust_expired():
-    assert m.classify_harvest_outcome(
-        set(), ["student/my-table-detail"], "",
-        "https://atrust.cqu.edu.cn/portal/?#!/login", host_kind="atrust"
-    ) == "atrust_expired"
-
-
-def test_classify_outcome_rewritten_sso_redirect_is_atrust_expired():
-    assert m.classify_harvest_outcome(
-        set(), ["student/my-table-detail"], "login-page-flowkey",
-        "https://sso-cqu-edu-cn-s.atrust.cqu.edu.cn/login?service=x",
-        host_kind="atrust",
-    ) == "atrust_expired"
 
 
 def test_is_expired_false_when_empty_and_normal_page():

@@ -4,8 +4,8 @@ my.cqu.edu.cn 全站瑞数化后,后端纯 HTTP POST 课表被 412 专守;唯一
 auth 已登录浏览器里导航 navUrl(页面自动 fire 课表/学期)+ 截获 capture 模式响应 +
 对 fetch[] 跑 in-page GET(同源、读豁免)。本模块是 schedule 取数的通用原语,业务无关。
 
-host 红线:navUrl/fetch[].url 解析出的 host 必须精确为直连应用或 aTrust 改写应用，且
-一份 recipe 内必须同 host，防 auth 变开放代理(SSRF)。纯函数(host 校验 / recipe 解析 /
+host 红线:navUrl/fetch[].url 解析出的 host 必须精确为直连应用，防 auth
+变开放代理(SSRF)。纯函数(host 校验 / recipe 解析 /
 capture 匹配)抽出便于单测。
 """
 import asyncio
@@ -15,17 +15,14 @@ import browser_profile
 import cqu_login  # UA / locale 等浏览器对抗参数,与取票统一
 import cqu_ticket_browser  # 复用 _close_browser_driver / TICKET_SEMAPHORE / 超时常量
 
-# harvest 只允许这两个目标 host(精确等于,绝不 endswith/in)。
+# harvest 只允许 Direct 目标 host(精确等于,绝不 endswith/in)。
 HARVEST_HOSTS = {
     "my.cqu.edu.cn": "direct",
-    "my-cqu-edu-cn-s.atrust.cqu.edu.cn": "atrust",
 }
-ATRUST_PORTAL_HOST = "atrust.cqu.edu.cn"
-ATRUST_SSO_HOST = "sso-cqu-edu-cn-s.atrust.cqu.edu.cn"
 
 
 def classify_harvest_host(url: str) -> str | None:
-    """合法 harvest URL 返回 ``direct``/``atrust``，非法返回 None。"""
+    """合法 harvest URL 返回 ``direct``，非法返回 None。"""
     if not url or "\\" in url:
         return None
     if any(ord(ch) < 0x20 or ord(ch) > 0x7e for ch in url):
@@ -51,7 +48,7 @@ def classify_harvest_host(url: str) -> str | None:
 
 
 def is_harvest_host_allowed(url: str) -> bool:
-    """非抛谓词：URL 是否属于两个精确允许 host 之一。"""
+    """非抛谓词：URL 是否属于 Direct 精确允许 host。"""
     return classify_harvest_host(url) is not None
 
 
@@ -120,7 +117,6 @@ def parse_harvest_recipe(body: dict) -> dict:
         "navUrl": nav_url,
         "capture": list(capture),
         "fetch": fetch,
-        "hostKind": nav_kind,
     }
 
 
@@ -156,10 +152,6 @@ class HarvestExpiredError(Exception):
     """
 
 
-class AtrustHarvestExpiredError(Exception):
-    """aTrust 独立会话落回门户或改写 SSO；只允许清理/重登 aTrust 状态。"""
-
-
 def is_expired_harvest(captures: dict, page_content: str, page_url: str) -> bool:
     """无任何 capture 命中 **且** 页面看起来是 CAS 登录页 → 判会话过期(纯函数, 便于单测)。
 
@@ -175,23 +167,6 @@ def is_expired_harvest(captures: dict, page_content: str, page_url: str) -> bool
         return True
     host = (urllib.parse.urlparse(page_url or "").hostname or "").lower()
     return host == _SSO_HOST
-
-
-def classify_expired_harvest(
-    captures: dict,
-    page_content: str,
-    page_url: str,
-    host_kind: str,
-) -> str | None:
-    """按 recipe 的状态域区分直连 CAS 过期与 aTrust 独立会话过期。"""
-    if captures:
-        return None
-    host = (urllib.parse.urlparse(page_url or "").hostname or "").lower()
-    if host_kind == "atrust":
-        if host in {ATRUST_PORTAL_HOST, ATRUST_SSO_HOST}:
-            return "atrust_expired"
-        return None
-    return "expired" if is_expired_harvest(captures, page_content, page_url) else None
 
 
 class HarvestTransientError(Exception):
@@ -214,7 +189,6 @@ def classify_harvest_outcome(
     page_content: str,
     page_url: str,
     fetch_statuses: list[int] | None = None,
-    host_kind: str = "direct",
 ) -> str:
     """navigate + capture-wait + fetch[] 后的三态判定(纯函数, 便于单测): "ok"/"expired"/"transient"。
 
@@ -232,11 +206,8 @@ def classify_harvest_outcome(
     capture 配方传 None/省略即可(保持既有调用与单测不变)。
     """
     captured = {k: True for k in captured_keys}  # is_expired_harvest 只看 truthy/empty
-    expired = classify_expired_harvest(
-        captured, page_content, page_url, host_kind
-    )
-    if expired is not None:
-        return expired
+    if is_expired_harvest(captured, page_content, page_url):
+        return "expired"
     if patterns:
         return "ok" if all_captures_present(captured_keys, patterns) else "transient"
     # fetch-only: 只有至少一个 2xx 才算真成功, 否则瞬态退避。
@@ -347,12 +318,7 @@ async def harvest(state: dict, recipe: dict) -> dict:
         page_content = "" if captured else await page.content()
         outcome = classify_harvest_outcome(
             set(captured), patterns, page_content, page.url, fetch_statuses,
-            host_kind=recipe.get("hostKind", "direct"),
         )
-        if outcome == "atrust_expired":
-            raise AtrustHarvestExpiredError(
-                "navUrl redirected to aTrust login (session expired)"
-            )
         if outcome == "expired":
             raise HarvestExpiredError("navUrl redirected to CAS login (session expired)")
         if outcome == "transient":

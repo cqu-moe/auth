@@ -2262,7 +2262,6 @@ export interface components {
         };
         CquSessionStatus: {
             status: string;
-            atrustStatus: string;
             studentId?: string;
         } & {
             [key: string]: unknown;

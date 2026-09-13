@@ -1,8 +1,7 @@
-// harvest 取数仅允许直连应用与 aTrust 改写应用两个精确 host。红线与
+// harvest 取数仅允许直连应用的精确 host。红线与
 // service-url.ts 一致(反斜杠/非ASCII/scheme/userinfo/端口/host字符)。
 const HARVEST_HOSTS = {
   "my.cqu.edu.cn": "direct",
-  "my-cqu-edu-cn-s.atrust.cqu.edu.cn": "atrust",
 } as const;
 
 export type CquHarvestHost = (typeof HARVEST_HOSTS)[keyof typeof HARVEST_HOSTS];

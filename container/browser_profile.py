@@ -22,15 +22,6 @@ TAB_POLL_WAIT_MS = 3_000 if CLOUDFLARE_PROFILE else 1_500
 TAB_CLICK_TIMEOUT_MS = 10_000 if CLOUDFLARE_PROFILE else 4_000
 BROWSER_LAUNCH_TIMEOUT_MS = 60_000 if CLOUDFLARE_PROFILE else 30_000
 
-# ── aTrust(cqu_atrust.py) ───────────────────────────────────────────────────
-# 页面导航 40s→90s;门户/SSO 轮询 40→120 次;应用就绪 60→180 轮询、25s→90s;
-# 启动 30s→60s。
-ATRUST_NAV_TIMEOUT_MS = 90_000 if CLOUDFLARE_PROFILE else 40_000
-ATRUST_PORTAL_POLLS = 120 if CLOUDFLARE_PROFILE else 40
-ATRUST_SSO_POLLS = 120 if CLOUDFLARE_PROFILE else 40
-ATRUST_APP_POLLS = 180 if CLOUDFLARE_PROFILE else 60
-ATRUST_APP_READY_TIMEOUT_S = 90 if CLOUDFLARE_PROFILE else 25
-
 # ── 采集(cqu_data_harvest.py) ───────────────────────────────────────────────
 # capture 盲等 8s→30s;单 in-page fetch 15s→30s;整段 45s→120s;导航 25s→60s。
 CAPTURE_WAIT_MS = 30_000 if CLOUDFLARE_PROFILE else 8_000

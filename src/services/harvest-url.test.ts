@@ -13,14 +13,12 @@ describe("validateCquHarvestUrl", () => {
   it("lowercases host", () => {
     expect(validateCquHarvestUrl("https://MY.CQU.EDU.CN/x")).toBe("https://my.cqu.edu.cn/x");
   });
-  it("accepts the exact aTrust rewritten app host", () => {
-    expect(
+  it("rejects the retired aTrust rewritten app host", () => {
+    expect(() =>
       validateCquHarvestUrl(
-        "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn:443/workspace/curriculum"
+        "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/workspace/curriculum"
       )
-    ).toBe(
-      "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/workspace/curriculum"
-    );
+    ).toThrow("host not allowed");
   });
   it("rejects other cqu subdomain (only my.cqu.edu.cn)", () => {
     expect(() => validateCquHarvestUrl("https://lib.cqu.edu.cn/x")).toThrow();
@@ -51,22 +49,13 @@ describe("validateCquHarvestRecipeHosts", () => {
     ).toBe("direct");
   });
 
-  it("returns atrust when every recipe URL uses the rewritten app host", () => {
-    expect(
-      validateCquHarvestRecipeHosts(
-        "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/workspace/curriculum",
-        ["https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/api/exam/x"]
-      )
-    ).toBe("atrust");
-  });
-
-  it("rejects a recipe that mixes direct and aTrust hosts", () => {
+  it("rejects a recipe containing the retired aTrust host", () => {
     expect(() =>
       validateCquHarvestRecipeHosts(
         "https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/workspace/curriculum",
         ["https://my.cqu.edu.cn/api/exam/x"]
       )
-    ).toThrow("same host");
+    ).toThrow("host not allowed");
   });
 });
 
@@ -74,10 +63,10 @@ describe("isCquHarvestUrl (non-throwing predicate)", () => {
   it("true for my.cqu.edu.cn", () => {
     expect(isCquHarvestUrl("https://my.cqu.edu.cn/x")).toBe(true);
   });
-  it("true for the exact aTrust app host", () => {
+  it("false for the retired aTrust app host", () => {
     expect(
       isCquHarvestUrl("https://my-cqu-edu-cn-s.atrust.cqu.edu.cn/x")
-    ).toBe(true);
+    ).toBe(false);
   });
   it("false for disallowed / garbage", () => {
     expect(isCquHarvestUrl("https://evil.com/x")).toBe(false);

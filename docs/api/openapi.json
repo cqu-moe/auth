@@ -18267,15 +18267,11 @@
       "CquSessionStatus": {
         "type": "object",
         "required": [
-          "status",
-          "atrustStatus"
+          "status"
         ],
         "additionalProperties": true,
         "properties": {
           "status": {
-            "type": "string"
-          },
-          "atrustStatus": {
             "type": "string"
           },
           "studentId": {

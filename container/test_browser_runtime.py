@@ -83,7 +83,7 @@ class BootGuardTests(BrowserRuntimeTestCase):
             resp = await self.client.get("/health")
             assert resp.status == 200
             payload = await resp.json()
-            assert payload["apiVersion"] == "atrust-harvest-v1"
+            assert payload["apiVersion"] == "direct-harvest-v1"
             assert payload["bootId"] == server.BOOT_ID
             assert payload["browserProfile"] == "cloudflare"
             assert "browser-route-v1" in payload["capabilities"]

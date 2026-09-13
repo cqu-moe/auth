@@ -145,7 +145,7 @@ class _FlowAsyncPlaywrightCM:
 def test_run_login_waits_for_permit_and_selects_the_right_code_source(
     monkeypatch, send_verdict, expected_code_event
 ):
-    """缺少 permit await 会让 CAS/aTrust 同时点击发码，竞争消费共享验证码。"""
+    """缺少 permit await 会让 CAS/QuickLogin 同时点击发码，竞争消费共享验证码。"""
     events = []
     cm = _FlowAsyncPlaywrightCM()
     monkeypatch.setattr(cqu_login, "async_playwright", lambda: cm)

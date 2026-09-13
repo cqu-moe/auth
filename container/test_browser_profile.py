@@ -20,11 +20,6 @@ PROFILE_PROBE = (
     "    'tab_poll': browser_profile.TAB_POLL_WAIT_MS, "
     "    'tab_click': browser_profile.TAB_CLICK_TIMEOUT_MS, "
     "    'launch': browser_profile.BROWSER_LAUNCH_TIMEOUT_MS, "
-    "    'atrust_nav': browser_profile.ATRUST_NAV_TIMEOUT_MS, "
-    "    'atrust_portal_polls': browser_profile.ATRUST_PORTAL_POLLS, "
-    "    'atrust_sso_polls': browser_profile.ATRUST_SSO_POLLS, "
-    "    'atrust_app_polls': browser_profile.ATRUST_APP_POLLS, "
-    "    'atrust_ready_s': browser_profile.ATRUST_APP_READY_TIMEOUT_S, "
     "    'capture_wait': browser_profile.CAPTURE_WAIT_MS, "
     "    'inpage_fetch': browser_profile.INPAGE_FETCH_TIMEOUT_MS, "
     "    'harvest_overall': browser_profile.HARVEST_OVERALL_TIMEOUT_S, "
@@ -58,11 +53,6 @@ DEFAULTS = {
     "tab_poll": 1_500,
     "tab_click": 4_000,
     "launch": 30_000,
-    "atrust_nav": 40_000,
-    "atrust_portal_polls": 40,
-    "atrust_sso_polls": 40,
-    "atrust_app_polls": 60,
-    "atrust_ready_s": 25,
     "capture_wait": 8_000,
     "inpage_fetch": 15_000,
     "harvest_overall": 45.0,
@@ -83,11 +73,6 @@ CLOUDFLARE = {
     "tab_poll": 3_000,
     "tab_click": 10_000,
     "launch": 60_000,
-    "atrust_nav": 90_000,
-    "atrust_portal_polls": 120,
-    "atrust_sso_polls": 120,
-    "atrust_app_polls": 180,
-    "atrust_ready_s": 90,
     "capture_wait": 30_000,
     "inpage_fetch": 30_000,
     "harvest_overall": 120.0,

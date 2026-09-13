@@ -25,7 +25,6 @@ from aiohttp import web
 
 import browser_profile  # 国内/Cloudflare 两套时限与运行标记
 import cqu_login  # 改造后的登录器, 暴露 run_login(...)
-import cqu_atrust  # 独立 aTrust 登录器, 只返回 storage_state
 import cqu_keepalive  # 国内节点浏览器水化探活, 暴露 probe_session_browser(...)
 import cqu_ticket_browser  # 浏览器水化取 ST(过瑞数 JS 挑战), 暴露 fetch_service_ticket_browser(...)
 import cqu_data_harvest  # 浏览器 organic harvest(navigate+capture+in-page fetch), 暴露 harvest(...)
@@ -33,9 +32,8 @@ from qg_proxy import acquire_qg_proxy, QgExtractError, should_use_proxy  # 青�
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("cqu-login-server")
-NODE_API_VERSION = "atrust-harvest-v1"
+NODE_API_VERSION = "direct-harvest-v1"
 NODE_CAPABILITIES = [
-    "atrust-login",
     "code-permit",
     "reusable-code",
     "data-harvest",
@@ -48,7 +46,7 @@ NODE_CAPABILITIES = [
 # 不加诊断 HTML/state 导出接口。
 BOOT_ID = uuid.uuid4().hex
 
-# CF profile 下全进程同一时刻只允许一个重型浏览器操作(basic 1 GiB;/run、/atrust-login、
+# CF profile 下全进程同一时刻只允许一个重型浏览器操作(basic 1 GiB;/run、
 # /service-ticket、/keepalive、/data-harvest 共用)。health/code/permit 不取此锁。
 BROWSER_JOB_LOCK = asyncio.Lock()
 
@@ -128,7 +126,7 @@ RUN_TOTAL_TIMEOUT = 660
 # 当前 owner 并行，PERMIT_PHASE_TIMEOUT 再留 60s 给第一因素/页面渲染开销。
 PERMIT_WAIT_TIMEOUT = 720
 PERMIT_PHASE_TIMEOUT = 780
-# A queued CAS/aTrust run performs its first factor in parallel while a previous
+# A queued CAS/QuickLogin run performs its first factor in parallel while a previous
 # ambiguous owner remains fenced for at most 1500s. Give that one successor the
 # predecessor fence plus 60s transport slack; per-kind single-flight means the
 # queue contains at most the other login track.
@@ -178,40 +176,6 @@ class BrowserDeadlineExceeded(Exception):
 
 class InvalidOperationTimeout(Exception):
     """operationTimeoutMs 入参非法(非整数/越界/该给未给)。"""
-
-
-ATRUST_FAILURE_STAGE_BY_MESSAGE = {
-    "ATRUST_PORTAL_OPTION_MISSING": "portal_option_missing",
-    "ATRUST_PORTAL_FALLBACK_FAILED": "portal_fallback_failed",
-    "ATRUST_SSO_NOT_READY": "sso_not_ready",
-    "ATRUST_APP_NOT_REACHED": "app_not_reached",
-    "ATRUST_APP_NOT_READY": "app_not_ready",
-    "ATRUST_APP_API_MISSING": "app_api_missing",
-    "ATRUST_APP_API_REJECTED": "app_api_rejected",
-    "ATRUST_APP_API_UNAVAILABLE": "app_api_unavailable",
-    "ATRUST_APP_API_INVALID": "app_api_invalid",
-    "ATRUST_CODE_BUTTON_MISSING": "code_button_missing",
-    "ATRUST_CODE_REQUEST_FAILED": "code_request_failed",
-    "ATRUST_CODE_MISSING": "code_missing",
-    "ATRUST_FIRST_FACTOR_FAILED": "first_factor_failed",
-}
-
-
-def atrust_failure_stage(error: Exception) -> str:
-    """Return a bounded, non-sensitive stage label for aTrust diagnostics."""
-    if isinstance(error, CodeWaitTimeout):
-        return "code_wait_timeout"
-    if isinstance(error, PermitWaitTimeout):
-        return "permit_wait_timeout"
-    if isinstance(error, asyncio.TimeoutError):
-        return "async_timeout"
-    controlled = ATRUST_FAILURE_STAGE_BY_MESSAGE.get(str(error))
-    if controlled:
-        return controlled
-    return {
-        "RuntimeError": "unexpected_runtime_error",
-        "TimeoutError": "unexpected_timeout_error",
-    }.get(type(error).__name__, "unexpected_error")
 
 
 def boot_guard_response(request: web.Request) -> web.Response | None:
@@ -560,181 +524,6 @@ async def run_handler(request: web.Request) -> web.Response:
         release_browser_job(job_acquired)
 
 
-async def atrust_login_handler(request: web.Request) -> web.Response:
-    try:
-        body = await request.json()
-    except Exception:
-        return web.json_response(
-            {"ok": False, "error": "invalid JSON body"}, status=400
-        )
-
-    student_id = body.get("studentId")
-    password = body.get("password")
-    method = body.get("method", "mail")
-    session = body.get("session") or "default"
-    queued_permit = body.get("queuedPermit") is True
-    permit_wait_timeout = (
-        QUEUED_PERMIT_WAIT_TIMEOUT if queued_permit else PERMIT_WAIT_TIMEOUT
-    )
-    permit_phase_timeout = (
-        QUEUED_PERMIT_PHASE_TIMEOUT if queued_permit else PERMIT_PHASE_TIMEOUT
-    )
-    if not (student_id and password):
-        return web.json_response(
-            {"ok": False, "error": "missing required field: studentId/password"},
-            status=400,
-        )
-
-    boot_guard = boot_guard_response(request)
-    if boot_guard is not None:
-        return boot_guard
-    try:
-        operation_timeout_ms = parse_operation_timeout_ms(body)
-    except InvalidOperationTimeout as error:
-        return web.json_response({"ok": False, "error": str(error)}, status=400)
-    if operation_timeout_ms is None and browser_profile.CLOUDFLARE_PROFILE:
-        return web.json_response(
-            {"ok": False, "error": "operationTimeoutMs is required"}, status=400
-        )
-
-    proxy = None
-    if should_use_proxy("login"):
-        try:
-            proxy = await acquire_qg_proxy("login")
-        except QgExtractError:
-            log.warning("atrust-login qg proxy unavailable")
-            return web.json_response(
-                {"ok": False, "error": "ATRUST_TRANSIENT"}, status=502
-            )
-
-    job_acquired = False
-    try:
-        job_acquired = await acquire_browser_job()
-    except BrowserBusyError:
-        log.warning("atrust-login busy (another heavy browser job holds this instance)")
-        return web.json_response({"ok": False, "error": "BROWSER_BUSY"}, status=503)
-
-    code_event = asyncio.Event()
-    reusable_code_event = asyncio.Event()
-    permit_event = asyncio.Event()
-    permit_claimed = asyncio.Event()
-    CODE_EVENTS[session] = code_event
-    REUSABLE_CODE_EVENTS[session] = reusable_code_event
-    PERMIT_EVENTS[session] = permit_event
-    if session in CODE_VALUES:
-        code_event.set()
-    if session in REUSABLE_CODE_VALUES:
-        reusable_code_event.set()
-    if session in PERMIT_VALUES:
-        permit_event.set()
-
-    async def code_waiter() -> str:
-        try:
-            await asyncio.wait_for(code_event.wait(), timeout=CODE_WAIT_TIMEOUT)
-        except asyncio.TimeoutError as e:
-            raise CodeWaitTimeout("aTrust code wait timed out") from e
-        entry = CODE_VALUES.pop(session, None)
-        return entry[0] if entry else ""
-
-    async def reusable_code_waiter() -> str:
-        if session not in CODE_VALUES and session not in REUSABLE_CODE_VALUES:
-            fresh_wait = asyncio.create_task(code_event.wait())
-            reusable_wait = asyncio.create_task(reusable_code_event.wait())
-            try:
-                done, pending = await asyncio.wait(
-                    {fresh_wait, reusable_wait},
-                    timeout=CODE_WAIT_TIMEOUT,
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                if not done:
-                    raise CodeWaitTimeout("aTrust reusable code never arrived")
-                for task in pending:
-                    task.cancel()
-                await asyncio.gather(*pending, return_exceptions=True)
-            finally:
-                for task in (fresh_wait, reusable_wait):
-                    if not task.done():
-                        task.cancel()
-                await asyncio.gather(
-                    fresh_wait, reusable_wait, return_exceptions=True
-                )
-        entry = CODE_VALUES.pop(session, None)
-        if entry is None:
-            entry = REUSABLE_CODE_VALUES.pop(session, None)
-        return entry[0] if entry else ""
-
-    async def permit_waiter() -> None:
-        try:
-            await asyncio.wait_for(
-                permit_event.wait(), timeout=permit_wait_timeout
-            )
-        except asyncio.TimeoutError as e:
-            raise PermitWaitTimeout("aTrust code permit timed out") from e
-        PERMIT_VALUES.pop(session, None)
-        permit_claimed.set()
-
-    log.info("atrust-login start method=%s", method)
-    try:
-        result = await run_bounded(
-            _run_with_separate_permit_budget(
-                cqu_atrust.run_atrust_login(
-                    student_id=student_id,
-                    password=password,
-                    method=method,
-                    code_provider=code_waiter,
-                    reusable_code_provider=reusable_code_waiter,
-                    permit_provider=permit_waiter,
-                    proxy=proxy,
-                ),
-                permit_claimed,
-                permit_phase_timeout,
-            ),
-            operation_timeout_ms,
-        )
-        log.info("atrust-login ok")
-        return web.json_response({"ok": True, **result})
-    except BrowserDeadlineExceeded:
-        log.warning("atrust-login deadline exceeded (operationTimeoutMs=%d)", operation_timeout_ms or -1)
-        return web.json_response(
-            {"ok": False, "error": "BROWSER_DEADLINE"}, status=503
-        )
-    except cqu_atrust.AtrustPasswordRejectedError:
-        log.warning("atrust-login password rejected")
-        return web.json_response(
-            {"ok": False, "error": "PASSWORD_REJECTED"}, status=401
-        )
-    except (CodeWaitTimeout, PermitWaitTimeout, asyncio.TimeoutError) as error:
-        failure_stage = atrust_failure_stage(error)
-        log.warning("atrust-login timeout stage=%s", failure_stage)
-        return web.json_response(
-            {
-                "ok": False,
-                "error": "ATRUST_TRANSIENT",
-                "failureStage": failure_stage,
-            },
-            status=504,
-        )
-    except Exception as error:  # noqa: BLE001 - map browser/network failures to stable transient
-        failure_stage = atrust_failure_stage(error)
-        log.warning("atrust-login transient stage=%s", failure_stage)
-        return web.json_response(
-            {
-                "ok": False,
-                "error": "ATRUST_TRANSIENT",
-                "failureStage": failure_stage,
-            },
-            status=502,
-        )
-    finally:
-        CODE_EVENTS.pop(session, None)
-        CODE_VALUES.pop(session, None)
-        REUSABLE_CODE_EVENTS.pop(session, None)
-        REUSABLE_CODE_VALUES.pop(session, None)
-        PERMIT_EVENTS.pop(session, None)
-        PERMIT_VALUES.pop(session, None)
-        release_browser_job(job_acquired)
-
-
 async def code_handler(request: web.Request) -> web.Response:
     try:
         body = await request.json()
@@ -948,7 +737,7 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
         return web.json_response(
             {"ok": False, "error": "missing required field: state (object)"}, status=400)
 
-    # 纵深第二层: recipe(navUrl/capture/fetch)只允许两个代码固定 host，并要求 same-host。
+    # 纵深第二层: recipe(navUrl/capture/fetch)只允许 Direct 固定 host。
     # 不通过 → 400, error 不泄露具体红线细节(只回类型名)。
     try:
         recipe = cqu_data_harvest.parse_harvest_recipe(body)
@@ -985,12 +774,6 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
         log.warning("data-harvest deadline exceeded (operationTimeoutMs=%d)", operation_timeout_ms or -1)
         return web.json_response(
             {"ok": False, "error": "BROWSER_DEADLINE"}, status=503
-        )
-    except cqu_data_harvest.AtrustHarvestExpiredError:
-        # aTrust 状态与普通 CAS 独立；用受控 marker 让 DO 只清理并恢复 aTrust。
-        log.warning("data-harvest expired (aTrust session) → 409")
-        return web.json_response(
-            {"ok": False, "error": "ATRUST_SESSION_EXPIRED"}, status=409
         )
     except cqu_data_harvest.HarvestExpiredError:
         # 会话过期: navUrl 落回 CAS 登录页, 无 capture 命中 → 409 {"error":"TGT_EXPIRED"}
@@ -1032,7 +815,6 @@ def build_app() -> web.Application:
     app = web.Application()
     app.add_routes([
         web.post("/run", run_handler),
-        web.post("/atrust-login", atrust_login_handler),
         web.post("/code", code_handler),
         web.post("/code-permit", code_permit_handler),
         web.post("/service-ticket", service_ticket_handler),

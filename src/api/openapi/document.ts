@@ -369,8 +369,8 @@ export function buildOpenApiDocument(operations: readonly HttpOperation[]) {
           },
         },
         CquSessionStatus: {
-          type: "object", required: ["status", "atrustStatus"], additionalProperties: true,
-          properties: { status: { type: "string" }, atrustStatus: { type: "string" }, studentId: { type: "string" } },
+          type: "object", required: ["status"], additionalProperties: true,
+          properties: { status: { type: "string" }, studentId: { type: "string" } },
         },
         BindingSnapshot: {
           type: "object", additionalProperties: false,

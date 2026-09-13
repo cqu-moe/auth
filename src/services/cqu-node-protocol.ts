@@ -113,7 +113,6 @@ export interface NodeHarvestBody {
 export type NodeHarvestKind =
   | "ok"
   | "expired"
-  | "atrust_expired"
   | "instance_replaced"
   | "transient";
 
@@ -135,17 +134,11 @@ export function classifyNodeHarvestResponse(
 ): NodeHarvestClassification {
   if (status === 409) {
     // boot 替换是瞬态基础设施错误,不是校园会话 409:必须先于过期判定,
-    // 否则会误清 CAS/aTrust 会话。
+    // 否则会误清 CAS 会话。
     if (body?.error === "BROWSER_INSTANCE_REPLACED") {
       return {
         kind: "instance_replaced",
         detail: "browser instance replaced",
-      };
-    }
-    if (body?.error === "ATRUST_SESSION_EXPIRED") {
-      return {
-        kind: "atrust_expired",
-        detail: "node /data-harvest aTrust session expired",
       };
     }
     return { kind: "expired", detail: "node /data-harvest 409" };

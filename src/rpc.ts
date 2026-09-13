@@ -211,12 +211,12 @@ export class AuthService extends WorkerEntrypoint<Env> {
    *   ① authenticateClient(M-6 client_secret constant-time):RPC 调用方自报 clientId 不可信,
    *      失败 → { error: "INVALID_CLIENT" }(opaque)。
    *   ② 经 DO data-harvest chokepoint 出数(绝不在此直起浏览器):寻址 idFromName(userId),
-   *      DO 做精确 host 白名单(my.cqu.edu.cn 或其 aTrust 改写 host，且单配方不得混用)
-   *      / 限流 / 审计 / 各自独立的 needs_reauth 熔断。
+   *      DO 做精确 host 白名单(只允许 my.cqu.edu.cn) / 限流 / 审计 /
+   *      needs_reauth 熔断。
    *   ③ DO 非 ok → 回传其 code(NEEDS_REAUTH | SESSION_INACTIVE | RATE_LIMITED |
    *      INVALID_HARVEST_URL | WAF_CHALLENGE | TGT_EXPIRED);成功 → { captures, fetches }。
    *
-   * ⚠️ host 红线只允许两个代码内固定的精确主机，且同一配方必须 same-host，
+   * ⚠️ host 红线只允许代码内固定的 Direct 主机，
    *    防 auth 变开放代理(SSRF)。不做 client-scope 检查(通用原语, 取数授权 = M-6 机器信任 +
    *    用户 CQU 会话 active + host 白名单;业务级权益门禁在调用方 schedule 侧)。
    */

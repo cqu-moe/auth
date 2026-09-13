@@ -71,7 +71,7 @@
     "image": "./container/Dockerfile",
     "max_instances": 5,
     "instance_type": "basic",
-    // 全量迁移目标区域: APAC(实测 CAS/aTrust 全链路可用, 见 docs 实测报告)。
+    // 全量迁移目标区域: APAC(实测 Direct CAS 与 harvest 可用)。
     // max_instances=5 只是本地示例值, 生产定值由 Task 10 按实际负载计算后调整。
     "constraints": { "regions": ["APAC"] }
   }],

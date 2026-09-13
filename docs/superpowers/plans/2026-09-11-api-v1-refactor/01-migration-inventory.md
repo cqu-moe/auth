@@ -99,7 +99,7 @@ interface ApiProblem {
 
 - `UserRole`=`user|admin|superAdmin`；用户、session 的实际字段沿用插件配置，日期跨 HTTP 为 ISO 字符串。不要把 TS Date 直接写进公开契约。
 - `TicketTarget` 是严格 union：`{service:'jwxt'|'jxpj'|'library'|'card'}` 或 `{serviceUrl:string}`。serviceUrl 用现有 `validateCquServiceUrl` 规范化，并在 DO 再校验。两者都传返回 `400 INVALID_TARGET`；都缺返回 `400 MISSING_SERVICE`；无效 URL 保留 `INVALID_SERVICE_URL`。新接口 GET/HEAD 不得铸票。
-- `BindingSnapshot`=`{address?:string,bindStatus:'unbound'|'pending'|'active'|'revoked',kind?:'direct'|'forward',forwardAddress?:string,sessionStatus: CquSessionStatus | {error:true}}`。CquSessionStatus必有status/atrustStatus；有state时另有studentId/loginAt/lastKeepAlive/lastRequestedAt/atrustLoginAt/atrustLastUsedAt。时间戳维持当前毫秒数。状态枚举对照现有状态机；不暴露DO内部state、cookie或credentials。
+- `BindingSnapshot`=`{address?:string,bindStatus:'unbound'|'pending'|'active'|'revoked',kind?:'direct'|'forward',forwardAddress?:string,sessionStatus: CquSessionStatus | {error:true}}`。CquSessionStatus必有status；有state时另有studentId/loginAt/lastKeepAlive/lastRequestedAt。时间戳维持当前毫秒数。状态枚举对照现有状态机；不暴露DO内部state、cookie或credentials。
 - C04 的新创建只支持 direct；显式 `kind:'forward'` 在新旧入口均返回 `403 FORWARD_MODE_DISABLED`，schema允许识别forward这个输入值，再在业务层给403；不能先被通用enum校验吞成另一个错误。读旧 forward 记录、恢复旧 forward 页面和邮件 sender 校验仍保留。
 - `EntitlementItem`=`{subsystem:string,capability:string,value:string}`；value 沿用现有存储协议，由 `validateEntitlementItems` 检查目录键、flag/quota、有限数值和复合键唯一性。`[]` 对 C21 表示清空整组。C22 是仅覆盖预设键的 merge，绝不可变成整组替换。
 - `EntitlementRow` 在 Item 基础上带 userId 及基线实际返回的元数据；`EntitlementPreset` 保留 name/items/updatedAt。定义由 schema 推导、输出 OpenAPI 后生成前端类型，禁止前后端手写两套 DTO。

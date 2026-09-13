@@ -21,10 +21,6 @@ const CODE_TO_STATUS: Record<string, number> = {
   // TGT 过期:会话失效但可经重登自愈,同 SESSION_INACTIVE/NEEDS_REAUTH 一类回 409,
   // 不再 fallback 成 500(伪装成服务器崩溃,调用方无法判断该重试/会自愈)。
   TGT_EXPIRED: 409,
-  ATRUST_SESSION_EXPIRED: 409,
-  ATRUST_NEEDS_REAUTH: 409,
-  ATRUST_LOGIN_IN_FLIGHT: 409,
-  ATRUST_TRANSIENT: 503,
   // 浏览器容量/实例替换/截止时间:瞬态基础设施状态,保留旧会话 → 503。
   BROWSER_BUSY: 503,
   BROWSER_INSTANCE_REPLACED: 503,

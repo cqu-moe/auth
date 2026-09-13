@@ -411,7 +411,7 @@ async def run_login(
                 raise RuntimeError(f"first-factor failed: {verdict}")
 
             await switch_2fa_tab(page, method)
-            # 普通 CAS 与 aTrust 可并行完成第一因素，但共享的账号级验证码只能由租约
+            # 普通 CAS 与 QuickLogin 可并行完成第一因素，但共享的账号级验证码只能由租约
             # owner 请求/消费。旧 CLI/调用方未提供 permit_provider 时维持立即发码。
             if permit_provider is not None:
                 await permit_provider()

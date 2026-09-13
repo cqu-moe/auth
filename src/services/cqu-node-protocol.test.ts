@@ -453,15 +453,6 @@ describe("classifyNodeHarvestResponse", () => {
     expect(classifyNodeHarvestResponse(409, { ok: false }).kind).toBe("expired");
   });
 
-  it("409 with the controlled aTrust marker → atrust_expired", () => {
-    expect(
-      classifyNodeHarvestResponse(409, {
-        ok: false,
-        error: "ATRUST_SESSION_EXPIRED",
-      }).kind
-    ).toBe("atrust_expired");
-  });
-
   it("409 with the browser boot marker → instance_replaced, never session expiry", () => {
     expect(
       classifyNodeHarvestResponse(409, {
