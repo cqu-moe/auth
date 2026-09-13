@@ -9,11 +9,16 @@ host 红线:navUrl/fetch[].url 解析出的 host 必须精确为直连应用，�
 capture 匹配)抽出便于单测。
 """
 import asyncio
+import json
+import logging
 import urllib.parse
+import time
 from patchright.async_api import async_playwright
 import browser_profile
 import cqu_login  # UA / locale 等浏览器对抗参数,与取票统一
 import cqu_ticket_browser  # 复用 _close_browser_driver / TICKET_SEMAPHORE / 超时常量
+
+log = logging.getLogger("cqu-data-harvest")
 
 # harvest 只允许 Direct 目标 host(精确等于,绝不 endswith/in)。
 HARVEST_HOSTS = {
@@ -177,6 +182,30 @@ class HarvestTransientError(Exception):
     下个周期, 与 409(过期重登)/400(配方错)三态严格区分。
     """
 
+    def __init__(self, message: str, diagnostics: dict | None = None):
+        super().__init__(message)
+        self.diagnostics = diagnostics or {}
+
+
+def safe_url_for_diagnostics(url: str) -> str:
+    """去掉 query/fragment 后的 URL, 避免 CAqWHAeT/ST/ticket 进入日志或错误响应。"""
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+    except Exception:
+        return "unparsable"
+
+
+def body_summary_for_diagnostics(body: str) -> dict:
+    """只描述响应形状,绝不返回响应正文(可能是课表/学籍或瑞数挑战脚本)。"""
+    text = body or ""
+    return {
+        "bytes": len(text),
+        "jsonLike": text.lstrip().startswith(("{", "[")),
+        "hasTs": "$_ts" in text,
+        "hasCasLogin": "login-croypto" in text or "login-page-flowkey" in text,
+    }
+
 
 def _has_2xx(statuses: list[int]) -> bool:
     """fetch_statuses 里是否有任一 2xx(in-page GET 真拿到数据)。失败 fetch 记 status 0, 非 2xx。"""
@@ -239,8 +268,15 @@ async def harvest(state: dict, recipe: dict) -> dict:
     patterns: list[str] = recipe["capture"]
     fetch_list: list[dict] = recipe["fetch"]
     handles: dict = {"pw": None, "browser": None}
+    diagnostics: dict = {
+        "navUrl": safe_url_for_diagnostics(nav_url),
+        "expectedPatterns": patterns,
+    }
+    _run_started_at = 0.0
 
     async def _run() -> dict:
+        nonlocal _run_started_at
+        _run_started_at = time.monotonic()
         pw = await async_playwright().start()
         handles["pw"] = pw
         browser = await pw.chromium.launch(headless=True, args=[
@@ -253,15 +289,38 @@ async def harvest(state: dict, recipe: dict) -> dict:
             locale="zh-CN", timezone_id="Asia/Shanghai")
         # pattern -> {url,status,contentType,body};同 pattern 多次 fire 保留最后一次。
         captured: dict[str, dict] = {}
+        response_events: list[dict] = []
+        request_failures: list[dict] = []
+        goto_status: int | None = None
+        goto_error: str | None = None
+
+        def _record_response(resp, body: str | None = None) -> None:
+            should_record = (
+                capture_match(resp.url, patterns) is not None
+                or "/api/" in resp.url
+                or resp.status >= 400
+            )
+            if not should_record or len(response_events) >= 80:
+                return
+            entry = {
+                "url": safe_url_for_diagnostics(resp.url),
+                "status": resp.status,
+                "contentType": resp.headers.get("content-type", "")[:80],
+            }
+            if body is not None:
+                entry["body"] = body_summary_for_diagnostics(body)
+            response_events.append(entry)
 
         async def _on_response(resp) -> None:
             pat = capture_match(resp.url, patterns)
             if pat is None:
+                _record_response(resp)
                 return
             try:
                 body = await resp.text()
             except Exception:
                 body = ""
+            _record_response(resp, body)
             captured[pat] = {
                 "url": resp.url,
                 "status": resp.status,
@@ -271,9 +330,19 @@ async def harvest(state: dict, recipe: dict) -> dict:
 
         page = await ctx.new_page()
         page.on("response", lambda r: asyncio.create_task(_on_response(r)))
+        page.on("requestfailed", lambda req: request_failures.append({
+            "url": safe_url_for_diagnostics(req.url),
+            "failure": str(req.failure)[:120] if req.failure else None,
+        }) if len(request_failures) < 30 else None)
         try:
-            await page.goto(nav_url, wait_until="domcontentloaded", timeout=browser_profile.HARVEST_NAV_TIMEOUT_MS)
+            response = await page.goto(
+                nav_url,
+                wait_until="domcontentloaded",
+                timeout=browser_profile.HARVEST_NAV_TIMEOUT_MS,
+            )
+            goto_status = response.status if response else None
         except Exception:
+            goto_error = "GotoTimeoutOrNetworkError"
             pass
         # 等 capture 齐(或超时):页面有机 fire 是异步的,轮询 captured 覆盖期望集即提前结束。
         waited = 0
@@ -322,8 +391,35 @@ async def harvest(state: dict, recipe: dict) -> dict:
         if outcome == "expired":
             raise HarvestExpiredError("navUrl redirected to CAS login (session expired)")
         if outcome == "transient":
+            if not page_content:
+                try:
+                    page_content = await page.content()
+                except Exception:
+                    page_content = ""
+            try:
+                page_title = await page.title()
+            except Exception:
+                page_title = ""
+            diagnostics.update({
+                "capturedPatterns": sorted(captured),
+                "missingPatterns": [p for p in patterns if p not in captured],
+                "goto": {"status": goto_status, "error": goto_error},
+                "waitedMs": waited,
+                "pageUrl": safe_url_for_diagnostics(page.url),
+                "title": page_title[:120],
+                "pageBody": body_summary_for_diagnostics(page_content),
+                "responses": response_events,
+                "requestFailures": request_failures,
+                "fetches": [
+                    {"url": safe_url_for_diagnostics(f["url"]), "status": f["status"]}
+                    for f in fetches
+                ],
+                "elapsedMs": int((time.monotonic() - _run_started_at) * 1000),
+            })
             raise HarvestTransientError(
-                "no usable harvest data (navigation/WAF/network/session transient)")
+                "no usable harvest data (navigation/WAF/network/session transient)",
+                diagnostics,
+            )
 
         captures = [captured[p] for p in patterns if p in captured]
         return {"captures": captures, "fetches": fetches}
@@ -334,7 +430,18 @@ async def harvest(state: dict, recipe: dict) -> dict:
         timeout=cqu_ticket_browser.QUEUE_WAIT,
     )
     try:
-        return await asyncio.wait_for(_run(), timeout=HARVEST_OVERALL_TIMEOUT)
+        started_at = time.monotonic()
+        try:
+            return await asyncio.wait_for(_run(), timeout=HARVEST_OVERALL_TIMEOUT)
+        except Exception:
+            diagnostics.setdefault(
+                "elapsedMs", int((time.monotonic() - started_at) * 1000)
+            )
+            log.warning(
+                "harvest exception diagnostics %s",
+                json.dumps(diagnostics, sort_keys=True, separators=(",", ":"), default=str),
+            )
+            raise
     finally:
         cqu_ticket_browser.TICKET_SEMAPHORE.release()
         await cqu_ticket_browser._close_browser_driver(handles["browser"], handles["pw"])

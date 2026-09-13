@@ -1069,6 +1069,12 @@ export class CquSessionDO extends DurableObject<Env> {
       throw new CquSsoError("TGT_EXPIRED", `CQU session expired (${c.detail ?? "node /data-harvest"})`);
     }
     if (c.kind === "transient") {
+      if (c.diagnostics) {
+        console.warn(JSON.stringify({
+          event: "cqu.harvest.transient_diagnostics",
+          diagnostics: c.diagnostics,
+        }));
+      }
       throw new CquSsoError("WAF_CHALLENGE", `browser /data-harvest ${c.detail ?? "transient"}`);
     }
     return { captures: c.captures ?? [], fetches: c.fetches ?? [] };

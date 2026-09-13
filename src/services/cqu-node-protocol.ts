@@ -108,6 +108,7 @@ export interface NodeHarvestBody {
   captures?: HarvestCapture[];
   fetches?: HarvestFetch[];
   error?: string;
+  diagnostics?: Record<string, unknown>;
 }
 
 export type NodeHarvestKind =
@@ -121,6 +122,7 @@ export interface NodeHarvestClassification {
   captures?: HarvestCapture[];
   fetches?: HarvestFetch[];
   detail?: string;
+  diagnostics?: Record<string, unknown>;
 }
 
 /**
@@ -154,7 +156,11 @@ export function classifyNodeHarvestResponse(
       fetches: body.fetches ?? [],
     };
   }
-  return { kind: "transient", detail: `not ok (status=${status})` };
+  return {
+    kind: "transient",
+    detail: `not ok (status=${status})`,
+    diagnostics: body.diagnostics,
+  };
 }
 
 /**

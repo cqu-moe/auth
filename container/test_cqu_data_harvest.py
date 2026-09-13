@@ -285,6 +285,26 @@ def test_all_captures_present_true_for_empty_expected():
     assert m.all_captures_present(set(), []) is True
 
 
+def test_diagnostics_url_removes_query_and_fragment():
+    safe = m.safe_url_for_diagnostics(
+        "https://my.cqu.edu.cn/api/x?CAqWHAeT=SECRET&ticket=SECRET#fragment"
+    )
+    assert safe == "https://my.cqu.edu.cn/api/x"
+    assert "SECRET" not in safe
+
+
+def test_diagnostics_body_summary_never_contains_body():
+    body = "{\"token\": \"SECRET\", $_ts: 1}"
+    summary = m.body_summary_for_diagnostics(body)
+    assert summary == {
+        "bytes": len(body),
+        "jsonLike": True,
+        "hasTs": True,
+        "hasCasLogin": False,
+    }
+    assert "SECRET" not in str(summary)
+
+
 # --- classify_harvest_outcome: capture-wait 后的三态判定(ok / expired / transient) ---
 # navigate 失败(goto 超时/网络/非 CAS 的瑞数挑战页)会让期望 capture 收不齐, 此时绝不能当
 # "ok 空 harvest"返回(经 DO/RPC 报 200 假成功)。纯函数, 让 harvest 主体据此 raise:

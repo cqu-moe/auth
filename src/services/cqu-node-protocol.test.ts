@@ -475,6 +475,17 @@ describe("classifyNodeHarvestResponse", () => {
     expect(classifyNodeHarvestResponse(502, { ok: false }).kind).toBe("transient");
   });
 
+  it("502 carries sanitized harvest diagnostics for Auth-side structured logging", () => {
+    const diagnostics = { missingPatterns: ["my-table-detail"] };
+    const c = classifyNodeHarvestResponse(502, {
+      ok: false,
+      error: "HARVEST_TRANSIENT",
+      diagnostics,
+    });
+    expect(c.kind).toBe("transient");
+    expect(c.diagnostics).toBe(diagnostics);
+  });
+
   it("non-JSON (null body) → transient", () => {
     expect(classifyNodeHarvestResponse(200, null).kind).toBe("transient");
   });
