@@ -306,10 +306,15 @@ def sanitize_harvest_diagnostics(diagnostics: object) -> dict:
     if not isinstance(diagnostics, dict) or not isinstance(diagnostics.get("timeline"), list):
         return {"timeline": []}
     timeline = []
-    for raw_event in diagnostics["timeline"][:80]:
+    seen_stages: set[str] = set()
+    for raw_event in diagnostics["timeline"]:
         event = _sanitize_stage_event(raw_event)
-        if event is not None:
-            timeline.append(event)
+        if event is None or event["stage"] in seen_stages:
+            continue
+        timeline.append(event)
+        seen_stages.add(event["stage"])
+        if len(timeline) >= 80:
+            break
     return {"timeline": timeline}
 
 
@@ -321,6 +326,7 @@ class StageTrace:
         self._started_at = clock()
         self._max_events = max_events
         self.events: list[dict] = []
+        self._recorded_stages: set[str] = set()
 
     def has_stage(self, stage: str) -> bool:
         return any(event["stage"] == stage for event in self.events)
@@ -338,6 +344,8 @@ class StageTrace:
     ) -> None:
         if stage not in STAGE_NAMES:
             raise ValueError("stage not allowed")
+        if stage in self._recorded_stages:
+            return
         if len(self.events) >= self._max_events:
             return
         raw_event: dict = {
@@ -364,6 +372,7 @@ class StageTrace:
         event = _sanitize_stage_event(raw_event)
         if event is not None:
             self.events.append(event)
+            self._recorded_stages.add(stage)
 
     def diagnostics(self) -> dict:
         return {"timeline": self.events}
@@ -427,14 +436,17 @@ class ResponseStageCollector:
             self._trace.record("JUDGE_RESPONSE", **metadata)
 
         pattern = capture_match(url, self._patterns)
-        if _TABLE_PATH_MARKER in path:
+        is_table_response = _TABLE_PATH_MARKER in path
+        if is_table_response:
             # This must stay synchronous and before create_task/response.text().
             self._trace.record("TABLE_RESPONSE_SEEN", **metadata)
-        if pattern is not None:
+        if pattern is not None or is_table_response:
             task = asyncio.create_task(self._read_capture_body(response, pattern, metadata))
             self._tasks.add(task)
 
-    async def _read_capture_body(self, response, pattern: str, metadata: dict) -> None:
+    async def _read_capture_body(
+        self, response, pattern: str | None, metadata: dict,
+    ) -> None:
         try:
             body = await response.text()
         except asyncio.CancelledError:
@@ -445,12 +457,13 @@ class ResponseStageCollector:
             return
         if _TABLE_PATH_MARKER in urllib.parse.urlsplit(metadata["url"]).path.lower():
             self._trace.record("TABLE_BODY_READY", body=body, **metadata)
-        self._captured[pattern] = {
-            "url": metadata["url"],
-            "status": metadata["status"],
-            "contentType": metadata["content_type"],
-            "body": body,
-        }
+        if pattern is not None:
+            self._captured[pattern] = {
+                "url": metadata["url"],
+                "status": metadata["status"],
+                "contentType": metadata["content_type"],
+                "body": body,
+            }
 
     async def close(self) -> None:
         self._closed = True

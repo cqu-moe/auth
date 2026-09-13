@@ -388,6 +388,29 @@ def test_diagnostics_boundary_allowlist_drops_untrusted_secrets():
     assert "20260001" not in str(safe)
 
 
+def test_diagnostics_boundary_deduplicates_before_bounding_timeline():
+    repeated = [{
+        "stage": "APP_READY_API",
+        "elapsedMs": index,
+        "url": "https://my.cqu.edu.cn/api/resourceapi/session/info-detail",
+        "status": 200,
+        "resourceType": "fetch",
+    } for index in range(100)]
+    diagnostics = {
+        "timeline": repeated + [{
+            "stage": "DONE",
+            "elapsedMs": 101,
+            "url": "https://my.cqu.edu.cn/workspace/curriculum",
+        }],
+    }
+
+    safe = m.sanitize_harvest_diagnostics(diagnostics)
+
+    assert [event["stage"] for event in safe["timeline"]] == [
+        "APP_READY_API", "DONE",
+    ]
+
+
 class _FakeRequest:
     def __init__(self, resource_type):
         self.resource_type = resource_type
@@ -434,6 +457,49 @@ async def test_table_response_seen_survives_body_read_failure():
         "FIRST_RESPONSE", "TABLE_RESPONSE_SEEN",
     ]
 
+    await collector.close()
+
+    assert [event["stage"] for event in trace.events] == [
+        "FIRST_RESPONSE", "TABLE_RESPONSE_SEEN", "TABLE_BODY_FAILURE",
+    ]
+    assert captured == {}
+    assert "SECRET" not in str(trace.events)
+
+
+@pytest.mark.asyncio
+async def test_table_body_ready_is_recorded_without_capture_pattern():
+    trace = m.StageTrace(clock=lambda: 5.0)
+    captured = {}
+    collector = m.ResponseStageCollector(trace, [], captured)
+    response = _FakeResponse(
+        "https://my.cqu.edu.cn/api/timetable/student/my-table-detail?CAqWHAeT=SECRET",
+        body='{"studentId":"20260001"}',
+    )
+
+    collector.on_response(response)
+    await collector.close()
+
+    assert [event["stage"] for event in trace.events] == [
+        "FIRST_RESPONSE", "TABLE_RESPONSE_SEEN", "TABLE_BODY_READY",
+    ]
+    assert captured == {}
+    assert trace.events[-1]["bodyBytes"] == 24
+    assert "20260001" not in str(trace.events)
+
+
+@pytest.mark.asyncio
+async def test_table_body_failure_is_recorded_for_unrelated_capture_pattern():
+    trace = m.StageTrace(clock=lambda: 5.0)
+    captured = {}
+    collector = m.ResponseStageCollector(
+        trace, ["resourceapi/session/info-detail"], captured,
+    )
+    response = _FakeResponse(
+        "https://my.cqu.edu.cn/api/timetable/student/my-table-detail",
+        body_error=RuntimeError("raw body SECRET"),
+    )
+
+    collector.on_response(response)
     await collector.close()
 
     assert [event["stage"] for event in trace.events] == [
@@ -529,6 +595,37 @@ async def test_response_classifier_ignores_stage_shaped_urls_on_other_hosts():
     await collector.close()
 
     assert [event["stage"] for event in trace.events] == ["FIRST_RESPONSE"]
+
+
+@pytest.mark.asyncio
+async def test_repeated_response_stages_cannot_exhaust_later_required_stages():
+    trace = m.StageTrace(clock=lambda: 5.0)
+    collector = m.ResponseStageCollector(trace, [], {})
+
+    for index in range(100):
+        collector.on_response(_FakeResponse(
+            "https://my.cqu.edu.cn/api/resourceapi/session/info-detail"
+            f"?poll={index}",
+        ))
+        collector.on_response(_FakeResponse(
+            "https://my.cqu.edu.cn/workspace/static/js/chunk-577be296.js"
+            f"?retry={index}",
+            resource_type="script",
+        ))
+    await collector.close()
+    trace.record(
+        "GET_FETCH_END",
+        url="https://my.cqu.edu.cn/api/exam/examTask/get-student-exam-list",
+        status=200,
+        resource_type="fetch",
+        body="[]",
+    )
+    trace.record("DONE", url="https://my.cqu.edu.cn/workspace/curriculum")
+
+    stages = [event["stage"] for event in trace.events]
+    assert stages.count("APP_READY_API") == 1
+    assert stages.count("ROUTE_CHUNK_RESPONSE") == 1
+    assert stages[-2:] == ["GET_FETCH_END", "DONE"]
 
 
 def test_dynamic_cookie_pair_requires_nonempty_s_and_t_values():
