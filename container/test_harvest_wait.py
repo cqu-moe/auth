@@ -154,13 +154,40 @@ async def test_hung_table_body_is_distinct_and_does_not_reload():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("events,cookie_at,expected", [
-    ([], 100, 30), ([], 1, 45), (bootstrap(judge=100), 1, 60),
+    ([], 100, 45), ([], 1, 45), (bootstrap(judge=100), 1, 60),
 ])
 async def test_bootstrap_limits_are_milestones_not_additive(events, cookie_at, expected):
     page = TimelinePage(events, cookie_at=cookie_at)
     await wait(page)
     assert page.now == pytest.approx(expected)
     assert page.reloads == []
+
+
+@pytest.mark.asyncio
+async def test_app_document_progress_continues_when_dynamic_cookie_is_not_observed():
+    page = TimelinePage(bootstrap() + [(55, response(TABLE))], cookie_at=100)
+    page.trace.record("NAV_START", url=NAV)
+
+    await wait(page)
+
+    assert TABLE in page.captured
+    assert page.trace.has_stage("APP_DOCUMENT_REACHED")
+    assert not page.trace.has_stage("DYNAMIC_COOKIES_PRESENT")
+    assert 55 <= page.now < 56
+    assert page.reloads == []
+
+
+def test_app_document_progress_classifies_missing_api_as_app_ready_timeout():
+    trace = m.StageTrace()
+    trace.record("APP_DOCUMENT_REACHED", url=NAV, status=200, resource_type="document")
+
+    assert m.harvest_failure_code(
+        trace,
+        [TABLE],
+        {},
+        required_statuses=[],
+        fetch_statuses=[],
+    ) == "APP_READY_TIMEOUT"
 
 
 @pytest.mark.asyncio
@@ -334,6 +361,8 @@ async def test_harvest_uses_one_browser_context_page_and_preserves_failure_gate(
             "TABLE_API_REJECTED" if capture_status == 503 else "HARVEST_TRANSIENT"
         )
         assert exports == []
+        if missing or capture_status == 503:
+            assert page.fetch_times == []
     else:
         result = await m.harvest({}, recipe)
         assert result["fetches" if fetch_only else "captures"]

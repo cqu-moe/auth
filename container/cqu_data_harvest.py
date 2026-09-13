@@ -579,12 +579,16 @@ def harvest_failure_code(
             return "TABLE_BODY_TIMEOUT"
         if trace.has_stage("TABLE_REQUEST_SEEN") and not trace.has_stage("TABLE_RESPONSE_SEEN"):
             return "TABLE_REQUEST_HUNG"
-    if any(not 200 <= status < 300 for status in statuses):
+    if 0 in statuses:
         return "HARVEST_TRANSIENT"
     if all_captures_present(set(captured), patterns):
+        if any(not 200 <= status < 300 for status in statuses):
+            return "HARVEST_TRANSIENT"
         return None
     if requires_table_capture(patterns):
-        if not trace.has_stage("DYNAMIC_COOKIES_PRESENT"):
+        if not trace.has_stage("DYNAMIC_COOKIES_PRESENT") and not trace.has_stage(
+            "APP_DOCUMENT_REACHED"
+        ):
             return "WAF_BOOTSTRAP_TIMEOUT"
         if not all(trace.has_stage(stage) for stage in (
             "APP_DOCUMENT_REACHED", "APP_READY_API", "JUDGE_RESPONSE",
@@ -592,6 +596,8 @@ def harvest_failure_code(
             return "APP_READY_TIMEOUT"
         if not trace.has_stage("TABLE_RESPONSE_SEEN"):
             return "TABLE_CAPTURE_TIMEOUT"
+    if any(not 200 <= status < 300 for status in statuses):
+        return "HARVEST_TRANSIENT"
     return "HARVEST_TRANSIENT"
 
 
@@ -633,7 +639,7 @@ async def wait_for_harvest_captures(
             trace.record("DYNAMIC_COOKIES_PRESENT", url=nav_url)
             break
         if clock() >= cookie_deadline:
-            return
+            break
         await page.wait_for_timeout(min(CAPTURE_POLL_MS, (cookie_deadline - clock()) * 1000))
 
     for stage, milestone_ms in (("APP_DOCUMENT_REACHED", APP_READY_WAIT_MS),
@@ -791,6 +797,27 @@ async def harvest(state: dict, recipe: dict) -> dict:
                 page, ctx, nav_url, patterns, captured, trace,
                 started_at=navigation_started_at, deadline=work_deadline,
             )
+
+            # A capture recipe cannot be rescued by supplemental GETs. Fail at
+            # the browser stage before issuing Bearer requests while the app may
+            # still be completing its token-index bootstrap.
+            prefetch_code = failure_code() if patterns else None
+            if prefetch_code is not None:
+                page_content = "" if captured else await page.content()
+                outcome = classify_harvest_outcome(
+                    set(captured), patterns, page_content, page.url, [],
+                )
+                if outcome == "expired":
+                    trace.record("HARVEST_FAILURE", url=page.url)
+                    raise HarvestExpiredError(
+                        "navUrl redirected to CAS login (session expired)"
+                    )
+                trace.record("HARVEST_FAILURE", url=page.url)
+                raise HarvestTransientError(
+                    "required capture unavailable before supplemental fetch",
+                    diagnostics,
+                    code=prefetch_code,
+                )
 
             await run_serial_inpage_gets(page, fetch_list, trace, fetches)
 
