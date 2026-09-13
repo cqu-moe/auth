@@ -11,6 +11,7 @@ capture 匹配)抽出便于单测。
 import asyncio
 import json
 import logging
+import random
 import re
 import urllib.parse
 import time
@@ -514,14 +515,106 @@ def classify_harvest_outcome(
     return "ok" if _has_2xx(fetch_statuses or []) else "transient"
 
 
-# 导航后等页面有机 fire 完 capture 的盲等上限(ms):课表 POST(my-table-detail)+ 学期
-# 由 /workspace/curriculum 自动 fire,实测百毫秒级到齐;给足 8s 容瑞数当场重算/重定向。
+# Generic capture recipes retain their profile-specific wait.
 CAPTURE_WAIT_MS = browser_profile.CAPTURE_WAIT_MS
 CAPTURE_POLL_MS = 150
+DYNAMIC_COOKIE_WAIT_MS = 30_000
+APP_READY_WAIT_MS = 45_000
+JUDGE_WAIT_MS = 60_000
+TABLE_WAIT_MS = 90_000
 # 单个 in-page fetch 的超时(ms):同源 GET 读豁免,正常亚秒级。
 INPAGE_FETCH_TIMEOUT_MS = browser_profile.INPAGE_FETCH_TIMEOUT_MS
 # harvest 整段执行上限(秒):navigate 过瑞数 + 等 capture + 跑 fetch[]。复用取票 overall_timeout 量级。
 HARVEST_OVERALL_TIMEOUT = browser_profile.HARVEST_OVERALL_TIMEOUT_S
+
+
+def requires_table_capture(patterns: list[str]) -> bool:
+    return any(_TABLE_PATH_MARKER in pattern.lower() for pattern in patterns)
+
+
+async def wait_for_harvest_captures(
+    page, context, nav_url: str, patterns: list[str], captured: dict,
+    trace: StageTrace, *, started_at: float, deadline: float,
+    clock=time.monotonic, uniform=random.uniform,
+) -> None:
+    """Observe one collector under navigation milestones and one table envelope.
+
+    Returning with missing captures leaves classification to harvest's existing
+    failure gate. A seen table with a pending body never triggers a reload.
+    """
+    def complete():
+        return all_captures_present(set(captured), patterns)
+
+    async def wait_until(predicate, until):
+        until = min(until, deadline)
+        while not complete() and not predicate() and clock() < until:
+            await page.wait_for_timeout(min(CAPTURE_POLL_MS, (until - clock()) * 1000))
+        return complete() or predicate()
+
+    if complete():
+        return
+    if not requires_table_capture(patterns):
+        await wait_until(complete, clock() + CAPTURE_WAIT_MS / 1000)
+        return
+
+    hostname = (urllib.parse.urlsplit(nav_url).hostname or "").lower()
+    cookie_deadline = min(started_at + DYNAMIC_COOKIE_WAIT_MS / 1000, deadline)
+    while not trace.has_stage("DYNAMIC_COOKIES_PRESENT") and not complete():
+        try:
+            # URL scoping prevents an unrelated host's same-named cookies
+            # from satisfying Direct readiness.
+            cookies = await context.cookies([nav_url])
+        except Exception:
+            cookies = []
+        if dynamic_cookie_pair_present(cookies, hostname):
+            trace.record("DYNAMIC_COOKIES_PRESENT", url=nav_url)
+            break
+        if clock() >= cookie_deadline:
+            return
+        await page.wait_for_timeout(min(CAPTURE_POLL_MS, (cookie_deadline - clock()) * 1000))
+
+    for stage, milestone_ms in (("APP_READY_API", APP_READY_WAIT_MS),
+                                ("JUDGE_RESPONSE", JUDGE_WAIT_MS)):
+        if not await wait_until(lambda: trace.has_stage(stage), started_at + milestone_ms / 1000):
+            return
+    if complete():
+        return
+
+    table_deadline = min(clock() + TABLE_WAIT_MS / 1000, deadline)
+    table_seen = lambda: trace.has_stage("TABLE_RESPONSE_SEEN")
+
+    async def wait_for_body():
+        await wait_until(lambda: trace.has_stage("TABLE_BODY_FAILURE"), table_deadline)
+
+    if table_seen():
+        await wait_for_body()
+        return
+    await wait_until(table_seen, min(clock() + uniform(15, 25), table_deadline))
+    if complete():
+        return
+    if table_seen():
+        await wait_for_body()
+        return
+    await wait_until(table_seen, min(clock() + uniform(4, 8), table_deadline))
+    if complete():
+        return
+    if table_seen():
+        await wait_for_body()
+        return
+    remaining_ms = (table_deadline - clock()) * 1000
+    if remaining_ms <= 0:
+        return
+    try:
+        await page.reload(
+            wait_until="commit",
+            timeout=min(browser_profile.HARVEST_NAV_TIMEOUT_MS, remaining_ms),
+        )
+    except Exception:
+        trace.record("NAV_FAILURE", url=nav_url, resource_type="document")
+    await wait_until(
+        lambda: trace.has_stage("TABLE_BODY_FAILURE"),
+        min(clock() + 45, table_deadline),
+    )
 
 
 async def harvest(state: dict, recipe: dict) -> dict:
@@ -543,6 +636,7 @@ async def harvest(state: dict, recipe: dict) -> dict:
     diagnostics = trace.diagnostics()
 
     async def _run() -> dict:
+        work_deadline = time.monotonic() + HARVEST_OVERALL_TIMEOUT
         pw = await async_playwright().start()
         handles["pw"] = pw
         browser = await pw.chromium.launch(headless=True, args=[
@@ -558,35 +652,22 @@ async def harvest(state: dict, recipe: dict) -> dict:
         response_collector = ResponseStageCollector(trace, patterns, captured)
         page.on("response", response_collector.on_response)
 
-        async def _record_dynamic_cookies_if_present() -> None:
-            if trace.has_stage("DYNAMIC_COOKIES_PRESENT"):
-                return
-            try:
-                cookies = await ctx.cookies()
-            except Exception:
-                return
-            hostname = (urllib.parse.urlsplit(nav_url).hostname or "").lower()
-            if dynamic_cookie_pair_present(cookies, hostname):
-                trace.record("DYNAMIC_COOKIES_PRESENT", url=nav_url)
-
         try:
+            navigation_started_at = time.monotonic()
             trace.record("NAV_START", url=nav_url, resource_type="document")
             try:
                 await page.goto(
                     nav_url,
-                    wait_until="domcontentloaded",
+                    wait_until="commit" if requires_table_capture(patterns) else "domcontentloaded",
                     timeout=browser_profile.HARVEST_NAV_TIMEOUT_MS,
                 )
             except Exception:
                 trace.record("NAV_FAILURE", url=nav_url, resource_type="document")
 
-            await _record_dynamic_cookies_if_present()
-            # Keep the existing wait behavior; Task 3 owns stage-specific waits/reload.
-            waited = 0
-            while waited < CAPTURE_WAIT_MS and not all_captures_present(set(captured), patterns):
-                await page.wait_for_timeout(CAPTURE_POLL_MS)
-                waited += CAPTURE_POLL_MS
-                await _record_dynamic_cookies_if_present()
+            await wait_for_harvest_captures(
+                page, ctx, nav_url, patterns, captured, trace,
+                started_at=navigation_started_at, deadline=work_deadline,
+            )
 
             # Keep GETs serial and GET-only; Task 6 owns inter-fetch jitter.
             fetches: list[dict] = []

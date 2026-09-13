@@ -25,10 +25,11 @@ TAB_CLICK_TIMEOUT_MS = 10_000 if CLOUDFLARE_PROFILE else 4_000
 BROWSER_LAUNCH_TIMEOUT_MS = 60_000 if CLOUDFLARE_PROFILE else 30_000
 
 # ── 采集(cqu_data_harvest.py) ───────────────────────────────────────────────
-# capture 盲等 8s→30s;单 in-page fetch 15s→30s;整段 45s→120s;导航 25s→60s。
+# Generic capture wait 8s→30s; GET 15s→30s; navigation 25s→60s.
+# Table stages share a 150s work ceiling: queue 35s + cleanup 15s + margin 10s = 210s.
 CAPTURE_WAIT_MS = 30_000 if CLOUDFLARE_PROFILE else 8_000
 INPAGE_FETCH_TIMEOUT_MS = 30_000 if CLOUDFLARE_PROFILE else 15_000
-HARVEST_OVERALL_TIMEOUT_S = 120.0 if CLOUDFLARE_PROFILE else 45.0
+HARVEST_OVERALL_TIMEOUT_S = 150.0
 HARVEST_NAV_TIMEOUT_MS = 60_000 if CLOUDFLARE_PROFILE else 25_000
 
 # ── CAS 取票/保活(cqu_ticket_browser.py) ────────────────────────────────────
