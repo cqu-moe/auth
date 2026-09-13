@@ -411,6 +411,17 @@ def test_diagnostics_boundary_deduplicates_before_bounding_timeline():
     ]
 
 
+@pytest.mark.parametrize("status", [0, 99, 100, 200, 599, 600, True, "200", None])
+def test_diagnostics_status_accepts_only_http_response_codes(status):
+    safe = m.sanitize_harvest_diagnostics({"timeline": [{
+        "stage": "GET_FETCH_FAILURE", "elapsedMs": 1, "status": status,
+    }]})
+    expected = {"stage": "GET_FETCH_FAILURE", "elapsedMs": 1}
+    if status in (100, 200, 599):
+        expected["status"] = status
+    assert safe == {"timeline": [expected]}
+
+
 class _FakeRequest:
     def __init__(self, resource_type):
         self.resource_type = resource_type

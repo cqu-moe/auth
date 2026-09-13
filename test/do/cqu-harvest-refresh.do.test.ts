@@ -34,7 +34,10 @@ describe("harvest refreshed storage state", () => {
     const stub = freshStub("refresh-valid");
     await seedSession(stub);
     const refreshed = refreshedState();
-    spyBrowserFetch({ "/data-harvest": async () => Response.json({ ok: true, ...data, state: refreshed }) });
+    spyBrowserFetch({ "/data-harvest": async () => Response.json({
+      ok: true, ...data, state: refreshed,
+      diagnostics: { timeline: [{ stage: "DONE", elapsedMs: 42 }], secret: "SECRET" },
+    }) });
     const res = await postHarvest(stub);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(data);

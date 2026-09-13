@@ -13,6 +13,7 @@
 运行:
     python3 -m pytest container/test_data_harvest.py -v
 """
+import json
 import os
 import sys
 
@@ -61,6 +62,49 @@ class DataHarvestTestCase(AioHTTPTestCase):
         assert body["captures"][0]["status"] == 200
         assert body["fetches"][0]["body"] == "[]"
         assert body["state"] == {"cookies": [], "origins": []}
+
+    async def test_success_logs_only_sanitized_timeline_and_preserves_internal_response(self):
+        result = {
+            "captures": [{"url": "u", "status": 200, "body": "course body SECRET"}],
+            "fetches": [{"url": "f", "status": 200, "body": "exam body SECRET"}],
+            "state": {"cookies": [{"name": "CtLgrmkSWHBZT", "value": "cookie SECRET"}], "origins": []},
+            "diagnostics": {
+                "timeline": [{
+                    "stage": "DONE", "elapsedMs": 42,
+                    "url": "https://my.cqu.edu.cn/workspace/curriculum?token=SECRET#fragment",
+                    "status": 200, "resourceType": "fetch",
+                    "contentType": "application/json; token=SECRET",
+                    "body": "course body SECRET", "cookie": "cookie SECRET",
+                    "token": "token SECRET", "title": "student name SECRET",
+                    "studentId": "20260001", "field": "arbitrary SECRET",
+                    "state": {"cookies": [{"value": "SECRET"}]},
+                }, {"stage": "ARBITRARY SECRET", "elapsedMs": 43}],
+                "body": "raw body SECRET", "studentId": "20260001",
+            },
+        }
+
+        async def fake_harvest(state, recipe):
+            return result
+
+        server.cqu_data_harvest.harvest = fake_harvest
+        with self.assertLogs(server.log.name, level="INFO") as logs:
+            resp = await self.client.post("/data-harvest", json=_payload())
+
+        expected = {"timeline": [{
+            "stage": "DONE", "elapsedMs": 42,
+            "url": "https://my.cqu.edu.cn/workspace/curriculum",
+            "status": 200, "resourceType": "fetch", "contentType": "application/json",
+        }]}
+        messages = [record.getMessage() for record in logs.records]
+        diagnostic_messages = [message for message in messages if "diagnostics " in message]
+        assert len(diagnostic_messages) == 1
+        assert json.loads(diagnostic_messages[0].split("diagnostics ", 1)[1]) == expected
+        assert "SECRET" not in str(messages)
+        assert "20260001" not in str(messages)
+        assert "fragment" not in str(messages)
+        assert resp.status == 200
+        body = await resp.json()
+        assert body == {"ok": True, **result, "diagnostics": expected}
 
     async def test_data_harvest_invalid_json(self):
         resp = await self.client.post("/data-harvest", data="not json")

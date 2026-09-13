@@ -766,9 +766,15 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
         result = await run_bounded(
             cqu_data_harvest.harvest(state, recipe), operation_timeout_ms
         )
-        # captures/fetches 不记日志(可能含课表/学籍数据); 只记计数供诊断。
-        log.info("data-harvest ok (captures=%d fetches=%d)",
-                 len(result.get("captures", [])), len(result.get("fetches", [])))
+        diagnostics = cqu_data_harvest.sanitize_harvest_diagnostics(
+            result.get("diagnostics", {})
+        )
+        # Course bodies and refreshed state stay outside the diagnostic log.
+        log.info("data-harvest ok (captures=%d fetches=%d) diagnostics %s",
+                 len(result.get("captures", [])), len(result.get("fetches", [])),
+                 json.dumps(diagnostics, sort_keys=True, separators=(",", ":")))
+        if "diagnostics" in result:
+            result = {**result, "diagnostics": diagnostics}
         return web.json_response({"ok": True, **result})
     except BrowserDeadlineExceeded:
         # 稳定 deadline 码优先于 harvest 业务分类,绝不能被包装成 HARVEST_TRANSIENT。

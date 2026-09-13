@@ -295,7 +295,7 @@ def _sanitize_stage_event(event: object) -> dict | None:
     if url is not None:
         safe["url"] = url
     status = event.get("status")
-    if isinstance(status, int) and not isinstance(status, bool) and 0 <= status <= 599:
+    if isinstance(status, int) and not isinstance(status, bool) and 100 <= status <= 599:
         safe["status"] = status
     resource_type = event.get("resourceType")
     if resource_type in _RESOURCE_TYPES:
@@ -556,6 +556,8 @@ TABLE_WAIT_MS = 90_000
 INPAGE_FETCH_TIMEOUT_MS = browser_profile.INPAGE_FETCH_TIMEOUT_MS
 # harvest 整段执行上限(秒):navigate 过瑞数 + 等 capture + 跑 fetch[]。复用取票 overall_timeout 量级。
 HARVEST_OVERALL_TIMEOUT = browser_profile.HARVEST_OVERALL_TIMEOUT_S
+STATE_EXPORT_TIMEOUT_S = 5.0
+STATE_EXPORT_DEADLINE_MARGIN_S = 1.0
 
 
 def requires_table_capture(patterns: list[str]) -> bool:
@@ -601,7 +603,7 @@ async def wait_for_harvest_captures(
     """Observe one collector under navigation milestones and one table envelope.
 
     Returning with missing captures leaves classification to harvest's existing
-    failure gate. A seen table with a pending body never triggers a reload.
+    failure gate. A table request or response already in flight prevents reload.
     """
     def complete():
         return all_captures_present(set(captured), patterns)
@@ -643,25 +645,27 @@ async def wait_for_harvest_captures(
         return
 
     table_deadline = min(clock() + TABLE_WAIT_MS / 1000, deadline)
-    table_seen = lambda: trace.has_stage("TABLE_RESPONSE_SEEN")
+    table_started = lambda: (
+        trace.has_stage("TABLE_REQUEST_SEEN") or trace.has_stage("TABLE_RESPONSE_SEEN")
+    )
 
-    async def wait_for_body():
+    async def wait_for_table():
         await wait_until(lambda: trace.has_stage("TABLE_BODY_FAILURE"), table_deadline)
 
-    if table_seen():
-        await wait_for_body()
+    if table_started():
+        await wait_for_table()
         return
-    await wait_until(table_seen, min(clock() + uniform(15, 25), table_deadline))
+    await wait_until(table_started, min(clock() + uniform(15, 25), table_deadline))
     if complete():
         return
-    if table_seen():
-        await wait_for_body()
+    if table_started():
+        await wait_for_table()
         return
-    await wait_until(table_seen, min(clock() + uniform(4, 8), table_deadline))
+    await wait_until(table_started, min(clock() + uniform(4, 8), table_deadline))
     if complete():
         return
-    if table_seen():
-        await wait_for_body()
+    if table_started():
+        await wait_for_table()
         return
     remaining_ms = (table_deadline - clock()) * 1000
     if remaining_ms <= 0:
@@ -756,8 +760,7 @@ async def harvest(state: dict, recipe: dict) -> dict:
             [f["status"] for f in fetches], table_statuses=table_statuses,
         )
 
-    async def _run() -> dict:
-        work_deadline = time.monotonic() + HARVEST_OVERALL_TIMEOUT
+    async def _run(work_deadline: float) -> dict:
         pw = await async_playwright().start()
         handles["pw"] = pw
         browser = await pw.chromium.launch(headless=True, args=[
@@ -818,10 +821,18 @@ async def harvest(state: dict, recipe: dict) -> dict:
             # Export only after complete successful captures and supplemental GETs.
             if (all(200 <= capture["status"] < 300 for capture in captures)
                     and all(200 <= status < 300 for status in fetch_statuses)):
-                try:
-                    result["state"] = await ctx.storage_state()
-                except Exception:
-                    log.warning("harvest state refresh skipped (export failed)")
+                export_deadline = min(
+                    time.monotonic() + STATE_EXPORT_TIMEOUT_S,
+                    work_deadline - STATE_EXPORT_DEADLINE_MARGIN_S,
+                )
+                if export_deadline > time.monotonic():
+                    try:
+                        async with asyncio.timeout_at(export_deadline):
+                            result["state"] = await ctx.storage_state()
+                    except Exception:
+                        # Timeout/internal export errors cannot discard complete data.
+                        # CancelledError still propagates to the owning operation.
+                        log.warning("harvest state refresh skipped (export failed)")
             return result
         finally:
             # No response-body task may outlive the browser/context cleanup below.
@@ -836,7 +847,7 @@ async def harvest(state: dict, recipe: dict) -> dict:
             work_timeout = asyncio.timeout(HARVEST_OVERALL_TIMEOUT)
             try:
                 async with work_timeout:
-                    return await _run()
+                    return await _run(work_timeout.when())
             except TimeoutError:
                 if not work_timeout.expired():
                     raise

@@ -477,10 +477,13 @@ describe("classifyNodeHarvestResponse", () => {
   });
 
   it("200 + ok → ok with captures/fetches", () => {
-    const c = classifyNodeHarvestResponse(200, okBody);
+    const c = classifyNodeHarvestResponse(200, {
+      ...okBody, diagnostics: { timeline: [{ stage: "DONE" }], secret: "SECRET" },
+    });
     expect(c.kind).toBe("ok");
     expect(c.captures?.[0].status).toBe(200);
     expect(c.fetches?.[0].body).toBe("[]");
+    expect(c).not.toHaveProperty("diagnostics");
   });
 
   it("409 → expired (session needs reauth)", () => {

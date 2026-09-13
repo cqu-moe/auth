@@ -15,9 +15,10 @@ TABLE = "/my-table-detail"
 
 
 class TimelinePage:
-    def __init__(self, events=(), cookie_at=1, reload_events=()):
+    def __init__(self, events=(), cookie_at=1, reload_events=(), requests=()):
         self.now = 0.0
         self.events = list(events)
+        self.requests = list(requests)
         self.cookie_at = cookie_at
         self.reload_events = reload_events
         self.reloads = []
@@ -36,6 +37,10 @@ class TimelinePage:
 
     async def wait_for_timeout(self, ms):
         self.now = round(self.now + ms / 1000, 6)
+        for at, request in list(self.requests):
+            if at <= self.now:
+                self.requests.remove((at, request))
+                self.collector.on_request(request)
         for at, response in list(self.events):
             if at <= self.now:
                 self.events.remove((at, response))
@@ -113,6 +118,27 @@ async def test_table_arriving_during_pre_reload_pause_avoids_reload():
     await wait(page)
     assert TABLE in page.captured
     assert page.reloads == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("request_at", [59, 63], ids=["before-pause", "during-pause"])
+@pytest.mark.parametrize("response_at", [120, None], ids=["late-response", "hung-request"])
+async def test_table_request_suppresses_reload_and_keeps_original_envelope(request_at, response_at):
+    events = bootstrap() + ([] if response_at is None else [(response_at, response(TABLE))])
+    page = TimelinePage(events, requests=[(
+        request_at, SimpleNamespace(url=NAV + TABLE, resource_type="fetch"),
+    )])
+
+    await wait(page)
+
+    assert page.reloads == []
+    assert page.trace.has_stage("TABLE_REQUEST_SEEN")
+    if response_at is None:
+        assert page.captured == {}
+        assert page.now == pytest.approx(130.05)  # observed judge + original 90s envelope
+    else:
+        assert page.captured[TABLE]["body"] == "{}"
+        assert 120 <= page.now < 121
 
 
 @pytest.mark.asyncio
@@ -322,6 +348,140 @@ async def test_harvest_uses_one_browser_context_page_and_preserves_failure_gate(
     assert page.goto_modes == ["domcontentloaded" if fetch_only else "commit"]
     if fetch_only:
         assert page.fetch_times == [0]
+
+
+@pytest.fixture
+def complete_harvest_browser(monkeypatch):
+    callbacks = {}
+    counts = {"launch": 0, "context": 0, "page": 0, "close": 0}
+
+    async def goto(*args, **kwargs):
+        callbacks["response"](response(TABLE, body='{"courses":["complete"]}'))
+        await asyncio.sleep(0)
+
+    async def evaluate(*args):
+        return {"status": 200, "body": '["complete exam"]'}
+
+    page = SimpleNamespace(
+        on=lambda event, callback: callbacks.update({event: callback}),
+        goto=goto, evaluate=evaluate, url=NAV,
+    )
+
+    async def new_page():
+        counts["page"] += 1
+        return page
+
+    context = SimpleNamespace(new_page=new_page)
+
+    async def new_context(**kwargs):
+        counts["context"] += 1
+        return context
+
+    async def launch(**kwargs):
+        counts["launch"] += 1
+        return SimpleNamespace(new_context=new_context)
+
+    async def start():
+        return SimpleNamespace(chromium=SimpleNamespace(launch=launch))
+
+    async def close(*args):
+        counts["close"] += 1
+
+    monkeypatch.setattr(m, "async_playwright", lambda: SimpleNamespace(start=start))
+    monkeypatch.setattr(m.cqu_ticket_browser, "_close_browser_driver", close)
+    return context, counts
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("work,export_cap,margin,export_started", [
+    (0.2, 0.02, 0.05, True),
+    (0.1, 1.0, 0.05, True),
+    (0.02, 1.0, 0.05, False),
+], ids=["export-cap", "remaining-work-margin", "insufficient-margin"])
+async def test_optional_export_stall_preserves_complete_data(
+    monkeypatch, complete_harvest_browser, work, export_cap, margin, export_started,
+):
+    context, counts = complete_harvest_browser
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def storage_state():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    context.storage_state = storage_state
+    monkeypatch.setattr(m, "HARVEST_OVERALL_TIMEOUT", work)
+    monkeypatch.setattr(m, "STATE_EXPORT_TIMEOUT_S", export_cap, raising=False)
+    monkeypatch.setattr(m, "STATE_EXPORT_DEADLINE_MARGIN_S", margin, raising=False)
+    result = await m.harvest({}, {
+        "navUrl": NAV, "capture": [TABLE],
+        "fetch": [{"url": "https://my.cqu.edu.cn/api/exam/x"}],
+    })
+
+    assert result["captures"][0]["body"] == '{"courses":["complete"]}'
+    assert result["fetches"][0]["body"] == '["complete exam"]'
+    assert "state" not in result
+    assert result["diagnostics"]["timeline"][-1]["stage"] == "DONE"
+    assert started.is_set() is export_started
+    assert cancelled.is_set() is export_started
+    assert counts == {"launch": 1, "context": 1, "page": 1, "close": 1}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("external_deadline", [False, True], ids=["task-cancellation", "server-deadline"])
+async def test_optional_export_propagates_external_cancellation(
+    monkeypatch, complete_harvest_browser, external_deadline,
+):
+    import server
+    context, counts = complete_harvest_browser
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def storage_state():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    context.storage_state = storage_state
+    monkeypatch.setattr(m, "HARVEST_OVERALL_TIMEOUT", 1.0)
+    monkeypatch.setattr(m, "STATE_EXPORT_TIMEOUT_S", 0.5, raising=False)
+    monkeypatch.setattr(m, "STATE_EXPORT_DEADLINE_MARGIN_S", 0.1, raising=False)
+    operation = m.harvest({}, {"navUrl": NAV, "capture": [TABLE], "fetch": []})
+    if external_deadline:
+        with pytest.raises(server.BrowserDeadlineExceeded):
+            await server.run_bounded(operation, 30)
+    else:
+        task = asyncio.create_task(operation)
+        await asyncio.wait_for(started.wait(), timeout=0.5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert started.is_set()
+    assert cancelled.is_set()
+    assert counts == {"launch": 1, "context": 1, "page": 1, "close": 1}
+
+
+@pytest.mark.asyncio
+async def test_failed_get_omits_diagnostic_status_but_keeps_business_zero():
+    async def evaluate(*args):
+        raise RuntimeError("transport SECRET")
+
+    trace = m.StageTrace()
+    fetches = []
+    await m.run_serial_inpage_gets(
+        SimpleNamespace(evaluate=evaluate),
+        [{"url": "https://my.cqu.edu.cn/api/exam/x"}], trace, fetches,
+    )
+    assert fetches == [{"url": "https://my.cqu.edu.cn/api/exam/x", "status": 0, "body": ""}]
+    failure = trace.diagnostics()["timeline"][-1]
+    assert failure["stage"] == "GET_FETCH_FAILURE"
+    assert "status" not in failure
+    assert "SECRET" not in str(trace.diagnostics())
 
 
 @pytest.mark.parametrize("stages,statuses,fetches,expected", [
