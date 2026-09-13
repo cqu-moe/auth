@@ -424,6 +424,7 @@ class ResponseStageCollector:
         self._tasks: set[asyncio.Task] = set()
         self._closed = False
         self.required_statuses: set[int] = set()
+        self.table_statuses: set[int] = set()
 
     def on_request(self, request) -> None:
         if self._closed:
@@ -459,11 +460,14 @@ class ResponseStageCollector:
 
         pattern = capture_match(url, self._patterns)
         is_table_response = _TABLE_PATH_MARKER in path
-        if (pattern is not None or is_table_response) and not (
+        required_table = is_table_response and requires_table_capture(self._patterns)
+        if (pattern is not None or required_table) and not (
             resource_type == "document" and path.startswith("/workspace/")
         ):
             if isinstance(metadata["status"], int):
                 self.required_statuses.add(metadata["status"])
+                if is_table_response:
+                    self.table_statuses.add(metadata["status"])
         if is_table_response:
             # This must stay synchronous and before create_task/response.text().
             self._trace.record("TABLE_RESPONSE_SEEN", **metadata)
@@ -560,19 +564,20 @@ def requires_table_capture(patterns: list[str]) -> bool:
 
 def harvest_failure_code(
     trace: StageTrace, patterns: list[str], captured: dict,
-    required_statuses, fetch_statuses: list[int],
+    required_statuses, fetch_statuses: list[int], *, table_statuses=(),
 ) -> str | None:
     """Classify observed failures before missing-stage timeouts; CAS expiry is handled first."""
     statuses = [*required_statuses, *fetch_statuses]
     if 412 in statuses:
         return "WAF_CHALLENGE"
-    if any(status != 0 and not 200 <= status < 300 for status in statuses):
-        return "TABLE_API_REJECTED"
-    if trace.has_stage("TABLE_RESPONSE_SEEN") and not trace.has_stage("TABLE_BODY_READY"):
-        return "TABLE_BODY_TIMEOUT"
-    if trace.has_stage("TABLE_REQUEST_SEEN") and not trace.has_stage("TABLE_RESPONSE_SEEN"):
-        return "TABLE_REQUEST_HUNG"
-    if 0 in statuses:
+    if requires_table_capture(patterns):
+        if any(status != 0 and not 200 <= status < 300 for status in table_statuses):
+            return "TABLE_API_REJECTED"
+        if trace.has_stage("TABLE_RESPONSE_SEEN") and not trace.has_stage("TABLE_BODY_READY"):
+            return "TABLE_BODY_TIMEOUT"
+        if trace.has_stage("TABLE_REQUEST_SEEN") and not trace.has_stage("TABLE_RESPONSE_SEEN"):
+            return "TABLE_REQUEST_HUNG"
+    if any(not 200 <= status < 300 for status in statuses):
         return "HARVEST_TRANSIENT"
     if all_captures_present(set(captured), patterns):
         return None
@@ -691,6 +696,19 @@ async def harvest(state: dict, recipe: dict) -> dict:
     handles: dict = {"pw": None, "browser": None}
     trace = StageTrace()
     diagnostics = trace.diagnostics()
+    captured: dict[str, dict] = {}
+    fetches: list[dict] = []
+    response_collector = ResponseStageCollector(trace, patterns, captured)
+
+    def failure_code():
+        table_statuses = response_collector.table_statuses | {
+            f["status"] for f in fetches
+            if _TABLE_PATH_MARKER in urllib.parse.urlsplit(f["url"]).path.lower()
+        }
+        return harvest_failure_code(
+            trace, patterns, captured, response_collector.required_statuses,
+            [f["status"] for f in fetches], table_statuses=table_statuses,
+        )
 
     async def _run() -> dict:
         work_deadline = time.monotonic() + HARVEST_OVERALL_TIMEOUT
@@ -704,9 +722,7 @@ async def harvest(state: dict, recipe: dict) -> dict:
             storage_state=state, user_agent=cqu_login.UA,
             viewport={"width": 1440, "height": 900},
             locale="zh-CN", timezone_id="Asia/Shanghai")
-        captured: dict[str, dict] = {}
         page = await ctx.new_page()
-        response_collector = ResponseStageCollector(trace, patterns, captured)
         page.on("request", response_collector.on_request)
         page.on("response", response_collector.on_response)
 
@@ -728,7 +744,6 @@ async def harvest(state: dict, recipe: dict) -> dict:
             )
 
             # Keep GETs serial and GET-only; Task 6 owns inter-fetch jitter.
-            fetches: list[dict] = []
             for f in fetch_list:
                 url = f["url"]
                 trace.record("GET_FETCH_START", url=url, resource_type="fetch")
@@ -770,15 +785,13 @@ async def harvest(state: dict, recipe: dict) -> dict:
             if outcome == "expired":
                 trace.record("HARVEST_FAILURE", url=page.url)
                 raise HarvestExpiredError("navUrl redirected to CAS login (session expired)")
-            failure_code = harvest_failure_code(
-                trace, patterns, captured, response_collector.required_statuses, fetch_statuses,
-            )
-            if failure_code is not None or outcome == "transient":
+            code = failure_code()
+            if code is not None or outcome == "transient":
                 trace.record("HARVEST_FAILURE", url=page.url)
                 raise HarvestTransientError(
                     "no usable harvest data (navigation/WAF/network/session transient)",
                     diagnostics,
-                    code=failure_code or "HARVEST_TRANSIENT",
+                    code=code or "HARVEST_TRANSIENT",
                 )
 
             trace.record("DONE", url=page.url)
@@ -806,7 +819,20 @@ async def harvest(state: dict, recipe: dict) -> dict:
     )
     try:
         try:
-            return await asyncio.wait_for(_run(), timeout=HARVEST_OVERALL_TIMEOUT)
+            work_timeout = asyncio.timeout(HARVEST_OVERALL_TIMEOUT)
+            try:
+                async with work_timeout:
+                    return await _run()
+            except TimeoutError:
+                if not work_timeout.expired():
+                    raise
+                # Only our work cap is classified here. External cancellation still
+                # reaches run_bounded, which owns BROWSER_DEADLINE precedence.
+                code = failure_code() if trace.has_stage("NAV_START") else None
+                raise HarvestTransientError(
+                    "harvest work budget exhausted", diagnostics,
+                    code=code or "HARVEST_TRANSIENT",
+                ) from None
         except Exception:
             if not trace.has_stage("HARVEST_FAILURE"):
                 trace.record("HARVEST_FAILURE")

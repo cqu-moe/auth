@@ -232,7 +232,10 @@ async def test_harvest_uses_one_browser_context_page_and_preserves_failure_gate(
     if missing or fetch_status == 503 or capture_status == 503:
         with pytest.raises(m.HarvestTransientError) as failure:
             await m.harvest({}, recipe)
-        assert failure.value.code == ("TABLE_CAPTURE_TIMEOUT" if missing else "TABLE_API_REJECTED")
+        assert failure.value.code == (
+            "TABLE_CAPTURE_TIMEOUT" if missing else
+            "TABLE_API_REJECTED" if capture_status == 503 else "HARVEST_TRANSIENT"
+        )
         assert exports == []
     else:
         result = await m.harvest({}, recipe)
@@ -268,7 +271,8 @@ def test_failure_precedence(stages, statuses, fetches, expected):
     trace = m.StageTrace()
     for stage in stages:
         trace.record(stage)
-    assert m.harvest_failure_code(trace, [TABLE], {}, statuses, fetches) == expected
+    assert m.harvest_failure_code(trace, [TABLE], {}, statuses, fetches,
+                                  table_statuses=statuses) == expected
 
 
 @pytest.mark.asyncio
@@ -285,12 +289,97 @@ async def test_initial_412_is_bootstrap_and_table_request_is_sanitized():
 
 
 @pytest.mark.asyncio
-async def test_unmatched_table_412_is_required_even_if_body_never_completes():
+async def test_unmatched_table_412_does_not_override_generic_capture_failure():
     trace = m.StageTrace()
     collector = m.ResponseStageCollector(trace, ["/session/list"], {})
     collector.on_response(response(TABLE, status=412, body_gate=asyncio.Event()))
-    assert m.harvest_failure_code(trace, ["/session/list"], {}, collector.required_statuses, []) == "WAF_CHALLENGE"
+    assert m.harvest_failure_code(trace, ["/session/list"], {}, collector.required_statuses, []) == "HARVEST_TRANSIENT"
     await collector.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,expected", [(404, "HARVEST_TRANSIENT"), (503, "HARVEST_TRANSIENT"), (412, "WAF_CHALLENGE")])
+async def test_generic_capture_rejections_preserve_resource_provenance(status, expected):
+    trace = m.StageTrace()
+    captured = {}
+    collector = m.ResponseStageCollector(trace, ["/session/list"], captured)
+    collector.on_response(response("/session/list", status=status))
+    await collector.close()
+    assert m.harvest_failure_code(trace, ["/session/list"], captured,
+                                  collector.required_statuses, []) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("incidental", ["request", "pending", "failed", "rejected", "challenge"])
+async def test_successful_generic_capture_ignores_incidental_table_traffic(incidental):
+    trace = m.StageTrace()
+    captured = {}
+    collector = m.ResponseStageCollector(trace, ["/session/list"], captured)
+    collector.on_response(response("/session/list"))
+    collector.on_request(SimpleNamespace(url=NAV + TABLE, resource_type="fetch"))
+    if incidental != "request":
+        collector.on_response(response(TABLE,
+            status=503 if incidental == "rejected" else 412 if incidental == "challenge" else 200,
+            body_gate=asyncio.Event() if incidental == "pending" else None,
+            body_error=RuntimeError("SECRET") if incidental == "failed" else None,
+        ))
+    await collector.close()
+    assert m.harvest_failure_code(trace, ["/session/list"], captured,
+                                  collector.required_statuses, []) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("external_deadline", [False, True])
+async def test_outer_short_budget_classifies_observed_hung_body(monkeypatch, external_deadline):
+    import server
+    callbacks = {}
+
+    async def goto(*args, **kwargs):
+        callbacks["response"](_FakeResponse(NAV, resource_type="document"))
+        callbacks["response"](response("/session/list"))
+        callbacks["response"](response("/judge-release-schedule-stu"))
+        callbacks["response"](response(TABLE, body_gate=asyncio.Event()))
+
+    async def content():
+        return "normal app"
+
+    async def cookies(*args):
+        return [{"name": name, "value": "present"}
+                for name in ("CtLgrmkSWHBZS", "CtLgrmkSWHBZT")]
+
+    page = SimpleNamespace(
+        on=lambda event, callback: callbacks.update({event: callback}),
+        goto=goto, content=content, url=NAV,
+        wait_for_timeout=lambda ms: asyncio.sleep(ms / 1000),
+    )
+
+    async def new_page():
+        return page
+
+    async def new_context(**kwargs):
+        return SimpleNamespace(new_page=new_page, cookies=cookies)
+
+    async def launch(**kwargs):
+        return SimpleNamespace(new_context=new_context)
+
+    async def start():
+        return SimpleNamespace(chromium=SimpleNamespace(launch=launch))
+
+    async def close(*args):
+        pass
+
+    monkeypatch.setattr(m, "async_playwright", lambda: SimpleNamespace(start=start))
+    monkeypatch.setattr(m, "HARVEST_OVERALL_TIMEOUT", 1 if external_deadline else 0.03)
+    monkeypatch.setattr(m.cqu_ticket_browser, "_close_browser_driver", close)
+    operation = m.harvest({}, {"navUrl": NAV, "capture": [TABLE], "fetch": []})
+    if external_deadline:
+        with pytest.raises(server.BrowserDeadlineExceeded):
+            await server.run_bounded(operation, 30)
+        return
+    with pytest.raises(m.HarvestTransientError) as failure:
+        await operation
+    assert failure.value.code == "TABLE_BODY_TIMEOUT"
+    assert "TABLE_RESPONSE_SEEN" in str(failure.value.diagnostics)
 
 
 @pytest.mark.asyncio
