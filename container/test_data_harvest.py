@@ -118,20 +118,28 @@ class DataHarvestTestCase(AioHTTPTestCase):
         assert body["error"] == "HARVEST_TRANSIENT"
         assert body["ok"] is False
 
-    async def test_data_harvest_transient_returns_sanitized_diagnostics(self):
+    async def test_data_harvest_transient_sanitizes_diagnostics_at_handler_boundary(self):
         async def transient(state, recipe):
             raise server.cqu_data_harvest.HarvestTransientError(
                 "expected captures missing",
                 {
-                    "missingPatterns": ["student/my-table-detail"],
-                    "pageUrl": "https://my.cqu.edu.cn/workspace/curriculum",
-                    "responses": [
-                        {
-                            "url": "https://my.cqu.edu.cn/api/x",
-                            "status": 412,
-                            "body": {"bytes": 2, "jsonLike": False},
-                        }
-                    ],
+                    "timeline": [{
+                        "stage": "TABLE_RESPONSE_SEEN",
+                        "elapsedMs": 42,
+                        "url": "https://my.cqu.edu.cn/api/x"
+                            "?CAqWHAeT=SECRET#fragment",
+                        "status": 412,
+                        "resourceType": "fetch",
+                        "contentType": "application/json; charset=utf-8",
+                        "body": "raw course body SECRET",
+                        "cookie": "CtLgrmkSWHBZT=SECRET",
+                        "Authorization": "Bearer SECRET",
+                        "studentId": "20260001",
+                        "storageState": {"cookies": [{"value": "SECRET"}]},
+                        "title": "student name SECRET",
+                        "failure": "arbitrary failure SECRET",
+                    }],
+                    "requestFailures": [{"failure": "SECRET"}],
                 },
             )
 
@@ -141,8 +149,14 @@ class DataHarvestTestCase(AioHTTPTestCase):
         assert resp.status == 502
         body = await resp.json()
         diagnostics = body["diagnostics"]
-        assert diagnostics["missingPatterns"] == ["student/my-table-detail"]
-        assert diagnostics["pageUrl"] == "https://my.cqu.edu.cn/workspace/curriculum"
-        assert diagnostics["responses"][0]["status"] == 412
+        assert diagnostics == {"timeline": [{
+            "stage": "TABLE_RESPONSE_SEEN",
+            "elapsedMs": 42,
+            "url": "https://my.cqu.edu.cn/api/x",
+            "status": 412,
+            "resourceType": "fetch",
+            "contentType": "application/json",
+        }]}
         assert "expected captures missing" not in body["error"]
-        assert "SECRET" not in body
+        assert "SECRET" not in str(body)
+        assert "20260001" not in str(body)

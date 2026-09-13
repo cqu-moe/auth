@@ -1,3 +1,5 @@
+import asyncio
+
 import cqu_data_harvest as m
 
 
@@ -299,10 +301,249 @@ def test_diagnostics_body_summary_never_contains_body():
     assert summary == {
         "bytes": len(body),
         "jsonLike": True,
+        "htmlLike": False,
         "hasTs": True,
         "hasCasLogin": False,
     }
     assert "SECRET" not in str(summary)
+
+
+def test_stage_trace_records_only_sanitized_allowlisted_fields():
+    ticks = iter([10.0, 10.125])
+    trace = m.StageTrace(clock=lambda: next(ticks))
+
+    trace.record(
+        "TABLE_BODY_READY",
+        url="https://my.cqu.edu.cn/api/timetable/student/my-table-detail"
+            "?CAqWHAeT=SECRET#fragment",
+        status=200,
+        resource_type="fetch",
+        content_type="application/json; charset=utf-8",
+        body='{"studentId":"20260001","$_ts":1}',
+        title="student name must not be accepted",
+        Authorization="Bearer SECRET",
+    )
+
+    assert trace.events == [{
+        "stage": "TABLE_BODY_READY",
+        "elapsedMs": 125,
+        "url": "https://my.cqu.edu.cn/api/timetable/student/my-table-detail",
+        "status": 200,
+        "resourceType": "fetch",
+        "contentType": "application/json",
+        "bodyBytes": 33,
+        "jsonLike": True,
+        "htmlLike": False,
+        "hasTs": True,
+        "hasCasLogin": False,
+    }]
+    assert "SECRET" not in str(trace.events)
+    assert "20260001" not in str(trace.events)
+
+
+def test_stage_trace_rejects_unknown_stage():
+    trace = m.StageTrace(clock=lambda: 1.0)
+    with pytest.raises(ValueError, match="stage not allowed"):
+        trace.record("ARBITRARY_FAILURE", failure="cookie=SECRET")
+
+
+def test_diagnostics_boundary_allowlist_drops_untrusted_secrets():
+    diagnostics = {
+        "timeline": [{
+            "stage": "TABLE_RESPONSE_SEEN",
+            "elapsedMs": 42,
+            "url": "https://my.cqu.edu.cn/api/timetable/student/my-table-detail"
+                "?CAqWHAeT=SECRET#fragment",
+            "status": 200,
+            "resourceType": "fetch",
+            "contentType": "application/json; charset=utf-8",
+            "body": "raw course body SECRET",
+            "cookie": "CtLgrmkSWHBZT=SECRET",
+            "Authorization": "Bearer SECRET",
+            "studentId": "20260001",
+            "storageState": {"cookies": [{"value": "SECRET"}]},
+            "title": "student name SECRET",
+            "failure": "arbitrary failure SECRET",
+        }, {
+            "stage": "NOT_ALLOWLISTED",
+            "elapsedMs": 43,
+            "failure": "SECRET",
+        }],
+        "pageBody": "SECRET",
+        "requestFailures": ["SECRET"],
+        "expectedPatterns": ["SECRET"],
+    }
+
+    safe = m.sanitize_harvest_diagnostics(diagnostics)
+
+    assert safe == {"timeline": [{
+        "stage": "TABLE_RESPONSE_SEEN",
+        "elapsedMs": 42,
+        "url": "https://my.cqu.edu.cn/api/timetable/student/my-table-detail",
+        "status": 200,
+        "resourceType": "fetch",
+        "contentType": "application/json",
+    }]}
+    assert "SECRET" not in str(safe)
+    assert "20260001" not in str(safe)
+
+
+class _FakeRequest:
+    def __init__(self, resource_type):
+        self.resource_type = resource_type
+
+
+class _FakeResponse:
+    def __init__(self, url, *, status=200, resource_type="fetch", body="{}",
+                 body_error=None, body_gate=None, body_finished=None):
+        self.url = url
+        self.status = status
+        self.headers = {"content-type": "application/json; charset=utf-8"}
+        self.request = _FakeRequest(resource_type)
+        self._body = body
+        self._body_error = body_error
+        self._body_gate = body_gate
+        self._body_finished = body_finished
+
+    async def text(self):
+        try:
+            if self._body_gate is not None:
+                await self._body_gate.wait()
+            if self._body_error is not None:
+                raise self._body_error
+            return self._body
+        finally:
+            if self._body_finished is not None:
+                self._body_finished.set()
+
+
+@pytest.mark.asyncio
+async def test_table_response_seen_survives_body_read_failure():
+    trace = m.StageTrace(clock=lambda: 5.0)
+    captured = {}
+    collector = m.ResponseStageCollector(
+        trace, ["student/my-table-detail"], captured,
+    )
+    response = _FakeResponse(
+        "https://my.cqu.edu.cn/api/timetable/student/my-table-detail?CAqWHAeT=SECRET",
+        body_error=RuntimeError("raw body SECRET"),
+    )
+
+    collector.on_response(response)
+    assert [event["stage"] for event in trace.events] == [
+        "FIRST_RESPONSE", "TABLE_RESPONSE_SEEN",
+    ]
+
+    await collector.close()
+
+    assert [event["stage"] for event in trace.events] == [
+        "FIRST_RESPONSE", "TABLE_RESPONSE_SEEN", "TABLE_BODY_FAILURE",
+    ]
+    assert captured == {}
+    assert "SECRET" not in str(trace.events)
+
+
+@pytest.mark.asyncio
+async def test_response_body_task_is_cancelled_and_joined_before_close_returns():
+    trace = m.StageTrace(clock=lambda: 5.0)
+    captured = {}
+    collector = m.ResponseStageCollector(
+        trace, ["student/my-table-detail"], captured,
+    )
+    body_gate = asyncio.Event()
+    body_finished = asyncio.Event()
+    response = _FakeResponse(
+        "https://my.cqu.edu.cn/api/timetable/student/my-table-detail",
+        body_gate=body_gate,
+        body_finished=body_finished,
+    )
+
+    collector.on_response(response)
+    await asyncio.sleep(0)
+    await collector.close()
+
+    assert body_finished.is_set()
+    assert [event["stage"] for event in trace.events] == [
+        "FIRST_RESPONSE", "TABLE_RESPONSE_SEEN",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_response_classifier_records_app_route_and_api_stages():
+    trace = m.StageTrace(clock=lambda: 5.0)
+    collector = m.ResponseStageCollector(trace, [], {})
+    responses = [
+        _FakeResponse(
+            "https://my.cqu.edu.cn/workspace/curriculum?secret=x",
+            status=412,
+            resource_type="document",
+        ),
+        _FakeResponse(
+            "https://my.cqu.edu.cn/workspace/static/js/app.57899e34.js",
+            resource_type="script",
+        ),
+        _FakeResponse(
+            "https://my.cqu.edu.cn/workspace/static/js/chunk-577be296.js",
+            resource_type="script",
+        ),
+        _FakeResponse(
+            "https://my.cqu.edu.cn/api/resourceapi/session/info-detail",
+        ),
+        _FakeResponse(
+            "https://my.cqu.edu.cn/api/coursearrange-param/"
+            "judge-release-schedule-stu",
+        ),
+    ]
+
+    for response in responses:
+        collector.on_response(response)
+    await collector.close()
+
+    assert [event["stage"] for event in trace.events] == [
+        "FIRST_RESPONSE",
+        "APP_DOCUMENT_REACHED",
+        "APP_JS_RESPONSE",
+        "ROUTE_CHUNK_RESPONSE",
+        "APP_READY_API",
+        "JUDGE_RESPONSE",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_response_classifier_ignores_stage_shaped_urls_on_other_hosts():
+    trace = m.StageTrace(clock=lambda: 5.0)
+    collector = m.ResponseStageCollector(
+        trace, ["student/my-table-detail"], {},
+    )
+
+    collector.on_response(_FakeResponse(
+        "https://evil.example/workspace/static/js/app.57899e34.js",
+        resource_type="script",
+    ))
+    collector.on_response(_FakeResponse(
+        "https://evil.example/api/coursearrange-param/judge-release-schedule-stu",
+    ))
+    collector.on_response(_FakeResponse(
+        "https://evil.example/api/timetable/student/my-table-detail",
+    ))
+    await collector.close()
+
+    assert [event["stage"] for event in trace.events] == ["FIRST_RESPONSE"]
+
+
+def test_dynamic_cookie_pair_requires_nonempty_s_and_t_values():
+    assert m.dynamic_cookie_pair_present([
+        {"name": "CtLgrmkSWHBZS", "value": "server"},
+        {"name": "CtLgrmkSWHBZT", "value": "dynamic"},
+    ], "my.cqu.edu.cn") is True
+    assert m.dynamic_cookie_pair_present([
+        {"name": "CtLgrmkSWHBZS", "value": "server"},
+        {"name": "CtLgrmkSWHBZT", "value": ""},
+    ], "my.cqu.edu.cn") is False
+    assert m.dynamic_cookie_pair_present([
+        {"name": "CtLgrmkSWHBZO", "value": "server"},
+        {"name": "CtLgrmkSWHBZP", "value": "dynamic"},
+    ], "sso.cqu.edu.cn") is True
 
 
 # --- classify_harvest_outcome: capture-wait 后的三态判定(ok / expired / transient) ---

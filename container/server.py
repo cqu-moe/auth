@@ -786,7 +786,11 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
         # 期望 capture 没到齐且页面非登录页(goto 超时/网络/非 CAS 瑞数挑战页)→ 502 瞬态。
         # 与 409(过期重登)严格区分: classifyNodeHarvestResponse 把 502 归 WAF_CHALLENGE(瞬态退避),
         # 绝不当 ok 空 harvest 让调用方误以为"今天没课"。error 不回显细节(只回固定锚点)。
-        diagnostics = getattr(e, "diagnostics", {})
+        # Exception diagnostics are untrusted at this handler boundary. Rebuild them
+        # from the fixed stage/event allowlist before either logging or returning.
+        diagnostics = cqu_data_harvest.sanitize_harvest_diagnostics(
+            getattr(e, "diagnostics", {})
+        )
         log.warning(
             "data-harvest transient diagnostics %s",
             json.dumps(diagnostics, sort_keys=True, separators=(",", ":"), default=str),

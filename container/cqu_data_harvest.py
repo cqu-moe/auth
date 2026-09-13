@@ -11,6 +11,7 @@ capture 匹配)抽出便于单测。
 import asyncio
 import json
 import logging
+import re
 import urllib.parse
 import time
 from patchright.async_api import async_playwright
@@ -199,12 +200,269 @@ def safe_url_for_diagnostics(url: str) -> str:
 def body_summary_for_diagnostics(body: str) -> dict:
     """只描述响应形状,绝不返回响应正文(可能是课表/学籍或瑞数挑战脚本)。"""
     text = body or ""
+    stripped = text.lstrip().lower()
     return {
-        "bytes": len(text),
-        "jsonLike": text.lstrip().startswith(("{", "[")),
+        "bytes": len(text.encode("utf-8", errors="replace")),
+        "jsonLike": stripped.startswith(("{", "[")),
+        "htmlLike": stripped.startswith(("<!doctype html", "<html")),
         "hasTs": "$_ts" in text,
         "hasCasLogin": "login-croypto" in text or "login-page-flowkey" in text,
     }
+
+
+STAGE_NAMES = frozenset({
+    "NAV_START",
+    "FIRST_RESPONSE",
+    "DYNAMIC_COOKIES_PRESENT",
+    "APP_DOCUMENT_REACHED",
+    "APP_JS_RESPONSE",
+    "ROUTE_CHUNK_RESPONSE",
+    "APP_READY_API",
+    "JUDGE_RESPONSE",
+    "TABLE_RESPONSE_SEEN",
+    "TABLE_BODY_READY",
+    "GET_FETCH_START",
+    "GET_FETCH_END",
+    "DONE",
+    "NAV_FAILURE",
+    "TABLE_BODY_FAILURE",
+    "GET_FETCH_FAILURE",
+    "HARVEST_FAILURE",
+})
+
+_RESOURCE_TYPES = frozenset({
+    "document", "stylesheet", "image", "media", "font", "script",
+    "texttrack", "xhr", "fetch", "eventsource", "websocket", "manifest",
+    "other",
+})
+_CONTENT_TYPE_RE = re.compile(r"[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+")
+_APP_READY_PATH_MARKERS = (
+    "/session/info-detail",
+    "/session/list",
+    "/cur-week",
+)
+_JUDGE_PATH_MARKER = "/judge-release-schedule-stu"
+_TABLE_PATH_MARKER = "/my-table-detail"
+_DYNAMIC_COOKIE_PAIRS = {
+    "my.cqu.edu.cn": ("CtLgrmkSWHBZS", "CtLgrmkSWHBZT"),
+    "sso.cqu.edu.cn": ("CtLgrmkSWHBZO", "CtLgrmkSWHBZP"),
+}
+
+
+def _safe_content_type(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    mime = value.split(";", 1)[0].strip().lower()
+    if len(mime) > 80 or _CONTENT_TYPE_RE.fullmatch(mime) is None:
+        return None
+    return mime
+
+
+def _safe_diagnostic_url(value: object) -> str | None:
+    if not isinstance(value, str) or len(value) > 2048:
+        return None
+    safe = safe_url_for_diagnostics(value)
+    try:
+        parsed = urllib.parse.urlsplit(safe)
+    except Exception:
+        return None
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    if parsed.username or parsed.password or len(safe) > 500:
+        return None
+    return safe
+
+
+def _sanitize_stage_event(event: object) -> dict | None:
+    if not isinstance(event, dict) or event.get("stage") not in STAGE_NAMES:
+        return None
+    safe = {"stage": event["stage"]}
+    elapsed_ms = event.get("elapsedMs")
+    if isinstance(elapsed_ms, int) and not isinstance(elapsed_ms, bool) and elapsed_ms >= 0:
+        safe["elapsedMs"] = elapsed_ms
+    url = _safe_diagnostic_url(event.get("url"))
+    if url is not None:
+        safe["url"] = url
+    status = event.get("status")
+    if isinstance(status, int) and not isinstance(status, bool) and 0 <= status <= 599:
+        safe["status"] = status
+    resource_type = event.get("resourceType")
+    if resource_type in _RESOURCE_TYPES:
+        safe["resourceType"] = resource_type
+    content_type = _safe_content_type(event.get("contentType"))
+    if content_type is not None:
+        safe["contentType"] = content_type
+    body_bytes = event.get("bodyBytes")
+    if isinstance(body_bytes, int) and not isinstance(body_bytes, bool) and body_bytes >= 0:
+        safe["bodyBytes"] = body_bytes
+    for marker in ("jsonLike", "htmlLike", "hasTs", "hasCasLogin"):
+        if isinstance(event.get(marker), bool):
+            safe[marker] = event[marker]
+    return safe
+
+
+def sanitize_harvest_diagnostics(diagnostics: object) -> dict:
+    """Handler/log boundary: only the typed stage timeline may leave this module."""
+    if not isinstance(diagnostics, dict) or not isinstance(diagnostics.get("timeline"), list):
+        return {"timeline": []}
+    timeline = []
+    for raw_event in diagnostics["timeline"][:80]:
+        event = _sanitize_stage_event(raw_event)
+        if event is not None:
+            timeline.append(event)
+    return {"timeline": timeline}
+
+
+class StageTrace:
+    """Bounded, allowlisted direct-harvest timeline with an injectable clock."""
+
+    def __init__(self, clock=time.monotonic, max_events: int = 80):
+        self._clock = clock
+        self._started_at = clock()
+        self._max_events = max_events
+        self.events: list[dict] = []
+
+    def has_stage(self, stage: str) -> bool:
+        return any(event["stage"] == stage for event in self.events)
+
+    def record(
+        self,
+        stage: str,
+        *,
+        url: str | None = None,
+        status: int | None = None,
+        resource_type: str | None = None,
+        content_type: str | None = None,
+        body: str | None = None,
+        **_discarded: object,
+    ) -> None:
+        if stage not in STAGE_NAMES:
+            raise ValueError("stage not allowed")
+        if len(self.events) >= self._max_events:
+            return
+        raw_event: dict = {
+            "stage": stage,
+            "elapsedMs": max(0, int((self._clock() - self._started_at) * 1000)),
+        }
+        if url is not None:
+            raw_event["url"] = url
+        if status is not None:
+            raw_event["status"] = status
+        if resource_type is not None:
+            raw_event["resourceType"] = resource_type
+        if content_type is not None:
+            raw_event["contentType"] = content_type
+        if body is not None:
+            summary = body_summary_for_diagnostics(body)
+            raw_event.update({
+                "bodyBytes": summary["bytes"],
+                "jsonLike": summary["jsonLike"],
+                "htmlLike": summary["htmlLike"],
+                "hasTs": summary["hasTs"],
+                "hasCasLogin": summary["hasCasLogin"],
+            })
+        event = _sanitize_stage_event(raw_event)
+        if event is not None:
+            self.events.append(event)
+
+    def diagnostics(self) -> dict:
+        return {"timeline": self.events}
+
+
+def dynamic_cookie_pair_present(cookies: object, hostname: str) -> bool:
+    """Check cookie names/presence only; no cookie value ever enters diagnostics."""
+    pair = _DYNAMIC_COOKIE_PAIRS.get((hostname or "").lower())
+    if pair is None or not isinstance(cookies, list):
+        return False
+    present = {
+        cookie.get("name")
+        for cookie in cookies
+        if isinstance(cookie, dict) and isinstance(cookie.get("value"), str)
+        and bool(cookie["value"])
+    }
+    return all(name in present for name in pair)
+
+
+def _response_metadata(response) -> dict:
+    request = getattr(response, "request", None)
+    headers = getattr(response, "headers", {})
+    return {
+        "url": getattr(response, "url", ""),
+        "status": getattr(response, "status", None),
+        "resource_type": getattr(request, "resource_type", None),
+        "content_type": headers.get("content-type", "") if isinstance(headers, dict) else "",
+    }
+
+
+class ResponseStageCollector:
+    """Synchronous response classifier plus owned asynchronous capture-body readers."""
+
+    def __init__(self, trace: StageTrace, patterns: list[str], captured: dict):
+        self._trace = trace
+        self._patterns = patterns
+        self._captured = captured
+        self._tasks: set[asyncio.Task] = set()
+        self._closed = False
+
+    def on_response(self, response) -> None:
+        if self._closed:
+            return
+        metadata = _response_metadata(response)
+        url = metadata["url"]
+        path = urllib.parse.urlsplit(url).path.lower()
+        resource_type = metadata["resource_type"]
+        if not self._trace.has_stage("FIRST_RESPONSE"):
+            self._trace.record("FIRST_RESPONSE", **metadata)
+        if classify_harvest_host(url) != "direct":
+            return
+        if resource_type == "document" and path.startswith("/workspace/"):
+            self._trace.record("APP_DOCUMENT_REACHED", **metadata)
+        if resource_type == "script" and "/workspace/static/js/app." in path:
+            self._trace.record("APP_JS_RESPONSE", **metadata)
+        if resource_type == "script" and "/workspace/static/js/chunk-" in path:
+            self._trace.record("ROUTE_CHUNK_RESPONSE", **metadata)
+        if any(marker in path for marker in _APP_READY_PATH_MARKERS):
+            self._trace.record("APP_READY_API", **metadata)
+        if _JUDGE_PATH_MARKER in path:
+            self._trace.record("JUDGE_RESPONSE", **metadata)
+
+        pattern = capture_match(url, self._patterns)
+        if _TABLE_PATH_MARKER in path:
+            # This must stay synchronous and before create_task/response.text().
+            self._trace.record("TABLE_RESPONSE_SEEN", **metadata)
+        if pattern is not None:
+            task = asyncio.create_task(self._read_capture_body(response, pattern, metadata))
+            self._tasks.add(task)
+
+    async def _read_capture_body(self, response, pattern: str, metadata: dict) -> None:
+        try:
+            body = await response.text()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            if _TABLE_PATH_MARKER in urllib.parse.urlsplit(metadata["url"]).path.lower():
+                self._trace.record("TABLE_BODY_FAILURE", **metadata)
+            return
+        if _TABLE_PATH_MARKER in urllib.parse.urlsplit(metadata["url"]).path.lower():
+            self._trace.record("TABLE_BODY_READY", body=body, **metadata)
+        self._captured[pattern] = {
+            "url": metadata["url"],
+            "status": metadata["status"],
+            "contentType": metadata["content_type"],
+            "body": body,
+        }
+
+    async def close(self) -> None:
+        self._closed = True
+        if not self._tasks:
+            return
+        # Let already-readable bodies settle, then cancel and join anything hung.
+        await asyncio.sleep(0)
+        for task in self._tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*self._tasks, return_exceptions=True)
+        self._tasks.clear()
 
 
 def _has_2xx(statuses: list[int]) -> bool:
@@ -268,15 +526,10 @@ async def harvest(state: dict, recipe: dict) -> dict:
     patterns: list[str] = recipe["capture"]
     fetch_list: list[dict] = recipe["fetch"]
     handles: dict = {"pw": None, "browser": None}
-    diagnostics: dict = {
-        "navUrl": safe_url_for_diagnostics(nav_url),
-        "expectedPatterns": patterns,
-    }
-    _run_started_at = 0.0
+    trace = StageTrace()
+    diagnostics = trace.diagnostics()
 
     async def _run() -> dict:
-        nonlocal _run_started_at
-        _run_started_at = time.monotonic()
         pw = await async_playwright().start()
         handles["pw"] = pw
         browser = await pw.chromium.launch(headless=True, args=[
@@ -287,159 +540,116 @@ async def harvest(state: dict, recipe: dict) -> dict:
             storage_state=state, user_agent=cqu_login.UA,
             viewport={"width": 1440, "height": 900},
             locale="zh-CN", timezone_id="Asia/Shanghai")
-        # pattern -> {url,status,contentType,body};同 pattern 多次 fire 保留最后一次。
         captured: dict[str, dict] = {}
-        response_events: list[dict] = []
-        request_failures: list[dict] = []
-        goto_status: int | None = None
-        goto_error: str | None = None
-
-        def _record_response(resp, body: str | None = None) -> None:
-            should_record = (
-                capture_match(resp.url, patterns) is not None
-                or "/api/" in resp.url
-                or resp.status >= 400
-            )
-            if not should_record or len(response_events) >= 80:
-                return
-            entry = {
-                "url": safe_url_for_diagnostics(resp.url),
-                "status": resp.status,
-                "contentType": resp.headers.get("content-type", "")[:80],
-            }
-            if body is not None:
-                entry["body"] = body_summary_for_diagnostics(body)
-            response_events.append(entry)
-
-        async def _on_response(resp) -> None:
-            pat = capture_match(resp.url, patterns)
-            if pat is None:
-                _record_response(resp)
-                return
-            try:
-                body = await resp.text()
-            except Exception:
-                body = ""
-            _record_response(resp, body)
-            captured[pat] = {
-                "url": resp.url,
-                "status": resp.status,
-                "contentType": resp.headers.get("content-type", ""),
-                "body": body,
-            }
-
         page = await ctx.new_page()
-        page.on("response", lambda r: asyncio.create_task(_on_response(r)))
-        page.on("requestfailed", lambda req: request_failures.append({
-            "url": safe_url_for_diagnostics(req.url),
-            "failure": str(req.failure)[:120] if req.failure else None,
-        }) if len(request_failures) < 30 else None)
+        response_collector = ResponseStageCollector(trace, patterns, captured)
+        page.on("response", response_collector.on_response)
+
+        async def _record_dynamic_cookies_if_present() -> None:
+            if trace.has_stage("DYNAMIC_COOKIES_PRESENT"):
+                return
+            try:
+                cookies = await ctx.cookies()
+            except Exception:
+                return
+            hostname = (urllib.parse.urlsplit(nav_url).hostname or "").lower()
+            if dynamic_cookie_pair_present(cookies, hostname):
+                trace.record("DYNAMIC_COOKIES_PRESENT", url=nav_url)
+
         try:
-            response = await page.goto(
-                nav_url,
-                wait_until="domcontentloaded",
-                timeout=browser_profile.HARVEST_NAV_TIMEOUT_MS,
-            )
-            goto_status = response.status if response else None
-        except Exception:
-            goto_error = "GotoTimeoutOrNetworkError"
-            pass
-        # 等 capture 齐(或超时):页面有机 fire 是异步的,轮询 captured 覆盖期望集即提前结束。
-        waited = 0
-        while waited < CAPTURE_WAIT_MS and not all_captures_present(set(captured), patterns):
-            await page.wait_for_timeout(CAPTURE_POLL_MS)
-            waited += CAPTURE_POLL_MS
-
-        # fetch[] 逐个 in-page GET(同源、带活 P、读豁免)。在页面上下文里 fetch,拿 VM 令牌豁免。
-        # fetch-only 配方靠这些 fetch 的 status 判 ok/transient(见下 classify_harvest_outcome),
-        # 故必须在三态闸前先跑完(失败/超时记 status 0)。
-        fetches: list[dict] = []
-        for f in fetch_list:
-            url = f["url"]
+            trace.record("NAV_START", url=nav_url, resource_type="document")
             try:
-                # 数据 API 是 Bearer-JWT 鉴权(非 cookie),credentials:'include' 不够;
-                # 须从 localStorage 读 personal-prod token 加 Authorization 头(实测裸 GET 返 401/空)。
-                # token 带首尾双引号(前端存储格式),strip 掉。AbortSignal 用 INPAGE_FETCH_TIMEOUT_MS 防挂。
-                result = await page.evaluate(
-                    """async ({ u, t }) => {
-                        let tok = '';
-                        try { tok = (localStorage.getItem('cqu_edu_ACCESS_TOKEN') || '').replace(/^"|"$/g, ''); } catch (e) {}
-                        const headers = { 'Accept': 'application/json' };
-                        if (tok) headers['Authorization'] = 'Bearer ' + tok;
-                        const r = await fetch(u, { credentials: 'include', headers, signal: AbortSignal.timeout(t) });
-                        return { status: r.status, body: await r.text() };
-                    }""",
-                    {"u": url, "t": INPAGE_FETCH_TIMEOUT_MS},
+                await page.goto(
+                    nav_url,
+                    wait_until="domcontentloaded",
+                    timeout=browser_profile.HARVEST_NAV_TIMEOUT_MS,
                 )
-                fetches.append({"url": url, "status": result["status"], "body": result["body"]})
             except Exception:
-                fetches.append({"url": url, "status": 0, "body": ""})
+                trace.record("NAV_FAILURE", url=nav_url, resource_type="document")
 
-        # navigate + capture-wait + fetch[] 后三态闸(classify_harvest_outcome): 绝不能把会话过期/
-        # 导航失败/fetch 全 401 当 ok 空 harvest 返回(经 DO/RPC 报 200 假成功)。对 capture 配方
-        # **和 fetch-only 配方(capture 期望为空)都鲁棒** —— 后者旧逻辑"patterns 空即 ok"会让会话
-        # 静默失效(P2)。仅在无成功 capture 时才 await page.content()(避免 happy path 拉整页开销):
-        #   · capture 全齐 / fetch-only 有 2xx → "ok", 照常返回 captures+fetches。
-        #   · 落回 CAS 登录页/SSO host(永远先判)→ "expired" → HarvestExpiredError(server 409 → DO 重登)。
-        #   · 其余没拿到可用数据(capture 缺且非登录页 / fetch-only 全非 2xx)→ "transient"
-        #     → HarvestTransientError(server 502 → 上游退避), 而非伪装成 ok 空成功。
-        fetch_statuses = [f["status"] for f in fetches]
-        page_content = "" if captured else await page.content()
-        outcome = classify_harvest_outcome(
-            set(captured), patterns, page_content, page.url, fetch_statuses,
-        )
-        if outcome == "expired":
-            raise HarvestExpiredError("navUrl redirected to CAS login (session expired)")
-        if outcome == "transient":
-            if not page_content:
+            await _record_dynamic_cookies_if_present()
+            # Keep the existing wait behavior; Task 3 owns stage-specific waits/reload.
+            waited = 0
+            while waited < CAPTURE_WAIT_MS and not all_captures_present(set(captured), patterns):
+                await page.wait_for_timeout(CAPTURE_POLL_MS)
+                waited += CAPTURE_POLL_MS
+                await _record_dynamic_cookies_if_present()
+
+            # Keep GETs serial and GET-only; Task 6 owns inter-fetch jitter.
+            fetches: list[dict] = []
+            for f in fetch_list:
+                url = f["url"]
+                trace.record("GET_FETCH_START", url=url, resource_type="fetch")
                 try:
-                    page_content = await page.content()
+                    result = await page.evaluate(
+                        """async ({ u, t }) => {
+                            let tok = '';
+                            try { tok = (localStorage.getItem('cqu_edu_ACCESS_TOKEN') || '').replace(/^"|"$/g, ''); } catch (e) {}
+                            const headers = { 'Accept': 'application/json' };
+                            if (tok) headers['Authorization'] = 'Bearer ' + tok;
+                            const r = await fetch(u, { credentials: 'include', headers, signal: AbortSignal.timeout(t) });
+                            return { status: r.status, body: await r.text() };
+                        }""",
+                        {"u": url, "t": INPAGE_FETCH_TIMEOUT_MS},
+                    )
+                    fetches.append({
+                        "url": url,
+                        "status": result["status"],
+                        "body": result["body"],
+                    })
+                    trace.record(
+                        "GET_FETCH_END",
+                        url=url,
+                        status=result["status"],
+                        resource_type="fetch",
+                        body=result["body"],
+                    )
                 except Exception:
-                    page_content = ""
-            try:
-                page_title = await page.title()
-            except Exception:
-                page_title = ""
-            diagnostics.update({
-                "capturedPatterns": sorted(captured),
-                "missingPatterns": [p for p in patterns if p not in captured],
-                "goto": {"status": goto_status, "error": goto_error},
-                "waitedMs": waited,
-                "pageUrl": safe_url_for_diagnostics(page.url),
-                "title": page_title[:120],
-                "pageBody": body_summary_for_diagnostics(page_content),
-                "responses": response_events,
-                "requestFailures": request_failures,
-                "fetches": [
-                    {"url": safe_url_for_diagnostics(f["url"]), "status": f["status"]}
-                    for f in fetches
-                ],
-                "elapsedMs": int((time.monotonic() - _run_started_at) * 1000),
-            })
-            raise HarvestTransientError(
-                "no usable harvest data (navigation/WAF/network/session transient)",
-                diagnostics,
+                    fetches.append({"url": url, "status": 0, "body": ""})
+                    trace.record(
+                        "GET_FETCH_FAILURE", url=url, status=0, resource_type="fetch",
+                    )
+
+            fetch_statuses = [f["status"] for f in fetches]
+            page_content = "" if captured else await page.content()
+            outcome = classify_harvest_outcome(
+                set(captured), patterns, page_content, page.url, fetch_statuses,
             )
+            if outcome == "expired":
+                trace.record("HARVEST_FAILURE", url=page.url)
+                raise HarvestExpiredError("navUrl redirected to CAS login (session expired)")
+            if outcome == "transient":
+                trace.record("HARVEST_FAILURE", url=page.url)
+                raise HarvestTransientError(
+                    "no usable harvest data (navigation/WAF/network/session transient)",
+                    diagnostics,
+                )
 
-        captures = [captured[p] for p in patterns if p in captured]
-        return {"captures": captures, "fetches": fetches}
+            trace.record("DONE", url=page.url)
+            captures = [captured[p] for p in patterns if p in captured]
+            return {
+                "captures": captures,
+                "fetches": fetches,
+                "diagnostics": diagnostics,
+            }
+        finally:
+            # No response-body task may outlive the browser/context cleanup below.
+            await response_collector.close()
 
-    # 复用取票的并发信号量(护节点资源)+ 等槽超时,与取票/探活共用同一槽。
     await asyncio.wait_for(
         cqu_ticket_browser.TICKET_SEMAPHORE.acquire(),
         timeout=cqu_ticket_browser.QUEUE_WAIT,
     )
     try:
-        started_at = time.monotonic()
         try:
             return await asyncio.wait_for(_run(), timeout=HARVEST_OVERALL_TIMEOUT)
         except Exception:
-            diagnostics.setdefault(
-                "elapsedMs", int((time.monotonic() - started_at) * 1000)
-            )
+            if not trace.has_stage("HARVEST_FAILURE"):
+                trace.record("HARVEST_FAILURE")
+            safe_diagnostics = sanitize_harvest_diagnostics(diagnostics)
             log.warning(
                 "harvest exception diagnostics %s",
-                json.dumps(diagnostics, sort_keys=True, separators=(",", ":"), default=str),
+                json.dumps(safe_diagnostics, sort_keys=True, separators=(",", ":")),
             )
             raise
     finally:
