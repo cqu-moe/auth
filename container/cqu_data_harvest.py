@@ -679,6 +679,52 @@ async def wait_for_harvest_captures(
     )
 
 
+async def run_serial_inpage_gets(
+    page, fetch_list: list[dict], trace: StageTrace, fetches: list[dict], *,
+    uniform=random.uniform, sleep=asyncio.sleep,
+) -> None:
+    """Run recipe GETs one at a time, pacing only the gaps between them.
+
+    The injectable clock-facing dependencies keep the bounded jitter deterministic
+    in tests; they are deliberately not used for VM/bootstrap or recovery timing.
+    """
+    for index, f in enumerate(fetch_list):
+        url = f["url"]
+        trace.record("GET_FETCH_START", url=url, resource_type="fetch")
+        try:
+            result = await page.evaluate(
+                """async ({ u, t }) => {
+                    let tok = '';
+                    try { tok = (localStorage.getItem('cqu_edu_ACCESS_TOKEN') || '').replace(/^"|"$/g, ''); } catch (e) {}
+                    const headers = { 'Accept': 'application/json' };
+                    if (tok) headers['Authorization'] = 'Bearer ' + tok;
+                    const r = await fetch(u, { credentials: 'include', headers, signal: AbortSignal.timeout(t) });
+                    return { status: r.status, body: await r.text() };
+                }""",
+                {"u": url, "t": INPAGE_FETCH_TIMEOUT_MS},
+            )
+            fetches.append({
+                "url": url,
+                "status": result["status"],
+                "body": result["body"],
+            })
+            trace.record(
+                "GET_FETCH_END",
+                url=url,
+                status=result["status"],
+                resource_type="fetch",
+                body=result["body"],
+            )
+        except Exception:
+            fetches.append({"url": url, "status": 0, "body": ""})
+            trace.record(
+                "GET_FETCH_FAILURE", url=url, status=0, resource_type="fetch",
+            )
+
+        if index < len(fetch_list) - 1:
+            await sleep(uniform(0.250, 0.800))
+
+
 async def harvest(state: dict, recipe: dict) -> dict:
     """在水化 state 的临时浏览器里 navigate recipe.navUrl(过瑞数,页面有机 fire 课表/学期),
     截获命中 capture 模式的响应 + 跑 fetch[] in-page GET,返回 {captures, fetches}。
@@ -743,39 +789,7 @@ async def harvest(state: dict, recipe: dict) -> dict:
                 started_at=navigation_started_at, deadline=work_deadline,
             )
 
-            # Keep GETs serial and GET-only; Task 6 owns inter-fetch jitter.
-            for f in fetch_list:
-                url = f["url"]
-                trace.record("GET_FETCH_START", url=url, resource_type="fetch")
-                try:
-                    result = await page.evaluate(
-                        """async ({ u, t }) => {
-                            let tok = '';
-                            try { tok = (localStorage.getItem('cqu_edu_ACCESS_TOKEN') || '').replace(/^"|"$/g, ''); } catch (e) {}
-                            const headers = { 'Accept': 'application/json' };
-                            if (tok) headers['Authorization'] = 'Bearer ' + tok;
-                            const r = await fetch(u, { credentials: 'include', headers, signal: AbortSignal.timeout(t) });
-                            return { status: r.status, body: await r.text() };
-                        }""",
-                        {"u": url, "t": INPAGE_FETCH_TIMEOUT_MS},
-                    )
-                    fetches.append({
-                        "url": url,
-                        "status": result["status"],
-                        "body": result["body"],
-                    })
-                    trace.record(
-                        "GET_FETCH_END",
-                        url=url,
-                        status=result["status"],
-                        resource_type="fetch",
-                        body=result["body"],
-                    )
-                except Exception:
-                    fetches.append({"url": url, "status": 0, "body": ""})
-                    trace.record(
-                        "GET_FETCH_FAILURE", url=url, status=0, resource_type="fetch",
-                    )
+            await run_serial_inpage_gets(page, fetch_list, trace, fetches)
 
             fetch_statuses = [f["status"] for f in fetches]
             page_content = "" if captured else await page.content()

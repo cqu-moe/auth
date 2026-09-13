@@ -168,6 +168,77 @@ async def test_fetch_only_wait_is_immediate_and_generic_capture_keeps_old_limit(
 
 
 @pytest.mark.asyncio
+async def test_inpage_gets_are_serial_with_between_only_injected_jitter():
+    events = []
+    first_started = asyncio.Event()
+    allow_first_to_finish = asyncio.Event()
+
+    class Page:
+        async def evaluate(self, script, args):
+            events.append(("fetch", args["u"]))
+            if args["u"].endswith("/one"):
+                first_started.set()
+                await allow_first_to_finish.wait()
+            return {"status": 200, "body": args["u"]}
+
+    async def sleep(seconds):
+        events.append(("sleep", seconds))
+
+    fetches = []
+    trace = m.StageTrace()
+    task = asyncio.create_task(m.run_serial_inpage_gets(
+        Page(),
+        [{"url": "https://my.cqu.edu.cn/api/one"},
+         {"url": "https://my.cqu.edu.cn/api/two"},
+         {"url": "https://my.cqu.edu.cn/api/three"}],
+        trace,
+        fetches,
+        uniform=lambda low, high: low if len(fetches) == 1 else high,
+        sleep=sleep,
+    ))
+
+    await first_started.wait()
+    await asyncio.sleep(0)
+    assert events == [("fetch", "https://my.cqu.edu.cn/api/one")]
+    allow_first_to_finish.set()
+    await task
+
+    assert events == [
+        ("fetch", "https://my.cqu.edu.cn/api/one"),
+        ("sleep", 0.250),
+        ("fetch", "https://my.cqu.edu.cn/api/two"),
+        ("sleep", 0.800),
+        ("fetch", "https://my.cqu.edu.cn/api/three"),
+    ]
+    assert [item["body"] for item in fetches] == [
+        "https://my.cqu.edu.cn/api/one",
+        "https://my.cqu.edu.cn/api/two",
+        "https://my.cqu.edu.cn/api/three",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("urls", [[], ["https://my.cqu.edu.cn/api/only"]])
+async def test_inpage_get_jitter_is_absent_for_zero_or_one_fetch(urls):
+    sleeps = []
+
+    class Page:
+        async def evaluate(self, script, args):
+            return {"status": 200, "body": "{}"}
+
+    async def sleep(seconds):
+        sleeps.append(seconds)
+
+    fetches = []
+    await m.run_serial_inpage_gets(
+        Page(), [{"url": url} for url in urls], m.StageTrace(), fetches,
+        uniform=lambda low, high: pytest.fail("uniform must not be called"),
+        sleep=sleep,
+    )
+    assert sleeps == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("fetch_only,missing,fetch_status,export_fails,capture_status,include_fetch", [
     (False, False, 200, False, 200, True), (False, True, 200, False, 200, True),
     (True, False, 200, False, 200, True), (False, False, 503, False, 200, True),
