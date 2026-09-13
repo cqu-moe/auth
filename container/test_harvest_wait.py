@@ -51,7 +51,8 @@ class TimelinePage:
         self.goto_modes.append(kwargs["wait_until"])
 
     def on(self, event, callback):
-        self.collector.on_response = callback
+        if event == "response":
+            self.collector.on_response = callback
 
     async def content(self):
         return "normal app"
@@ -66,7 +67,8 @@ def response(path, **kwargs):
 
 
 def bootstrap(app=35, judge=40):
-    return [(app, response("/session/list")),
+    return [(app, _FakeResponse(NAV, resource_type="document")),
+            (app, response("/session/list")),
             (judge, response("/judge-release-schedule-stu"))]
 
 
@@ -91,7 +93,7 @@ async def test_late_route_and_table_succeed_without_reload_in_soft_wait():
     assert page.reloads == []
     assert [event["stage"] for event in page.trace.events] == [
         "NAV_START", "DYNAMIC_COOKIES_PRESENT", "FIRST_RESPONSE",
-        "APP_READY_API", "JUDGE_RESPONSE", "TABLE_RESPONSE_SEEN", "TABLE_BODY_READY",
+        "APP_DOCUMENT_REACHED", "APP_READY_API", "JUDGE_RESPONSE", "TABLE_RESPONSE_SEEN", "TABLE_BODY_READY",
     ]
 
 
@@ -126,7 +128,7 @@ async def test_hung_table_body_is_distinct_and_does_not_reload():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("events,cookie_at,expected", [
-    ([], 100, 30), ([], 1, 45), ([(35, response("/session/list"))], 1, 60),
+    ([], 100, 30), ([], 1, 45), (bootstrap(judge=100), 1, 60),
 ])
 async def test_bootstrap_limits_are_milestones_not_additive(events, cookie_at, expected):
     page = TimelinePage(events, cookie_at=cookie_at)
@@ -227,18 +229,15 @@ async def test_harvest_uses_one_browser_context_page_and_preserves_failure_gate(
     monkeypatch.setattr(m.cqu_ticket_browser, "_close_browser_driver", close)
     recipe = {"navUrl": NAV, "capture": [] if fetch_only else [TABLE],
               "fetch": [{"url": "https://my.cqu.edu.cn/api/example"}] if include_fetch else []}
-    if missing or (fetch_only and fetch_status == 503):
-        with pytest.raises(m.HarvestTransientError):
+    if missing or fetch_status == 503 or capture_status == 503:
+        with pytest.raises(m.HarvestTransientError) as failure:
             await m.harvest({}, recipe)
+        assert failure.value.code == ("TABLE_CAPTURE_TIMEOUT" if missing else "TABLE_API_REJECTED")
         assert exports == []
     else:
         result = await m.harvest({}, recipe)
         assert result["fetches" if fetch_only else "captures"]
-        if capture_status == 503:
-            assert result["captures"][0]["status"] == 503
-            assert exports == []
-            assert "state" not in result
-        elif fetch_status == 200 and not export_fails:
+        if fetch_status == 200 and not export_fails:
             assert result["state"] == refreshed
             assert len(exports) == 1
         else:
@@ -249,6 +248,59 @@ async def test_harvest_uses_one_browser_context_page_and_preserves_failure_gate(
     assert page.goto_modes == ["domcontentloaded" if fetch_only else "commit"]
     if fetch_only:
         assert page.fetch_times == [0]
+
+
+@pytest.mark.parametrize("stages,statuses,fetches,expected", [
+    ([], [], [], "WAF_BOOTSTRAP_TIMEOUT"),
+    (["DYNAMIC_COOKIES_PRESENT"], [], [], "APP_READY_TIMEOUT"),
+    (["DYNAMIC_COOKIES_PRESENT", "APP_READY_API", "JUDGE_RESPONSE"], [], [], "APP_READY_TIMEOUT"),
+    (["DYNAMIC_COOKIES_PRESENT", "APP_DOCUMENT_REACHED", "APP_READY_API"], [], [], "APP_READY_TIMEOUT"),
+    (["DYNAMIC_COOKIES_PRESENT", "APP_DOCUMENT_REACHED", "APP_READY_API", "JUDGE_RESPONSE"], [], [], "TABLE_CAPTURE_TIMEOUT"),
+    (["TABLE_REQUEST_SEEN"], [], [], "TABLE_REQUEST_HUNG"),
+    (["TABLE_RESPONSE_SEEN"], [], [], "TABLE_BODY_TIMEOUT"),
+    (["TABLE_RESPONSE_SEEN", "TABLE_BODY_FAILURE"], [], [], "TABLE_BODY_TIMEOUT"),
+    (["TABLE_RESPONSE_SEEN"], [503], [], "TABLE_API_REJECTED"),
+    (["TABLE_RESPONSE_SEEN", "TABLE_BODY_FAILURE"], [503, 412], [], "WAF_CHALLENGE"),
+    ([], [], [412], "WAF_CHALLENGE"),
+    ([], [], [0], "HARVEST_TRANSIENT"),
+])
+def test_failure_precedence(stages, statuses, fetches, expected):
+    trace = m.StageTrace()
+    for stage in stages:
+        trace.record(stage)
+    assert m.harvest_failure_code(trace, [TABLE], {}, statuses, fetches) == expected
+
+
+@pytest.mark.asyncio
+async def test_initial_412_is_bootstrap_and_table_request_is_sanitized():
+    trace = m.StageTrace()
+    collector = m.ResponseStageCollector(trace, [TABLE], {})
+    collector.on_response(_FakeResponse(NAV, status=412, resource_type="document"))
+    assert not trace.has_stage("APP_DOCUMENT_REACHED")
+    assert m.harvest_failure_code(trace, [TABLE], {}, collector.required_statuses, []) == "WAF_BOOTSTRAP_TIMEOUT"
+    collector.on_request(SimpleNamespace(url=NAV + TABLE + "?token=SECRET", resource_type="fetch"))
+    assert m.harvest_failure_code(trace, [TABLE], {}, collector.required_statuses, []) == "TABLE_REQUEST_HUNG"
+    assert "SECRET" not in str(trace.diagnostics())
+    await collector.close()
+
+
+@pytest.mark.asyncio
+async def test_unmatched_table_412_is_required_even_if_body_never_completes():
+    trace = m.StageTrace()
+    collector = m.ResponseStageCollector(trace, ["/session/list"], {})
+    collector.on_response(response(TABLE, status=412, body_gate=asyncio.Event()))
+    assert m.harvest_failure_code(trace, ["/session/list"], {}, collector.required_statuses, []) == "WAF_CHALLENGE"
+    await collector.close()
+
+
+@pytest.mark.asyncio
+async def test_empty_judge_data_does_not_prove_schedule_unpublished():
+    page = TimelinePage(bootstrap(judge=100) + [
+        (40, response("/judge-release-schedule-stu", body='{"data":""}')),
+    ])
+    await wait(page)
+    assert m.harvest_failure_code(page.trace, [TABLE], page.captured,
+                                  page.collector.required_statuses, []) == "TABLE_CAPTURE_TIMEOUT"
 
 
 def test_cross_layer_browser_work_budget_leaves_queue_cleanup_and_margin():

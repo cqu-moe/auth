@@ -59,6 +59,8 @@ export async function fetchBrowser(
   }
   const id = env.CQU_LOGIN.idFromName(route.containerKey ?? route.userId);
   const response = await env.CQU_LOGIN.get(id).fetch(request);
+  // Harvest owns its stage codes and residual transport classification, including 503.
+  if (new URL(request.url).pathname === "/data-harvest") return response;
   if (response.status === 429 || response.status === 503) {
     const protocolError = await readProtocolError(response);
     if (protocolError && STABLE_PROTOCOL_ERRORS.has(protocolError)) {

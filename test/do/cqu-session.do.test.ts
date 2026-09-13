@@ -1841,7 +1841,7 @@ describe("H4/L1 service-ticket node 409", () => {
 
 // ── 3. transient: 节点 502 / fetch 抛 → status 不变, 不重登 ──────────────────
 describe("transient failures", () => {
-  it("service-ticket node 502 → WAF_CHALLENGE (500 fallback), status unchanged, no immediate alarm, no relogin", async () => {
+  it("service-ticket node 502 → WAF_CHALLENGE (503), status unchanged, no immediate alarm, no relogin", async () => {
     const stub = freshStub("transient-502");
     await seedSession(stub, { status: "active" });
     const setAlarmCalls = await captureSetAlarm(stub);
@@ -1855,8 +1855,7 @@ describe("transient failures", () => {
       { method: "POST" }
     );
 
-    // transient → WAF_CHALLENGE 不在 CODE_TO_STATUS → fallback 500(服务端/瞬态, 调用方该退避重试)。
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(503);
     const body = (await res.json()) as { code?: string };
     expect(body.code).toBe("WAF_CHALLENGE");
 
@@ -1883,7 +1882,7 @@ describe("transient failures", () => {
       { method: "POST" }
     );
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(503);
     const body = (await res.json()) as { code?: string };
     expect(body.code).toBe("WAF_CHALLENGE");
     expect(pathsOf(spy)).toEqual(["/service-ticket"]);
@@ -2196,16 +2195,55 @@ describe("data-harvest action", () => {
     ).not.toContain("/run");
   });
 
-  it("node 502 → WAF_CHALLENGE (500), status unchanged", async () => {
+  it("node 502 without a stable code → HARVEST_TRANSIENT (503), status unchanged", async () => {
     const stub = freshStub("harvest-502");
     await seedSession(stub, { status: "active" });
     spyBrowserFetch({
       "/data-harvest": async () => Response.json({ ok: false }, { status: 502 }),
     });
     const res = await postHarvest(stub);
-    expect(res.status).toBe(500);
-    expect(((await res.json()) as { code?: string }).code).toBe("WAF_CHALLENGE");
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { code?: string }).code).toBe("HARVEST_TRANSIENT");
     expect(await readStatus(stub)).toBe("active");
+  });
+
+  it.each([
+    ["WAF_BOOTSTRAP_TIMEOUT", 503], ["APP_READY_TIMEOUT", 503],
+    ["TABLE_CAPTURE_TIMEOUT", 503], ["TABLE_REQUEST_HUNG", 504],
+    ["TABLE_BODY_TIMEOUT", 504], ["TABLE_API_REJECTED", 502],
+    ["WAF_CHALLENGE", 503], ["SCHEDULE_NOT_PUBLISHED", 409],
+    ["HARVEST_TRANSIENT", 503], ["BROWSER_BUSY", 503], ["BROWSER_DEADLINE", 503],
+  ])("harvest %s propagates unchanged at HTTP %s without relogin", async (code, status) => {
+    const stub = freshStub(`harvest-code-${code}`);
+    await seedSession(stub, { status: "active" });
+    const alarms = await captureSetAlarm(stub);
+    spyBrowserFetch({ "/data-harvest": async () => Response.json({
+      ok: false, error: code, diagnostics: { timeline: [] }, state: { secret: "SECRET" },
+    }, { status: status as number }) });
+    const res = await postHarvest(stub);
+    expect(res.status).toBe(status);
+    const body = await res.json();
+    expect(body).toMatchObject({ code });
+    expect(body).not.toHaveProperty("diagnostics");
+    expect(body).not.toHaveProperty("state");
+    expect(JSON.stringify(body)).not.toContain("SECRET");
+    expect(await readStatus(stub)).toBe("active");
+    expect(alarms).toHaveLength(0);
+  });
+
+  it.each(["throw", "html", "unknown"])("harvest %s is residual, never WAF", async (mode) => {
+    const stub = freshStub(`harvest-residual-${mode}`);
+    await seedSession(stub, { status: "active" });
+    spyBrowserFetch({ "/data-harvest": async () => {
+      if (mode === "throw") throw new Error("SECRET browser failure");
+      if (mode === "html") return new Response("SECRET non-JSON", { status: 502 });
+      return Response.json({ ok: false, error: "SECRET unknown code" }, { status: 502 });
+    } });
+    const res = await postHarvest(stub);
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body).toMatchObject({ code: "HARVEST_TRANSIENT" });
+    expect(JSON.stringify(body)).not.toContain("SECRET");
   });
 
   it("per-user rate limit exhausted → RATE_LIMITED", async () => {

@@ -2,6 +2,14 @@ import { describe, it, expect } from "vitest";
 import { cquErrorHttpStatus } from "./cqu-error-status";
 
 describe("cquErrorHttpStatus", () => {
+  it.each([
+    ["WAF_BOOTSTRAP_TIMEOUT", 503], ["APP_READY_TIMEOUT", 503],
+    ["TABLE_CAPTURE_TIMEOUT", 503], ["TABLE_REQUEST_HUNG", 504],
+    ["TABLE_BODY_TIMEOUT", 504], ["TABLE_API_REJECTED", 502],
+    ["WAF_CHALLENGE", 503], ["SCHEDULE_NOT_PUBLISHED", 409], ["HARVEST_TRANSIENT", 503],
+  ])("maps %s to %s", (code, status) => {
+    expect(cquErrorHttpStatus(code as string)).toBe(status);
+  });
   it("maps INVALID_SERVICE_URL → 400", () => {
     expect(cquErrorHttpStatus("INVALID_SERVICE_URL")).toBe(400);
   });

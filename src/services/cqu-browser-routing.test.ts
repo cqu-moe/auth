@@ -77,12 +77,12 @@ describe("fetchBrowser transport", () => {
     expect(await forwarded.clone().text()).toBe(JSON.stringify({ token: "tok", code: "123456" }));
   });
 
-  it("does not fall back to node when the container reports capacity exhaustion", async () => {
+  it("leaves harvest non-JSON capacity responses to the residual classifier without fallback", async () => {
     const busyFetch = vi.fn().mockResolvedValue(new Response("capacity", { status: 503 }));
     const env = makeEnv(busyFetch);
-    await expect(
-      fetchBrowser(env as never, cfRoute, new Request("http://cqu-login.internal/data-harvest", { method: "POST" }))
-    ).rejects.toMatchObject({ code: "BROWSER_BUSY" });
+    const response = await fetchBrowser(env as never, cfRoute, new Request("http://cqu-login.internal/data-harvest", { method: "POST" }));
+    expect(response.status).toBe(503);
+    expect(await response.text()).toBe("capacity");
     expect(busyFetch).toHaveBeenCalledTimes(1);
   });
 
@@ -103,7 +103,7 @@ describe("fetchBrowser transport", () => {
       )
     );
     await expect(
-      fetchBrowser(env as never, cfRoute, new Request("http://cqu-login.internal/data-harvest", { method: "POST" }))
+      fetchBrowser(env as never, cfRoute, new Request("http://cqu-login.internal/run", { method: "POST" }))
     ).rejects.toMatchObject({ code: "BROWSER_DEADLINE" });
   });
 

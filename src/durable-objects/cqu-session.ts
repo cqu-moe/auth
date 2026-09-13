@@ -1086,7 +1086,7 @@ export class CquSessionDO extends DurableObject<Env> {
       if (e instanceof CquSsoError && STABLE_BROWSER_CODES.has(e.code)) {
         throw e;
       }
-      throw new CquSsoError("WAF_CHALLENGE", `browser /data-harvest fetch failed: ${errMsg(e)}`);
+      throw new CquSsoError("HARVEST_TRANSIENT", "browser /data-harvest fetch failed");
     }
     let body: NodeHarvestBody | null;
     try {
@@ -1112,7 +1112,7 @@ export class CquSessionDO extends DurableObject<Env> {
           diagnostics: c.diagnostics,
         }));
       }
-      throw new CquSsoError("WAF_CHALLENGE", `browser /data-harvest ${c.detail ?? "transient"}`);
+      throw new CquSsoError(c.code ?? "HARVEST_TRANSIENT", `browser /data-harvest ${c.detail ?? "transient"}`);
     }
     return { captures: c.captures ?? [], fetches: c.fetches ?? [], state: c.state };
   }

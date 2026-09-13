@@ -155,8 +155,16 @@ export type NodeHarvestKind =
   | "instance_replaced"
   | "transient";
 
+const HARVEST_ERROR_CODES = new Set([
+  "WAF_BOOTSTRAP_TIMEOUT", "APP_READY_TIMEOUT", "TABLE_CAPTURE_TIMEOUT",
+  "TABLE_REQUEST_HUNG", "TABLE_BODY_TIMEOUT", "TABLE_API_REJECTED",
+  "WAF_CHALLENGE", "SCHEDULE_NOT_PUBLISHED", "HARVEST_TRANSIENT",
+  "BROWSER_BUSY", "BROWSER_DEADLINE", "BROWSER_INSTANCE_REPLACED",
+]);
+
 export interface NodeHarvestClassification {
   kind: NodeHarvestKind;
+  code?: string;
   captures?: HarvestCapture[];
   fetches?: HarvestFetch[];
   state?: CquStorageState;
@@ -165,9 +173,9 @@ export interface NodeHarvestClassification {
 }
 
 /**
- * 把节点 /data-harvest 的 (status, body) 映射为 {kind, captures?, fetches?, detail?}。
- * 判定顺序: 409 优先(会话失效, 交 needs_reauth/重登) → 非 JSON(null body)→ ok → 其余 transient。
- * 脱敏: detail 只保留 status 锚点, 绝不回显节点 raw error(可能含 state/cookie 片段)。
+ * Preserve explicit instance replacement and unpublished codes before 409 expiry.
+ * Failed responses retain only allowlisted error codes; unknown/non-JSON responses
+ * become HARVEST_TRANSIENT. Raw error text is never included in detail.
  */
 export function classifyNodeHarvestResponse(
   status: number,
@@ -182,10 +190,13 @@ export function classifyNodeHarvestResponse(
         detail: "browser instance replaced",
       };
     }
+    if (body?.error === "SCHEDULE_NOT_PUBLISHED") {
+      return { kind: "transient", code: "SCHEDULE_NOT_PUBLISHED" };
+    }
     return { kind: "expired", detail: "node /data-harvest 409" };
   }
   if (body === null) {
-    return { kind: "transient", detail: `non-JSON (status=${status})` };
+    return { kind: "transient", code: "HARVEST_TRANSIENT", detail: `non-JSON (status=${status})` };
   }
   const httpOk = status >= 200 && status < 300;
   if (httpOk && body.ok === true) {
@@ -198,6 +209,8 @@ export function classifyNodeHarvestResponse(
   }
   return {
     kind: "transient",
+    code: typeof body.error === "string" && HARVEST_ERROR_CODES.has(body.error)
+      ? body.error : "HARVEST_TRANSIENT",
     detail: `not ok (status=${status})`,
     diagnostics: body.diagnostics,
   };

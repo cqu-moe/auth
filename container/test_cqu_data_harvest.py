@@ -545,6 +545,10 @@ async def test_response_classifier_records_app_route_and_api_stages():
             resource_type="document",
         ),
         _FakeResponse(
+            "https://my.cqu.edu.cn/workspace/curriculum",
+            resource_type="document",
+        ),
+        _FakeResponse(
             "https://my.cqu.edu.cn/workspace/static/js/app.57899e34.js",
             resource_type="script",
         ),

@@ -437,6 +437,26 @@ describe("buildStMintAudit", () => {
 });
 
 describe("classifyNodeHarvestResponse", () => {
+  it.each([
+    ["WAF_BOOTSTRAP_TIMEOUT", 503], ["APP_READY_TIMEOUT", 503],
+    ["TABLE_CAPTURE_TIMEOUT", 503], ["TABLE_REQUEST_HUNG", 504],
+    ["TABLE_BODY_TIMEOUT", 504], ["TABLE_API_REJECTED", 502],
+    ["WAF_CHALLENGE", 503], ["SCHEDULE_NOT_PUBLISHED", 409],
+    ["HARVEST_TRANSIENT", 503], ["BROWSER_BUSY", 503], ["BROWSER_DEADLINE", 503],
+  ])("preserves allowlisted %s without state or raw detail", (code, status) => {
+    const result = classifyNodeHarvestResponse(status as number, {
+      ok: false, error: code as string, state: state(TRIPLE),
+    });
+    expect(result).toMatchObject({ kind: "transient", code });
+    expect(result).not.toHaveProperty("state");
+  });
+
+  it.each([null, { ok: false }, { ok: false, error: "cookie=SECRET" },
+    { ok: false, error: "TABLE_BODY_TIMEOUT SECRET" }])("uses residual code for untrusted errors %#", (body) => {
+    const result = classifyNodeHarvestResponse(502, body);
+    expect(result).toMatchObject({ kind: "transient", code: "HARVEST_TRANSIENT" });
+    expect(JSON.stringify(result)).not.toContain("SECRET");
+  });
   const okBody: NodeHarvestBody = {
     ok: true,
     captures: [{ url: "u", status: 200, contentType: "application/json", body: "{}" }],

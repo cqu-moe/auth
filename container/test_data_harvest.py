@@ -5,7 +5,7 @@
 走临时浏览器水化取数(navigate + capture + in-page fetch)。
   · 取数成功 → 200 {ok:true, captures, fetches}。
   · recipe 非法(缺 state / navUrl host 越界 / fetch host 越界 / 缺字段)→ 400 {ok:false}。
-  · 浏览器崩/超时/任意异常 → 502 {ok:false, error:type(e).__name__}(脱敏, 绝不回 str(e))。
+  · 未识别浏览器异常 → 503 {ok:false, error:HARVEST_TRANSIENT}，不回显异常原文。
 
 测试把 server.cqu_data_harvest.harvest monkeypatch(端点 handler 直接调它),不触网、不起真浏览器。
 沿用 test_service_ticket.py 的 AioHTTPTestCase 模式(本仓未装 pytest-aiohttp,无 aiohttp_client fixture)。
@@ -82,16 +82,16 @@ class DataHarvestTestCase(AioHTTPTestCase):
         resp = await self.client.post("/data-harvest", json=p)
         assert resp.status == 400
 
-    async def test_data_harvest_harvest_raises_is_502_sanitized(self):
+    async def test_data_harvest_unknown_exception_is_residual_sanitized(self):
         async def boom(state, recipe):
             raise RuntimeError("cookie=SECRET should never leak")
         server.cqu_data_harvest.harvest = boom
 
         resp = await self.client.post("/data-harvest", json=_payload())
-        assert resp.status == 502
+        assert resp.status == 503
         body = await resp.json()
-        # 脱敏:只回类型名,绝不回 str(e)(可能含 state/cookie 明文)。
-        assert body["error"] == "RuntimeError"
+        # 不回显异常类型或原文。
+        assert body["error"] == "HARVEST_TRANSIENT"
         assert "SECRET" not in body["error"]
         assert "state" not in body
 
@@ -108,15 +108,15 @@ class DataHarvestTestCase(AioHTTPTestCase):
         # 脱敏:绝不回 str(e)。
         assert "redirected" not in body["error"]
 
-    async def test_data_harvest_transient_is_502_distinct_from_expired(self):
-        # 期望 capture 没到齐且页面非登录页 → 502 {"error":"HARVEST_TRANSIENT"}(瞬态退避),
+    async def test_data_harvest_transient_is_503_distinct_from_expired(self):
+        # 期望 capture 没到齐且页面非登录页 → 503 {"error":"HARVEST_TRANSIENT"}(瞬态退避),
         # 与 409(过期)严格区分, 绝不当 ok 空成功返回。
         async def transient(state, recipe):
             raise server.cqu_data_harvest.HarvestTransientError("expected captures missing")
         server.cqu_data_harvest.harvest = transient
 
         resp = await self.client.post("/data-harvest", json=_payload())
-        assert resp.status == 502
+        assert resp.status == 503
         body = await resp.json()
         assert body["error"] == "HARVEST_TRANSIENT"
         assert body["ok"] is False
@@ -150,7 +150,7 @@ class DataHarvestTestCase(AioHTTPTestCase):
         server.cqu_data_harvest.harvest = transient
 
         resp = await self.client.post("/data-harvest", json=_payload())
-        assert resp.status == 502
+        assert resp.status == 503
         body = await resp.json()
         diagnostics = body["diagnostics"]
         assert diagnostics == {"timeline": [{
@@ -164,3 +164,21 @@ class DataHarvestTestCase(AioHTTPTestCase):
         assert "expected captures missing" not in body["error"]
         assert "SECRET" not in str(body)
         assert "20260001" not in str(body)
+
+    async def test_stable_error_codes_and_statuses(self):
+        for code, status in [
+            ("WAF_BOOTSTRAP_TIMEOUT", 503), ("APP_READY_TIMEOUT", 503),
+            ("TABLE_CAPTURE_TIMEOUT", 503), ("TABLE_REQUEST_HUNG", 504),
+            ("TABLE_BODY_TIMEOUT", 504), ("TABLE_API_REJECTED", 502),
+            ("WAF_CHALLENGE", 503), ("SCHEDULE_NOT_PUBLISHED", 409),
+            ("HARVEST_TRANSIENT", 503), ("unrecognized SECRET", 503),
+        ]:
+            async def fail(state, recipe):
+                error = server.cqu_data_harvest.HarvestTransientError("SECRET")
+                error.code = code
+                raise error
+            server.cqu_data_harvest.harvest = fail
+            resp = await self.client.post("/data-harvest", json=_payload())
+            assert resp.status == status
+            body = await resp.json()
+            assert body == {"ok": False, "error": code if "SECRET" not in code else "HARVEST_TRANSIENT", "diagnostics": {"timeline": []}}

@@ -176,16 +176,25 @@ def is_expired_harvest(captures: dict, page_content: str, page_url: str) -> bool
     return host == _SSO_HOST
 
 
+HARVEST_ERROR_STATUS = {
+    "WAF_BOOTSTRAP_TIMEOUT": 503,
+    "APP_READY_TIMEOUT": 503,
+    "TABLE_CAPTURE_TIMEOUT": 503,
+    "TABLE_REQUEST_HUNG": 504,
+    "TABLE_BODY_TIMEOUT": 504,
+    "TABLE_API_REJECTED": 502,
+    "WAF_CHALLENGE": 503,
+    "SCHEDULE_NOT_PUBLISHED": 409,
+    "HARVEST_TRANSIENT": 503,
+}
+
+
 class HarvestTransientError(Exception):
-    """navigate/WAF/网络瞬态 —— 期望 capture 没到齐, 但页面**不是** CAS 登录页(非干净过期)。
+    """Failed harvest with an allowlisted code and separately sanitized diagnostics."""
 
-    成因: goto 超时 / 网络抖动 / 非 CAS 的瑞数挑战页(无登录标记)。此时绝不能当 ok 空 harvest
-    返回(经 DO/RPC 报 200 假成功, 调用方误以为"今天没课"); server.py 据此回 502, 让上游退避重试
-    下个周期, 与 409(过期重登)/400(配方错)三态严格区分。
-    """
-
-    def __init__(self, message: str, diagnostics: dict | None = None):
+    def __init__(self, message: str, diagnostics: dict | None = None, *, code="HARVEST_TRANSIENT"):
         super().__init__(message)
+        self.code = code if code in HARVEST_ERROR_STATUS else "HARVEST_TRANSIENT"
         self.diagnostics = diagnostics or {}
 
 
@@ -220,6 +229,7 @@ STAGE_NAMES = frozenset({
     "ROUTE_CHUNK_RESPONSE",
     "APP_READY_API",
     "JUDGE_RESPONSE",
+    "TABLE_REQUEST_SEEN",
     "TABLE_RESPONSE_SEEN",
     "TABLE_BODY_READY",
     "GET_FETCH_START",
@@ -413,6 +423,16 @@ class ResponseStageCollector:
         self._captured = captured
         self._tasks: set[asyncio.Task] = set()
         self._closed = False
+        self.required_statuses: set[int] = set()
+
+    def on_request(self, request) -> None:
+        if self._closed:
+            return
+        url = getattr(request, "url", "")
+        if (classify_harvest_host(url) == "direct"
+                and _TABLE_PATH_MARKER in urllib.parse.urlsplit(url).path.lower()):
+            self._trace.record("TABLE_REQUEST_SEEN", url=url,
+                               resource_type=getattr(request, "resource_type", None))
 
     def on_response(self, response) -> None:
         if self._closed:
@@ -425,19 +445,25 @@ class ResponseStageCollector:
             self._trace.record("FIRST_RESPONSE", **metadata)
         if classify_harvest_host(url) != "direct":
             return
-        if resource_type == "document" and path.startswith("/workspace/"):
+        successful = isinstance(metadata["status"], int) and 200 <= metadata["status"] < 300
+        if successful and resource_type == "document" and path.startswith("/workspace/"):
             self._trace.record("APP_DOCUMENT_REACHED", **metadata)
         if resource_type == "script" and "/workspace/static/js/app." in path:
             self._trace.record("APP_JS_RESPONSE", **metadata)
         if resource_type == "script" and "/workspace/static/js/chunk-" in path:
             self._trace.record("ROUTE_CHUNK_RESPONSE", **metadata)
-        if any(marker in path for marker in _APP_READY_PATH_MARKERS):
+        if successful and any(marker in path for marker in _APP_READY_PATH_MARKERS):
             self._trace.record("APP_READY_API", **metadata)
-        if _JUDGE_PATH_MARKER in path:
+        if successful and _JUDGE_PATH_MARKER in path:
             self._trace.record("JUDGE_RESPONSE", **metadata)
 
         pattern = capture_match(url, self._patterns)
         is_table_response = _TABLE_PATH_MARKER in path
+        if (pattern is not None or is_table_response) and not (
+            resource_type == "document" and path.startswith("/workspace/")
+        ):
+            if isinstance(metadata["status"], int):
+                self.required_statuses.add(metadata["status"])
         if is_table_response:
             # This must stay synchronous and before create_task/response.text().
             self._trace.record("TABLE_RESPONSE_SEEN", **metadata)
@@ -532,6 +558,36 @@ def requires_table_capture(patterns: list[str]) -> bool:
     return any(_TABLE_PATH_MARKER in pattern.lower() for pattern in patterns)
 
 
+def harvest_failure_code(
+    trace: StageTrace, patterns: list[str], captured: dict,
+    required_statuses, fetch_statuses: list[int],
+) -> str | None:
+    """Classify observed failures before missing-stage timeouts; CAS expiry is handled first."""
+    statuses = [*required_statuses, *fetch_statuses]
+    if 412 in statuses:
+        return "WAF_CHALLENGE"
+    if any(status != 0 and not 200 <= status < 300 for status in statuses):
+        return "TABLE_API_REJECTED"
+    if trace.has_stage("TABLE_RESPONSE_SEEN") and not trace.has_stage("TABLE_BODY_READY"):
+        return "TABLE_BODY_TIMEOUT"
+    if trace.has_stage("TABLE_REQUEST_SEEN") and not trace.has_stage("TABLE_RESPONSE_SEEN"):
+        return "TABLE_REQUEST_HUNG"
+    if 0 in statuses:
+        return "HARVEST_TRANSIENT"
+    if all_captures_present(set(captured), patterns):
+        return None
+    if requires_table_capture(patterns):
+        if not trace.has_stage("DYNAMIC_COOKIES_PRESENT"):
+            return "WAF_BOOTSTRAP_TIMEOUT"
+        if not all(trace.has_stage(stage) for stage in (
+            "APP_DOCUMENT_REACHED", "APP_READY_API", "JUDGE_RESPONSE",
+        )):
+            return "APP_READY_TIMEOUT"
+        if not trace.has_stage("TABLE_RESPONSE_SEEN"):
+            return "TABLE_CAPTURE_TIMEOUT"
+    return "HARVEST_TRANSIENT"
+
+
 async def wait_for_harvest_captures(
     page, context, nav_url: str, patterns: list[str], captured: dict,
     trace: StageTrace, *, started_at: float, deadline: float,
@@ -573,7 +629,8 @@ async def wait_for_harvest_captures(
             return
         await page.wait_for_timeout(min(CAPTURE_POLL_MS, (cookie_deadline - clock()) * 1000))
 
-    for stage, milestone_ms in (("APP_READY_API", APP_READY_WAIT_MS),
+    for stage, milestone_ms in (("APP_DOCUMENT_REACHED", APP_READY_WAIT_MS),
+                                ("APP_READY_API", APP_READY_WAIT_MS),
                                 ("JUDGE_RESPONSE", JUDGE_WAIT_MS)):
         if not await wait_until(lambda: trace.has_stage(stage), started_at + milestone_ms / 1000):
             return
@@ -650,6 +707,7 @@ async def harvest(state: dict, recipe: dict) -> dict:
         captured: dict[str, dict] = {}
         page = await ctx.new_page()
         response_collector = ResponseStageCollector(trace, patterns, captured)
+        page.on("request", response_collector.on_request)
         page.on("response", response_collector.on_response)
 
         try:
@@ -712,11 +770,15 @@ async def harvest(state: dict, recipe: dict) -> dict:
             if outcome == "expired":
                 trace.record("HARVEST_FAILURE", url=page.url)
                 raise HarvestExpiredError("navUrl redirected to CAS login (session expired)")
-            if outcome == "transient":
+            failure_code = harvest_failure_code(
+                trace, patterns, captured, response_collector.required_statuses, fetch_statuses,
+            )
+            if failure_code is not None or outcome == "transient":
                 trace.record("HARVEST_FAILURE", url=page.url)
                 raise HarvestTransientError(
                     "no usable harvest data (navigation/WAF/network/session transient)",
                     diagnostics,
+                    code=failure_code or "HARVEST_TRANSIENT",
                 )
 
             trace.record("DONE", url=page.url)
@@ -726,8 +788,7 @@ async def harvest(state: dict, recipe: dict) -> dict:
                 "fetches": fetches,
                 "diagnostics": diagnostics,
             }
-            # The result gate checks capture presence; refresh also requires 2xx
-            # statuses for every required capture and supplemental GET.
+            # Export only after complete successful captures and supplemental GETs.
             if (all(200 <= capture["status"] < 300 for capture in captures)
                     and all(200 <= status < 300 for status in fetch_statuses)):
                 try:
