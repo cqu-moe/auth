@@ -726,9 +726,10 @@ async def harvest(state: dict, recipe: dict) -> dict:
                 "fetches": fetches,
                 "diagnostics": diagnostics,
             }
-            # Supplemental GETs may fail while the required captures remain usable.
-            # Preserve those data, but only export a fully successful browser state.
-            if all(200 <= status < 300 for status in fetch_statuses):
+            # The result gate checks capture presence; refresh also requires 2xx
+            # statuses for every required capture and supplemental GET.
+            if (all(200 <= capture["status"] < 300 for capture in captures)
+                    and all(200 <= status < 300 for status in fetch_statuses)):
                 try:
                     result["state"] = await ctx.storage_state()
                 except Exception:
