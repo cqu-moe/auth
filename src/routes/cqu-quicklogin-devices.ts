@@ -123,7 +123,7 @@ async function statusFor(c: Context<HonoEnv>, authority: DeviceAuthority): Promi
   }
   const device = list.devices.find((entry) => entry.deviceId === authority.deviceId);
   return {
-    protocolVersion: 1,
+    protocolVersion: 2,
     deviceId: authority.deviceId,
     generation: authority.generation,
     masterEnabled: authority.masterEnabled,

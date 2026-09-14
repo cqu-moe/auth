@@ -100,7 +100,7 @@ export const QUICKLOGIN_SCHEMAS: Record<string, Schema> = {
       "appliedVersion", "loginAt", "lastKeepAliveAt", "lastSeenAt",
     ],
     properties: {
-      protocolVersion: { type: "integer", const: 1 },
+      protocolVersion: { type: "integer", const: 2 },
       deviceId: { type: "string", minLength: 1 },
       generation: { type: "integer", minimum: 0 },
       masterEnabled: { type: "boolean" },
@@ -272,7 +272,7 @@ export const QUICKLOGIN_SCHEMAS: Record<string, Schema> = {
       "protocolVersion", "deviceId", "generation", "sessionVersion", "createdAt", "cookies",
     ],
     properties: {
-      protocolVersion: { type: "integer", const: 1 },
+      protocolVersion: { type: "integer", const: 2 },
       deviceId: { type: "string", minLength: 1 },
       generation: { type: "integer", minimum: 0 },
       sessionVersion: { type: "integer", minimum: 0 },

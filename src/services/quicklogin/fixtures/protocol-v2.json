@@ -1,6 +1,6 @@
 {
   "status": {
-    "protocolVersion": 1,
+    "protocolVersion": 2,
     "deviceId": "synthetic-device-a",
     "generation": 4,
     "masterEnabled": true,
@@ -16,7 +16,7 @@
     "lastSeenAt": 1700003900000
   },
   "envelope": {
-    "protocolVersion": 1,
+    "protocolVersion": 2,
     "deviceId": "synthetic-device-a",
     "generation": 4,
     "sessionVersion": 7,
@@ -43,12 +43,5 @@
         "expires": 1900000000
       }
     ]
-  },
-  "error": {
-    "error": {
-      "code": "RATE_LIMITED",
-      "message": "RATE_LIMITED",
-      "retryAfterMs": 60000
-    }
   }
 }

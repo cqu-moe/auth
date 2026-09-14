@@ -2357,7 +2357,7 @@ export interface components {
         };
         DeviceStatus: {
             /** @constant */
-            protocolVersion: 1;
+            protocolVersion: 2;
             deviceId: string;
             generation: number;
             masterEnabled: boolean;
@@ -2454,7 +2454,7 @@ export interface components {
         };
         QuickloginCookieEnvelope: {
             /** @constant */
-            protocolVersion: 1;
+            protocolVersion: 2;
             deviceId: string;
             generation: number;
             sessionVersion: number;
@@ -2475,19 +2475,19 @@ export interface components {
         };
         QuickloginDeviceHeartbeat: {
             /** @constant */
-            protocolVersion: 1;
+            protocolVersion: 2;
             appliedVersion: number | null;
-            generation: number;
+            observedGeneration: number;
             browserVersion: string;
         };
         QuickloginDeviceRefresh: {
             /** @constant */
-            protocolVersion: 1;
+            protocolVersion: 2;
             generation: number;
         };
         QuickloginDeviceExport: {
             /** @constant */
-            protocolVersion: 1;
+            protocolVersion: 2;
             generation: number;
             sessionVersion: number;
         };

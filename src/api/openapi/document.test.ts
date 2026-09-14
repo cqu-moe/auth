@@ -331,10 +331,10 @@ describe("complete API document", () => {
     };
     const invalidDevice = { ...validDevice, ownerUserId: "internal-user" };
     const validHeartbeat = {
-      protocolVersion: 1, appliedVersion: null, generation: 2,
+      protocolVersion: 2, appliedVersion: null, observedGeneration: 2,
       browserVersion: "140.0.0.0",
     };
-    const invalidHeartbeat = { ...validHeartbeat, protocolVersion: 2 };
+    const invalidHeartbeat = { ...validHeartbeat, protocolVersion: 1 };
     for (const [name, valid, invalid] of [
       ["PublicDevice", validDevice, invalidDevice],
       ["QuickloginDeviceHeartbeat", validHeartbeat, invalidHeartbeat],
@@ -449,27 +449,27 @@ describe("complete API document", () => {
         schema: "QuickloginDeviceHeartbeat",
         parser: parseHeartbeat,
         input: {
-          protocolVersion: 1, appliedVersion: Number.MAX_SAFE_INTEGER,
-          generation: Number.MAX_SAFE_INTEGER, browserVersion: "版本 140.0",
+          protocolVersion: 2, appliedVersion: Number.MAX_SAFE_INTEGER,
+          observedGeneration: Number.MAX_SAFE_INTEGER, browserVersion: "版本 140.0",
         },
         ok: true,
         output: {
-          protocolVersion: 1, appliedVersion: Number.MAX_SAFE_INTEGER,
-          generation: Number.MAX_SAFE_INTEGER, browserVersion: "版本 140.0",
+          protocolVersion: 2, appliedVersion: Number.MAX_SAFE_INTEGER,
+          observedGeneration: Number.MAX_SAFE_INTEGER, browserVersion: "版本 140.0",
         },
       },
       {
         name: "heartbeat rejects unsafe generation",
         schema: "QuickloginDeviceHeartbeat",
         parser: parseHeartbeat,
-        input: { protocolVersion: 1, appliedVersion: null, generation: 2 ** 53, browserVersion: "140" },
+        input: { protocolVersion: 2, appliedVersion: null, observedGeneration: 2 ** 53, browserVersion: "140" },
         ok: false, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "heartbeat rejects whitespace-only version",
         schema: "QuickloginDeviceHeartbeat",
         parser: parseHeartbeat,
-        input: { protocolVersion: 1, appliedVersion: null, generation: 1, browserVersion: "   " },
+        input: { protocolVersion: 2, appliedVersion: null, observedGeneration: 1, browserVersion: "   " },
         ok: false, cloudflareOk: true, code: "INVALID_REQUEST", status: 400,
       },
       {
@@ -477,7 +477,7 @@ describe("complete API document", () => {
         schema: "QuickloginDeviceHeartbeat",
         parser: parseHeartbeat,
         input: {
-          protocolVersion: 1, appliedVersion: null, generation: 1,
+          protocolVersion: 2, appliedVersion: null, observedGeneration: 1,
           browserVersion: "1".repeat(41),
         },
         ok: false, code: "INVALID_REQUEST", status: 400,
@@ -487,7 +487,7 @@ describe("complete API document", () => {
         schema: "QuickloginDeviceHeartbeat",
         parser: parseHeartbeat,
         input: {
-          protocolVersion: 1, appliedVersion: null, generation: 1,
+          protocolVersion: 2, appliedVersion: null, observedGeneration: 1,
           browserVersion: "\u3000140",
         },
         ok: false, cloudflareOk: true, code: "INVALID_REQUEST", status: 400,
@@ -497,7 +497,7 @@ describe("complete API document", () => {
         schema: "QuickloginDeviceHeartbeat",
         parser: parseHeartbeat,
         input: {
-          protocolVersion: 1, appliedVersion: null, generation: 1,
+          protocolVersion: 2, appliedVersion: null, observedGeneration: 1,
           browserVersion: "Chrome🚀",
         },
         ok: false, cloudflareOk: true, code: "INVALID_REQUEST", status: 400,
@@ -507,7 +507,7 @@ describe("complete API document", () => {
         schema: "QuickloginDeviceHeartbeat",
         parser: parseHeartbeat,
         input: {
-          protocolVersion: 1, appliedVersion: null, generation: 1,
+          protocolVersion: 2, appliedVersion: null, observedGeneration: 1,
           browserVersion: "Chrome\uFEFF140",
         },
         ok: false, cloudflareOk: true, code: "INVALID_REQUEST", status: 400,
@@ -516,35 +516,35 @@ describe("complete API document", () => {
         name: "heartbeat rejects unsupported protocol separately",
         schema: "QuickloginDeviceHeartbeat",
         parser: parseHeartbeat,
-        input: { protocolVersion: 2, appliedVersion: null, generation: 1, browserVersion: "140" },
+        input: { protocolVersion: 1, appliedVersion: null, generation: 1, browserVersion: "140" },
         ok: false, code: "PROTOCOL_UNSUPPORTED", status: 426,
       },
       {
         name: "refresh rejects unsafe generation",
         schema: "QuickloginDeviceRefresh",
         parser: parseRefreshRequest,
-        input: { protocolVersion: 1, generation: 2 ** 53 },
+        input: { protocolVersion: 2, generation: 2 ** 53 },
         ok: false, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "refresh rejects unsupported protocol separately",
         schema: "QuickloginDeviceRefresh",
         parser: parseRefreshRequest,
-        input: { protocolVersion: 2, generation: 1 },
+        input: { protocolVersion: 1, generation: 1 },
         ok: false, code: "PROTOCOL_UNSUPPORTED", status: 426,
       },
       {
         name: "export rejects unsafe session version",
         schema: "QuickloginDeviceExport",
         parser: parseExportRequest,
-        input: { protocolVersion: 1, generation: 1, sessionVersion: 2 ** 53 },
+        input: { protocolVersion: 2, generation: 1, sessionVersion: 2 ** 53 },
         ok: false, code: "INVALID_REQUEST", status: 400,
       },
       {
         name: "export rejects unsupported protocol separately",
         schema: "QuickloginDeviceExport",
         parser: parseExportRequest,
-        input: { protocolVersion: 2, generation: 1, sessionVersion: 1 },
+        input: { protocolVersion: 1, generation: 1, sessionVersion: 1 },
         ok: false, code: "PROTOCOL_UNSUPPORTED", status: 426,
       },
     ];

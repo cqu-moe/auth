@@ -572,7 +572,7 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       throw new DeviceDoError(after.reason ?? "STALE_GENERATION");
     }
     return {
-      protocolVersion: 1,
+      protocolVersion: 2,
       deviceId: session.deviceId,
       generation: session.generation,
       sessionVersion: session.sessionVersion,

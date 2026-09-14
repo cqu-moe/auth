@@ -25,7 +25,7 @@ function extensionHeaders(authorization: string): Headers {
 }
 
 describe("quicklogin device HTTP", () => {
-  it("serves every v1 device operation with no legacy bridge", async () => {
+  it("serves v2 device payloads on the canonical API and reconciles stale status", async () => {
     const fixture = await createOAuthFixture(env);
     const install = await authorizeOfficialInstall(fixture, {
       websiteSession: fixture.websiteSession,
@@ -93,8 +93,8 @@ describe("quicklogin device HTTP", () => {
         method: "POST",
         headers: extensionHeaders(authorization),
         body: JSON.stringify({
-          protocolVersion: 1,
-          generation: enabledBody.generation,
+          protocolVersion: 2,
+          observedGeneration: enabledBody.generation,
           appliedVersion: null,
           browserVersion: "141",
         }),
@@ -102,12 +102,35 @@ describe("quicklogin device HTTP", () => {
     );
     expect(status.status).toBe(200);
 
+    await accounts.setMasterEnabled(fixture.websiteSession.userId, false);
+    await accounts.setMasterEnabled(fixture.websiteSession.userId, true);
+    const reconciled = await SELF.fetch(
+      `http://localhost:8787/api/v1/cqu/quicklogin/devices/${device.deviceId}/status`,
+      {
+        method: "POST",
+        headers: extensionHeaders(authorization),
+        body: JSON.stringify({
+          protocolVersion: 2,
+          observedGeneration: enabledBody.generation,
+          appliedVersion: null,
+          browserVersion: "141",
+        }),
+      }
+    );
+    expect(reconciled.status).toBe(200);
+    const reconciledBody = await reconciled.json<{
+      generation: number;
+      lastSeenAt: number | null;
+    }>();
+    expect(reconciledBody.generation).toBe(enabledBody.generation + 2);
+    expect(reconciledBody.lastSeenAt).not.toBeNull();
+
     const refresh = await SELF.fetch(
       `http://localhost:8787/api/v1/cqu/quicklogin/devices/${device.deviceId}/refresh`,
       {
         method: "POST",
         headers: extensionHeaders(authorization),
-        body: JSON.stringify({ protocolVersion: 1, generation: enabledBody.generation }),
+        body: JSON.stringify({ protocolVersion: 2, generation: reconciledBody.generation }),
       }
     );
     expect(refresh.status).toBe(202);
@@ -118,8 +141,8 @@ describe("quicklogin device HTTP", () => {
         method: "POST",
         headers: extensionHeaders(authorization),
         body: JSON.stringify({
-          protocolVersion: 1,
-          generation: enabledBody.generation,
+          protocolVersion: 2,
+          generation: reconciledBody.generation,
           sessionVersion: 0,
         }),
       }

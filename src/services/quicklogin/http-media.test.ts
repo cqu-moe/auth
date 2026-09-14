@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { QuickloginHttpError, readJson } from "./http";
+import { parseHeartbeat, QuickloginHttpError, readJson } from "./http";
 
 describe("QuickLogin HTTP JSON media contract", () => {
   it.each([
@@ -23,5 +23,29 @@ describe("QuickLogin HTTP JSON media contract", () => {
 
   it("uses the native error type", () => {
     expect(new QuickloginHttpError("INVALID_REQUEST", 400)).toBeInstanceOf(Error);
+  });
+
+  it("accepts the v2 observed-generation heartbeat contract", () => {
+    expect(parseHeartbeat({
+      protocolVersion: 2,
+      observedGeneration: 7,
+      appliedVersion: 5,
+      browserVersion: "152.0.0.0",
+    })).toEqual({
+      protocolVersion: 2,
+      observedGeneration: 7,
+      appliedVersion: 5,
+      browserVersion: "152.0.0.0",
+    });
+
+    expect(() => parseHeartbeat({
+      protocolVersion: 1,
+      generation: 7,
+      appliedVersion: 5,
+      browserVersion: "152.0.0.0",
+    })).toThrowError(expect.objectContaining({
+      code: "PROTOCOL_UNSUPPORTED",
+      status: 426,
+    }));
   });
 });

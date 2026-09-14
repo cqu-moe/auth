@@ -5,12 +5,12 @@ import type { CookieEnvelope, DeviceStatus } from "./contracts";
 
 async function fixture() {
   return JSON.parse(await readFile(
-    new URL("./fixtures/protocol-v1.json", import.meta.url), "utf8"
+    new URL("./fixtures/protocol-v2.json", import.meta.url), "utf8"
   )) as { status: DeviceStatus; envelope: CookieEnvelope };
 }
 
 function validateStatus(status: DeviceStatus): void {
-  if (status.protocolVersion !== 1 || !status.deviceId ||
+  if (status.protocolVersion !== 2 || !status.deviceId ||
       !Number.isSafeInteger(status.generation) || status.generation < 0 ||
       !Number.isSafeInteger(status.sessionVersion) || status.sessionVersion < 0 ||
       !Number.isSafeInteger(status.deviceLimit) || status.deviceLimit < 0 ||
@@ -20,7 +20,7 @@ function validateStatus(status: DeviceStatus): void {
 }
 
 function validateEnvelope(envelope: CookieEnvelope): void {
-  if (envelope.protocolVersion !== 1 || !envelope.deviceId ||
+  if (envelope.protocolVersion !== 2 || !envelope.deviceId ||
       !Number.isSafeInteger(envelope.generation) ||
       !Number.isSafeInteger(envelope.sessionVersion) ||
       new TextEncoder().encode(JSON.stringify(envelope)).length > 256 * 1024) {
@@ -29,7 +29,7 @@ function validateEnvelope(envelope: CookieEnvelope): void {
   validateSsoCookies(envelope.cookies, envelope.createdAt);
 }
 
-describe("shared protocol v1 fixture", () => {
+describe("shared protocol v2 fixture", () => {
   it("accepts the same synthetic status and envelope as the extension", async () => {
     const value = await fixture();
     expect(() => validateStatus(value.status)).not.toThrow();
@@ -39,7 +39,7 @@ describe("shared protocol v1 fixture", () => {
 
   it("rejects protocol drift, parent-domain cookies and oversized payloads", async () => {
     const value = await fixture();
-    expect(() => validateStatus({ ...value.status, protocolVersion: 2 as 1 })).toThrow();
+    expect(() => validateStatus({ ...value.status, protocolVersion: 1 as 2 })).toThrow();
     expect(() => validateEnvelope({
       ...value.envelope,
       cookies: value.envelope.cookies.map((cookie) => ({

@@ -61,9 +61,9 @@ async function registerDevice(
 
 function heartbeat(device: DeviceRecord, appliedVersion: number | null = null): HeartbeatInput {
   return {
-    protocolVersion: 1,
+    protocolVersion: 2,
     appliedVersion,
-    generation: device.generation,
+    observedGeneration: device.generation,
     browserVersion: "140.0.0",
   };
 }

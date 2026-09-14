@@ -284,7 +284,7 @@ describe("CquQuickloginDeviceDO", () => {
     await expect(devices.readDeviceSession(userId, authority.deviceId))
       .resolves.toMatchObject({ state: "ready", sessionVersion: 1 });
     await expect(devices.exportDeviceCookies(authority)).resolves.toMatchObject({
-      protocolVersion: 1,
+      protocolVersion: 2,
       deviceId: authority.deviceId,
       generation: authority.generation,
       sessionVersion: 1,

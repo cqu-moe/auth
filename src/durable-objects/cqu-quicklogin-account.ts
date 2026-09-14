@@ -235,8 +235,8 @@ export class CquQuickloginAccountDO extends DurableObject<Env> {
           }
           const input: HeartbeatInput = {
             protocolVersion:
-              payload.input.protocolVersion === 1
-                ? 1
+              payload.input.protocolVersion === 2
+                ? 2
                 : (() => {
                     throw new QuickloginAccountError("PROTOCOL_UNSUPPORTED");
                   })(),
@@ -244,7 +244,7 @@ export class CquQuickloginAccountDO extends DurableObject<Env> {
               payload.input.appliedVersion === null
                 ? null
                 : readNow(payload.input.appliedVersion),
-            generation: readNow(payload.input.generation),
+            observedGeneration: readNow(payload.input.observedGeneration),
             browserVersion: readString(payload.input.browserVersion),
           };
           if (payload.ip !== null && typeof payload.ip !== "string") {

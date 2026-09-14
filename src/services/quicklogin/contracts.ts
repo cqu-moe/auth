@@ -93,7 +93,7 @@ export interface DeviceAuthority {
 }
 
 export interface DeviceStatus {
-  protocolVersion: 1;
+  protocolVersion: 2;
   deviceId: DeviceId;
   generation: number;
   masterEnabled: boolean;
@@ -133,7 +133,7 @@ export interface SsoCookie {
 }
 
 export interface CookieEnvelope {
-  protocolVersion: 1;
+  protocolVersion: 2;
   deviceId: DeviceId;
   generation: number;
   sessionVersion: number;
@@ -186,9 +186,9 @@ export type DeviceLoginResult =
   | { kind: "cancelled" };
 
 export interface HeartbeatInput {
-  protocolVersion: 1;
+  protocolVersion: 2;
   appliedVersion: number | null;
-  generation: number;
+  observedGeneration: number;
   browserVersion: string;
 }
 

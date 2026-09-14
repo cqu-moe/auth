@@ -19,19 +19,19 @@ export const QuickloginDeviceRegistrationBody = z.strictObject({
 });
 
 export const QuickloginDeviceHeartbeatBody = z.strictObject({
-  protocolVersion: z.literal(1),
+  protocolVersion: z.literal(2),
   appliedVersion: SafeNonNegativeInteger.nullable(),
-  generation: SafeNonNegativeInteger,
+  observedGeneration: SafeNonNegativeInteger,
   browserVersion: boundedCanonicalText(40),
 });
 
 export const QuickloginDeviceRefreshBody = z.strictObject({
-  protocolVersion: z.literal(1),
+  protocolVersion: z.literal(2),
   generation: SafeNonNegativeInteger,
 });
 
 export const QuickloginDeviceExportBody = z.strictObject({
-  protocolVersion: z.literal(1),
+  protocolVersion: z.literal(2),
   generation: SafeNonNegativeInteger,
   sessionVersion: SafeNonNegativeInteger,
 });
@@ -52,13 +52,6 @@ function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function exactKeys(value: Record<string, unknown>, keys: string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const expected = [...keys].sort();
-  return actual.length === expected.length &&
-    actual.every((key, index) => key === expected[index]);
-}
-
 export async function readJson(request: Request): Promise<unknown> {
   if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get("content-type") ?? "")) {
     throw new QuickloginHttpError("INVALID_REQUEST", 415);
@@ -77,10 +70,13 @@ export function parseEnabled(value: unknown): boolean {
 
 function parseProtocol<T>(
   schema: z.ZodType<T>,
-  value: unknown,
-  keys: string[]
+  value: unknown
 ): T {
-  if (record(value) && exactKeys(value, keys) && value.protocolVersion !== 1) {
+  if (
+    record(value) &&
+    "protocolVersion" in value &&
+    value.protocolVersion !== 2
+  ) {
     throw new QuickloginHttpError("PROTOCOL_UNSUPPORTED", 426);
   }
   const parsed = schema.safeParse(value);
@@ -89,22 +85,20 @@ function parseProtocol<T>(
 }
 
 export function parseRefreshRequest(value: unknown): {
-  protocolVersion: 1; generation: number;
+  protocolVersion: 2; generation: number;
 } {
   return parseProtocol(
     QuickloginDeviceRefreshBody,
-    value,
-    ["generation", "protocolVersion"]
+    value
   );
 }
 
 export function parseExportRequest(value: unknown): {
-  protocolVersion: 1; generation: number; sessionVersion: number;
+  protocolVersion: 2; generation: number; sessionVersion: number;
 } {
   return parseProtocol(
     QuickloginDeviceExportBody,
-    value,
-    ["generation", "protocolVersion", "sessionVersion"]
+    value
   );
 }
 
@@ -117,7 +111,6 @@ export function parseDeviceMetadata(value: unknown): DeviceMetadata {
 export function parseHeartbeat(value: unknown): HeartbeatInput {
   return parseProtocol(
     QuickloginDeviceHeartbeatBody,
-    value,
-    ["appliedVersion", "browserVersion", "generation", "protocolVersion"]
+    value
   );
 }

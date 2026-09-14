@@ -74,6 +74,42 @@ describe("reduceAccount", () => {
     expect(result.result).toMatchObject({ used: 1, masterEnabled: false });
   });
 
+  it("reconciles a stale v2 heartbeat without accepting its applied version", () => {
+    const before = state({
+      devices: {
+        "device-1": device({ generation: 7, appliedVersion: 5 }),
+      },
+    });
+    const disabled = reduce(before, {
+      type: "set_master_enabled",
+      enabled: false,
+    });
+    const reenabled = reduce(disabled.state, {
+      type: "set_master_enabled",
+      enabled: true,
+    });
+
+    const result = reduce(reenabled.state, {
+      type: "heartbeat",
+      deviceId: "device-1",
+      input: {
+        protocolVersion: 2,
+        observedGeneration: 7,
+        appliedVersion: 999,
+        browserVersion: "152.0.0.0",
+      },
+      ip: "192.0.2.10",
+    } as unknown as AccountCommand, NOW + 1_000);
+
+    expect(result.state.devices["device-1"]).toMatchObject({
+      generation: 9,
+      appliedVersion: 5,
+      browserVersion: "152.0.0.0",
+      lastSeenAt: NOW + 1_000,
+      lastIp: "192.0.2.10",
+    });
+  });
+
   it("releases a slot on disable and keeps repeated enable idempotent", () => {
     const disabled = reduce(state(), {
       type: "set_device_enabled",

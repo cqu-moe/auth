@@ -354,10 +354,9 @@ export function reduceAccount(
     }
     case "heartbeat": {
       const device = requireLiveDevice(state, command.deviceId);
-      if (command.input.protocolVersion !== 1) fail("PROTOCOL_UNSUPPORTED");
-      if (command.input.generation !== device.generation) {
-        fail("STALE_GENERATION");
-      }
+      if (command.input.protocolVersion !== 2) fail("PROTOCOL_UNSUPPORTED");
+      const generationMatches =
+        command.input.observedGeneration === device.generation;
       if (
         command.input.appliedVersion !== null &&
         (!Number.isSafeInteger(command.input.appliedVersion) ||
@@ -376,7 +375,9 @@ export function reduceAccount(
       device.lastSeenAt = now;
       device.lastIp = command.ip;
       device.browserVersion = browserVersion;
-      device.appliedVersion = command.input.appliedVersion;
+      if (generationMatches) {
+        device.appliedVersion = command.input.appliedVersion;
+      }
       changed = true;
       eventSeeds.push({ kind: "projection" });
       break;
