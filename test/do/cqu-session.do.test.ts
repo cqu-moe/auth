@@ -103,6 +103,94 @@ async function restartDurableObject(stub: DurableObjectStub) {
 }
 
 describe("CAS activation recovery", () => {
+  it("promotes a freshly persisted first-login state when only the final status write was interrupted", async () => {
+    const stub = freshStub("cas-interrupted-success");
+    const loginAt = Date.now() - 60_000;
+    await seedSession(stub, {
+      status: "unbound",
+      loginAt,
+      storageState: validStorageState(),
+    });
+    await runInDurableObject(stub, async (_instance, state) => {
+      const stored = await state.storage.get<Record<string, unknown>>("state");
+      await state.storage.put({
+        state: { ...stored, lastKeepAlive: loginAt },
+        loginInFlight: {
+          token: "interrupted-success",
+          startedAt: loginAt - 30_000,
+          browserRouteVersion: 1,
+        },
+        "browserRoute:interrupted-success": {
+          token: "interrupted-success",
+          kind: "cas",
+          route: {
+            version: 1,
+            backend: "cloudflare",
+            userId: "u1",
+            bootId: "old-boot",
+          },
+          createdAt: loginAt - 30_000,
+          expiresAt: Date.now() + 60_000,
+        },
+        codeLease: {
+          ownerToken: "interrupted-success",
+          ownerKind: "cas",
+          acquiredAt: loginAt - 30_000,
+          ownerCodeReceivedAt: loginAt - 10_000,
+          queue: [],
+        },
+        codePermitProven: "interrupted-success",
+      });
+    });
+
+    const restarted = await restartDurableObject(stub);
+    const response = await restarted.fetch("http://do/status");
+
+    expect(response.status).toBe(200);
+    expect(await readStatus(restarted)).toBe("active");
+    expect((await readState(restarted))?.storageState).toEqual(validStorageState());
+    expect(await readStorage(restarted, "loginInFlight")).toBeUndefined();
+    expect(await readStorage(restarted, "codeLease")).toBeUndefined();
+    expect(await readStorage(restarted, "codePermitProven")).toBeUndefined();
+    expect(await readStorage(restarted, "browserRoute:interrupted-success")).toBeUndefined();
+    expect(await readAlarm(restarted)).not.toBeNull();
+  });
+
+  it.each(["revoked", "needs_reauth"] as const)(
+    "does not resurrect an explicitly terminal %s session",
+    async (status) => {
+      const stub = freshStub(`cas-interrupted-success-${status}`);
+      const loginAt = Date.now() - 60_000;
+      await seedSession(stub, {
+        status,
+        loginAt,
+        storageState: validStorageState(),
+      });
+      await runInDurableObject(stub, async (_instance, state) => {
+        const stored = await state.storage.get<Record<string, unknown>>("state");
+        await state.storage.put("state", { ...stored, lastKeepAlive: loginAt });
+      });
+
+      const restarted = await restartDurableObject(stub);
+      expect((await restarted.fetch("http://do/status")).status).toBe(200);
+      expect(await readStatus(restarted)).toBe(status);
+    }
+  );
+
+  it("does not promote an old or subsequently refreshed state", async () => {
+    const stub = freshStub("cas-interrupted-success-stale");
+    const loginAt = Date.now() - 8 * 60 * 60_000;
+    await seedSession(stub, {
+      status: "unbound",
+      loginAt,
+      storageState: validStorageState(),
+    });
+
+    const restarted = await restartDurableObject(stub);
+    expect((await restarted.fetch("http://do/status")).status).toBe(200);
+    expect(await readStatus(restarted)).toBe("unbound");
+  });
+
   it("releases a CAS login lock orphaned by a Durable Object restart", async () => {
     const stub = freshStub("cas-orphan-on-restart");
     const now = Date.now();

@@ -263,6 +263,13 @@ export class CquSessionDO extends DurableObject<Env> {
         );
       }
       try {
+        if (await this.recoverPersistedSuccessfulLogin()) return;
+      } catch (error) {
+        console.warn(
+          `[CquSession] persisted successful login recovery deferred (${error instanceof Error ? error.name : "unknown"})`
+        );
+      }
+      try {
         await this.recoverOrphanedCasLogin(true);
       } catch (error) {
         console.warn(
@@ -290,6 +297,52 @@ export class CquSessionDO extends DurableObject<Env> {
     if (!this.state) {
       this.state = (await this.ctx.storage.get<SessionState>("state")) ?? null;
     }
+  }
+
+  /**
+   * A first-login result is persisted before the final status write. A Worker update in that
+   * narrow window can leave a fresh, complete state behind while later failed retries put the
+   * status back to unbound. A real unbind deletes state entirely, so this exact fingerprint is
+   * safe to promote without importing or minting another school session.
+   */
+  private async recoverPersistedSuccessfulLogin(): Promise<boolean> {
+    const [storedState, status, lock] = await Promise.all([
+      this.ctx.storage.get<SessionState>("state"),
+      this.ctx.storage.get<CquStatus>("status"),
+      this.ctx.storage.get<LoginInFlight>("loginInFlight"),
+    ]);
+    const now = Date.now();
+    if (
+      status !== "unbound" ||
+      !storedState?.storageState ||
+      !hasValidTgt(storedState.storageState) ||
+      !Number.isSafeInteger(storedState.loginAt) ||
+      storedState.loginAt <= 0 ||
+      storedState.loginAt > now ||
+      now - storedState.loginAt > PROACTIVE_RELOGIN_MS ||
+      storedState.lastKeepAlive !== storedState.loginAt
+    ) {
+      return false;
+    }
+    const routeKey = lock ? this.browserRouteKey(lock.token) : null;
+    await this.ctx.storage.delete([
+      "loginInFlight",
+      "codeLease",
+      "codePermitPending",
+      "codePermitProven",
+      "pendingCode",
+      ...(routeKey ? [routeKey] : []),
+    ]);
+    this.state = storedState;
+    await this.setStatus("active");
+    await this.ctx.storage.setAlarm(now + KEEPALIVE_INTERVAL_MS);
+    this.orphanedCasLoginToken = null;
+    this.activationCasLockCaptureComplete = true;
+    this.activationPermitRecoveryComplete = true;
+    console.warn(JSON.stringify({
+      event: "cqu.cas.persisted_success_recovered",
+    }));
+    return true;
   }
 
   /**
