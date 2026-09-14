@@ -82,7 +82,7 @@ CLOUDFLARE = {
     "two_factor_settle": 3_000,
     "tab_click": 10_000,
     "launch": 60_000,
-    "capture_wait": 30_000,
+    "capture_wait": 45_000,
     "inpage_fetch": 30_000,
     "harvest_overall": 150.0,
     "harvest_nav": 60_000,

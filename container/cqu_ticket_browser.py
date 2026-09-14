@@ -168,7 +168,7 @@ async def _hydrate_navigate(service_url: str, state: dict, *, capture_state: boo
             "--no-sandbox", "--disable-dev-shm-usage"], timeout=browser_profile.TICKET_LAUNCH_TIMEOUT_MS)
         handles["browser"] = browser
         ctx = await browser.new_context(
-            storage_state=state, user_agent=cqu_login.UA,
+            storage_state=state,
             viewport={"width": 1440, "height": 900},
             locale="zh-CN", timezone_id="Asia/Shanghai")
         tickets: list[str] = []
@@ -189,6 +189,7 @@ async def _hydrate_navigate(service_url: str, state: dict, *, capture_state: boo
 
         await ctx.route("**/*", _route)
         page = await ctx.new_page()
+        await cqu_login.apply_browser_identity(ctx, page, browser.version)
         cqu_login.install_ticket_sniffer(page, tickets)  # 事实源:从 CAS 302 Location 抓 ST
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=browser_profile.TICKET_NAV_TIMEOUT_MS)

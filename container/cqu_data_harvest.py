@@ -508,6 +508,16 @@ class ResponseStageCollector:
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
 
+    async def settle_pending(self, deadline: float, *, clock=time.monotonic) -> None:
+        """Give response bodies already in flight a bounded chance to finish."""
+        pending = [task for task in self._tasks if not task.done()]
+        if not pending:
+            return
+        timeout = min(CAPTURE_BODY_SETTLE_S, max(0.0, deadline - clock()))
+        if timeout <= 0:
+            return
+        await asyncio.wait(pending, timeout=timeout)
+
 
 def _has_2xx(statuses: list[int]) -> bool:
     """fetch_statuses 里是否有任一 2xx(in-page GET 真拿到数据)。失败 fetch 记 status 0, 非 2xx。"""
@@ -558,6 +568,7 @@ INPAGE_FETCH_TIMEOUT_MS = browser_profile.INPAGE_FETCH_TIMEOUT_MS
 HARVEST_OVERALL_TIMEOUT = browser_profile.HARVEST_OVERALL_TIMEOUT_S
 STATE_EXPORT_TIMEOUT_S = 5.0
 STATE_EXPORT_DEADLINE_MARGIN_S = 1.0
+CAPTURE_BODY_SETTLE_S = 5.0
 
 
 def requires_table_capture(patterns: list[str]) -> bool:
@@ -774,10 +785,11 @@ async def harvest(state: dict, recipe: dict) -> dict:
             "--no-sandbox", "--disable-dev-shm-usage"], timeout=30000)
         handles["browser"] = browser
         ctx = await browser.new_context(
-            storage_state=state, user_agent=cqu_login.UA,
+            storage_state=state,
             viewport={"width": 1440, "height": 900},
             locale="zh-CN", timezone_id="Asia/Shanghai")
         page = await ctx.new_page()
+        await cqu_login.apply_browser_identity(ctx, page, browser.version)
         page.on("request", response_collector.on_request)
         page.on("response", response_collector.on_response)
 
@@ -797,6 +809,7 @@ async def harvest(state: dict, recipe: dict) -> dict:
                 page, ctx, nav_url, patterns, captured, trace,
                 started_at=navigation_started_at, deadline=work_deadline,
             )
+            await response_collector.settle_pending(work_deadline)
 
             # A capture recipe cannot be rescued by supplemental GETs. Fail at
             # the browser stage before issuing Bearer requests while the app may

@@ -28,9 +28,9 @@ BROWSER_LAUNCH_TIMEOUT_MS = 60_000 if CLOUDFLARE_PROFILE else 30_000
 SEND_CODE_RESPONSE_TIMEOUT_MS = 60_000 if CLOUDFLARE_PROFILE else 30_000
 
 # ── 采集(cqu_data_harvest.py) ───────────────────────────────────────────────
-# Generic capture wait 8s→30s; GET 15s→30s; navigation 25s→60s.
+# Generic capture wait 8s→45s; GET 15s→30s; navigation 25s→60s.
 # Table stages share a 150s work ceiling: queue 35s + cleanup 15s + margin 10s = 210s.
-CAPTURE_WAIT_MS = 30_000 if CLOUDFLARE_PROFILE else 8_000
+CAPTURE_WAIT_MS = 45_000 if CLOUDFLARE_PROFILE else 8_000
 INPAGE_FETCH_TIMEOUT_MS = 30_000 if CLOUDFLARE_PROFILE else 15_000
 HARVEST_OVERALL_TIMEOUT_S = 150.0
 HARVEST_NAV_TIMEOUT_MS = 60_000 if CLOUDFLARE_PROFILE else 25_000

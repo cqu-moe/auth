@@ -12,6 +12,7 @@ from test_browser_profile import probe_profile
 
 NAV = "https://my.cqu.edu.cn/workspace/curriculum"
 TABLE = "/my-table-detail"
+SESSION_INFO = "/session/info-detail"
 
 
 class TimelinePage:
@@ -221,6 +222,139 @@ async def test_fetch_only_wait_is_immediate_and_generic_capture_keeps_old_limit(
 
 
 @pytest.mark.asyncio
+async def test_generic_capture_body_arriving_at_wait_edge_is_preserved(monkeypatch):
+    gate = asyncio.Event()
+    page = TimelinePage([
+        (m.CAPTURE_WAIT_MS / 1000, response(SESSION_INFO, body_gate=gate)),
+    ], cookie_at=100)
+
+    async def new_page():
+        return page
+
+    async def storage_state():
+        return {"cookies": [], "origins": []}
+
+    async def new_cdp_session(_page):
+        return SimpleNamespace(send=lambda *_args, **_kwargs: asyncio.sleep(0))
+
+    context = SimpleNamespace(
+        new_page=new_page,
+        cookies=page.cookies,
+        storage_state=storage_state,
+        new_cdp_session=new_cdp_session,
+    )
+
+    async def new_context(**_kwargs):
+        return context
+
+    async def launch(**_kwargs):
+        return SimpleNamespace(new_context=new_context, version="148.0.7778.96")
+
+    async def start():
+        return SimpleNamespace(chromium=SimpleNamespace(launch=launch))
+
+    async def close(*_args):
+        return None
+
+    original_wait = m.wait_for_harvest_captures
+
+    async def timed_wait(p, ctx, nav, patterns, captured, trace, **_kwargs):
+        page.captured = captured
+        page.trace = trace
+        await original_wait(
+            p, ctx, nav, patterns, captured, trace,
+            started_at=0, deadline=150, clock=lambda: page.now,
+            uniform=lambda low, high: (low + high) / 2,
+        )
+
+    async def release_body():
+        await asyncio.sleep(0.01)
+        gate.set()
+
+    monkeypatch.setattr(m, "async_playwright", lambda: SimpleNamespace(start=start))
+    monkeypatch.setattr(m, "wait_for_harvest_captures", timed_wait)
+    monkeypatch.setattr(m.cqu_ticket_browser, "_close_browser_driver", close)
+
+    releaser = asyncio.create_task(release_body())
+    result = await m.harvest({}, {
+        "navUrl": NAV,
+        "capture": [SESSION_INFO],
+        "fetch": [],
+    })
+    await releaser
+
+    assert result["captures"][0]["body"] == "{}"
+
+
+@pytest.mark.asyncio
+async def test_harvest_applies_runtime_browser_identity_before_navigation(monkeypatch):
+    calls = {"context": None, "cdp": [], "goto": 0}
+
+    class Page:
+        url = NAV
+
+        def on(self, *_args):
+            return None
+
+        async def goto(self, *_args, **_kwargs):
+            calls["goto"] += 1
+
+        async def evaluate(self, *_args):
+            return {"status": 200, "body": "{}"}
+
+        async def content(self):
+            return "normal app"
+
+    page = Page()
+
+    class Session:
+        async def send(self, method, params):
+            assert calls["goto"] == 0
+            calls["cdp"].append((method, params))
+
+    async def new_cdp_session(identity_page):
+        assert identity_page is page
+        return Session()
+
+    async def new_page():
+        return page
+
+    async def storage_state():
+        return {"cookies": [], "origins": []}
+
+    async def new_context(**kwargs):
+        calls["context"] = kwargs
+        return SimpleNamespace(
+            new_page=new_page,
+            new_cdp_session=new_cdp_session,
+            storage_state=storage_state,
+        )
+
+    async def launch(**_kwargs):
+        return SimpleNamespace(new_context=new_context, version="148.0.7778.96")
+
+    async def start():
+        return SimpleNamespace(chromium=SimpleNamespace(launch=launch))
+
+    async def close(*_args):
+        return None
+
+    monkeypatch.setattr(m, "async_playwright", lambda: SimpleNamespace(start=start))
+    monkeypatch.setattr(m.cqu_ticket_browser, "_close_browser_driver", close)
+
+    result = await m.harvest({}, {
+        "navUrl": NAV,
+        "capture": [],
+        "fetch": [{"url": "https://my.cqu.edu.cn/api/example"}],
+    })
+
+    assert result["fetches"][0]["status"] == 200
+    assert "user_agent" not in calls["context"]
+    assert calls["cdp"][0][0] == "Network.setUserAgentOverride"
+    assert "Chrome/148.0.7778.96" in calls["cdp"][0][1]["userAgent"]
+
+
+@pytest.mark.asyncio
 async def test_inpage_gets_are_serial_with_between_only_injected_jitter():
     events = []
     first_started = asyncio.Event()
@@ -325,13 +459,21 @@ async def test_harvest_uses_one_browser_context_page_and_preserves_failure_gate(
         counts["page"] += 1
         return page
 
+    async def new_cdp_session(_page):
+        return SimpleNamespace(send=lambda *_args, **_kwargs: asyncio.sleep(0))
+
     async def new_context(**kwargs):
         counts["context"] += 1
-        return SimpleNamespace(new_page=new_page, cookies=page.cookies, storage_state=storage_state)
+        return SimpleNamespace(
+            new_page=new_page,
+            new_cdp_session=new_cdp_session,
+            cookies=page.cookies,
+            storage_state=storage_state,
+        )
 
     async def launch(**kwargs):
         counts["launch"] += 1
-        return SimpleNamespace(new_context=new_context)
+        return SimpleNamespace(new_context=new_context, version="148.0.7778.96")
 
     async def start():
         return SimpleNamespace(chromium=SimpleNamespace(launch=launch))
@@ -400,7 +542,10 @@ def complete_harvest_browser(monkeypatch):
         counts["page"] += 1
         return page
 
-    context = SimpleNamespace(new_page=new_page)
+    async def new_cdp_session(_page):
+        return SimpleNamespace(send=lambda *_args, **_kwargs: asyncio.sleep(0))
+
+    context = SimpleNamespace(new_page=new_page, new_cdp_session=new_cdp_session)
 
     async def new_context(**kwargs):
         counts["context"] += 1
@@ -408,7 +553,7 @@ def complete_harvest_browser(monkeypatch):
 
     async def launch(**kwargs):
         counts["launch"] += 1
-        return SimpleNamespace(new_context=new_context)
+        return SimpleNamespace(new_context=new_context, version="148.0.7778.96")
 
     async def start():
         return SimpleNamespace(chromium=SimpleNamespace(launch=launch))
@@ -616,11 +761,18 @@ async def test_outer_short_budget_classifies_observed_hung_body(monkeypatch, ext
     async def new_page():
         return page
 
+    async def new_cdp_session(_page):
+        return SimpleNamespace(send=lambda *_args, **_kwargs: asyncio.sleep(0))
+
     async def new_context(**kwargs):
-        return SimpleNamespace(new_page=new_page, cookies=cookies)
+        return SimpleNamespace(
+            new_page=new_page,
+            new_cdp_session=new_cdp_session,
+            cookies=cookies,
+        )
 
     async def launch(**kwargs):
-        return SimpleNamespace(new_context=new_context)
+        return SimpleNamespace(new_context=new_context, version="148.0.7778.96")
 
     async def start():
         return SimpleNamespace(chromium=SimpleNamespace(launch=launch))

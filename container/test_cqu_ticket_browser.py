@@ -1,3 +1,7 @@
+from types import SimpleNamespace
+
+import pytest
+
 import cqu_login
 import cqu_ticket_browser as m
 
@@ -126,3 +130,86 @@ def test_collected_ticket_url_is_extractable_by_extract_ticket():
     tickets = []
     m.collect_ticket_url("https://my.cqu.edu.cn/authserver/authentication/cas?ticket=ST-42-aB.c-D_e", tickets)
     assert cqu_login.extract_ticket(tickets) == "ST-42-aB.c-D_e"
+
+
+@pytest.mark.asyncio
+async def test_hydrate_applies_runtime_browser_identity_before_navigation(monkeypatch):
+    calls = {"context": None, "cdp": [], "goto": 0}
+    callback = "https://my.cqu.edu.cn/cas?ticket=ST-42-runtime-identity"
+
+    class Page:
+        url = "about:blank"
+
+        async def goto(self, *_args, **_kwargs):
+            calls["goto"] += 1
+            self.url = callback
+
+        async def wait_for_timeout(self, _milliseconds):
+            return None
+
+        async def content(self):
+            return ""
+
+    page = Page()
+
+    class Session:
+        async def send(self, method, params):
+            assert calls["goto"] == 0
+            calls["cdp"].append((method, params))
+
+    async def new_cdp_session(identity_page):
+        assert identity_page is page
+        return Session()
+
+    async def new_page():
+        return page
+
+    async def route(*_args):
+        return None
+
+    async def new_context(**kwargs):
+        calls["context"] = kwargs
+        return SimpleNamespace(
+            route=route,
+            new_page=new_page,
+            new_cdp_session=new_cdp_session,
+        )
+
+    async def browser_close():
+        return None
+
+    browser = SimpleNamespace(
+        new_context=new_context,
+        close=browser_close,
+        version="148.0.7778.96",
+    )
+
+    async def launch(**_kwargs):
+        return browser
+
+    async def playwright_stop():
+        return None
+
+    playwright = SimpleNamespace(
+        chromium=SimpleNamespace(launch=launch),
+        stop=playwright_stop,
+    )
+
+    async def start():
+        return playwright
+
+    monkeypatch.setattr(m, "async_playwright", lambda: SimpleNamespace(start=start))
+    monkeypatch.setattr(m.cqu_login, "install_ticket_sniffer", lambda *_args: None)
+
+    ticket, body, refreshed = await m._hydrate_navigate(
+        "https://my.cqu.edu.cn/authserver/authentication/cas",
+        {"cookies": [], "origins": []},
+        overall_timeout=1,
+    )
+
+    assert ticket == "ST-42-runtime-identity"
+    assert body == ""
+    assert refreshed is None
+    assert "user_agent" not in calls["context"]
+    assert calls["cdp"][0][0] == "Network.setUserAgentOverride"
+    assert "Chrome/148.0.7778.96" in calls["cdp"][0][1]["userAgent"]
