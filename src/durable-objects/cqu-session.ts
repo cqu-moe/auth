@@ -31,6 +31,7 @@ import { fetchBrowser } from "../services/cqu-browser-routing";
 import {
   BROWSER_CLEANUP_MARGIN_MS,
   CONTAINER_BROWSER_DEADLINE_MS,
+  CONTAINER_HARVEST_DEADLINE_MS,
   remainingBrowserBudget,
   resolveBrowserDeadline,
 } from "../services/cqu-browser-budget";
@@ -1167,7 +1168,10 @@ export class CquSessionDO extends DurableObject<Env> {
     route: BrowserRoute,
     deadlineAt: number
   ): Promise<{ captures: HarvestCapture[]; fetches: HarvestFetch[]; state?: CquStorageState }> {
-    const budget = this.browserOperationBudget(deadlineAt);
+    const budget = this.browserOperationBudget(
+      deadlineAt,
+      CONTAINER_HARVEST_DEADLINE_MS
+    );
     const requestBody: Record<string, unknown> = { state, ...recipe };
     if (route.backend === "cloudflare" && budget.operationTimeoutMs) {
       requestBody.operationTimeoutMs = budget.operationTimeoutMs;
@@ -3084,15 +3088,16 @@ export class CquSessionDO extends DurableObject<Env> {
   }
 
   /**
-   * 单阶段浏览器操作的出站预算:CF 取 210s 单操作上限与剩余 invocation 时间中
+   * 单阶段浏览器操作的出站预算:CF 取该操作上限与剩余 invocation 时间中
    * 较小者(减去 DO 清理余量后作为 Python operationTimeoutMs)。
    * 剩余不足 30s 时受控抛 BROWSER_DEADLINE,不启动注定做不完的操作。
    */
   private browserOperationBudget(
-    deadlineAt: number
+    deadlineAt: number,
+    operationDeadlineMs = CONTAINER_BROWSER_DEADLINE_MS
   ): { fetchTimeoutMs: number; operationTimeoutMs?: number } {
     const remaining = remainingBrowserBudget(deadlineAt, Date.now());
-    const fetchTimeoutMs = Math.min(CONTAINER_BROWSER_DEADLINE_MS, remaining);
+    const fetchTimeoutMs = Math.min(operationDeadlineMs, remaining);
     return {
       fetchTimeoutMs,
       operationTimeoutMs: Math.max(

@@ -3,6 +3,7 @@ import {
   BROWSER_CLEANUP_MARGIN_MS,
   BROWSER_INVOCATION_BUDGET_MS,
   CONTAINER_BROWSER_DEADLINE_MS,
+  CONTAINER_HARVEST_DEADLINE_MS,
   remainingBrowserBudget,
   resolveBrowserDeadline,
 } from "./cqu-browser-budget";
@@ -11,6 +12,7 @@ describe("budget constants", () => {
   it("matches the agreed invocation/deadline/cleanup values", () => {
     expect(BROWSER_INVOCATION_BUDGET_MS).toBe(13 * 60_000);
     expect(CONTAINER_BROWSER_DEADLINE_MS).toBe(210_000);
+    expect(CONTAINER_HARVEST_DEADLINE_MS).toBe(380_000);
     expect(BROWSER_CLEANUP_MARGIN_MS).toBe(20_000);
   });
 });

@@ -6,6 +6,9 @@ export const BROWSER_INVOCATION_BUDGET_MS = 13 * 60_000;
 /** 单个容器浏览器操作(冷启动+排队+执行+清理)的单阶段保护上限。 */
 export const CONTAINER_BROWSER_DEADLINE_MS = 210_000;
 
+/** 课表采集允许 5 分钟浏览器工作，另给排队、清理和 DO 收尾留足余量。 */
+export const CONTAINER_HARVEST_DEADLINE_MS = 380_000;
+
 /** DO 在截止时间前预留的处理/清理余量。 */
 export const BROWSER_CLEANUP_MARGIN_MS = 20_000;
 

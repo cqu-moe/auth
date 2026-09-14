@@ -24,6 +24,11 @@ PROFILE_PROBE = (
     "    'tab_click': browser_profile.TAB_CLICK_TIMEOUT_MS, "
     "    'launch': browser_profile.BROWSER_LAUNCH_TIMEOUT_MS, "
     "    'capture_wait': browser_profile.CAPTURE_WAIT_MS, "
+    "    'dynamic_cookie_wait': browser_profile.DYNAMIC_COOKIE_WAIT_MS, "
+    "    'app_ready_wait': browser_profile.APP_READY_WAIT_MS, "
+    "    'judge_wait': browser_profile.JUDGE_WAIT_MS, "
+    "    'table_wait': browser_profile.TABLE_WAIT_MS, "
+    "    'capture_body_settle': browser_profile.CAPTURE_BODY_SETTLE_S, "
     "    'inpage_fetch': browser_profile.INPAGE_FETCH_TIMEOUT_MS, "
     "    'harvest_overall': browser_profile.HARVEST_OVERALL_TIMEOUT_S, "
     "    'harvest_nav': browser_profile.HARVEST_NAV_TIMEOUT_MS, "
@@ -60,6 +65,11 @@ DEFAULTS = {
     "tab_click": 4_000,
     "launch": 30_000,
     "capture_wait": 8_000,
+    "dynamic_cookie_wait": 30_000,
+    "app_ready_wait": 45_000,
+    "judge_wait": 60_000,
+    "table_wait": 90_000,
+    "capture_body_settle": 5.0,
     "inpage_fetch": 15_000,
     "harvest_overall": 150.0,
     "harvest_nav": 25_000,
@@ -82,10 +92,15 @@ CLOUDFLARE = {
     "two_factor_settle": 3_000,
     "tab_click": 10_000,
     "launch": 60_000,
-    "capture_wait": 45_000,
-    "inpage_fetch": 30_000,
-    "harvest_overall": 150.0,
-    "harvest_nav": 60_000,
+    "capture_wait": 90_000,
+    "dynamic_cookie_wait": 60_000,
+    "app_ready_wait": 120_000,
+    "judge_wait": 180_000,
+    "table_wait": 180_000,
+    "capture_body_settle": 15.0,
+    "inpage_fetch": 60_000,
+    "harvest_overall": 300.0,
+    "harvest_nav": 90_000,
     "hydrate_overall": 120.0,
     "ticket_launch": 60_000,
     "ticket_nav": 60_000,

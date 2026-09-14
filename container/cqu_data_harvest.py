@@ -558,17 +558,17 @@ def classify_harvest_outcome(
 # Generic capture recipes retain their profile-specific wait.
 CAPTURE_WAIT_MS = browser_profile.CAPTURE_WAIT_MS
 CAPTURE_POLL_MS = 150
-DYNAMIC_COOKIE_WAIT_MS = 30_000
-APP_READY_WAIT_MS = 45_000
-JUDGE_WAIT_MS = 60_000
-TABLE_WAIT_MS = 90_000
+DYNAMIC_COOKIE_WAIT_MS = browser_profile.DYNAMIC_COOKIE_WAIT_MS
+APP_READY_WAIT_MS = browser_profile.APP_READY_WAIT_MS
+JUDGE_WAIT_MS = browser_profile.JUDGE_WAIT_MS
+TABLE_WAIT_MS = browser_profile.TABLE_WAIT_MS
 # 单个 in-page fetch 的超时(ms):同源 GET 读豁免,正常亚秒级。
 INPAGE_FETCH_TIMEOUT_MS = browser_profile.INPAGE_FETCH_TIMEOUT_MS
 # harvest 整段执行上限(秒):navigate 过瑞数 + 等 capture + 跑 fetch[]。复用取票 overall_timeout 量级。
 HARVEST_OVERALL_TIMEOUT = browser_profile.HARVEST_OVERALL_TIMEOUT_S
 STATE_EXPORT_TIMEOUT_S = 5.0
 STATE_EXPORT_DEADLINE_MARGIN_S = 1.0
-CAPTURE_BODY_SETTLE_S = 5.0
+CAPTURE_BODY_SETTLE_S = browser_profile.CAPTURE_BODY_SETTLE_S
 
 
 def requires_table_capture(patterns: list[str]) -> bool:
@@ -782,7 +782,8 @@ async def harvest(state: dict, recipe: dict) -> dict:
         handles["pw"] = pw
         browser = await pw.chromium.launch(headless=True, args=[
             "--headless=new", "--disable-blink-features=AutomationControlled",
-            "--no-sandbox", "--disable-dev-shm-usage"], timeout=30000)
+            "--no-sandbox", "--disable-dev-shm-usage"],
+            timeout=browser_profile.BROWSER_LAUNCH_TIMEOUT_MS)
         handles["browser"] = browser
         ctx = await browser.new_context(
             storage_state=state,

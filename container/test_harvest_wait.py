@@ -806,8 +806,8 @@ async def test_empty_judge_data_does_not_prove_schedule_unpublished():
 
 def test_cross_layer_browser_work_budget_leaves_queue_cleanup_and_margin():
     source = (Path(__file__).resolve().parents[1] / "src/services/cqu-browser-budget.ts").read_text()
-    outer_ms = int(re.search(r"CONTAINER_BROWSER_DEADLINE_MS = ([\d_]+)", source)[1].replace("_", ""))
+    outer_ms = int(re.search(r"CONTAINER_HARVEST_DEADLINE_MS = ([\d_]+)", source)[1].replace("_", ""))
     for name in ("default", "cloudflare"):
         work = probe_profile({"CQU_BROWSER_PROFILE": name})["harvest_overall"]
-        assert work == 150
+        assert work == (300 if name == "cloudflare" else 150)
         assert (m.cqu_ticket_browser.QUEUE_WAIT + work + 15 + 10) * 1000 <= outer_ms
