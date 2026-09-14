@@ -612,11 +612,18 @@ export class CquSessionDO extends DurableObject<Env> {
     reservation: { token: string; route: BrowserRoute }
   ): Promise<{ success: boolean; error?: string; code?: string }> {
     try {
-      // 占位 state, 让 runContainerLogin 能拿到 userId/studentId。
+      // 同一绑定的修复登录复用上一份浏览器状态，维持学校侧信任画像；真正成功前不覆盖落盘态。
+      // 换用户或换学号时绝不跨账号复用 state。
+      const previous = await this.ctx.storage.get<SessionState>("state");
+      const seedState =
+        previous?.userId === userId && previous.studentId === studentId
+          ? previous.storageState
+          : null;
+      // 占位 state, 让 runContainerLogin 能拿到 userId/studentId 与可选 seedState。
       this.state = {
         userId,
         studentId,
-        storageState: null,
+        storageState: seedState,
         objectId: "",
         tgt: "",
         loginAt: 0,
@@ -1550,6 +1557,9 @@ export class CquSessionDO extends DurableObject<Env> {
         session: token,
         queuedPermit: permitRole === "queued",
       };
+      if (this.state.storageState) {
+        runBody.seedState = this.state.storageState;
+      }
       if (loginRoute.backend === "cloudflare") {
         runBody.operationTimeoutMs = Math.max(
           1,
@@ -2876,6 +2886,9 @@ export class CquSessionDO extends DurableObject<Env> {
         session: token,
         queuedPermit: permitRole === "queued",
       };
+      if (state.storageState) {
+        runBody.seedState = state.storageState;
+      }
       if (loginRoute.backend === "cloudflare") {
         runBody.operationTimeoutMs = runTimeoutMs;
       }

@@ -1404,6 +1404,65 @@ describe("persistent browser route records", () => {
     expect(route?.route.userId).toBe("u1");
   });
 
+  it("repair login reuses only the same account's prior browser state", async () => {
+    const stub = freshStub("repair-seed-state");
+    const previousState = validStorageState();
+    await seedSession(stub, {
+      status: "needs_reauth",
+      storageState: previousState,
+    });
+    const encrypted = await encrypt("new-password", env.ENCRYPTION_KEY);
+    const runBodies: Array<Record<string, unknown>> = [];
+    spyCfLogin({
+      "/run": async (request) => {
+        runBodies.push(await request.json<Record<string, unknown>>());
+        return Response.json({ ok: false, error: "test stop" });
+      },
+      "/code-permit": () => Response.json({ ok: true }),
+    });
+
+    await stub.fetch("https://do/init", {
+      method: "POST",
+      body: JSON.stringify({
+        userId: "u1",
+        studentId: "2020000001",
+        encryptedPassword: encrypted.ciphertext,
+        iv: encrypted.iv,
+      }),
+    });
+
+    expect(runBodies).toHaveLength(1);
+    expect(runBodies[0].seedState).toEqual(previousState);
+    expect((await readState(stub))?.storageState).toEqual(previousState);
+  });
+
+  it("repair login does not seed browser state across student ids", async () => {
+    const stub = freshStub("repair-cross-account-seed");
+    await seedSession(stub, { status: "needs_reauth" });
+    const encrypted = await encrypt("new-password", env.ENCRYPTION_KEY);
+    const runBodies: Array<Record<string, unknown>> = [];
+    spyCfLogin({
+      "/run": async (request) => {
+        runBodies.push(await request.json<Record<string, unknown>>());
+        return Response.json({ ok: false, error: "test stop" });
+      },
+      "/code-permit": () => Response.json({ ok: true }),
+    });
+
+    await stub.fetch("https://do/init", {
+      method: "POST",
+      body: JSON.stringify({
+        userId: "u1",
+        studentId: "2026000002",
+        encryptedPassword: encrypted.ciphertext,
+        iv: encrypted.iv,
+      }),
+    });
+
+    expect(runBodies).toHaveLength(1);
+    expect(runBodies[0]).not.toHaveProperty("seedState");
+  });
+
   it("keeps expired routes referenced by a live lock, lease owner or outbox, drops the rest", async () => {
     const stub = freshStub("route-cleanup");
     const now = Date.now();
@@ -1915,6 +1974,7 @@ describe("cloudflare CAS migration", () => {
     expect(run?.body.operationTimeoutMs).toBeGreaterThan(0);
     expect(run?.body.operationTimeoutMs).toBeLessThanOrEqual(780_000);
     expect(run?.body.session).toEqual(expect.any(String));
+    expect(run?.body.seedState).toEqual(validStorageState());
   });
 
   it("keepalive below the relogin threshold goes to the container with a bounded budget", async () => {

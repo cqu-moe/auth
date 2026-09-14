@@ -46,11 +46,14 @@ describe("quicklogin login broker", () => {
     await seedSession(stub, { status: "active", loginAt: 123_456 });
     await seedCredentials(stub);
     const before = await readState(stub);
+    let runBody: Record<string, unknown> | null = null;
     spyBrowserFetch({
       "/health": health,
       "/code-permit": () => Response.json({ ok: true }),
-      "/run": () =>
-        Response.json({ ok: true, state: freshDeviceState("device") }),
+      "/run": async (request) => {
+        runBody = await request.json<Record<string, unknown>>();
+        return Response.json({ ok: true, state: freshDeviceState("device") });
+      },
     });
 
     const result = await (await broker(stub)).quickloginLogin({
@@ -66,6 +69,10 @@ describe("quicklogin login broker", () => {
     expect(JSON.parse((result as Extract<DeviceLoginResult, { kind: "success" }>).storageState))
       .toMatchObject({ cookies: expect.any(Array) });
     expect(await readState(stub)).toEqual(before);
+    expect(runBody).not.toBeNull();
+    expect((runBody as unknown as Record<string, unknown>).seedState).toEqual(
+      before?.storageState
+    );
     expect(await readStatus(stub)).toBe("active");
     expect(await readStorage(stub, "quickloginLogin:device-a")).toBeUndefined();
   });

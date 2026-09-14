@@ -114,6 +114,50 @@ class RunQgTestCase(AioHTTPTestCase):
         assert _VALID_BODY["session"] not in server.CODE_EVENTS
         assert _VALID_BODY["session"] not in server.CODE_VALUES
 
+    async def test_valid_seed_state_is_passed_to_run_login(self):
+        captured = {}
+        seed_state = {
+            "cookies": [{"name": "trust", "value": "opaque"}],
+            "origins": [],
+        }
+
+        async def _run_login(**kwargs):
+            captured.update(kwargs)
+            return {"ticket": "ST-seeded", "state": {"cookies": [], "origins": []}}
+
+        server.should_use_proxy = lambda _profile: False
+        server.cqu_login.run_login = _run_login
+
+        resp = await self.client.post(
+            "/run", json={**_VALID_BODY, "seedState": seed_state}
+        )
+
+        assert resp.status == 200
+        assert captured.get("seed_state") == seed_state
+
+    async def test_invalid_seed_state_returns_400_before_browser_or_proxy(self):
+        called = {"run_login": False, "acquire": False}
+
+        async def _acquire(_profile="short"):
+            called["acquire"] = True
+            return _FAKE_PROXY
+
+        async def _run_login(**_kwargs):
+            called["run_login"] = True
+            return {"ticket": "ST-impossible", "state": {"cookies": [], "origins": []}}
+
+        server.acquire_qg_proxy = _acquire
+        server.cqu_login.run_login = _run_login
+
+        for invalid in ([], {}, {"cookies": "not-a-list"}, {"cookies": [], "origins": {}}):
+            resp = await self.client.post(
+                "/run", json={**_VALID_BODY, "seedState": invalid}
+            )
+            assert resp.status == 400
+            assert (await resp.json())["error"] == "invalid seedState"
+
+        assert called == {"run_login": False, "acquire": False}
+
     async def test_gray_door_off_direct_connect_no_acquire(self):
         # 灰度门关(should_use_proxy("login")=False) → 节点直连: 不调 acquire_qg_proxy,
         # 传给 run_login 的 proxy 必须是 None。

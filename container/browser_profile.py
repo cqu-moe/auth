@@ -24,6 +24,8 @@ POST_SUBMIT_WAIT_MS = 20_000 if CLOUDFLARE_PROFILE else 2_500
 TWO_FACTOR_SETTLE_WAIT_MS = 3_000 if CLOUDFLARE_PROFILE else 1_500
 TAB_CLICK_TIMEOUT_MS = 10_000 if CLOUDFLARE_PROFILE else 4_000
 BROWSER_LAUNCH_TIMEOUT_MS = 60_000 if CLOUDFLARE_PROFILE else 30_000
+# 点击发码后等待真实 HTTP response；此前固定 3.5s 会在按钮仍转圈时误判 status=None。
+SEND_CODE_RESPONSE_TIMEOUT_MS = 60_000 if CLOUDFLARE_PROFILE else 30_000
 
 # ── 采集(cqu_data_harvest.py) ───────────────────────────────────────────────
 # Generic capture wait 8s→30s; GET 15s→30s; navigation 25s→60s.

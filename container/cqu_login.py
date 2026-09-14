@@ -73,6 +73,48 @@ METHOD = {
 }
 
 
+def build_browser_identity(browser_version: str) -> dict:
+    """Build a UA + UA-CH override whose versions and headless brands agree."""
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)\.(\d+)", browser_version)
+    if not match:
+        raise ValueError(f"unparseable browser version: {browser_version!r}")
+    major = match.group(1)
+    grease = {"brand": "Not_A Brand", "version": "99"}
+    chromium = {"brand": "Chromium", "version": major}
+    return {
+        "userAgent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            f"Chrome/{browser_version} Safari/537.36"
+        ),
+        # CDP adds q-values when serializing this list into Accept-Language.
+        "acceptLanguage": "zh-CN,zh",
+        "platform": "MacIntel",
+        "userAgentMetadata": {
+            "brands": [grease, chromium],
+            "fullVersionList": [
+                {"brand": grease["brand"], "version": "99.0.0.0"},
+                {"brand": chromium["brand"], "version": browser_version},
+            ],
+            "platform": "macOS",
+            "platformVersion": "10_15_7",
+            "architecture": "x86",
+            "model": "",
+            "mobile": False,
+            "bitness": "64",
+            "wow64": False,
+        },
+    }
+
+
+async def apply_browser_identity(context, page, browser_version: str) -> None:
+    """Apply the consistent identity before the first network navigation."""
+    session = await context.new_cdp_session(page)
+    await session.send(
+        "Network.setUserAgentOverride", build_browser_identity(browser_version)
+    )
+
+
 async def _read_complete_login_form(pg):
     """读取完整第一因素表单；任一动态字段未就绪时返回空。"""
     try:
@@ -250,7 +292,9 @@ async def do_first_factor(pg, url, username, password, debug_screenshot=True):
     fields = {"_eventId": "submit", "type": "UsernamePassword", "execution": flowkey,
               "geolocation": "", "username": username,
               "password": aes_encrypt_password(croypto, password), "croypto": croypto}
-    await formnav_submit(pg, url, fields)
+    # 当前前端动态 form 的 action 固定为相对路径 `login`，浏览器最终 POST /login，
+    # service 已封装在 execution 内；不要把初始 GET 的 query 原样带入 POST。
+    await formnav_submit(pg, f"{SSO}/login", fields)
     await pg.wait_for_timeout(browser_profile.POST_SUBMIT_WAIT_MS)
     if "ticket=ST-" in pg.url:
         return "success"
@@ -301,7 +345,7 @@ async def switch_2fa_tab(pg, method, *, uniform=random.uniform):
 
 
 async def request_code(pg, sms_state, *, uniform=random.uniform):
-    """原生点「获取验证码」, 发码 XHR 自带 CAqWHAeT。返回是否点到。"""
+    """原生点「获取验证码」并等待匹配的 HTTP response。返回是否点到。"""
     for sel in [".font-class-text-button", "button:has-text('获取验证码')", "span:has-text('获取验证码')"]:
         if await pg.locator(sel).count():
             try:
@@ -311,7 +355,16 @@ async def request_code(pg, sms_state, *, uniform=random.uniform):
                 )
                 await pg.wait_for_timeout(uniform(150, 450))
                 await button.click(timeout=browser_profile.TAB_CLICK_TIMEOUT_MS)
-                await pg.wait_for_timeout(3500)
+                response_event = sms_state.setdefault(
+                    "_response_event", asyncio.Event()
+                )
+                try:
+                    await asyncio.wait_for(
+                        response_event.wait(),
+                        timeout=browser_profile.SEND_CODE_RESPONSE_TIMEOUT_MS / 1000,
+                    )
+                except asyncio.TimeoutError:
+                    sms_state["response_timed_out"] = True
                 return True
             except Exception:
                 continue
@@ -359,8 +412,9 @@ async def submit_code(pg, url, username, code, method):
     except Exception:
         flowkey = ""
     fields = {"username": username, "password": code, "type": METHOD[method]["login_type"],
-              "execution": flowkey, "_eventId": "submit", "trustDevice": "false"}
-    await formnav_submit(pg, url, fields, timeout=browser_profile.FORMNAV_TIMEOUT_MS)
+              "execution": flowkey, "_eventId": "submit", "geolocation": "",
+              "captcha_code": ""}
+    await formnav_submit(pg, f"{SSO}/login", fields, timeout=browser_profile.FORMNAV_TIMEOUT_MS)
     await pg.wait_for_timeout(browser_profile.POST_SUBMIT_WAIT_MS)
 
 
@@ -384,6 +438,8 @@ def install_send_code_sniffer(page, sms_state, method):
     `await resp.json()` 防御异常(发码响应偶有非 JSON / 解析失败), 失败时 body 留 None。
     """
     marker = METHOD[method]["send_marker"]
+    sms_state["_response_event"] = asyncio.Event()
+    sms_state["response_timed_out"] = False
 
     async def on_response(resp):
         try:
@@ -396,6 +452,9 @@ def install_send_code_sniffer(page, sms_state, method):
                 sms_state["body"] = None
         except Exception:
             pass
+        finally:
+            if marker in getattr(resp, "url", ""):
+                sms_state["_response_event"].set()
 
     page.on("response", on_response)
 
@@ -447,6 +506,7 @@ async def run_login(
     reusable_code_provider=None,
     permit_provider=None,
     proxy=None,
+    seed_state=None,
 ):
     """容器入口: 跑完整登录流程, 验证码经 code_provider(async, 返回 6 位字符串)推入。
 
@@ -456,6 +516,9 @@ async def run_login(
     proxy: 可选, 形如 {"server": "http://ip:port", "username": .., "password": ..}(青果住宅代理,
     由 server.py 经 acquire_qg_proxy() 取得后传入), 让浏览器经国内住宅出站消除 CQU 验证码;
     None 时透传给 patchright launch 等价于不设代理(playwright 默认 = 无代理), 保持旧行为。
+
+    seed_state: 可选的上一份完整 Patchright storage_state。只用于初始化新 context，保留学校
+    侧浏览器画像/信任 cookie 的连续性；登录成功后仍导出一份全新的 state 覆盖旧态。
 
     成功返回 {"state": <patchright storage_state 完整对象, 含 cookies + localStorage>, "ticket": "ST-..."}。
     失败(第一因素未过 / 无 ST / 未取到码)抛 RuntimeError, 携带可诊断信息。
@@ -480,9 +543,16 @@ async def run_login(
             proxy=proxy,
             timeout=browser_profile.BROWSER_LAUNCH_TIMEOUT_MS,
         )
-        ctx = await browser.new_context(user_agent=UA, viewport={"width": 1440, "height": 900},
-                                        locale="zh-CN", timezone_id="Asia/Shanghai")
+        context_options = {
+            "viewport": {"width": 1440, "height": 900},
+            "locale": "zh-CN",
+            "timezone_id": "Asia/Shanghai",
+        }
+        if seed_state is not None:
+            context_options["storage_state"] = seed_state
+        ctx = await browser.new_context(**context_options)
         page = await ctx.new_page()
+        await apply_browser_identity(ctx, page, browser.version)
         page.set_default_timeout(15000)
         tickets = []
         install_ticket_sniffer(page, tickets)
@@ -556,9 +626,10 @@ async def run(args):
                   "--no-sandbox", "--disable-dev-shm-usage"]
             if not args.headed else ["--disable-blink-features=AutomationControlled"],
             timeout=browser_profile.BROWSER_LAUNCH_TIMEOUT_MS)
-        ctx = await browser.new_context(user_agent=UA, viewport={"width": 1440, "height": 900},
+        ctx = await browser.new_context(viewport={"width": 1440, "height": 900},
                                         locale="zh-CN", timezone_id="Asia/Shanghai")
         page = await ctx.new_page()
+        await apply_browser_identity(ctx, page, browser.version)
         page.set_default_timeout(15000)
         tickets = []
         install_ticket_sniffer(page, tickets)

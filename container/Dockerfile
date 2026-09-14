@@ -1,4 +1,5 @@
-# CQU 浏览器登录器镜像。用 buildx --platform=linux/amd64 构建(CF Containers 仅跑 amd64)。
+# CQU 浏览器登录器镜像。登录走裸 CDP，取票/采集继续复用 patchright 安装的 Chromium。
+# 用 buildx --platform=linux/amd64 构建(CF Containers 仅跑 amd64)。
 # 注: 不在此处写 `FROM --platform=linux/amd64`(会触发 docker lint 警告), 平台靠构建时 --platform 指定。
 FROM python:3.12-slim
 
@@ -32,7 +33,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && patchright install chromium
 
-COPY server.py browser_profile.py cqu_login.py qg_proxy.py cqu_ticket.py cqu_ticket_browser.py cqu_keepalive.py cqu_data_harvest.py ./
+COPY server.py browser_profile.py cqu_login.py cqu_login_cdp.py qg_proxy.py cqu_ticket.py cqu_ticket_browser.py cqu_keepalive.py cqu_data_harvest.py ./
 
 EXPOSE 8080
 # tini 作 PID 1(-- 后接真实命令): 转发信号 + reap 临时 chromium 的孤儿/僵尸进程。

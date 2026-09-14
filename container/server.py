@@ -25,7 +25,7 @@ import uuid
 from aiohttp import web
 
 import browser_profile  # 国内/Cloudflare 两套时限与运行标记
-import cqu_login  # 改造后的登录器, 暴露 run_login(...)
+import cqu_login_cdp as cqu_login  # 裸 CDP 登录器；避免 Patchright 注入触发发码空 400。
 import cqu_keepalive  # 国内节点浏览器水化探活, 暴露 probe_session_browser(...)
 import cqu_ticket_browser  # 浏览器水化取 ST(过瑞数 JS 挑战), 暴露 fetch_service_ticket_browser(...)
 import cqu_data_harvest  # 浏览器 organic harvest(navigate+capture+in-page fetch), 暴露 harvest(...)
@@ -40,6 +40,7 @@ NODE_CAPABILITIES = [
     "data-harvest",
     "browser-route-v1",
     "operation-deadline-v1",
+    "raw-cdp-login-v1",
 ]
 
 # 进程级启动标识:实例停止/崩溃/更新后 Event 字典即清空,DO 必须能识别"同一个容器 ID
@@ -212,6 +213,19 @@ def parse_operation_timeout_ms(body: dict) -> int | None:
     return value
 
 
+def parse_seed_state(body: dict) -> dict | None:
+    """Validate the optional prior browser state before starting proxy/browser work."""
+    value = body.get("seedState")
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not isinstance(value.get("cookies"), list):
+        raise ValueError("invalid seedState")
+    origins = value.get("origins", [])
+    if not isinstance(origins, list):
+        raise ValueError("invalid seedState")
+    return {"cookies": value["cookies"], "origins": origins}
+
+
 async def acquire_browser_job() -> bool:
     """尝试占用本进程唯一的重型浏览器槽(仅 CF profile 生效)。
 
@@ -347,6 +361,11 @@ async def run_handler(request: web.Request) -> web.Response:
             status=400,
         )
 
+    try:
+        seed_state = parse_seed_state(body)
+    except ValueError as error:
+        return web.json_response({"ok": False, "error": str(error)}, status=400)
+
     boot_guard = boot_guard_response(request)
     if boot_guard is not None:
         return boot_guard
@@ -474,6 +493,7 @@ async def run_handler(request: web.Request) -> web.Response:
                     reusable_code_provider=reusable_code_waiter,
                     permit_provider=permit_waiter,
                     proxy=proxy,
+                    seed_state=seed_state,
                 ),
                 permit_claimed,
                 permit_phase_timeout,

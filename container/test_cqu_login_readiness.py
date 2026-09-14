@@ -243,6 +243,8 @@ def test_switching_2fa_tab_waits_for_profile_settle_window_before_send(monkeypat
 def test_request_code_uses_injected_pre_click_pause():
     page = FakeInteractivePage()
     ranges = []
+    response_event = asyncio.Event()
+    response_event.set()
 
     def uniform(low, high):
         ranges.append((low, high))
@@ -251,7 +253,7 @@ def test_request_code_uses_injected_pre_click_pause():
     clicked = asyncio.run(
         cqu_login.request_code(
             page,
-            {"status": None, "body": None},
+            {"status": None, "body": None, "_response_event": response_event},
             uniform=uniform,
         )
     )
@@ -262,5 +264,49 @@ def test_request_code_uses_injected_pre_click_pause():
         ("visible", "visible"),
         ("pause", 275.0),
         ("click", None),
-        ("pause", 3500),
     ]
+
+
+def test_request_code_waits_for_the_observed_http_response(monkeypatch):
+    page = FakeInteractivePage()
+    response_event = asyncio.Event()
+    state = {"status": None, "body": None, "_response_event": response_event}
+    completed = []
+    monkeypatch.setattr(
+        cqu_login.browser_profile,
+        "SEND_CODE_RESPONSE_TIMEOUT_MS",
+        500,
+        raising=False,
+    )
+
+    async def drive():
+        async def complete_response():
+            await asyncio.sleep(0.02)
+            state["status"] = 200
+            state["body"] = {"code": 200, "data": {"result": True}}
+            completed.append(True)
+            response_event.set()
+
+        task = asyncio.create_task(complete_response())
+        clicked = await cqu_login.request_code(page, state, uniform=lambda *_: 0)
+        await task
+        return clicked
+
+    assert asyncio.run(drive()) is True
+    assert completed == [True]
+    assert state["status"] == 200
+    assert state.get("response_timed_out") is not True
+
+
+def test_request_code_marks_a_real_response_timeout(monkeypatch):
+    page = FakeInteractivePage()
+    state = {"status": None, "body": None, "_response_event": asyncio.Event()}
+    monkeypatch.setattr(
+        cqu_login.browser_profile,
+        "SEND_CODE_RESPONSE_TIMEOUT_MS",
+        1,
+        raising=False,
+    )
+
+    assert asyncio.run(cqu_login.request_code(page, state, uniform=lambda *_: 0)) is True
+    assert state["response_timed_out"] is True

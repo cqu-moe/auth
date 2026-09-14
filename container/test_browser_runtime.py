@@ -88,6 +88,7 @@ class BootGuardTests(BrowserRuntimeTestCase):
             assert payload["browserProfile"] == "cloudflare"
             assert "browser-route-v1" in payload["capabilities"]
             assert "operation-deadline-v1" in payload["capabilities"]
+            assert "raw-cdp-login-v1" in payload["capabilities"]
 
 
 class SingleHeavyJobTests(BrowserRuntimeTestCase):

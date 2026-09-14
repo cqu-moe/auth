@@ -4,7 +4,7 @@ import type { Env } from "../types";
 /**
  * CQU 浏览器登录器容器(CF Containers, basic 1 GiB)。
  *
- * 容器内是 aiohttp(container/server.py)+ patchright(container/cqu_login.py):
+ * 容器内是 aiohttp(container/server.py)；登录用裸 CDP，采集/取票仍用 patchright：
  *   - POST /run  起一次完整登录, 阻塞等 2FA 码
  *   - POST /code DO 收到 CF 转发的 2FA 邮件提码后推入, 唤醒在途 /run
  *
