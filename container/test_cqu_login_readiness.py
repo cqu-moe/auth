@@ -205,10 +205,16 @@ class FakeInteractivePage:
         self.events.append(("pause", milliseconds))
 
 
-def test_switching_2fa_tab_waits_for_visibility_and_uses_injected_safe_pacing():
+def test_switching_2fa_tab_waits_for_profile_settle_window_before_send(monkeypatch):
     page = FakeInteractivePage()
     pauses = iter((300.0, 400.0))
     ranges = []
+    monkeypatch.setattr(
+        cqu_login.browser_profile,
+        "TWO_FACTOR_SETTLE_WAIT_MS",
+        3_000,
+        raising=False,
+    )
 
     def uniform(low, high):
         ranges.append((low, high))
@@ -229,6 +235,7 @@ def test_switching_2fa_tab_waits_for_visibility_and_uses_injected_safe_pacing():
         ("click", None),
         ("visible", "visible"),
         ("pause", 400.0),
+        ("pause", 3_000),
     ]
 
 

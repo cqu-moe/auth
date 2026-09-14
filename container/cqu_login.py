@@ -294,6 +294,7 @@ async def switch_2fa_tab(pg, method, *, uniform=random.uniform):
             state="visible", timeout=browser_profile.TAB_CLICK_TIMEOUT_MS
         )
         await pg.wait_for_timeout(uniform(200, 500))
+        await pg.wait_for_timeout(browser_profile.TWO_FACTOR_SETTLE_WAIT_MS)
     except Exception:
         pass
 

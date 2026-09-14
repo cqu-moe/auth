@@ -20,6 +20,7 @@ PROFILE_PROBE = (
     "    'ready_attempts': browser_profile.LOGIN_READY_ATTEMPTS, "
     "    'formnav': browser_profile.FORMNAV_TIMEOUT_MS, "
     "    'post_submit': browser_profile.POST_SUBMIT_WAIT_MS, "
+    "    'two_factor_settle': getattr(browser_profile, 'TWO_FACTOR_SETTLE_WAIT_MS', None), "
     "    'tab_click': browser_profile.TAB_CLICK_TIMEOUT_MS, "
     "    'launch': browser_profile.BROWSER_LAUNCH_TIMEOUT_MS, "
     "    'capture_wait': browser_profile.CAPTURE_WAIT_MS, "
@@ -55,6 +56,7 @@ DEFAULTS = {
     "ready_attempts": 2,
     "formnav": 25_000,
     "post_submit": 2_500,
+    "two_factor_settle": 1_500,
     "tab_click": 4_000,
     "launch": 30_000,
     "capture_wait": 8_000,
@@ -77,6 +79,7 @@ CLOUDFLARE = {
     "ready_attempts": 2,
     "formnav": 60_000,
     "post_submit": 20_000,
+    "two_factor_settle": 3_000,
     "tab_click": 10_000,
     "launch": 60_000,
     "capture_wait": 30_000,

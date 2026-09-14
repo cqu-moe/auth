@@ -12,7 +12,7 @@ CLOUDFLARE_PROFILE = os.environ.get("CQU_BROWSER_PROFILE") == "cloudflare"
 PROFILE_NAME = "cloudflare" if CLOUDFLARE_PROFILE else "default"
 
 # ── 登录页/表单导航(cqu_login.py) ────────────────────────────────────────────
-# goto/reload 25s→60s;formnav 25s→60s;提交后 2.5s→20s;
+# goto/reload 25s→60s;formnav 25s→60s;提交后 2.5s→20s;二次认证稳定 1.5s→3s;
 # 4s 操作超时→10s;浏览器启动 30s→60s。(逐 hunk 对齐 2026-09-08 登录/采集实测补丁)
 LOGIN_NAV_TIMEOUT_MS = 60_000 if CLOUDFLARE_PROFILE else 25_000
 LOGIN_COOKIE_WAIT_MS = 20_000
@@ -21,6 +21,7 @@ LOGIN_READY_POLL_MS = 100
 LOGIN_READY_ATTEMPTS = 2
 FORMNAV_TIMEOUT_MS = 60_000 if CLOUDFLARE_PROFILE else 25_000
 POST_SUBMIT_WAIT_MS = 20_000 if CLOUDFLARE_PROFILE else 2_500
+TWO_FACTOR_SETTLE_WAIT_MS = 3_000 if CLOUDFLARE_PROFILE else 1_500
 TAB_CLICK_TIMEOUT_MS = 10_000 if CLOUDFLARE_PROFILE else 4_000
 BROWSER_LAUNCH_TIMEOUT_MS = 60_000 if CLOUDFLARE_PROFILE else 30_000
 
