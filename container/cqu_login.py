@@ -284,6 +284,7 @@ async def switch_2fa_tab(pg, method, *, uniform=random.uniform):
     tab_text = METHOD[method]["tab"]
     t = pg.locator(".ant-tabs-tab").filter(has_text=tab_text)
     try:
+        await pg.wait_for_timeout(browser_profile.TWO_FACTOR_SETTLE_WAIT_MS)
         await t.first.wait_for(
             state="visible", timeout=browser_profile.TAB_CLICK_TIMEOUT_MS
         )

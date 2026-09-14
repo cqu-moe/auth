@@ -230,6 +230,7 @@ def test_switching_2fa_tab_waits_for_profile_settle_window_before_send(monkeypat
 
     assert ranges == [(150, 450), (200, 500)]
     assert page.events == [
+        ("pause", 3_000),
         ("visible", "visible"),
         ("pause", 300.0),
         ("click", None),
