@@ -247,6 +247,8 @@ export class CquSessionDO extends DurableObject<Env> {
   // 全部浏览器出站均经 CF 容器 stub;此直连客户端仅作历史回滚窗口保留。
   private ssoClient = new CquSsoClient();
   private quickloginFlights = new Map<string, Promise<DeviceLoginResult>>();
+  private orphanedCasLoginToken: string | null = null;
+  private activationCasLockCaptureComplete = false;
   private retiredAtrustCleanupComplete = false;
   private activationPermitRecoveryComplete = false;
 
@@ -259,6 +261,14 @@ export class CquSessionDO extends DurableObject<Env> {
         console.warn(
           `[CquSession] retired aTrust state cleanup deferred (${error instanceof Error ? error.name : "unknown"})`
         );
+      }
+      try {
+        await this.recoverOrphanedCasLogin(true);
+      } catch (error) {
+        console.warn(
+          `[CquSession] orphaned CAS login recovery deferred (${error instanceof Error ? error.name : "unknown"})`
+        );
+        return;
       }
       // `codePermitPending` is a durable outbox marker. Replaying the same token
       // is idempotent, so recovery can finish an acknowledgement without handing
@@ -349,6 +359,19 @@ export class CquSessionDO extends DurableObject<Env> {
         );
       }
     }
+    try {
+      if (await this.recoverOrphanedCasLogin()) {
+        await this.recoverPendingCodePermit();
+      }
+    } catch (error) {
+      console.warn(
+        `[CquSession] orphaned CAS login retry recovery deferred (${error instanceof Error ? error.name : "unknown"})`
+      );
+      return Response.json(
+        { error: "CQU login recovery unavailable", code: "INTERNAL_ERROR" },
+        { status: 503 }
+      );
+    }
     if (
       this.retiredAtrustCleanupComplete &&
       !this.activationPermitRecoveryComplete
@@ -418,18 +441,33 @@ export class CquSessionDO extends DurableObject<Env> {
             encryptedPassword: string;
             iv: string;
           }>();
-          await this.bumpQuickloginBindingEpoch(body.userId);
-          await this.ctx.storage.put<StoredCredentials>("credentials", {
-            encryptedPassword: body.encryptedPassword,
-            iv: body.iv,
-          });
-          const result = await this.initSession(
-            body.userId,
-            body.studentId,
-            body.encryptedPassword,
-            body.iv
+          const reservation = await this.acquireRoutedLoginLock(
+            "loginInFlight",
+            "cas",
+            body.userId
           );
-          return Response.json(result);
+          if (!reservation) {
+            return Response.json({
+              success: false,
+              code: "CQU_LOGIN_IN_FLIGHT",
+              error: "CQU 登录正在进行中（请勿重复提交）",
+            });
+          }
+          try {
+            await this.bumpQuickloginBindingEpoch(body.userId);
+            await this.ctx.storage.put<StoredCredentials>("credentials", {
+              encryptedPassword: body.encryptedPassword,
+              iv: body.iv,
+            });
+            return Response.json(await this.initSession(
+              body.userId,
+              body.studentId,
+              reservation
+            ));
+          } catch (error) {
+            await this.releaseRoutedLoginReservation(reservation.token);
+            throw error;
+          }
         }
         case "service-ticket": {
           const service = url.searchParams.get("service");
@@ -566,14 +604,13 @@ export class CquSessionDO extends DurableObject<Env> {
    * NOTE(onboarding, Phase 6 定稿): 真实首登要求绑定先 active(密保邮箱已设为专属地址、
    * 2FA 邮件能被 CF 捕获)才能跑通——容器发码后 DO 必须能收到 deposit-code。Phase 5 这里
    * 只负责「存凭证 + 触发容器登录」, 不强求 onboarding 时序完全闭合; 在尚未绑定 2FA 邮件的
-   * 环境里, 容器会在等码处超时返回失败, initSession 据此返回 {success:false}(route 据此回滚)。
+   * 环境里, 容器会在等码处超时返回失败, initSession 据此返回 {success:false}。
    */
   private async initSession(
     userId: string,
     studentId: string,
-    _encryptedPassword: string,
-    _iv: string
-  ): Promise<{ success: boolean; error?: string }> {
+    reservation: { token: string; route: BrowserRoute }
+  ): Promise<{ success: boolean; error?: string; code?: string }> {
     try {
       // 占位 state, 让 runContainerLogin 能拿到 userId/studentId。
       this.state = {
@@ -590,12 +627,16 @@ export class CquSessionDO extends DurableObject<Env> {
       await this.setStatus("binding");
       const outcome = await this.containerLogin(
         "FIRST_LOGIN_OK",
-        "FIRST_LOGIN_FAIL"
+        "FIRST_LOGIN_FAIL",
+        undefined,
+        undefined,
+        reservation
       );
       if (outcome === "in_flight") {
         // 已有在途首登(如重复提交), 让它跑完; 不当失败回滚, 也不谎报成功。
         return {
           success: false,
+          code: "CQU_LOGIN_IN_FLIGHT",
           error: "CQU 登录正在进行中（请勿重复提交）",
         };
       }
@@ -605,6 +646,7 @@ export class CquSessionDO extends DurableObject<Env> {
       await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
       return { success: true };
     } catch (e) {
+      await this.releaseRoutedLoginReservation(reservation.token);
       return {
         success: false,
         error: e instanceof Error ? e.message : "Unknown error",
@@ -1192,18 +1234,18 @@ export class CquSessionDO extends DurableObject<Env> {
       pending.ownerToken = observedLease.ownerToken;
       const permitPending =
         (await this.ctx.storage.get<string>("codePermitPending")) ?? null;
+      const observationWrites: Record<string, unknown> = {
+        codeLease: observedLease,
+        pendingCode: pending,
+      };
       if (permitPending === observedLease.ownerToken) {
         // A mail code can only exist after some login clicked send. That is
         // stronger proof than a lost HTTP response that this owner consumed its
         // permit. Publish separate proof; the in-flight grant/recovery path is
         // the only writer allowed to commit (clear) the durable outbox marker.
-        await this.ctx.storage.put(
-          "codePermitProven",
-          observedLease.ownerToken
-        );
+        observationWrites.codePermitProven = observedLease.ownerToken;
       }
-      await this.persistCodeLeaseTransition(storedLease, observedLease);
-      await this.ctx.storage.put("pendingCode", pending);
+      await this.ctx.storage.put(observationWrites);
       const userId = this.state?.userId;
       if (!userId) {
         // 退化态: 有在途登录锁却无 session 状态, 节点路径走不通。码已广播无害, 但节点收码失败。
@@ -1719,6 +1761,18 @@ export class CquSessionDO extends DurableObject<Env> {
         await this.ctx.storage.setAlarm(Date.now() + RETRY_INTERVAL_MS);
         return;
       }
+    }
+    try {
+      if (await this.recoverOrphanedCasLogin()) {
+        await this.recoverPendingCodePermit();
+      }
+      if (this.orphanedCasLoginToken) return;
+    } catch (error) {
+      console.warn(
+        `[CquSession] orphaned CAS login alarm recovery deferred (${error instanceof Error ? error.name : "unknown"})`
+      );
+      await this.ctx.storage.setAlarm(Date.now() + RETRY_INTERVAL_MS);
+      return;
     }
     if (!this.activationPermitRecoveryComplete) {
       try {
@@ -2514,6 +2568,126 @@ export class CquSessionDO extends DurableObject<Env> {
   }
 
   /**
+   * A persisted CAS lock found during activation cannot still have an owning JS
+   * continuation. Remove only that token and its routing/lease references. If a
+   * code was already observed for the orphan, retain the owner fence until the
+   * account-level code expires so a replacement login cannot send concurrently.
+   */
+  private async recoverOrphanedCasLogin(
+    captureActivationLock = false
+  ): Promise<boolean> {
+    if (captureActivationLock || !this.activationCasLockCaptureComplete) {
+      const lock =
+        (await this.ctx.storage.get<LoginInFlight>("loginInFlight")) ?? null;
+      this.orphanedCasLoginToken = lock?.token ?? null;
+      this.activationCasLockCaptureComplete = true;
+    }
+    const orphanToken = this.orphanedCasLoginToken;
+    if (!orphanToken) return false;
+
+    const now = Date.now();
+    let recovered = false;
+    let matched = false;
+    let deferUntil: number | null = null;
+    let promotedOwnerKind: LoginKind | null = null;
+
+    await this.ctx.storage.transaction(async (tx) => {
+      const lock =
+        (await tx.get<LoginInFlight>("loginInFlight")) ?? null;
+      if (lock?.token !== orphanToken) return;
+      matched = true;
+
+      const [lease, pendingToken, provenToken, pendingCode, status, storedState] =
+        await Promise.all([
+          tx.get<CodeLease>("codeLease"),
+          tx.get<string>("codePermitPending"),
+          tx.get<string>("codePermitProven"),
+          tx.get<PendingCode>("pendingCode"),
+          tx.get<CquStatus>("status"),
+          tx.get<SessionState>("state"),
+        ]);
+      const observedCodeAt =
+        lease?.ownerToken === orphanToken &&
+        typeof lease.ownerCodeReceivedAt === "number" &&
+        Number.isSafeInteger(lease.ownerCodeReceivedAt) &&
+        lease.ownerCodeReceivedAt > 0
+          ? Math.min(lease.ownerCodeReceivedAt, now)
+          : null;
+      const interruptedCodeObservation =
+        lease?.ownerToken === orphanToken &&
+        observedCodeAt === null &&
+        provenToken === orphanToken;
+      if (
+        (observedCodeAt !== null &&
+          now - observedCodeAt < CODE_VALIDITY_MS) ||
+        interruptedCodeObservation
+      ) {
+        const fenceStartedAt = observedCodeAt ?? now;
+        deferUntil = fenceStartedAt + CODE_VALIDITY_MS;
+        if (interruptedCodeObservation && lease) {
+          await tx.put("codeLease", {
+            ...lease,
+            ownerCodeReceivedAt: fenceStartedAt,
+          });
+        }
+        return;
+      }
+
+      const nextLease = releaseCodeLease(lease ?? null, orphanToken, now);
+      const ownerChanged = lease?.ownerToken !== nextLease?.ownerToken;
+      const deletes = [
+        "loginInFlight",
+        this.browserRouteKey(orphanToken),
+      ];
+      if (!nextLease) deletes.push("codeLease");
+      if (ownerChanged || pendingToken === orphanToken) {
+        deletes.push("codePermitPending");
+      }
+      if (ownerChanged || provenToken === orphanToken) {
+        deletes.push("codePermitProven");
+      }
+      await tx.delete(deletes);
+
+      const writes: Record<string, unknown> = {};
+      if (nextLease) writes.codeLease = nextLease;
+      if (ownerChanged && nextLease) {
+        writes.codePermitPending = nextLease.ownerToken;
+        promotedOwnerKind = nextLease.ownerKind;
+      }
+      if (pendingCode?.ownerToken === orphanToken) {
+        const { ownerToken: _orphanOwner, ...unownedCode } = pendingCode;
+        writes.pendingCode = unownedCode;
+      }
+      if (status === "binding" || status === "relogging") {
+        writes.status = storedState?.storageState ? "expired" : "unbound";
+      }
+      if (Object.keys(writes).length > 0) await tx.put(writes);
+      recovered = true;
+    });
+
+    if (!matched || recovered) this.orphanedCasLoginToken = null;
+    if (deferUntil !== null) {
+      const currentAlarm = await this.ctx.storage.getAlarm();
+      if (currentAlarm === null || currentAlarm > deferUntil) {
+        await this.ctx.storage.setAlarm(deferUntil);
+      }
+      if (captureActivationLock) {
+        console.warn(JSON.stringify({
+          event: "cqu.cas.orphaned_login_recovery_deferred",
+          reason: "observed_code_still_valid",
+        }));
+      }
+    }
+    if (recovered) {
+      console.warn(JSON.stringify({
+        event: "cqu.cas.orphaned_login_recovered",
+        promotedOwnerKind,
+      }));
+    }
+    return recovered;
+  }
+
+  /**
    * 按 FIFO 获取共享验证码通道。CAS 与 QuickLogin 的浏览器登录可以并行，
    * 但只有 owner 会被允许点击「获取验证码」。
    */
@@ -2583,10 +2757,8 @@ export class CquSessionDO extends DurableObject<Env> {
   /**
    * 调容器 /run 跑一次完整浏览器登录(首登 / 重登共用)。
    *
-   * single-flight 在此集中: 先从 storage 读最新锁, 若已有「活的、未过期」在途登录
-   * (shouldStartLogin === false) 则返回 "in_flight", 不点火第二个容器、不覆盖锁,
-   * 这样 init()→containerLogin 与 relogin()→containerLogin 都能抵御重复触发
-   * (如绑定时的双击提交)。
+   * relogin 在此获取 single-flight 锁；init 在写凭据/状态前预先获取同一把锁并把
+   * reservation 传入。两条路径都保证竞争失败者不点火第二个容器、不覆盖锁。
    *
    * 设置 single-flight 锁(token 作容器 session 键, deposit-code 凭它路由 2FA 码),
    * 解密密码 → POST /run → 成功落 cookies + loginAt + `okEvent`; 失败走 `failEvent`。
@@ -2600,7 +2772,8 @@ export class CquSessionDO extends DurableObject<Env> {
     okEvent: "FIRST_LOGIN_OK" | "RELOGIN_OK",
     failEvent: "FIRST_LOGIN_FAIL" | "RELOGIN_FAIL",
     startEvent?: CquEvent,
-    deadlineAt?: number
+    deadlineAt?: number,
+    reservation?: { token: string; route: BrowserRoute }
   ): Promise<"in_flight" | "ok" | "failed"> {
     const state = this.state!;
     // deadline 只在操作链入口 resolve 一次:alarm 链由 alarm() 传入;首登(init)链
@@ -2609,10 +2782,12 @@ export class CquSessionDO extends DurableObject<Env> {
       deadlineAt ?? resolveBrowserDeadline(undefined, Date.now());
 
     // single-flight 守卫: 读最新锁, 活锁在途则直接退出, 不抢锁、不二次发码。
-    const existingLock =
-      await this.ctx.storage.get<LoginInFlight>("loginInFlight");
-    if (!shouldStartLogin(existingLock ?? null, Date.now())) {
-      return "in_flight";
+    if (!reservation) {
+      const existingLock =
+        await this.ctx.storage.get<LoginInFlight>("loginInFlight");
+      if (!shouldStartLogin(existingLock ?? null, Date.now())) {
+        return "in_flight";
+      }
     }
 
     const creds = await this.ctx.storage.get<StoredCredentials>("credentials");
@@ -2629,7 +2804,11 @@ export class CquSessionDO extends DurableObject<Env> {
 
     // 原子写锁 + 持久 route:并发发起者只有一个能同时写入两者(无 route 不发 permit,
     // 无锁不点火第二个登录)。transaction 内无网络操作。
-    const acquired = await this.acquireRoutedLoginLock("loginInFlight", "cas");
+    const acquired = reservation ?? await this.acquireRoutedLoginLock(
+      "loginInFlight",
+      "cas",
+      state.userId
+    );
     if (!acquired) return "in_flight";
     const token = acquired.token;
     let runAbort: AbortController | null = null;
@@ -2997,19 +3176,20 @@ export class CquSessionDO extends DurableObject<Env> {
    *
    * transaction 内只做 storage 与纯函数:并发发起者只有一个能把活锁与 route 一起写入;
    * 解密、容器预热、浏览器调用等网络准备都在返回之后由调用方进行。
- * route 的 backend 固定为 cloudflare(腾讯云节点已停用),之后所有该 token 的
- * /run、/code、/code-permit 都固定用这条 route。
+   * route 的 backend 固定为 cloudflare(腾讯云节点已停用),之后所有该 token 的
+   * /run、/code、/code-permit 都固定用这条 route。
    */
   private async acquireRoutedLoginLock(
     lockKey: "loginInFlight",
-    kind: "cas"
+    kind: "cas",
+    userId = this.state?.userId ?? ""
   ): Promise<{ token: string; route: BrowserRoute } | null> {
     const token = crypto.randomUUID();
     const now = Date.now();
     const route: BrowserRoute = {
       version: 1,
       backend: "cloudflare",
-      userId: this.state?.userId ?? "",
+      userId,
     };
     const record: LoginRouteRecord = {
       token,
@@ -3029,6 +3209,18 @@ export class CquSessionDO extends DurableObject<Env> {
       acquired = true;
     });
     return acquired ? { token, route } : null;
+  }
+
+  private async releaseRoutedLoginReservation(token: string): Promise<void> {
+    await this.ctx.storage.transaction(async (tx) => {
+      const current =
+        (await tx.get<LoginInFlight>("loginInFlight")) ?? null;
+      if (current?.token !== token) return;
+      await tx.delete([
+        "loginInFlight",
+        this.browserRouteKey(token),
+      ]);
+    });
   }
 
   /**

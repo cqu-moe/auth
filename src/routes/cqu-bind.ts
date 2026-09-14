@@ -141,9 +141,8 @@ cquBinding.get("/", async (c) => {
 
 // PUT /api/cqu/binding/credentials （← 原 POST /credentials）
 // body { studentId, password }。要求已存在绑定地址行（否则 400 "先获取绑定地址"）。
-// 加密密码 → upsert cqu_credentials → 触发 DO /init 首登。
-// 成功 → cqu_bind_addresses.status = "active"；首登失败 → 回滚本次新插入的凭证行
-// （对齐 cqu.ts），绑定地址保留 pending，不标记 active。
+// 加密密码 → 触发 DO /init 首登 → 成功后 upsert cqu_credentials 并把两表标记 active。
+// 首登失败不写 D1 凭据，绑定地址保留原状态；并发提交也不会覆盖当前有效凭据。
 cquBinding.put("/credentials", async (c) => {
   const user = c.get("user") as { id: string };
 
@@ -171,52 +170,13 @@ cquBinding.put("/credentials", async (c) => {
 
   const { ciphertext, iv } = await encrypt(password, c.env.ENCRYPTION_KEY);
 
-  // upsert cqu_credentials（复刻 cqu.ts 的 insert/update 形状）。
-  // #3: 记录本次是「插入新行」还是「更新已有行」——首登失败需据此回滚：
-  //   插入的新行要删掉，否则残留行会把 cqu.ts 的 POST /bind 卡成 409 ALREADY_BOUND；
-  //   更新的旧行保留（对齐 PUT /bind 语义，不破坏既有绑定）。
+  // 先只读现有凭据。真正的 D1 写入推迟到 DO 登录成功之后：并发提交若命中
+  // CQU_LOGIN_IN_FLIGHT，不能在返回 409 前改掉当前有效凭据。
   const existingCreds = await db
     .select()
     .from(cquCredentials)
     .where(eq(cquCredentials.userId, user.id))
     .get();
-  let insertedCredsId: string | null = null;
-  if (existingCreds) {
-    await db
-      .update(cquCredentials)
-      .set({ studentId, encryptedPassword: ciphertext, iv })
-      .where(eq(cquCredentials.userId, user.id));
-  } else {
-    const newId = crypto.randomUUID();
-    try {
-      await db.insert(cquCredentials).values({
-        id: newId,
-        userId: user.id,
-        studentId,
-        encryptedPassword: ciphertext,
-        iv,
-        // First login has not succeeded yet. The schema default remains active
-        // for legacy entry points, so this route must opt into pending explicitly.
-        status: "pending",
-        // 显式写真实时间戳：即便列默认值损坏（历史遗留），新行也拿到正确时间。
-        boundAt: sql`(datetime('now'))`,
-      });
-      insertedCredsId = newId;
-    } catch (err) {
-      // #6: 并发同用户请求会撞 user_id UNIQUE。退化为「更新已有行」（视作 existing，
-      // 不持有回滚权），而非裸 500。
-      const raced = await db
-        .select()
-        .from(cquCredentials)
-        .where(eq(cquCredentials.userId, user.id))
-        .get();
-      if (!raced) throw err;
-      await db
-        .update(cquCredentials)
-        .set({ studentId, encryptedPassword: ciphertext, iv })
-        .where(eq(cquCredentials.userId, user.id));
-    }
-  }
 
   // 触发 DO 首登。userId 只来自 session（绝不取客户端入参）。
   const stub = c.env.CQU_SESSION.get(c.env.CQU_SESSION.idFromName(user.id));
@@ -232,33 +192,64 @@ cquBinding.put("/credentials", async (c) => {
     })
   );
   // #1: DO /init 响应非 2xx 或非 JSON 不应抛未捕获异常。解析失败兜底为
-  // {success:false}，与「首登未成功」走同一回滚分支。
+  // {success:false}，与「首登未成功」走同一失败分支。
   const initResult = result.ok
     ? await result
-        .json<{ success: boolean; error?: string }>()
-        .catch(() => ({ success: false, error: undefined as string | undefined }))
-    : { success: false, error: undefined as string | undefined };
+        .json<{ success: boolean; error?: string; code?: string }>()
+        .catch(() => ({
+          success: false,
+          error: undefined as string | undefined,
+          code: undefined as string | undefined,
+        }))
+    : {
+        success: false,
+        error: undefined as string | undefined,
+        code: undefined as string | undefined,
+      };
 
   if (!initResult.success) {
-    // #3: 首登未成功。本次若 INSERT 了新凭证行，回滚删除（避免半绑定残留卡死
-    // cqu.ts 的 POST /bind）；若是更新已有行则保留（对齐 PUT /bind）。
-    // 绑定地址行无论如何留 pending（正确）。
-    if (insertedCredsId) {
-      await db
-        .delete(cquCredentials)
-        .where(eq(cquCredentials.id, insertedCredsId));
-    }
+    // DO 未成功时尚未写 D1，现有凭据与绑定状态保持原样。
+    const inFlight = initResult.code === "CQU_LOGIN_IN_FLIGHT";
     return errorResponse(
       c,
-      "CQU_LOGIN_FAILED",
+      inFlight ? "CQU_LOGIN_IN_FLIGHT" : "CQU_LOGIN_FAILED",
       initResult.error ?? "CQU 登录失败",
-      400
+      inFlight ? 409 : 400
     );
   }
 
-  // #4: 首登已成功、DO 已初始化。若这步置 active 的 D1 写抛错，返回独立的
-  // 可重试错误而非裸 500——重试 /credentials 是安全的（重登 + 重置 active）。
+  // DO 登录成功后才持久化新凭据并激活两张表。若 D1 写失败，返回独立的可重试
+  // 错误；重试 /credentials 会重新登录并完成同一组幂等写入。
   try {
+    if (existingCreds) {
+      await db
+        .update(cquCredentials)
+        .set({ studentId, encryptedPassword: ciphertext, iv })
+        .where(eq(cquCredentials.userId, user.id));
+    } else {
+      try {
+        await db.insert(cquCredentials).values({
+          id: crypto.randomUUID(),
+          userId: user.id,
+          studentId,
+          encryptedPassword: ciphertext,
+          iv,
+          status: "pending",
+          boundAt: sql`(datetime('now'))`,
+        });
+      } catch (error) {
+        const raced = await db
+          .select()
+          .from(cquCredentials)
+          .where(eq(cquCredentials.userId, user.id))
+          .get();
+        if (!raced) throw error;
+        await db
+          .update(cquCredentials)
+          .set({ studentId, encryptedPassword: ciphertext, iv })
+          .where(eq(cquCredentials.userId, user.id));
+      }
+    }
     await db.batch([
       db
         .update(cquBindAddresses)

@@ -369,6 +369,37 @@
               }
             }
           },
+          "409": {
+            "description": "Login already in progress",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiProblem"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "const": "CQU_LOGIN_IN_FLIGHT"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "415": {
             "description": "Unsupported request media type",
             "headers": {

@@ -18,7 +18,7 @@
 //     入口同 DO(会抛 "Cannot perform I/O on behalf of a different Durable Object")。故 M7 不靠
 //     input-gate 真交错, 而是让 keepalive spy 往【同一 state.storage】写 revoked(同 DO 上下文)
 //     来复现「探活在途 status 被改写」的因果, 断言写回分支命中撤销守卫。
-import { runInDurableObject } from "cloudflare:test";
+import { abortAllDurableObjects, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:test";
 import { describe, it, expect, afterEach, vi, type MockInstance } from "vitest";
 import { encrypt } from "../../src/services/crypto";
@@ -52,6 +52,7 @@ async function seedLease(
   stub: DurableObjectStub,
   opts: {
     status?: string;
+    storageState?: ReturnType<typeof validStorageState> | null;
     extra?: Record<string, unknown>;
   }
 ): Promise<void> {
@@ -69,7 +70,11 @@ async function seedLease(
     if (lock?.token) tokens.add(lock.token);
   }
   for (const token of tokens) {
-    const kind: "cas" | "atrust" = token.startsWith("atrust") ? "atrust" : "cas";
+    const kind: "cas" | "atrust" | "quicklogin" = token.startsWith("atrust")
+      ? "atrust"
+      : token.startsWith("quicklogin")
+        ? "quicklogin"
+        : "cas";
     Object.assign(extra, cfRouteRecord(token, kind));
   }
   if (lease) lease.ownerBrowserRouteVersion = 1;
@@ -90,6 +95,257 @@ async function runRetiredAtrustCleanup(stub: DurableObjectStub) {
     await target.recoverPendingCodePermit();
   });
 }
+
+async function restartDurableObject(stub: DurableObjectStub) {
+  const id = stub.id;
+  await abortAllDurableObjects();
+  return env.CQU_SESSION.get(id);
+}
+
+describe("CAS activation recovery", () => {
+  it("releases a CAS login lock orphaned by a Durable Object restart", async () => {
+    const stub = freshStub("cas-orphan-on-restart");
+    const now = Date.now();
+    await seedLease(stub, {
+      status: "binding",
+      extra: {
+        loginInFlight: { token: "cas-orphan", startedAt: now },
+        codeLease: {
+          ownerToken: "cas-orphan",
+          ownerKind: "cas",
+          acquiredAt: now,
+          queue: [],
+        },
+        codePermitPending: "cas-orphan",
+      },
+    });
+
+    const restarted = await restartDurableObject(stub);
+    expect((await restarted.fetch("http://do/status")).status).toBe(200);
+
+    expect(await readStorage(restarted, "loginInFlight")).toBeUndefined();
+    expect(await readStorage(restarted, "browserRoute:cas-orphan")).toBeUndefined();
+    expect(await readStorage(restarted, "codeLease")).toBeUndefined();
+    expect(await readStorage(restarted, "codePermitPending")).toBeUndefined();
+    expect(await readStorage(restarted, "codePermitProven")).toBeUndefined();
+    expect(await readStatus(restarted)).toBe("expired");
+  });
+
+  it("restores an interrupted first binding without a prior session to unbound", async () => {
+    const stub = freshStub("cas-orphan-first-binding");
+    const now = Date.now();
+    await seedLease(stub, {
+      status: "binding",
+      storageState: null,
+      extra: {
+        loginInFlight: { token: "cas-orphan", startedAt: now },
+        codeLease: {
+          ownerToken: "cas-orphan",
+          ownerKind: "cas",
+          acquiredAt: now,
+          queue: [],
+        },
+      },
+    });
+
+    const restarted = await restartDurableObject(stub);
+    expect((await restarted.fetch("http://do/status")).status).toBe(200);
+    expect(await readStorage(restarted, "loginInFlight")).toBeUndefined();
+    expect(await readStatus(restarted)).toBe("unbound");
+  });
+
+  it("keeps a legacy observed-code proof fenced when its timestamp write was interrupted", async () => {
+    const stub = freshStub("cas-orphan-partial-code-proof");
+    const now = Date.now();
+    await seedLease(stub, {
+      status: "relogging",
+      extra: {
+        loginInFlight: { token: "cas-orphan", startedAt: now },
+        codeLease: {
+          ownerToken: "cas-orphan",
+          ownerKind: "cas",
+          acquiredAt: now,
+          queue: [],
+        },
+        codePermitProven: "cas-orphan",
+      },
+    });
+
+    const restarted = await restartDurableObject(stub);
+    expect((await restarted.fetch("http://do/status")).status).toBe(200);
+    expect(await readStorage(restarted, "loginInFlight")).toMatchObject({
+      token: "cas-orphan",
+    });
+    expect(await readAlarm(restarted)).toBeGreaterThanOrEqual(now + 10 * 60_000);
+  });
+
+  it("keeps an orphaned CAS owner fenced only while its observed code is valid", async () => {
+    const now = Date.now();
+    const stub = freshStub("cas-orphan-with-code");
+    await seedLease(stub, {
+      status: "relogging",
+      extra: {
+        loginInFlight: { token: "cas-orphan", startedAt: now },
+        codeLease: {
+          ownerToken: "cas-orphan",
+          ownerKind: "cas",
+          acquiredAt: now,
+          ownerCodeReceivedAt: now,
+          queue: [],
+        },
+        codePermitProven: "cas-orphan",
+      },
+    });
+
+    const restarted = await restartDurableObject(stub);
+    expect((await restarted.fetch("http://do/status")).status).toBe(200);
+    expect(await readStorage(restarted, "loginInFlight")).toMatchObject({
+      token: "cas-orphan",
+    });
+
+    await runInDurableObject(restarted, async (_instance, state) => {
+      const lease = await state.storage.get<Record<string, unknown>>("codeLease");
+      await state.storage.put("codeLease", {
+        ...lease,
+        ownerCodeReceivedAt: Date.now() - 10 * 60_000 - 1,
+      });
+      await state.storage.deleteAlarm();
+    });
+    expect((await restarted.fetch("http://do/status")).status).toBe(200);
+    expect(await readStorage(restarted, "loginInFlight")).toBeUndefined();
+    expect(await readStorage(restarted, "codeLease")).toBeUndefined();
+    expect(await readStatus(restarted)).toBe("expired");
+  });
+
+  it("removes only a queued CAS orphan while preserving the QuickLogin owner", async () => {
+    const stub = freshStub("cas-orphan-queued-behind-quicklogin");
+    const now = Date.now();
+    await seedLease(stub, {
+      status: "binding",
+      extra: {
+        loginInFlight: { token: "cas-orphan", startedAt: now },
+        codeLease: {
+          ownerToken: "quicklogin-live",
+          ownerKind: "quicklogin",
+          acquiredAt: now,
+          queue: [{ token: "cas-orphan", kind: "cas", queuedAt: now }],
+        },
+        codePermitPending: "quicklogin-live",
+        codePermitProven: "quicklogin-live",
+      },
+    });
+
+    const restarted = await restartDurableObject(stub);
+    expect((await restarted.fetch("http://do/status")).status).toBe(200);
+
+    expect(await readStorage(restarted, "loginInFlight")).toBeUndefined();
+    expect(await readStorage(restarted, "browserRoute:cas-orphan")).toBeUndefined();
+    expect(await readStorage(restarted, "codeLease")).toMatchObject({
+      ownerToken: "quicklogin-live",
+      ownerKind: "quicklogin",
+      queue: [],
+    });
+    expect(await readStorage(restarted, "codePermitPending")).toBeUndefined();
+    expect(await readStorage(restarted, "codePermitProven")).toBeUndefined();
+    expect(await readStorage(restarted, "browserRoute:quicklogin-live")).toBeDefined();
+    expect(await readStatus(restarted)).toBe("expired");
+  });
+
+  it("promotes a queued QuickLogin owner and replays its permit", async () => {
+    const stub = freshStub("cas-orphan-promote-quicklogin");
+    const now = Date.now();
+    await seedLease(stub, {
+      status: "relogging",
+      extra: {
+        loginInFlight: { token: "cas-orphan", startedAt: now },
+        codeLease: {
+          ownerToken: "cas-orphan",
+          ownerKind: "cas",
+          acquiredAt: now,
+          queue: [{ token: "quicklogin-next", kind: "quicklogin", queuedAt: now }],
+        },
+        codePermitPending: "cas-orphan",
+      },
+    });
+    const restarted = await restartDurableObject(stub);
+    const permits: string[] = [];
+    spyBrowserFetch({
+      "/code-permit": async (request) => {
+        permits.push((await request.json<{ session: string }>()).session);
+        return Response.json({ ok: true });
+      },
+    });
+
+    expect((await restarted.fetch("http://do/status")).status).toBe(200);
+    expect(await readStorage(restarted, "codeLease")).toMatchObject({
+      ownerToken: "quicklogin-next",
+      ownerKind: "quicklogin",
+      queue: [],
+    });
+    expect(permits).toEqual(["quicklogin-next"]);
+  });
+
+  it("replays the final promoted permit when an unrelated expired owner preceded the CAS orphan", async () => {
+    const stub = freshStub("cas-orphan-after-expired-quicklogin");
+    const now = Date.now();
+    await seedLease(stub, {
+      status: "relogging",
+      extra: {
+        loginInFlight: { token: "cas-orphan", startedAt: now },
+        codeLease: {
+          ownerToken: "quicklogin-expired",
+          ownerKind: "quicklogin",
+          acquiredAt: 0,
+          queue: [
+            { token: "cas-orphan", kind: "cas", queuedAt: now },
+            { token: "quicklogin-next", kind: "quicklogin", queuedAt: now },
+          ],
+        },
+        codePermitPending: "quicklogin-expired",
+      },
+    });
+    const restarted = await restartDurableObject(stub);
+    const permits: string[] = [];
+    spyBrowserFetch({
+      "/code-permit": async (request) => {
+        permits.push((await request.json<{ session: string }>()).session);
+        return Response.json({ ok: true });
+      },
+    });
+
+    expect((await restarted.fetch("http://do/status")).status).toBe(200);
+    expect(await readStorage(restarted, "codeLease")).toMatchObject({
+      ownerToken: "quicklogin-next",
+      ownerKind: "quicklogin",
+      queue: [],
+    });
+    expect(permits).toEqual(["quicklogin-next"]);
+  });
+
+  it("retries activation lock capture after a transient storage read failure", async () => {
+    const stub = freshStub("cas-orphan-capture-retry");
+    const now = Date.now();
+    await seedLease(stub, {
+      status: "binding",
+      extra: {
+        loginInFlight: { token: "cas-orphan", startedAt: now },
+      },
+    });
+
+    await runInDurableObject(stub, async (instance) => {
+      const target = instance as unknown as {
+        activationCasLockCaptureComplete: boolean;
+        orphanedCasLoginToken: string | null;
+        recoverOrphanedCasLogin: () => Promise<boolean>;
+      };
+      target.activationCasLockCaptureComplete = false;
+      target.orphanedCasLoginToken = null;
+      expect(await target.recoverOrphanedCasLogin()).toBe(true);
+    });
+
+    expect(await readStorage(stub, "loginInFlight")).toBeUndefined();
+  });
+});
 
 describe("retired aTrust state cleanup", () => {
   it("deletes legacy aTrust state and preserves direct CAS state", async () => {
@@ -998,12 +1254,39 @@ describe("verification-code lease orchestration", () => {
 describe("persistent browser route records", () => {
   it("a second initiator against a live lock returns in_flight without new backend calls", async () => {
     const stub = freshStub("route-lock-race");
-    const encrypted = await encrypt("test-password", env.ENCRYPTION_KEY);
+    const oldCredentials = await encrypt("old-password", env.ENCRYPTION_KEY);
+    const newCredentials = await encrypt("new-password", env.ENCRYPTION_KEY);
     // 模拟发起者 A:活锁 + 成对 route 已落盘(在途)。workerd 的跨 DO I/O 隔离
     // 不允许把 mock 挂起后二次进入同一 DO,故用种子锁复现"同 kind 活锁在途"窗口。
     await seedSession(stub, {
-      status: "binding",
+      status: "relogging",
       extra: {
+        credentials: {
+          encryptedPassword: oldCredentials.ciphertext,
+          iv: oldCredentials.iv,
+        },
+        quickloginBindingEpoch: 7,
+        "quickloginLogin:device-a": {
+          token: "quicklogin-device-a",
+          deviceId: "device-a",
+          generation: 3,
+          bindingEpoch: 7,
+          startedAt: Date.now(),
+          browserRouteVersion: 1,
+        },
+        "browserRoute:quicklogin-device-a": {
+          token: "quicklogin-device-a",
+          kind: "quicklogin",
+          route: {
+            version: 1,
+            backend: "cloudflare",
+            userId: "u1",
+            containerKey: "quicklogin:u1:device-a",
+            bootId: "quicklogin-boot",
+          },
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 60_000,
+        },
         loginInFlight: {
           token: "tok-a",
           startedAt: Date.now(),
@@ -1031,17 +1314,35 @@ describe("persistent browser route records", () => {
       method: "POST",
       body: JSON.stringify({
         userId: "u1",
-        studentId: "2020000001",
-        encryptedPassword: encrypted.ciphertext,
-        iv: encrypted.iv,
+        studentId: "2026000002",
+        encryptedPassword: newCredentials.ciphertext,
+        iv: newCredentials.iv,
       }),
     });
-    const result = (await response.json()) as { success: boolean; error?: string };
+    const result = (await response.json()) as { success: boolean; error?: string; code?: string };
     expect(result.success).toBe(false);
+    expect(result.code).toBe("CQU_LOGIN_IN_FLIGHT");
     expect(result.error).toContain("正在进行中");
     expect(fetchSpy).not.toHaveBeenCalled();
     const lockAfter = await readStorage(stub, "loginInFlight");
     expect(lockAfter).toMatchObject({ token: "tok-a", browserRouteVersion: 1 });
+    expect(await readStorage(stub, "credentials")).toEqual({
+      encryptedPassword: oldCredentials.ciphertext,
+      iv: oldCredentials.iv,
+    });
+    expect(await readStorage(stub, "quickloginBindingEpoch")).toBe(7);
+    expect(await readStorage(stub, "quickloginLogin:device-a")).toBeDefined();
+    expect(await readStorage(stub, "browserRoute:quicklogin-device-a")).toBeDefined();
+    expect(await readStatus(stub)).toBe("relogging");
+    expect(await readStorage<{ studentId: string }>(stub, "state")).toMatchObject({
+      studentId: "2020000001",
+    });
+    await runInDurableObject(stub, async (instance) => {
+      const state = (instance as unknown as {
+        state: { studentId: string } | null;
+      }).state;
+      expect(state).toBeNull();
+    });
   });
 
   it("lock and route land atomically and exactly one permit is sent for the routed token", async () => {
@@ -1699,14 +2000,22 @@ function pathsOf(spy: ReturnType<typeof spyBrowserFetch>): string[] {
 /** 组装 CF 登录 route 记录(容器后端,带 bootId;userId 固定为种子 u1)。 */
 function cfRouteRecord(
   token: string,
-  kind: "cas" | "atrust" = "cas",
+  kind: "cas" | "atrust" | "quicklogin" = "cas",
   bootId = "boot-1"
 ): Record<string, unknown> {
   return {
     [`browserRoute:${token}`]: {
       token,
       kind,
-      route: { version: 1, backend: "cloudflare", userId: "u1", bootId },
+      route: {
+        version: 1,
+        backend: "cloudflare",
+        userId: "u1",
+        ...(kind === "quicklogin"
+          ? { containerKey: `quicklogin:u1:${token}` }
+          : {}),
+        bootId,
+      },
       createdAt: Date.now(),
       expiresAt: Date.now() + 600_000,
     },

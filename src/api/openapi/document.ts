@@ -273,12 +273,35 @@ function responsesFor(
   const hasValidatedQuery =
     (operation.path.endsWith("/admin/users") && operation.method === "GET") ||
     (operation.path.endsWith("/cqu/binding") && ["GET", "DELETE"].includes(operation.method));
-  const problemResponse = (description: string) => ({
+  const problemResponse = (description: string, code?: string) => ({
     description,
     ...(sensitive ? { headers: { "Cache-Control": { schema: { type: "string", const: "no-store" } } } } : {}),
-    content: { "application/problem+json": { schema: { $ref: "#/components/schemas/ApiProblem" } } },
+    content: {
+      "application/problem+json": {
+        schema: code
+          ? {
+              allOf: [
+                { $ref: "#/components/schemas/ApiProblem" },
+                {
+                  type: "object",
+                  properties: { code: { type: "string", const: code } },
+                },
+              ],
+            }
+          : { $ref: "#/components/schemas/ApiProblem" },
+      },
+    },
   });
   if (hasJsonBody || hasValidatedQuery) responses["400"] = problemResponse("Invalid request");
+  if (
+    operation.path === "/api/v1/cqu/binding/credentials" &&
+    operation.method === "PUT"
+  ) {
+    responses["409"] = problemResponse(
+      "Login already in progress",
+      "CQU_LOGIN_IN_FLIGHT"
+    );
+  }
   if (hasJsonBody) responses["415"] = problemResponse("Unsupported request media type");
   return responses;
 }

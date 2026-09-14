@@ -2763,6 +2763,19 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
+            /** @description Login already in progress */
+            409: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"] & {
+                        /** @constant */
+                        code?: "CQU_LOGIN_IN_FLIGHT";
+                    };
+                };
+            };
             /** @description Unsupported request media type */
             415: {
                 headers: {

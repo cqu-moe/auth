@@ -758,6 +758,7 @@ function Step3Credentials({ onSuccess }: { onSuccess: (studentId: string) => voi
       const apiError = err instanceof ApiError ? err : null;
       const codeMessages: Record<string, string> = {
         CQU_LOGIN_FAILED: "CQU 登录失败，请检查统一身份认证账号和密码是否正确",
+        CQU_LOGIN_IN_FLIGHT: "已有 CQU 登录正在进行，请等待当前登录完成",
         NO_BIND_ADDRESS: "尚未完成密保邮箱设置，请刷新页面后重新开始",
         INVALID_BODY: "请求格式错误，请刷新页面重试",
         BIND_ACTIVATE_FAILED: "首次登录成功，但激活状态写入失败，请稍后重试",

@@ -114,6 +114,20 @@ describe("complete API document", () => {
       .toMatchObject({ properties: { data: { properties: { ticket: { type: "string" } } } } });
     expect(tickets.responses["201"].headers["Cache-Control"].schema.const).toBe("no-store");
     expect(tickets.responses["400"].headers["Cache-Control"].schema.const).toBe("no-store");
+    expect(paths["/api/v1/cqu/binding/credentials"].put.responses["409"])
+      .toMatchObject({
+        description: "Login already in progress",
+        content: {
+          "application/problem+json": {
+            schema: {
+              allOf: [
+                { $ref: "#/components/schemas/ApiProblem" },
+                { properties: { code: { const: "CQU_LOGIN_IN_FLIGHT" } } },
+              ],
+            },
+          },
+        },
+      });
     expect(paths["/api/v1/admin/oauth-clients"].post.requestBody.content["application/json"].schema)
       .toBeTruthy();
     expect(paths["/api/v1/admin/oauth-clients/{id}"].patch.requestBody.content["application/json"].schema)

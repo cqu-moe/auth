@@ -145,7 +145,7 @@ function createBindingFixture() {
     );
   `);
 
-  let releaseInit: ((body: { success: boolean; error?: string }) => void) | undefined;
+  let releaseInit: ((body: { success: boolean; error?: string; code?: string }) => void) | undefined;
   let startedResolve: (() => void) | undefined;
   let failNextBatch = false;
   const started = new Promise<void>((resolve) => { startedResolve = resolve; });
@@ -193,7 +193,7 @@ function createBindingFixture() {
     deferInit() {
       return {
         started,
-        resolve(body: { success: boolean; error?: string }) {
+        resolve(body: { success: boolean; error?: string; code?: string }) {
           releaseInit?.(body);
         },
       };
@@ -215,6 +215,16 @@ function createBindingFixture() {
         status: string;
       } | undefined)?.status;
     },
+    credentialRecord(userId = "current-user") {
+      return database.prepare(
+        "SELECT student_id, encrypted_password, iv, status FROM cqu_credentials WHERE user_id = ?"
+      ).get(userId) as {
+        student_id: string;
+        encrypted_password: string;
+        iv: string;
+        status: string;
+      } | undefined;
+    },
     failActivationBatch() {
       failNextBatch = true;
     },
@@ -227,7 +237,7 @@ function createBindingFixture() {
 }
 
 describe("PUT CQU binding credentials", () => {
-  it("does not report a newly inserted credential as active before init succeeds", async () => {
+  it("does not persist a new credential before init succeeds", async () => {
     const fixture = createBindingFixture();
     await fixture.insertAddress("current-user", "pending");
     const init = fixture.deferInit();
@@ -240,7 +250,7 @@ describe("PUT CQU binding credentials", () => {
     fixture.close();
   });
 
-  it("deletes only the newly inserted credential when init fails", async () => {
+  it("does not insert a credential when init fails", async () => {
     const fixture = createBindingFixture();
     await fixture.insertAddress("current-user");
     await fixture.insertCredential("other-user", "active");
@@ -265,6 +275,38 @@ describe("PUT CQU binding credentials", () => {
     init.resolve({ success: false, error: "temporary failure" });
 
     expect((await request).status).toBe(400);
+    expect(fixture.credentialRecord()).toEqual({
+      student_id: "20260000",
+      encrypted_password: "ciphertext",
+      iv: "iv",
+      status: "active",
+    });
+    fixture.close();
+  });
+
+  it("returns a distinct conflict when another CQU login is still in flight", async () => {
+    const fixture = createBindingFixture();
+    await fixture.insertAddress("current-user");
+    await fixture.insertCredential("current-user", "active");
+    const init = fixture.deferInit();
+    const request = fixture.putCredentials({ studentId: "20260001", password: "test-only" });
+    await init.started;
+    init.resolve({
+      success: false,
+      code: "CQU_LOGIN_IN_FLIGHT",
+      error: "CQU 登录正在进行中（请勿重复提交）",
+    });
+
+    const response = await request;
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      detail: {
+        error: {
+          code: "CQU_LOGIN_IN_FLIGHT",
+          message: "CQU 登录正在进行中（请勿重复提交）",
+        },
+      },
+    });
     expect(fixture.credentialStatus()).toBe("active");
     fixture.close();
   });

@@ -300,6 +300,40 @@ describe("CquBindWizard bootstrap", () => {
 });
 
 describe("CquBindWizard completion confirmation", () => {
+  it("shows an in-flight conflict without blaming the account password", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json(snapshot({
+        address: "token@example.test",
+        bindStatus: "active",
+        kind: "direct",
+      })))
+      .mockResolvedValueOnce(json({
+        type: "about:blank",
+        title: "Conflict",
+        status: 409,
+        detail: "CQU 登录正在进行中（请勿重复提交）",
+        code: "CQU_LOGIN_IN_FLIGHT",
+      }, 409));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderWizard("/cqu/bind?repair=1");
+    await flush();
+    const studentId = container.querySelector<HTMLInputElement>("#bind-studentId");
+    const password = container.querySelector<HTMLInputElement>("#bind-cquPassword");
+    setInput(studentId!, "20260001");
+    setInput(password!, "test-only");
+    await act(async () => {
+      container.querySelector("form")?.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(container.textContent).toContain("已有 CQU 登录正在进行，请等待当前登录完成");
+    expect(container.textContent).not.toContain("账号和密码是否正确");
+  });
+
   it("does not show success until the post-login GET confirms active", async () => {
     let resolveConfirmation!: (response: Response) => void;
     const confirmation = new Promise<Response>((resolve) => { resolveConfirmation = resolve; });
