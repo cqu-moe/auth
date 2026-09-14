@@ -730,7 +730,13 @@ function Step2AddressAndCode({
 // Step 3 — Enter CQU credentials
 // ────────────────────────────────────────────────────────────────────────────
 
-function Step3Credentials({ onSuccess }: { onSuccess: (studentId: string) => void | Promise<void> }) {
+function Step3Credentials({
+  onSuccess,
+  repair = false,
+}: {
+  onSuccess: (studentId: string) => void | Promise<void>;
+  repair?: boolean;
+}) {
   const [studentId, setStudentId] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -773,9 +779,13 @@ function Step3Credentials({ onSuccess }: { onSuccess: (studentId: string) => voi
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-gray-900 mb-2">登录重庆大学统一认证账号</h2>
+        <h2 className="text-xl font-semibold text-gray-900 mb-2">
+          {repair ? "重新设置 CQU 密码" : "登录重庆大学统一认证账号"}
+        </h2>
         <p className="text-sm text-gray-500">
-          输入您的 CQU 统一身份认证账号和密码。系统将立即发起首次登录——由于需要等待 2FA 邮件，此过程可能需要几分钟，请耐心等待。
+          {repair
+            ? "输入统一身份认证账号和新密码。系统会验证新密码，并重新建立 CQU 会话，过程可能需要几分钟。"
+            : "输入您的 CQU 统一身份认证账号和密码。系统将立即发起首次登录。由于需要等待 2FA 邮件，此过程可能需要几分钟。"}
         </p>
       </div>
 
@@ -820,11 +830,14 @@ function Step3Credentials({ onSuccess }: { onSuccess: (studentId: string) => voi
           <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
             <div className="flex items-center gap-3 mb-2">
               <Spinner size="sm" color="blue" />
-              <p className="text-sm font-medium text-blue-800">正在完成首次登录…</p>
+              <p className="text-sm font-medium text-blue-800">
+                {repair ? "正在验证新密码…" : "正在完成首次登录…"}
+              </p>
             </div>
             <p className="text-xs text-blue-600 pl-6">
-              系统正在以您的身份登录 CQU，可能需要等待 2FA 验证码邮件，
-              预计需要 1–5 分钟。请保持页面打开，不要刷新。
+              {repair
+                ? "系统正在使用新密码重新登录 CQU，可能需要等待 2FA 验证码邮件。请保持页面打开。"
+                : "系统正在以您的身份登录 CQU，可能需要等待 2FA 验证码邮件，预计需要 1–5 分钟。请保持页面打开，不要刷新。"}
             </p>
           </div>
         )}
@@ -835,7 +848,9 @@ function Step3Credentials({ onSuccess }: { onSuccess: (studentId: string) => voi
           className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
         >
           {loading && <Spinner size="sm" color="white" />}
-          {loading ? "首次登录中，请稍候…" : "确认绑定"}
+          {loading
+            ? repair ? "正在保存，请稍候…" : "首次登录中，请稍候…"
+            : repair ? "保存并重新登录" : "确认绑定"}
         </button>
       </form>
 
@@ -1035,7 +1050,7 @@ export default function CquBindWizard({ onReturn = replaceLocation }: CquBindWiz
       forwardAddress={forwardAddress}
     />
   ) : screen === "credentials" ? (
-    <Step3Credentials onSuccess={async () => {
+    <Step3Credentials repair={repair} onSuccess={async () => {
       waitStartedAtRef.current = Date.now();
       setPollDelay(3000);
       await checkBindingConfirmation();
@@ -1045,10 +1060,14 @@ export default function CquBindWizard({ onReturn = replaceLocation }: CquBindWiz
       <div className="flex justify-center"><Spinner size="lg" color="blue" /></div>
       <div>
         <h2 className="text-xl font-semibold text-gray-900">
-          {waitTimedOut ? "尚未确认绑定结果" : "正在确认绑定结果"}
+          {repair
+            ? waitTimedOut ? "尚未确认密码更新" : "正在确认密码更新"
+            : waitTimedOut ? "尚未确认绑定结果" : "正在确认绑定结果"}
         </h2>
         <p className="mt-2 text-sm text-gray-500">
-          {waitTimedOut ? "首次登录可能仍在处理，请重新检查。" : "首次登录可能需要几分钟。"}
+          {repair
+            ? waitTimedOut ? "新密码可能仍在验证，请重新检查。" : "系统正在使用新密码恢复 CQU 会话。"
+            : waitTimedOut ? "首次登录可能仍在处理，请重新检查。" : "首次登录可能需要几分钟。"}
         </p>
       </div>
       {waitTimedOut && (
@@ -1070,6 +1089,8 @@ export default function CquBindWizard({ onReturn = replaceLocation }: CquBindWiz
       returnTo={returnTo}
       autoReturn={boundThisVisit && Boolean(returnTo)}
       onReturn={onReturn}
+      title={repair ? "密码已重新设置" : undefined}
+      description={repair ? "系统已使用新密码恢复 CQU 会话。" : undefined}
     />
   );
 
@@ -1089,7 +1110,7 @@ export default function CquBindWizard({ onReturn = replaceLocation }: CquBindWiz
         </div>
 
         <div className="bg-white rounded-2xl border border-gray-200 p-6 sm:p-8">
-          {currentStep && <StepIndicator current={currentStep} />}
+          {currentStep && !repair && <StepIndicator current={currentStep} />}
           <div>{content}</div>
         </div>
       </div>

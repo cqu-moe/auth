@@ -300,6 +300,52 @@ describe("CquBindWizard bootstrap", () => {
 });
 
 describe("CquBindWizard completion confirmation", () => {
+  it("uses password-repair copy for an already-bound repair entry", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => json(snapshot({
+      address: "token@example.test",
+      bindStatus: "active",
+      kind: "direct",
+    }))));
+
+    await renderWizard("/cqu/bind?repair=1");
+    await flush();
+
+    expect(container.textContent).toContain("重新设置 CQU 密码");
+    expect(container.textContent).toContain("保存并重新登录");
+    expect(container.textContent).not.toContain("首次登录");
+  });
+
+  it("reports a repaired password after the new credentials are confirmed", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json(snapshot({
+        address: "token@example.test",
+        bindStatus: "active",
+        kind: "direct",
+      })))
+      .mockResolvedValueOnce(json({ success: true, studentId: "20260001" }))
+      .mockResolvedValueOnce(json(snapshot({
+        address: "token@example.test",
+        bindStatus: "active",
+        kind: "direct",
+      })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await renderWizard("/cqu/bind?repair=1");
+    await flush();
+    setInput(container.querySelector<HTMLInputElement>("#bind-studentId")!, "20260001");
+    setInput(container.querySelector<HTMLInputElement>("#bind-cquPassword")!, "test-only");
+    await act(async () => {
+      container.querySelector("form")?.dispatchEvent(
+        new Event("submit", { bubbles: true, cancelable: true }),
+      );
+      await Promise.resolve();
+    });
+    await flush();
+
+    expect(container.textContent).toContain("密码已重新设置");
+    expect(container.textContent).not.toContain("绑定成功");
+  });
+
   it("shows an in-flight conflict without blaming the account password", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(json(snapshot({

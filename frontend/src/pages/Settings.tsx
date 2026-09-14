@@ -383,6 +383,9 @@ function CquBindingSection() {
     gray: { pill: "bg-gray-100 text-gray-500", dot: "bg-gray-400" },
   };
 
+  const maintenanceActionClass =
+    "inline-flex min-h-11 w-full shrink-0 items-center justify-center rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-800 transition-colors hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 sm:w-auto";
+
   return (
     <SettingsCard title="CQU 账户绑定" description="绑定后由系统代你维护与重庆大学统一认证的会话。">
 
@@ -443,25 +446,52 @@ function CquBindingSection() {
           {/* ── 实时验证码 — 仅 active 时显示 ─────────────────────────────────── */}
           {status?.bindStatus === "active" && <LiveCodeSection />}
 
-          {/* ── Action buttons ───────────────────────────────────────────────── */}
-          <div className="flex flex-wrap items-center gap-3">
-            <Link
-              to="/cqu/bind"
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
-            >
-              绑定新账号
-            </Link>
-            <button
-              type="button"
-              onClick={() => void handleUnbind()}
-              disabled={unbindLoading}
-              className="px-4 py-2 border border-red-300 text-red-600 hover:bg-red-50 disabled:opacity-50 text-sm font-medium rounded-lg transition-colors flex items-center gap-2"
-            >
-              {unbindLoading && (
-                <span className="w-4 h-4 border-2 border-red-400 border-t-transparent rounded-full animate-spin" />
-              )}
-              {unbindLoading ? "解绑中..." : "解除绑定"}
-            </button>
+          {/* ── Maintenance actions ───────────────────────────────────────────── */}
+          <div className="divide-y divide-gray-100 border-t border-gray-100">
+            <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-gray-500">
+                密保邮箱无法使用时，在 CQU 自服务中心重新绑定。
+              </p>
+              <a
+                href="https://self.cqu.edu.cn/cas-success/safe-center/email-bind-way/rebind"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={maintenanceActionClass}
+              >
+                重新绑定邮箱
+                <span className="sr-only">（在新标签页打开）</span>
+              </a>
+            </div>
+
+            <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-gray-500">
+                CQU 密码修改后，更新系统保存的密码。
+              </p>
+              <Link to="/cqu/bind?repair=1" className={maintenanceActionClass}>
+                重新设置密码
+              </Link>
+            </div>
+
+            <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-gray-500">
+                更换 CQU 账号，或同时更换邮箱和密码。
+              </p>
+              <button
+                type="button"
+                onClick={() => void handleUnbind()}
+                disabled={unbindLoading}
+                aria-busy={unbindLoading}
+                className="inline-flex min-h-11 w-full shrink-0 items-center justify-center gap-2 rounded-lg border border-red-300 px-4 py-2.5 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
+              >
+                {unbindLoading && (
+                  <span
+                    className="h-4 w-4 animate-spin rounded-full border-2 border-red-400 border-t-transparent"
+                    aria-hidden="true"
+                  />
+                )}
+                {unbindLoading ? "正在解除..." : "解除绑定"}
+              </button>
+            </div>
           </div>
         </div>
       ) : (

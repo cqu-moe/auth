@@ -5,6 +5,8 @@ export interface CquBindSuccessProps {
   returnTo: string | null;
   autoReturn: boolean;
   onReturn?: (url: string) => void;
+  title?: string;
+  description?: string;
 }
 
 const navigateToService = (url: string) => window.location.replace(url);
@@ -13,6 +15,8 @@ export default function CquBindSuccess({
   returnTo,
   autoReturn,
   onReturn = navigateToService,
+  title = "绑定成功",
+  description = "可以返回使用服务了。",
 }: CquBindSuccessProps) {
   const [paused, setPaused] = useState(false);
   const [seconds, setSeconds] = useState(3);
@@ -39,8 +43,8 @@ export default function CquBindSuccess({
   return (
     <div className="space-y-6 text-center">
       <div>
-        <h2 className="text-xl font-semibold text-gray-900">绑定成功</h2>
-        <p className="mt-2 text-sm text-gray-500">可以返回使用服务了。</p>
+        <h2 className="text-xl font-semibold text-gray-900">{title}</h2>
+        <p className="mt-2 text-sm text-gray-500">{description}</p>
       </div>
       {returnTo ? (
         <a
