@@ -81,6 +81,11 @@ describe("CQU binding settings actions", () => {
   it("offers the three recovery choices for a bound account", async () => {
     await renderSettings();
 
+    const actionGroup = container.querySelector('[aria-label="CQU 绑定操作"]');
+    expect(actionGroup?.classList.contains("flex-nowrap")).toBe(true);
+    expect(actionGroup?.querySelectorAll(":scope > a, :scope > button")).toHaveLength(3);
+    expect(actionGroup?.querySelector("p")).toBeNull();
+
     const emailLink = actionLink("重新绑定邮箱");
     expect(emailLink?.getAttribute("href")).toBe(
       "https://self.cqu.edu.cn/cas-success/safe-center/email-bind-way/rebind",
