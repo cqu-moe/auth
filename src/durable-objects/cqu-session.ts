@@ -46,6 +46,7 @@ import {
   classifyLoginFailure,
   shouldRequireReauth,
   nextKeepaliveDelayMs,
+  recoveryRetryDelayMs,
 } from "../services/cqu-2fa/relogin-policy";
 import {
   pruneStMintLog,
@@ -154,8 +155,28 @@ interface StoredCredentials {
 interface LoginInFlight {
   token: string;
   startedAt: number;
+  deadlineAt?: number;
   /** 新格式:该锁与 browserRoute:<token> 持久记录成对出现(部署前旧锁无此字段)。 */
   browserRouteVersion?: 1;
+}
+
+interface InterruptedLogin {
+  token: string;
+  kind: LoginKind;
+  lockKey?: string;
+  stopped?: boolean;
+  preserveCodeFence?: boolean;
+  isolationUntil?: number;
+  safeAfter?: number;
+  retryAt: number;
+}
+
+interface SessionRecoveryCycle {
+  id: string;
+  userId: string;
+  deadlineAt: number;
+  created: boolean;
+  checkedAt?: number;
 }
 
 interface QuickloginLoginInFlight extends LoginInFlight {
@@ -248,10 +269,9 @@ export class CquSessionDO extends DurableObject<Env> {
   // 全部浏览器出站均经 CF 容器 stub;此直连客户端仅作历史回滚窗口保留。
   private ssoClient = new CquSsoClient();
   private quickloginFlights = new Map<string, Promise<DeviceLoginResult>>();
-  private orphanedCasLoginToken: string | null = null;
-  private activationCasLockCaptureComplete = false;
+  private recoveryFlight: Promise<void> | null = null;
+  private workflowStartFlight: Promise<void> | null = null;
   private retiredAtrustCleanupComplete = false;
-  private activationPermitRecoveryComplete = false;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -264,32 +284,17 @@ export class CquSessionDO extends DurableObject<Env> {
         );
       }
       try {
-        if (await this.recoverPersistedSuccessfulLogin()) return;
+        await this.recoverPersistedSuccessfulLogin();
       } catch (error) {
         console.warn(
           `[CquSession] persisted successful login recovery deferred (${error instanceof Error ? error.name : "unknown"})`
         );
       }
-      try {
-        await this.recoverOrphanedCasLogin(true);
-      } catch (error) {
-        console.warn(
-          `[CquSession] orphaned CAS login recovery deferred (${error instanceof Error ? error.name : "unknown"})`
-        );
-        return;
-      }
-      // `codePermitPending` is a durable outbox marker. Replaying the same token
-      // is idempotent, so recovery can finish an acknowledgement without handing
-      // the shared channel to a second owner.
-      if (this.retiredAtrustCleanupComplete) {
-        try {
-          await this.recoverPendingCodePermit();
-          this.activationPermitRecoveryComplete = true;
-        } catch (error) {
-          console.warn(
-            `[CquSession] pending code permit recovery deferred (${error instanceof Error ? error.name : "unknown"})`
-          );
-        }
+      // Storage only: network recovery must never hold the initialization gate.
+      await this.captureInterruptedLogins(true);
+      const storedState = await this.ctx.storage.get<SessionState>("state");
+      if (storedState && (await this.ctx.storage.get<InterruptedLogin[]>("interruptedLogins"))?.length) {
+        await this.enqueueRecoveryWorkflow(storedState.userId, true);
       }
     });
   }
@@ -325,21 +330,11 @@ export class CquSessionDO extends DurableObject<Env> {
     ) {
       return false;
     }
-    const routeKey = lock ? this.browserRouteKey(lock.token) : null;
-    await this.ctx.storage.delete([
-      "loginInFlight",
-      "codeLease",
-      "codePermitPending",
-      "codePermitProven",
-      "pendingCode",
-      ...(routeKey ? [routeKey] : []),
-    ]);
+    // Completion of this CAS state says nothing about another device's browser.
+    // Leave operation/channel records for the common cancellation recovery.
     this.state = storedState;
     await this.setStatus("active");
-    await this.ctx.storage.setAlarm(now + KEEPALIVE_INTERVAL_MS);
-    this.orphanedCasLoginToken = null;
-    this.activationCasLockCaptureComplete = true;
-    this.activationPermitRecoveryComplete = true;
+    await this.scheduleSessionAlarm(now + KEEPALIVE_INTERVAL_MS);
     console.warn(JSON.stringify({
       event: "cqu.cas.persisted_success_recovered",
     }));
@@ -413,33 +408,6 @@ export class CquSessionDO extends DurableObject<Env> {
         );
       }
     }
-    try {
-      if (await this.recoverOrphanedCasLogin()) {
-        await this.recoverPendingCodePermit();
-      }
-    } catch (error) {
-      console.warn(
-        `[CquSession] orphaned CAS login retry recovery deferred (${error instanceof Error ? error.name : "unknown"})`
-      );
-      return Response.json(
-        { error: "CQU login recovery unavailable", code: "INTERNAL_ERROR" },
-        { status: 503 }
-      );
-    }
-    if (
-      this.retiredAtrustCleanupComplete &&
-      !this.activationPermitRecoveryComplete
-    ) {
-      try {
-        await this.recoverPendingCodePermit();
-        this.activationPermitRecoveryComplete = true;
-      } catch (error) {
-        console.warn(
-          `[CquSession] pending code permit retry recovery deferred (${error instanceof Error ? error.name : "unknown"})`
-        );
-      }
-    }
-
     // WS 升级分支(在 action switch 之前): 浏览器在绑定 onboarding 期间连上来等
     // bind_confirm 码秒推。用 Hibernatable WebSocket — 接受 server 端后即可忘掉,
     // DO 被驱逐也能存活, 唤醒后由 webSocket* 回调处理。鉴权/路由(只有正确用户的
@@ -488,7 +456,26 @@ export class CquSessionDO extends DurableObject<Env> {
 
     try {
       switch (action) {
+        case "recovery-tick": {
+          const body = await request.json<{recoveryId: string; deadlineAt: number}>();
+          return Response.json(await this.recoveryTick(body.recoveryId));
+        }
+        case "recovery-finish": {
+          const body = await request.json<{recoveryId: string; outcome: string}>();
+          await this.ctx.storage.transaction(async (tx) => {
+            const cycle = await tx.get<SessionRecoveryCycle>("sessionRecoveryCycle");
+            if (cycle?.id !== body.recoveryId) return;
+            await tx.delete("sessionRecoveryCycle");
+            if (body.outcome === "failed" && (await tx.get<CquStatus>("status")) !== "active") {
+              const cooldownUntil = Date.now() + 15 * 60_000;
+              await tx.put("sessionRecoveryCooldownUntil", cooldownUntil);
+              await tx.put("reloginRetryAt", Math.max(cooldownUntil, (await tx.get<number>("reloginRetryAt")) ?? 0));
+            }
+          });
+          return Response.json({ok: true});
+        }
         case "init": {
+          await this.recoverInterruptedLogins();
           const body = await request.json<{
             userId: string;
             studentId: string;
@@ -704,7 +691,7 @@ export class CquSessionDO extends DurableObject<Env> {
       if (outcome === "failed") {
         return { success: false, error: "CQU 登录失败（容器登录未成功）" };
       }
-      await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
+      await this.scheduleSessionAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
       return { success: true };
     } catch (e) {
       await this.releaseRoutedLoginReservation(reservation.token);
@@ -754,7 +741,7 @@ export class CquSessionDO extends DurableObject<Env> {
     // 立即触发容器重登铸完整 storageState。仍绝不把旧 3-cookie 当 storageState 发节点。
     if (!this.state.storageState) {
       await this.setStatus("expired");
-      await this.ctx.storage.setAlarm(Date.now());
+      await this.scheduleSessionAlarm(Date.now());
       throw new CquSsoError(
         "SESSION_INACTIVE",
         "CQU session needs re-login (no storage state)"
@@ -871,7 +858,7 @@ export class CquSessionDO extends DurableObject<Env> {
       );
     } catch (e) {
       if (e instanceof CquSsoError && e.code === "TGT_EXPIRED") {
-        await this.ctx.storage.setAlarm(Date.now());
+        await this.scheduleSessionAlarm(Date.now());
       }
       throw e;
     }
@@ -1046,11 +1033,14 @@ export class CquSessionDO extends DurableObject<Env> {
           "CQU session needs re-auth (请重新绑定)"
         );
       }
+      if (status === "expired" || status === "relogging" || status === "binding") {
+        await this.enqueueRecoveryWorkflow(sessionState.userId);
+      }
       throw new CquSsoError("SESSION_INACTIVE", "CQU session not active");
     }
     if (!sessionState.storageState) {
       await this.setStatus("expired");
-      await this.ctx.storage.setAlarm(Date.now());
+      await this.scheduleSessionAlarm(Date.now());
       throw new CquSsoError(
         "SESSION_INACTIVE",
         "CQU session needs re-login (no storage state)"
@@ -1104,7 +1094,7 @@ export class CquSessionDO extends DurableObject<Env> {
           error instanceof CquSsoError &&
           error.code === "TGT_EXPIRED"
         ) {
-          await this.ctx.storage.setAlarm(Date.now());
+          await this.scheduleSessionAlarm(Date.now());
         }
         throw error;
       }
@@ -1411,17 +1401,21 @@ export class CquSessionDO extends DurableObject<Env> {
       }),
     ]);
     const keys = [...locks.keys(), ...results.keys()];
-    for (const lock of locks.values()) {
-      keys.push(this.browserRouteKey(lock.token));
-    }
+    await this.ctx.storage.transaction(async (tx) => {
+      const pending = (await tx.get<InterruptedLogin[]>("interruptedLogins")) ?? [];
+      for (const [lockKey, lock] of locks) {
+        if (!pending.some((entry) => entry.token === lock.token)) {
+          pending.push({token: lock.token, lockKey, kind: "quicklogin", retryAt: Date.now(), safeAfter: lock.startedAt + LOGIN_LOCK_TTL_MS});
+        }
+      }
+      if (pending.length) await tx.put("interruptedLogins", pending);
+      const lease = await tx.get<CodeLease>("codeLease");
+      if (lease && pending.some((entry) => entry.token === lease.ownerToken)) await tx.put("codeLease", {...lease, recoveryFence: true});
+    });
     if (keys.length > 0) await this.ctx.storage.delete(keys);
     await this.ctx.storage.put("quickloginBindingEpoch", next);
     this.quickloginFlights.clear();
-    try {
-      await this.clearVerificationCodeLeasesByKind("quicklogin");
-    } catch {
-      // A live owner remains fenced until its normal finally/TTL path.
-    }
+    if (locks.size) await this.scheduleSessionAlarm(Date.now());
     if (ownerUserId) {
       await new QuickloginAccountClient(this.env)
         .notifyBindingChanged(ownerUserId);
@@ -1456,6 +1450,7 @@ export class CquSessionDO extends DurableObject<Env> {
   private async quickloginLogin(
     input: DeviceLoginRequest
   ): Promise<DeviceLoginResult> {
+    await this.recoverInterruptedLogins();
     if (
       !input.ownerUserId ||
       !input.deviceId ||
@@ -1470,25 +1465,90 @@ export class CquSessionDO extends DurableObject<Env> {
       input.deviceId,
       input.generation
     );
+    const validateSuccess = async (
+      result: Extract<DeviceLoginResult, { kind: "success" }>,
+      cache: "read" | "write"
+    ): Promise<boolean> => {
+      let accepted = false;
+      await this.ctx.storage.transaction(async (tx) => {
+        const [state, status, epoch, credentials, deviceLock, cached] =
+          await Promise.all([
+            tx.get<SessionState>("state"),
+            tx.get<CquStatus>("status"),
+            tx.get<number>("quickloginBindingEpoch"),
+            tx.get<StoredCredentials>("credentials"),
+            tx.get<QuickloginLoginInFlight>(this.quickloginLockKey(input.deviceId)),
+            tx.get<QuickloginCachedLoginResult>(resultKey),
+          ]);
+        const cacheIsCurrent =
+          cache === "write" ||
+          (cached?.expiresAt !== undefined &&
+            cached.expiresAt > Date.now() &&
+            cached.result.bindingEpoch === result.bindingEpoch);
+        const bindingIsCurrent =
+          state?.userId === input.ownerUserId &&
+          credentials !== undefined &&
+          status !== "unbound" &&
+          status !== "revoked" &&
+          status !== "needs_reauth" &&
+          (epoch ?? 0) === result.bindingEpoch &&
+          !(deviceLock && deviceLock.generation > input.generation);
+        if (!cacheIsCurrent || !bindingIsCurrent) {
+          if (
+            cached &&
+            cached.result.bindingEpoch === result.bindingEpoch
+          ) {
+            await tx.delete(resultKey);
+          }
+          return;
+        }
+        if (cache === "write") {
+          await tx.put(resultKey, {
+            result,
+            expiresAt: Date.now() + 60_000,
+          } satisfies QuickloginCachedLoginResult);
+          await tx.delete([
+            "quickloginTransientFailures",
+            "reloginRetryAt",
+          ]);
+        }
+        accepted = true;
+      });
+      return accepted;
+    };
     const cached =
       (await this.ctx.storage.get<QuickloginCachedLoginResult>(resultKey)) ??
       null;
-    if (cached?.expiresAt && cached.expiresAt > Date.now()) {
-      return cached.result;
+    if (cached) {
+      if (cached.expiresAt <= Date.now()) {
+        await this.ctx.storage.delete(resultKey);
+      } else if (await validateSuccess(cached.result, "read")) {
+        return cached.result;
+      } else {
+        return { kind: "cancelled" };
+      }
     }
-    if (cached) await this.ctx.storage.delete(resultKey);
     const existing = this.quickloginFlights.get(key);
-    if (existing) return existing;
+    if (existing) {
+      const result = await existing;
+      if (
+        result.kind === "success" &&
+        !(await validateSuccess(result, "write"))
+      ) {
+        return { kind: "cancelled" };
+      }
+      return result;
+    }
 
     const flight = this.runQuickloginLogin(input);
     this.quickloginFlights.set(key, flight);
     try {
       const result = await flight;
-      if (result.kind === "success") {
-        await this.ctx.storage.put(resultKey, {
-          result,
-          expiresAt: Date.now() + 60_000,
-        } satisfies QuickloginCachedLoginResult);
+      if (
+        result.kind === "success" &&
+        !(await validateSuccess(result, "write"))
+      ) {
+        return { kind: "cancelled" };
       }
       return result;
     } finally {
@@ -1517,6 +1577,9 @@ export class CquSessionDO extends DurableObject<Env> {
       return { kind: "needs_reauth", reason: "unbound" };
     }
 
+    const retryAt = (await this.ctx.storage.get<number>("reloginRetryAt")) ?? 0;
+    if (retryAt > Date.now()) return {kind: "temporary_unavailable", retryAfterMs: retryAt - Date.now()};
+
     const lockKey = this.quickloginLockKey(input.deviceId);
     const token = crypto.randomUUID();
     const route = quickloginBrowserRoute(input.ownerUserId, input.deviceId);
@@ -1526,17 +1589,17 @@ export class CquSessionDO extends DurableObject<Env> {
     await this.ctx.storage.transaction(async (tx) => {
       const current =
         (await tx.get<QuickloginLoginInFlight>(lockKey)) ?? null;
-      if (current && now - current.startedAt <= LOGIN_LOCK_TTL_MS) {
+      if (current) {
         if (current.generation > input.generation) staleGeneration = true;
         return;
       }
-      if (current) await tx.delete(this.browserRouteKey(current.token));
       const lock: QuickloginLoginInFlight = {
         token,
         deviceId: input.deviceId,
         generation: input.generation,
         bindingEpoch: binding.epoch,
         startedAt: now,
+        deadlineAt: resolveBrowserDeadline(undefined, now),
         browserRouteVersion: 1,
       };
       const record: LoginRouteRecord = {
@@ -1553,13 +1616,14 @@ export class CquSessionDO extends DurableObject<Env> {
       acquired = true;
     });
     await this.ctx.storage.sync();
+    if (acquired) await this.enqueueRecoveryWorkflow(input.ownerUserId);
     if (!acquired) {
       return staleGeneration
         ? { kind: "cancelled" }
         : { kind: "temporary_unavailable", retryAfterMs: 1_000 };
     }
 
-    let leaseAcquired = false;
+    let runCompleted = false;
     let runAbort: AbortController | null = null;
     const recheck = async () => {
       const [latestState, latestStatus, latestEpoch, latestLock] =
@@ -1602,8 +1666,7 @@ export class CquSessionDO extends DurableObject<Env> {
         token,
         "quicklogin"
       );
-      leaseAcquired = true;
-      const deadline = resolveBrowserDeadline(undefined, Date.now());
+      const deadline = resolveBrowserDeadline(undefined, now);
       const remainingMs = remainingBrowserBudget(deadline, Date.now());
       runAbort = new AbortController();
       const runBody: Record<string, unknown> = {
@@ -1638,6 +1701,7 @@ export class CquSessionDO extends DurableObject<Env> {
       const result = await response
         .json<ContainerRunResult>()
         .catch(() => null);
+      runCompleted = response.ok && result?.ok === true && !!result.state && hasValidTgt(result.state);
       await recheck();
 
       if (result?.error === "PASSWORD_REJECTED") {
@@ -1652,7 +1716,7 @@ export class CquSessionDO extends DurableObject<Env> {
         !result.state ||
         !hasValidTgt(result.state)
       ) {
-        return { kind: "temporary_unavailable", retryAfterMs: 60_000 };
+        return { kind: "temporary_unavailable", retryAfterMs: await this.deferQuickloginRetry(binding.epoch) };
       }
       await this.clearConsumedLoginCode();
       return {
@@ -1676,85 +1740,54 @@ export class CquSessionDO extends DurableObject<Env> {
       ) {
         return { kind: "cancelled" };
       }
-      return { kind: "temporary_unavailable", retryAfterMs: 60_000 };
+      return { kind: "temporary_unavailable", retryAfterMs: await this.deferQuickloginRetry(binding.epoch) };
     } finally {
       runAbort?.abort();
-      try {
-        await this.releaseVerificationCodeLease(token, leaseAcquired);
-      } catch {
-        // The persisted owner fence remains authoritative until its TTL.
-      }
-      const current =
-        (await this.ctx.storage.get<QuickloginLoginInFlight>(lockKey)) ?? null;
-      if (current?.token === token) {
-        await this.ctx.storage.delete([
-          lockKey,
-          this.browserRouteKey(token),
-        ]);
-      }
+      await this.finishLoginOperation(token, lockKey, "quicklogin", runCompleted);
     }
   }
 
-  /**
-   * Preserve only a still-live owner across destructive lifecycle changes.
-   * Tokens are non-secret fencing metadata. Queue entries are discarded because
-   * their login generations were invalidated and none has received a permit.
-   */
-  private async snapshotLiveCodeLeaseOwner(): Promise<{
-    lease: CodeLease;
-    pendingToken: string | null;
-    provenToken: string | null;
-  } | null> {
-    const now = Date.now();
-    const [lease, pendingToken, provenToken] = await Promise.all([
-      this.ctx.storage.get<CodeLease>("codeLease"),
-      this.ctx.storage.get<string>("codePermitPending"),
-      this.ctx.storage.get<string>("codePermitProven"),
-    ]);
-    if (!lease || pruneCodeLease(lease, now)?.ownerToken !== lease.ownerToken) {
-      return null;
-    }
-    return {
-      lease: { ...lease, queue: [] },
-      pendingToken:
-        pendingToken === lease.ownerToken ? pendingToken : null,
-      provenToken: provenToken === lease.ownerToken ? provenToken : null,
-    };
-  }
-
-  private async restoreCodeLeaseOwnerFence(
-    fence: Awaited<ReturnType<CquSessionDO["snapshotLiveCodeLeaseOwner"]>>
-  ): Promise<void> {
-    if (!fence) return;
-    await this.ctx.storage.put("codeLease", fence.lease);
-    if (fence.pendingToken) {
-      await this.ctx.storage.put("codePermitPending", fence.pendingToken);
-    }
-    if (fence.provenToken) {
-      await this.ctx.storage.put("codePermitProven", fence.provenToken);
-    }
+  private async deferQuickloginRetry(bindingEpoch: number): Promise<number> {
+    return this.ctx.storage.transaction(async (tx) => {
+      if (((await tx.get<number>("quickloginBindingEpoch")) ?? 0) !== bindingEpoch) return 60_000;
+      const failures = ((await tx.get<number>("quickloginTransientFailures")) ?? 0) + 1;
+      const delay = recoveryRetryDelayMs(failures);
+      await tx.put({quickloginTransientFailures: failures,
+        reloginRetryAt: Math.max((await tx.get<number>("reloginRetryAt")) ?? 0, Date.now() + delay)});
+      return delay;
+    });
   }
 
   private async destroy(): Promise<void> {
     await this.loadState();
     const ownerUserId = this.state?.userId;
-    const fence = await this.snapshotLiveCodeLeaseOwner();
-    const previousEpoch =
-      (await this.ctx.storage.get<number>("quickloginBindingEpoch")) ?? 0;
-    const nextEpoch =
-      Number.isSafeInteger(previousEpoch) && previousEpoch >= 0
-        ? Math.min(previousEpoch + 1, Number.MAX_SAFE_INTEGER)
-        : 1;
-    await this.ctx.storage.deleteAll();
+    await this.captureInterruptedLogins(true);
+    await this.ctx.storage.transaction(async (tx) => {
+      const values = await tx.list();
+      const previousEpoch = (values.get("quickloginBindingEpoch") as number | undefined) ?? 0;
+      const pending = (values.get("interruptedLogins") as InterruptedLogin[] | undefined) ?? [];
+      const preserved: Record<string, unknown> = {
+        status: "unbound" satisfies CquStatus,
+        quickloginBindingEpoch: Number.isSafeInteger(previousEpoch) && previousEpoch >= 0 ? Math.min(previousEpoch + 1, Number.MAX_SAFE_INTEGER) : 1,
+      };
+      if (pending.length) preserved.interruptedLogins = pending;
+      for (const item of pending) {
+        const key = this.browserRouteKey(item.token);
+        if (values.has(key)) preserved[key] = values.get(key);
+      }
+      const lease = values.get("codeLease") as CodeLease | undefined;
+      if (lease) {
+        preserved.codeLease = {...lease, queue: [], recoveryFence: true};
+        for (const key of ["codePermitPending", "codePermitProven"]) {
+          if (values.has(key)) preserved[key] = values.get(key);
+        }
+      }
+      await tx.delete([...values.keys()]);
+      await tx.put(preserved);
+    });
     this.state = null;
     this.quickloginFlights.clear();
-    // deleteAll 已清掉 status/loginInFlight/pendingCode/state/credentials/reloginAttempts/reloginFailures;
-    // 显式回到 unbound, 让后续 status 查询语义清晰(而非依赖默认值)。
-    await this.ctx.storage.put({
-      status: "unbound" satisfies CquStatus,
-      quickloginBindingEpoch: nextEpoch,
-    });
-    await this.restoreCodeLeaseOwnerFence(fence);
+    if ((await this.ctx.storage.get<InterruptedLogin[]>("interruptedLogins"))?.length) await this.scheduleSessionAlarm(Date.now());
     if (ownerUserId) {
       await new QuickloginAccountClient(this.env)
         .notifyBindingChanged(ownerUserId);
@@ -1773,20 +1806,12 @@ export class CquSessionDO extends DurableObject<Env> {
   private async revoke(): Promise<void> {
     await this.loadState();
     const ownerUserId = this.state?.userId;
-    const fence = await this.snapshotLiveCodeLeaseOwner();
-    await this.bumpQuickloginBindingEpoch();
-    // 刻意直写 setStatus("revoked") 而非走 nextStatus 状态机: 撤销要从任意状态(含空/
-    // unbound 的 DO, admin 端点对未初始化的 DO 也会发 revoke)强制置位; 状态机表里
-    // unbound 无 REVOKE 转移, 走表会停在 unbound 而漏置墓碑。勿"修回"成走表。
     await this.setStatus("revoked");
-    await this.ctx.storage.deleteAlarm();
+    await this.captureInterruptedLogins(true);
+    await this.bumpQuickloginBindingEpoch();
     await this.ctx.storage.delete("loginInFlight");
-    await this.ctx.storage.delete([
-      "codeLease",
-      "codePermitPending",
-      "codePermitProven",
-    ]);
-    await this.restoreCodeLeaseOwnerFence(fence);
+    if ((await this.ctx.storage.get<InterruptedLogin[]>("interruptedLogins"))?.length) await this.scheduleSessionAlarm(Date.now());
+    else await this.ctx.storage.deleteAlarm();
     if (ownerUserId) {
       try {
         await new QuickloginAccountClient(this.env)
@@ -1814,10 +1839,11 @@ export class CquSessionDO extends DurableObject<Env> {
     // 空/unbound 的 DO)强制置位让 alarm 探针接管; 状态机表里没有从 revoked/unbound 出发的
     // UNREVOKE 转移, 走表会停在原态而无法恢复保活循环。勿"修回"成走表。
     await this.setStatus("expired");
-    await this.ctx.storage.setAlarm(Date.now());
+    await this.scheduleSessionAlarm(Date.now());
   }
 
   async alarm(): Promise<void> {
+    await this.flushRecoveryWorkflow();
     if (!this.retiredAtrustCleanupComplete) {
       try {
         if (!(await this.removeRetiredAtrustState())) return;
@@ -1825,33 +1851,16 @@ export class CquSessionDO extends DurableObject<Env> {
         console.warn(
           `[CquSession] retired aTrust state cleanup alarm retry failed (${error instanceof Error ? error.name : "unknown"})`
         );
-        await this.ctx.storage.setAlarm(Date.now() + RETRY_INTERVAL_MS);
+        await this.scheduleSessionAlarm(Date.now() + RETRY_INTERVAL_MS);
         return;
       }
     }
-    try {
-      if (await this.recoverOrphanedCasLogin()) {
-        await this.recoverPendingCodePermit();
-      }
-      if (this.orphanedCasLoginToken) return;
-    } catch (error) {
-      console.warn(
-        `[CquSession] orphaned CAS login alarm recovery deferred (${error instanceof Error ? error.name : "unknown"})`
-      );
-      await this.ctx.storage.setAlarm(Date.now() + RETRY_INTERVAL_MS);
+    await this.recoverInterruptedLogins();
+    if ((await this.ctx.storage.get<InterruptedLogin[]>("interruptedLogins"))?.length) return;
+    const runningLogin = await this.ctx.storage.get<LoginInFlight>("loginInFlight");
+    if (runningLogin) {
+      await this.scheduleSessionAlarm(runningLogin.deadlineAt ?? runningLogin.startedAt + LOGIN_LOCK_TTL_MS);
       return;
-    }
-    if (!this.activationPermitRecoveryComplete) {
-      try {
-        await this.recoverPendingCodePermit();
-        this.activationPermitRecoveryComplete = true;
-      } catch (error) {
-        console.warn(
-          `[CquSession] pending code permit alarm recovery deferred (${error instanceof Error ? error.name : "unknown"})`
-        );
-        await this.ctx.storage.setAlarm(Date.now() + RETRY_INTERVAL_MS);
-        return;
-      }
     }
     await this.pruneQuickloginMintReceipts(Date.now());
     await this.loadState();
@@ -1867,6 +1876,11 @@ export class CquSessionDO extends DurableObject<Env> {
       status === "needs_reauth"
     )
       return;
+    if (status === "expired" || status === "relogging") {
+      await this.relogin(deadlineAt);
+      if (await this.getStatus() === "active") await this.scheduleSessionAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
+      return;
+    }
 
     // 主动重登: TGT 接近 ~8h 硬上限前(+7h)且当前 active, 提前重铸, 避免热路径在过期窗口取不到 ST。
     // 判定抽成纯函数 shouldProactiveRelogin(便于单测), 语义与旧内联条件完全一致(含 `>=` 边界)。
@@ -1894,7 +1908,7 @@ export class CquSessionDO extends DurableObject<Env> {
       // relogin 内部已更新状态; 重新排 alarm 继续保活循环。
       // 此处刻意不再 putStateGuarded: containerLogin 成功时内部已落 fresh state; proactive 跑在
       // 健康 active 会话上(consecutiveFailures 本就 0), 无需像 expired 分支那样为清零失败计数而重 put。
-      await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
+      await this.scheduleSessionAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
       return;
     }
 
@@ -1921,7 +1935,7 @@ export class CquSessionDO extends DurableObject<Env> {
       // 误触告警; 同时清零熔断的「连续凭据失败」计数(会话已证实健康)。
       await this.ctx.storage.put("reloginFailures", 0);
       await this.ctx.storage.put("credentialFailures", 0);
-      await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
+      await this.scheduleSessionAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
       return;
     }
 
@@ -1944,7 +1958,7 @@ export class CquSessionDO extends DurableObject<Env> {
       }
       this.state.consecutiveFailures = 0;
       await this.putStateGuarded(this.state);
-      await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
+      await this.scheduleSessionAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
       return;
     }
 
@@ -1962,7 +1976,7 @@ export class CquSessionDO extends DurableObject<Env> {
       `[CquSession] ${this.state.studentId}: keepalive unreachable (attempt #${this.state.consecutiveFailures}), keeping session, retrying in ${delay}ms`
     );
     await this.putStateGuarded(this.state);
-    await this.ctx.storage.setAlarm(Date.now() + delay);
+    await this.scheduleSessionAlarm(Date.now() + delay);
   }
 
   /**
@@ -2205,7 +2219,15 @@ export class CquSessionDO extends DurableObject<Env> {
   private async relogin(deadlineAt?: number): Promise<void> {
     if (!this.state) throw new Error("No state");
     const studentId = this.state.studentId;
+    const priorStatus = await this.getStatus();
     const now = Date.now();
+    if (await this.ctx.storage.get<LoginInFlight>("loginInFlight")) return;
+    const retryAt = (await this.ctx.storage.get<number>("reloginRetryAt")) ?? 0;
+    if (retryAt > now) {
+      await this.scheduleSessionAlarm(retryAt);
+      return;
+    }
+    const attemptEpoch = (await this.ctx.storage.get<number>("quickloginBindingEpoch")) ?? 0;
 
     // 重登限频(只在重登路径, 不进 containerLogin —— 否则会误伤永不该被限流的首登)。
     // 读近期重登发起时刻, 裁到窗口; 若已达 runaway 闸则告警并直接 return:
@@ -2224,6 +2246,9 @@ export class CquSessionDO extends DurableObject<Env> {
       console.error(
         `[CquSession] ${studentId}: ALERT relogin throttled — ${pruned.length} relogins in last hour, skipping to avoid runaway/瑞数 risk`
       );
+      const retryAt = Math.min(...pruned) + RELOGIN_RATE_WINDOW_MS + 1;
+      await this.ctx.storage.put("reloginRetryAt", retryAt);
+      await this.scheduleSessionAlarm(retryAt);
       return;
     }
     // 未限流: 记录本次发起时刻并落盘, 再继续容器登录。
@@ -2238,6 +2263,8 @@ export class CquSessionDO extends DurableObject<Env> {
       "RELOGIN_START",
       deadlineAt
     );
+    if (((await this.ctx.storage.get<number>("quickloginBindingEpoch")) ?? 0) !== attemptEpoch ||
+        shouldAbandonKeepaliveWriteback(await this.getStatus())) return;
     if (outcome === "in_flight") {
       // 命中在途锁: 不算一次失败、也不重置失败计数(让在途登录自己收尾)。
       console.info(
@@ -2248,11 +2275,18 @@ export class CquSessionDO extends DurableObject<Env> {
     if (outcome === "failed") {
       // containerLogin 失败时已把状态推到 RELOGIN_FAIL(→ expired) 并清锁。
       const reason = this.lastLoginFailReason;
+      if (priorStatus === "active" && reason === "transient" && this.state.storageState) {
+        // A failed proactive refresh does not invalidate the previously usable session.
+        await this.setStatus("active");
+      }
       console.error(`[CquSession] ${studentId}: relogin failed (reason=${reason})`);
       // 连续重登失败计数自增 + 持久化(通用告警, 不分原因)。
       const failures =
         ((await this.ctx.storage.get<number>("reloginFailures")) ?? 0) + 1;
       await this.ctx.storage.put("reloginFailures", failures);
+      const retryAt = Date.now() + recoveryRetryDelayMs(failures);
+      await this.ctx.storage.put("reloginRetryAt", retryAt);
+      await this.scheduleSessionAlarm(retryAt);
 
       // 熔断(混合): 仅「凭据」失败累计 —— 达阈值落 needs_reauth 终态(凭据真死, 停保活,
       // 等用户重绑)。「瑞数/瞬态」失败不累计, 交 keepalive 退避自愈, 绝不误杀。
@@ -2281,6 +2315,7 @@ export class CquSessionDO extends DurableObject<Env> {
     // 以便在 observability 可见(info 级实测在当前配置下不可见; 重登成功此前无任何日志, 是观测盲区)。
     await this.ctx.storage.put("reloginFailures", 0);
     await this.ctx.storage.put("credentialFailures", 0);
+    await this.ctx.storage.delete("reloginRetryAt");
     console.warn(`[CquSession] ${studentId}: relogin OK, new TGT minted`);
   }
 
@@ -2395,6 +2430,8 @@ export class CquSessionDO extends DurableObject<Env> {
       this.ctx.storage.get<string>("codePermitPending"),
     ]);
     if (!pendingToken) return;
+    const recovering = (await this.ctx.storage.get<InterruptedLogin[]>("interruptedLogins")) ?? [];
+    if (recovering.some((item) => item.token === pendingToken)) return;
     if (!lease || lease.ownerToken !== pendingToken) {
       await this.ctx.storage.delete([
         "codePermitPending",
@@ -2424,27 +2461,17 @@ export class CquSessionDO extends DurableObject<Env> {
     current: CodeLease | null,
     next: CodeLease | null
   ): Promise<void> {
-    const ownerChanged = current?.ownerToken !== next?.ownerToken;
-    if (!next) {
-      await this.ctx.storage.delete([
-        "codeLease",
-        "codePermitPending",
-        "codePermitProven",
-      ]);
-      return;
-    }
-    if (!ownerChanged) {
-      await this.ctx.storage.put("codeLease", next);
-      return;
-    }
-
-    await this.ctx.storage.delete("codePermitProven");
-    await this.ctx.storage.put({
-      codeLease: next,
-      codePermitPending: next.ownerToken,
+    await this.ctx.storage.transaction(async (tx) => {
+      const latest = (await tx.get<CodeLease>("codeLease")) ?? null;
+      if (JSON.stringify(latest) !== JSON.stringify(current)) {
+        throw new CquSsoError("CODE_OWNER_REPLACED", "verification channel changed");
+      }
+      await this.writeCodeLease(tx, latest, next);
     });
-    await this.grantVerificationCodePermit(next.ownerToken);
-    await this.commitAcknowledgedCodePermit(next.ownerToken);
+    if (next && current?.ownerToken !== next.ownerToken) {
+      await this.scheduleSessionAlarm(Date.now() + RETRY_INTERVAL_MS);
+      await this.recoverPendingCodePermit();
+    }
   }
 
   /**
@@ -2592,7 +2619,7 @@ export class CquSessionDO extends DurableObject<Env> {
     if (deferUntil !== null) {
       const currentAlarm = await this.ctx.storage.getAlarm();
       if (currentAlarm === null || currentAlarm > deferUntil) {
-        await this.ctx.storage.setAlarm(deferUntil);
+        await this.scheduleSessionAlarm(deferUntil);
       }
       return false;
     }
@@ -2600,158 +2627,262 @@ export class CquSessionDO extends DurableObject<Env> {
     return true;
   }
 
-  /** 清理某类登录在 owner/队列中的所有租约，保留另一类登录的顺序。 */
-  private async clearVerificationCodeLeasesByKind(
-    kind: LoginKind
-  ): Promise<void> {
-    const now = Date.now();
-    const current =
-      (await this.ctx.storage.get<CodeLease>("codeLease")) ?? null;
-    if (!current) {
-      await this.ctx.storage.delete([
-        "codePermitPending",
-        "codePermitProven",
-      ]);
-      return;
-    }
-
-    const filtered: CodeLease = {
-      ...current,
-      queue: current.queue.filter((entry) => entry.kind !== kind),
-    };
-    const currentStillLive =
-      pruneCodeLease(current, now)?.ownerToken === current.ownerToken;
-    if (current.ownerKind === kind && currentStillLive) {
-      // Reset invalidates the browser generation, not the external node's
-      // already-issued permit. Keep the owner fence until its own finally or TTL.
-      await this.ctx.storage.put("codeLease", filtered);
-      return;
-    }
-    const next =
-      current.ownerKind === kind
-        ? releaseCodeLease(filtered, current.ownerToken, now)
-        : pruneCodeLease(filtered, now);
-    await this.persistCodeLeaseTransition(current, next);
+  private async enqueueRecoveryWorkflow(userId: string, deferStart = false, deadlineAt = Date.now() + 30 * 60_000): Promise<void> {
+    const id = crypto.randomUUID();
+    await this.ctx.storage.transaction(async (tx) => {
+      const current = await tx.get<SessionRecoveryCycle>("sessionRecoveryCycle");
+      if (current && current.deadlineAt > Date.now()) return;
+      if (((await tx.get<number>("sessionRecoveryCooldownUntil")) ?? 0) > Date.now()) return;
+      await tx.put("sessionRecoveryCycle", {id, userId, deadlineAt, created: false} satisfies SessionRecoveryCycle);
+    });
+    await this.scheduleSessionAlarm(Date.now());
+    if (!deferStart) this.ctx.waitUntil(this.flushRecoveryWorkflow());
   }
 
-  /**
-   * A persisted CAS lock found during activation cannot still have an owning JS
-   * continuation. Remove only that token and its routing/lease references. If a
-   * code was already observed for the orphan, retain the owner fence until the
-   * account-level code expires so a replacement login cannot send concurrently.
-   */
-  private async recoverOrphanedCasLogin(
-    captureActivationLock = false
-  ): Promise<boolean> {
-    if (captureActivationLock || !this.activationCasLockCaptureComplete) {
-      const lock =
-        (await this.ctx.storage.get<LoginInFlight>("loginInFlight")) ?? null;
-      this.orphanedCasLoginToken = lock?.token ?? null;
-      this.activationCasLockCaptureComplete = true;
-    }
-    const orphanToken = this.orphanedCasLoginToken;
-    if (!orphanToken) return false;
-
-    const now = Date.now();
-    let recovered = false;
-    let matched = false;
-    let deferUntil: number | null = null;
-    let promotedOwnerKind: LoginKind | null = null;
-
-    await this.ctx.storage.transaction(async (tx) => {
-      const lock =
-        (await tx.get<LoginInFlight>("loginInFlight")) ?? null;
-      if (lock?.token !== orphanToken) return;
-      matched = true;
-
-      const [lease, pendingToken, provenToken, pendingCode, status, storedState] =
-        await Promise.all([
-          tx.get<CodeLease>("codeLease"),
-          tx.get<string>("codePermitPending"),
-          tx.get<string>("codePermitProven"),
-          tx.get<PendingCode>("pendingCode"),
-          tx.get<CquStatus>("status"),
-          tx.get<SessionState>("state"),
-        ]);
-      const observedCodeAt =
-        lease?.ownerToken === orphanToken &&
-        typeof lease.ownerCodeReceivedAt === "number" &&
-        Number.isSafeInteger(lease.ownerCodeReceivedAt) &&
-        lease.ownerCodeReceivedAt > 0
-          ? Math.min(lease.ownerCodeReceivedAt, now)
-          : null;
-      const interruptedCodeObservation =
-        lease?.ownerToken === orphanToken &&
-        observedCodeAt === null &&
-        provenToken === orphanToken;
-      if (
-        (observedCodeAt !== null &&
-          now - observedCodeAt < CODE_VALIDITY_MS) ||
-        interruptedCodeObservation
-      ) {
-        const fenceStartedAt = observedCodeAt ?? now;
-        deferUntil = fenceStartedAt + CODE_VALIDITY_MS;
-        if (interruptedCodeObservation && lease) {
-          await tx.put("codeLease", {
-            ...lease,
-            ownerCodeReceivedAt: fenceStartedAt,
-          });
+  private async flushRecoveryWorkflow(): Promise<void> {
+    if (this.workflowStartFlight) return this.workflowStartFlight;
+    const start = async () => {
+      const cycle = await this.ctx.storage.get<SessionRecoveryCycle>("sessionRecoveryCycle");
+      if (!cycle || (cycle.created && (cycle.checkedAt ?? 0) > Date.now() - RETRY_INTERVAL_MS)) return;
+      try {
+        let existingStatus: string | undefined;
+        if (cycle.created) {
+          existingStatus = (await (await this.env.CQU_SESSION_RECOVERY.get(cycle.id)).status()).status;
+        } else try {
+          await this.env.CQU_SESSION_RECOVERY.create({id: cycle.id, params: {
+            userId: cycle.userId, recoveryId: cycle.id, deadlineAt: cycle.deadlineAt,
+          }});
+        } catch {
+          // A lost create acknowledgement is recovered with the exact same instance ID.
+          const existing = await this.env.CQU_SESSION_RECOVERY.get(cycle.id);
+          existingStatus = (await existing.status()).status;
         }
-        return;
+        if (existingStatus === "complete" || existingStatus === "errored" || existingStatus === "terminated") {
+          let cleared = false;
+          await this.ctx.storage.transaction(async (tx) => {
+            if ((await tx.get<SessionRecoveryCycle>("sessionRecoveryCycle"))?.id !== cycle.id) return;
+            await tx.delete("sessionRecoveryCycle");
+            cleared = true;
+          });
+          const pending = (await this.ctx.storage.get<InterruptedLogin[]>("interruptedLogins")) ?? [];
+          const hasLocks = !!(await this.ctx.storage.get<LoginInFlight>("loginInFlight")) ||
+            (await this.ctx.storage.list<LoginInFlight>({prefix: "quickloginLogin:"})).size > 0;
+          const status = await this.getStatus();
+          if (cleared && (status === "expired" || hasLocks || pending.length) && cycle.deadlineAt > Date.now() && status !== "revoked" && status !== "unbound") {
+            await this.enqueueRecoveryWorkflow(cycle.userId, false, cycle.deadlineAt);
+          }
+          return;
+        }
+        if (existingStatus === "unknown") throw new Error("recovery workflow unavailable");
+        await this.ctx.storage.transaction(async (tx) => {
+          const latest = await tx.get<SessionRecoveryCycle>("sessionRecoveryCycle");
+          if (latest?.id === cycle.id) await tx.put("sessionRecoveryCycle", {...latest, created: true, checkedAt: Date.now()});
+        });
+      } catch {
+        await this.scheduleSessionAlarm(Date.now() + RETRY_INTERVAL_MS);
+        console.warn(JSON.stringify({event: "cqu.recovery.workflow_start_deferred"}));
       }
+    };
+    const flight = start();
+    this.workflowStartFlight = flight;
+    try { await flight; }
+    finally { if (this.workflowStartFlight === flight) this.workflowStartFlight = null; }
+  }
 
-      const nextLease = releaseCodeLease(lease ?? null, orphanToken, now);
-      const ownerChanged = lease?.ownerToken !== nextLease?.ownerToken;
-      const deletes = [
-        "loginInFlight",
-        this.browserRouteKey(orphanToken),
-      ];
-      if (!nextLease) deletes.push("codeLease");
-      if (ownerChanged || pendingToken === orphanToken) {
-        deletes.push("codePermitPending");
-      }
-      if (ownerChanged || provenToken === orphanToken) {
-        deletes.push("codePermitProven");
-      }
-      await tx.delete(deletes);
+  private async recoveryTick(recoveryId: string): Promise<{state: "complete" | "needs_reauth" | "waiting" | "failed"; retryAt?: number}> {
+    const cycle = await this.ctx.storage.get<SessionRecoveryCycle>("sessionRecoveryCycle");
+    if (!cycle || cycle.id !== recoveryId) return {state: "complete"};
+    if (Date.now() >= cycle.deadlineAt) return {state: "failed"};
+    const status = await this.getStatus();
+    if (status === "needs_reauth" || status === "revoked" || status === "unbound") return {state: "needs_reauth"};
+    const pending = (await this.ctx.storage.get<InterruptedLogin[]>("interruptedLogins")) ?? [];
+    const cas = await this.ctx.storage.get<LoginInFlight>("loginInFlight");
+    const devices = await this.ctx.storage.list<LoginInFlight>({prefix: "quickloginLogin:"});
+    if (status === "active" && !cas && !devices.size && !pending.length) return {state: "complete"};
+    const retryAt = Math.max(Date.now() + 5_000, (await this.ctx.storage.get<number>("reloginRetryAt")) ?? 0);
+    await this.scheduleSessionAlarm(pending.length || cas || devices.size ? Date.now() + 1_000 : retryAt);
+    return {state: "waiting", retryAt: Math.min(cycle.deadlineAt, Math.max(Date.now() + 30_000, retryAt))};
+  }
 
-      const writes: Record<string, unknown> = {};
-      if (nextLease) writes.codeLease = nextLease;
-      if (ownerChanged && nextLease) {
-        writes.codePermitPending = nextLease.ownerToken;
-        promotedOwnerKind = nextLease.ownerKind;
+  /** Capture lost continuations on activation, and expired operations during normal use. */
+  private async captureInterruptedLogins(activation = false): Promise<void> {
+    const now = Date.now();
+    await this.ctx.storage.transaction(async (tx) => {
+      const pending = new Map(((await tx.get<InterruptedLogin[]>("interruptedLogins")) ?? []).map((item) => [item.token, item]));
+      const locks = await tx.list<LoginInFlight>({ prefix: "quickloginLogin:" });
+      const cas = await tx.get<LoginInFlight>("loginInFlight");
+      if (cas) locks.set("loginInFlight", cas);
+      for (const [lockKey, lock] of locks) {
+        if (!activation && Date.now() < (lock.deadlineAt ?? lock.startedAt + LOGIN_LOCK_TTL_MS)) continue;
+        if (!pending.has(lock.token)) pending.set(lock.token, {
+          token: lock.token, lockKey,
+          kind: lockKey === "loginInFlight" ? "cas" : "quicklogin",
+          safeAfter: lock.startedAt + LOGIN_LOCK_TTL_MS,
+          retryAt: now,
+        });
       }
-      if (pendingCode?.ownerToken === orphanToken) {
-        const { ownerToken: _orphanOwner, ...unownedCode } = pendingCode;
-        writes.pendingCode = unownedCode;
+      const lease = await tx.get<CodeLease>("codeLease");
+      if (activation && lease) {
+        for (const entry of [{token: lease.ownerToken, kind: lease.ownerKind}, ...lease.queue]) {
+          if (!pending.has(entry.token)) pending.set(entry.token, {...entry, retryAt: now,
+            safeAfter: entry.token === lease.ownerToken ? lease.acquiredAt + 1500_000 :
+              ("queuedAt" in entry && typeof entry.queuedAt === "number" ? entry.queuedAt : now) + LOGIN_LOCK_TTL_MS});
+        }
       }
-      if (status === "binding" || status === "relogging") {
-        writes.status = storedState?.storageState ? "expired" : "unbound";
+      if (lease && pending.has(lease.ownerToken)) await tx.put("codeLease", {...lease, recoveryFence: true});
+      if (pending.size) {
+        await tx.put("interruptedLogins", [...pending.values()]);
+        const alarm = await tx.getAlarm();
+        const next = Math.max(now + 1_000, Math.min(...[...pending.values()].map((item) => item.retryAt)));
+        if (alarm === null || alarm > next) await tx.setAlarm(next);
       }
-      if (Object.keys(writes).length > 0) await tx.put(writes);
-      recovered = true;
     });
+  }
 
-    if (!matched || recovered) this.orphanedCasLoginToken = null;
-    if (deferUntil !== null) {
-      const currentAlarm = await this.ctx.storage.getAlarm();
-      if (currentAlarm === null || currentAlarm > deferUntil) {
-        await this.ctx.storage.setAlarm(deferUntil);
-      }
-      if (captureActivationLock) {
-        console.warn(JSON.stringify({
-          event: "cqu.cas.orphaned_login_recovery_deferred",
-          reason: "observed_code_still_valid",
-        }));
-      }
+  /** Only a cancellation receipt or a replaced boot proves an old browser cannot send again. */
+  private async stopInterruptedLogin(item: InterruptedLogin): Promise<{stopped: boolean; mayHaveRequestedCode?: boolean}> {
+    const {token} = item;
+    const record = await this.ctx.storage.get<LoginRouteRecord>(this.browserRouteKey(token));
+    if (!record || record.route.backend === "node") {
+      return {stopped: item.safeAfter !== undefined && Date.now() > item.safeAfter};
     }
-    if (recovered) {
-      console.warn(JSON.stringify({
-        event: "cqu.cas.orphaned_login_recovered",
-        promotedOwnerKind,
+    if (!record.route.bootId) {
+      // A route is persisted with bootId before any permit or /run can be sent.
+      return {stopped: true, mayHaveRequestedCode: false};
+    }
+    try {
+      const response = await fetchBrowser(this.env, record.route, new Request(`${BROWSER_BASE}/login-cancel`, {
+        method: "POST",
+        headers: {"X-Cqu-Expected-Boot-Id": record.route.bootId},
+        body: JSON.stringify({session: token}),
+        signal: AbortSignal.timeout(5_000),
       }));
+      const result = await response.json<{ok?: boolean; stopped?: boolean; error?: string; mayHaveRequestedCode?: boolean}>();
+      return {stopped: (response.ok && result.ok === true && result.stopped === true) ||
+        (response.status === 409 && result.error === "BROWSER_INSTANCE_REPLACED"),
+        mayHaveRequestedCode: result.mayHaveRequestedCode};
+    } catch {
+      return {stopped: false};
     }
-    return recovered;
+  }
+
+  private async recoverInterruptedLogins(): Promise<void> {
+    if (this.recoveryFlight) return this.recoveryFlight;
+    const flight = this.runInterruptedLoginRecovery();
+    this.recoveryFlight = flight;
+    try { await flight; }
+    finally { if (this.recoveryFlight === flight) this.recoveryFlight = null; }
+  }
+
+  private async finishLoginOperation(token: string, lockKey: string, kind: LoginKind, completed: boolean): Promise<void> {
+    await this.ctx.storage.transaction(async (tx) => {
+      const pending = (await tx.get<InterruptedLogin[]>("interruptedLogins")) ?? [];
+      if (!pending.some((entry) => entry.token === token)) {
+        const lock = await tx.get<LoginInFlight>(lockKey);
+        pending.push({token, lockKey, kind, stopped: completed, preserveCodeFence: !completed, retryAt: Date.now(), safeAfter: (lock?.startedAt ?? Date.now()) + LOGIN_LOCK_TTL_MS});
+      }
+      await tx.put("interruptedLogins", pending);
+      const lease = await tx.get<CodeLease>("codeLease");
+      if (lease?.ownerToken === token) await tx.put("codeLease", {...lease, recoveryFence: true});
+    });
+    await this.scheduleSessionAlarm(Date.now() + RETRY_INTERVAL_MS);
+    await this.recoverInterruptedLogins();
+  }
+
+  private async runInterruptedLoginRecovery(): Promise<void> {
+    await this.captureInterruptedLogins();
+    const pending = (await this.ctx.storage.get<InterruptedLogin[]>("interruptedLogins")) ?? [];
+    for (const item of pending) {
+      if (item.retryAt > Date.now()) continue;
+      // Persist the retry before contacting another object. An interrupted recovery is recoverable too.
+      await this.ctx.storage.transaction(async (tx) => {
+        const current = (await tx.get<InterruptedLogin[]>("interruptedLogins")) ?? [];
+        const next = current.map((entry) => entry.token === item.token ? {...entry, retryAt: Date.now() + RETRY_INTERVAL_MS} : entry);
+        await tx.put("interruptedLogins", next);
+      });
+      await this.scheduleSessionAlarm(Date.now() + RETRY_INTERVAL_MS);
+      const receipt = item.stopped ? {stopped: true, mayHaveRequestedCode: false} : await this.stopInterruptedLogin(item);
+      if (!receipt.stopped) {
+        console.warn(JSON.stringify({event: "cqu.login.stop_unconfirmed", kind: item.kind}));
+        continue;
+      }
+      await this.ctx.storage.transaction(async (tx) => {
+        const current = (await tx.get<InterruptedLogin[]>("interruptedLogins")) ?? [];
+        if (!current.some((entry) => entry.token === item.token)) return;
+        const lock = item.lockKey ? await tx.get<LoginInFlight>(item.lockKey) : null;
+        if (item.lockKey && lock?.token === item.token) {
+          await tx.delete(item.lockKey);
+          if (item.kind === "cas") {
+            const status = await tx.get<CquStatus>("status");
+            if (status === "binding" || status === "relogging") {
+              const state = await tx.get<SessionState>("state");
+              await tx.put("status", state?.storageState ? "expired" : "unbound");
+            }
+          }
+        }
+        const lease = await tx.get<CodeLease>("codeLease");
+        const proven = await tx.get<string>("codePermitProven");
+        const now = Date.now();
+        let observedAt = lease?.ownerCodeReceivedAt;
+        if (lease?.ownerToken === item.token && observedAt === undefined && proven === item.token) observedAt = now;
+        const isolationUntil = item.isolationUntil ?? (observedAt !== undefined ? observedAt + CODE_VALIDITY_MS :
+          receipt.mayHaveRequestedCode !== false ? now + CODE_VALIDITY_MS : 0);
+        if (item.preserveCodeFence !== false && lease?.ownerToken === item.token && isolationUntil > now) {
+          // Keep OTP isolation, not a phantom running task. The original timestamp survives restarts.
+          await tx.put("codeLease", {...lease, ...(observedAt !== undefined ? {ownerCodeReceivedAt: observedAt} : {}), recoveryFence: true});
+          await tx.put("interruptedLogins", current.map((entry) => entry.token === item.token ?
+            {...entry, stopped: true, isolationUntil, retryAt: isolationUntil} : entry));
+          return;
+        }
+        if (lease) {
+          const next = releaseCodeLease(lease, item.token, now);
+          await this.writeCodeLease(tx, lease, next);
+        }
+        const code = await tx.get<PendingCode>("pendingCode");
+        if (code?.ownerToken === item.token) await tx.delete("pendingCode");
+        await tx.delete(this.browserRouteKey(item.token));
+        const nextPending = current.filter((entry) => entry.token !== item.token);
+        if (nextPending.length) await tx.put("interruptedLogins", nextPending);
+        else await tx.delete("interruptedLogins");
+      });
+    }
+    // Never grant a permit to another lost continuation captured in this activation.
+    const remaining = (await this.ctx.storage.get<InterruptedLogin[]>("interruptedLogins")) ?? [];
+    const permit = await this.ctx.storage.get<string>("codePermitPending");
+    if (permit && !remaining.some((item) => item.token === permit)) {
+      try { await this.recoverPendingCodePermit(); }
+      catch { await this.scheduleSessionAlarm(Date.now() + RETRY_INTERVAL_MS); }
+    }
+    if (remaining.length) await this.scheduleSessionAlarm(Math.min(...remaining.map((item) => item.retryAt)));
+  }
+
+  /** One alarm serves keepalive, operation deadlines and recovery; no caller may postpone maintenance. */
+  private async scheduleSessionAlarm(at: number): Promise<void> {
+    await this.ctx.storage.transaction(async (tx) => {
+      const pending = (await tx.get<InterruptedLogin[]>("interruptedLogins")) ?? [];
+      const recovering = new Set(pending.map((item) => item.token));
+      const locks = [...(await tx.list<LoginInFlight>({prefix: "quickloginLogin:"})).values()];
+      const cas = await tx.get<LoginInFlight>("loginInFlight");
+      if (cas) locks.push(cas);
+      const deadlines = locks.filter((lock) => !recovering.has(lock.token) && lock.deadlineAt !== undefined).map((lock) => lock.deadlineAt!);
+      const retryAt = await tx.get<number>("reloginRetryAt");
+      if (retryAt && retryAt > Date.now()) deadlines.push(retryAt);
+      const cycle = await tx.get<SessionRecoveryCycle>("sessionRecoveryCycle");
+      if (cycle) deadlines.push(cycle.created ? Math.min(cycle.deadlineAt, (cycle.checkedAt ?? 0) + RETRY_INTERVAL_MS) : Date.now() + RETRY_INTERVAL_MS);
+      await tx.setAlarm(Math.max(Date.now() + 1_000, Math.min(at, ...pending.map((item) => item.retryAt), ...deadlines)));
+    });
+  }
+
+  private async writeCodeLease(tx: DurableObjectTransaction, current: CodeLease | null | undefined, next: CodeLease | null): Promise<void> {
+    if (!next) {
+      await tx.delete(["codeLease", "codePermitPending", "codePermitProven"]);
+      return;
+    }
+    await tx.put("codeLease", next);
+    if (current?.ownerToken !== next.ownerToken) {
+      await tx.delete("codePermitProven");
+      await tx.put("codePermitPending", next.ownerToken);
+    }
   }
 
   /**
@@ -2763,62 +2894,15 @@ export class CquSessionDO extends DurableObject<Env> {
     kind: LoginKind
   ): Promise<"owner" | "queued"> {
     const now = Date.now();
-    const current =
-      (await this.ctx.storage.get<CodeLease>("codeLease")) ?? null;
-    const pendingToken =
-      (await this.ctx.storage.get<string>("codePermitPending")) ?? null;
-    if (
-      current?.ownerToken === token &&
-      pendingToken === token &&
-      pruneCodeLease(current, now)?.ownerToken === token
-    ) {
-      await this.recoverPendingCodePermit();
-      return "owner";
-    }
-    const next = acquireCodeLease(
-      current,
-      { token, kind, queuedAt: now, browserRouteVersion: 1 },
-      now
-    );
-    await this.persistCodeLeaseTransition(current, next);
-    return next.ownerToken === token ? "owner" : "queued";
-  }
-
-  /** 释放租约；owner 完成后原子推进 FIFO 队首，再向新 owner 发 permit。 */
-  private async releaseVerificationCodeLease(
-    token: string,
-    ownerFinished = true
-  ): Promise<void> {
-    const now = Date.now();
-    const current =
-      (await this.ctx.storage.get<CodeLease>("codeLease")) ?? null;
-    const pendingToken =
-      (await this.ctx.storage.get<string>("codePermitPending")) ?? null;
-    const pruned = pruneCodeLease(current, now);
-    if (
-      current?.ownerToken === token &&
-      pendingToken === token &&
-      pruned?.ownerToken === token
-    ) {
-      // A failed acknowledgement is not proof the node missed the permit.
-      // Keep this owner fenced until its 1500s TTL outlives the node's full
-      // 780s permit phase + 660s owner budget; immediate promotion could let
-      // two browsers send.
-      if (!ownerFinished) return;
-      try {
-        await this.recoverPendingCodePermit();
-      } catch (error) {
-        console.warn(
-          `[CquSession] pending code permit release recovery deferred (${error instanceof Error ? error.name : "unknown"})`
-        );
-        return;
-      }
-      const remainingMarker =
-        (await this.ctx.storage.get<string>("codePermitPending")) ?? null;
-      if (remainingMarker === token) return;
-    }
-    const next = releaseCodeLease(current, token, now);
-    await this.persistCodeLeaseTransition(current, next);
+    const role = await this.ctx.storage.transaction(async (tx) => {
+      const current = (await tx.get<CodeLease>("codeLease")) ?? null;
+      const next = acquireCodeLease(current, { token, kind, queuedAt: now, browserRouteVersion: 1 }, now);
+      await this.writeCodeLease(tx, current, next);
+      return next.ownerToken === token ? "owner" : "queued";
+    });
+    await this.scheduleSessionAlarm(Date.now() + RETRY_INTERVAL_MS);
+    await this.recoverPendingCodePermit();
+    return role;
   }
 
   /**
@@ -2845,7 +2929,7 @@ export class CquSessionDO extends DurableObject<Env> {
     const state = this.state!;
     // deadline 只在操作链入口 resolve 一次:alarm 链由 alarm() 传入;首登(init)链
     // 在此 resolve。内部函数不得再次重新取得 13 分钟预算。
-    const operationDeadline =
+    let operationDeadline =
       deadlineAt ?? resolveBrowserDeadline(undefined, Date.now());
 
     // single-flight 守卫: 读最新锁, 活锁在途则直接退出, 不抢锁、不二次发码。
@@ -2857,18 +2941,6 @@ export class CquSessionDO extends DurableObject<Env> {
       }
     }
 
-    const creds = await this.ctx.storage.get<StoredCredentials>("credentials");
-    if (!creds) {
-      await this.failLogin(failEvent);
-      throw new Error("No stored credentials");
-    }
-
-    // 确认要发起新登录后再推进状态机(如 RELOGIN_START → relogging)。
-    if (startEvent) {
-      const status = await this.getStatus();
-      await this.setStatus(nextStatus(status, startEvent));
-    }
-
     // 原子写锁 + 持久 route:并发发起者只有一个能同时写入两者(无 route 不发 permit,
     // 无锁不点火第二个登录)。transaction 内无网络操作。
     const acquired = reservation ?? await this.acquireRoutedLoginLock(
@@ -2878,20 +2950,37 @@ export class CquSessionDO extends DurableObject<Env> {
     );
     if (!acquired) return "in_flight";
     const token = acquired.token;
+    const bindingEpoch =
+      (await this.ctx.storage.get<number>("quickloginBindingEpoch")) ?? 0;
     let runAbort: AbortController | null = null;
-    let leaseAcquired = false;
+    let runCompleted = false;
 
     try {
+      const lock = await this.ctx.storage.get<LoginInFlight>("loginInFlight");
+      if (lock?.token !== token) return "in_flight";
+      operationDeadline = Math.min(operationDeadline, lock.deadlineAt ?? operationDeadline);
+      if (startEvent) await this.setStatus(nextStatus(await this.getStatus(), startEvent));
+      await this.enqueueRecoveryWorkflow(state.userId);
+      const creds = await this.ctx.storage.get<StoredCredentials>("credentials");
+      if (!creds) throw new Error("No stored credentials");
       // 锁获取跨 await:再核对绑定与状态,撤销/解绑已落地时不点火、不复位状态机。
       // 注意首登(initSession)的占位 state 尚未落盘:storage 无 state 属正常,不据此拦截;
       // 只在已落盘且 userId 不匹配(换绑)或状态已 revoked 时受控退出。预热写回前还会再核对。
       const recheckBinding = async () => {
-        const [storedState, currentStatus] = await Promise.all([
+        const [storedState, currentStatus, currentLock, currentBindingEpoch] = await Promise.all([
           this.ctx.storage.get<SessionState>("state"),
           this.getStatus(),
+          this.ctx.storage.get<LoginInFlight>("loginInFlight"),
+          this.ctx.storage.get<number>("quickloginBindingEpoch"),
         ]);
         if (
-          (storedState !== undefined && storedState.userId !== state.userId) ||
+          currentLock?.token !== token ||
+          (currentBindingEpoch ?? 0) !== bindingEpoch ||
+          (okEvent === "RELOGIN_OK" &&
+            storedState !== undefined &&
+            (storedState.userId !== state.userId ||
+              storedState.studentId !== state.studentId)) ||
+          currentStatus === "unbound" ||
           currentStatus === "revoked"
         ) {
           throw new CquSsoError(
@@ -2922,7 +3011,6 @@ export class CquSessionDO extends DurableObject<Env> {
       let permitRole: "owner" | "queued";
       try {
         permitRole = await this.acquireVerificationCodeLease(token, "cas");
-        leaseAcquired = true;
       } catch (error) {
         throw error;
       }
@@ -2964,6 +3052,7 @@ export class CquSessionDO extends DurableObject<Env> {
       );
       const res = await runRequest;
       const result = await res.json<ContainerRunResult>();
+      runCompleted = res.ok && result.ok === true && !!result.state && hasValidTgt(result.state);
       // M5 回写完整性校验: 除 res.ok/result.ok/result.state 兜空外, 再套 hasValidTgt(升级后的
       // CAS 三件套校验)。容器可能返回 ok 但 state 半残(缺 SESSION/rg_objectid 等), 这种半残态
       // 落盘后下轮取票 storageState 非 null 却缺关键 cookie → 落登录页 409 → 误判过期重登; 故按
@@ -2979,7 +3068,7 @@ export class CquSessionDO extends DurableObject<Env> {
         this.lastLoginFailReason = invalidState
           ? "transient"
           : classifyLoginFailure(result.error);
-        await this.failLogin(failEvent);
+        await this.failLogin(failEvent, token);
         return "failed";
       }
 
@@ -2993,17 +3082,18 @@ export class CquSessionDO extends DurableObject<Env> {
       // `tgt`/`cookies` 等残留键)—— 旧重登只覆盖 storageState、漏清 legacy `tgt`, 会留脏数据落盘。
       // 仅本次登录拥有的字段(storageState/loginAt/lastKeepAlive)取新值, 其余沿用最新落盘态。
       const fresh: SessionState = {
-        userId: latest.userId,
-        studentId: latest.studentId,
+        userId: okEvent === "FIRST_LOGIN_OK" ? state.userId : latest.userId,
+        studentId:
+          okEvent === "FIRST_LOGIN_OK" ? state.studentId : latest.studentId,
         storageState: result.state,
-        objectId: latest.objectId,
+        objectId:
+          okEvent === "FIRST_LOGIN_OK" ? state.objectId : latest.objectId,
         tgt: "", // 已废弃: 改造后 TGT 在 storageState.cookies 内, 顶层字段恒清空。
         loginAt: now,
         lastKeepAlive: now,
         lastRequestedAt: latest.lastRequestedAt,
         consecutiveFailures: latest.consecutiveFailures ?? 0,
       };
-      this.state = fresh;
       // 诊断: 尽力解出新 TGT(SOURCEID_TGC, JWT) 的 exp, 观测其服务端寿命, 排查
       // 会话疑似「定点过期」(按固定时刻而非固定时长)。绝不记录 token 本身, 只记
       // exp 时刻与剩余分钟数。decodeJwtExp 纯函数不抛, 再用 try/catch 兜底, 确保
@@ -3022,9 +3112,50 @@ export class CquSessionDO extends DurableObject<Env> {
       } catch {
         // 诊断失败绝不影响登录主流程。
       }
-      await this.putStateGuarded(fresh);
-      const status = await this.getStatus();
-      await this.setStatus(nextStatus(status, okEvent));
+      let committed = false;
+      await this.ctx.storage.transaction(async (tx) => {
+        const [currentLock, currentBindingEpoch, currentStatus, storedState] =
+          await Promise.all([
+            tx.get<LoginInFlight>("loginInFlight"),
+            tx.get<number>("quickloginBindingEpoch"),
+            tx.get<CquStatus>("status"),
+            tx.get<SessionState>("state"),
+          ]);
+        if (
+          currentLock?.token !== token ||
+          (currentBindingEpoch ?? 0) !== bindingEpoch ||
+          currentStatus === "revoked" ||
+          currentStatus === "unbound" ||
+          (okEvent === "RELOGIN_OK" &&
+            storedState !== undefined &&
+            (storedState.userId !== state.userId ||
+              storedState.studentId !== state.studentId))
+        ) {
+          return;
+        }
+        const terminalState: SessionState = {
+          ...fresh,
+          lastRequestedAt: storedState?.lastRequestedAt ?? fresh.lastRequestedAt,
+        };
+        const bytes = serializedStateBytes(terminalState);
+        if (stateExceedsHardLimit(bytes)) {
+          console.error(
+            `[CquSession] ALERT storageState size ${bytes}B exceeds DO hard limit (${STATE_HARD_LIMIT_BYTES}B); SKIPPING CAS login commit`
+          );
+          return;
+        }
+        await tx.put({
+          state: terminalState,
+          status: nextStatus(currentStatus ?? "unbound", okEvent),
+        });
+        await tx.delete(["quickloginTransientFailures", "reloginRetryAt"]);
+        this.state = terminalState;
+        committed = true;
+      });
+      if (!committed) {
+        await this.failLogin(failEvent, token);
+        return "failed";
+      }
       await this.clearConsumedLoginCode();
       return "ok";
     } catch (e) {
@@ -3033,36 +3164,26 @@ export class CquSessionDO extends DurableObject<Env> {
       );
       // 容器/网络层异常 = 瞬态, 不当凭据死(不累计熔断)。
       this.lastLoginFailReason = "transient";
-      await this.failLogin(failEvent);
+      await this.failLogin(failEvent, token);
       return "failed";
     } finally {
       runAbort?.abort();
-      try {
-        await this.releaseVerificationCodeLease(token, leaseAcquired);
-      } catch (error) {
-        // 当前登录的成败已确定，permit 轮转失败不应覆盖它；后续
-        // 排队登录会按自身超时路径失败并释放租约。日志不包含 token。
-        console.error(
-          `[CquSession] failed to rotate verification-code permit: ${errMsg(error)}`
-        );
-      }
-      // 只删自己的锁(route 记录保留:迟到邮件/outbox 恢复仍按 token 寻址,
-      // 由 expiresAt 与引用清理兜底)。
-      const latestLock =
-        (await this.ctx.storage.get<LoginInFlight>("loginInFlight")) ?? null;
-      if (latestLock?.token === token) {
-        await this.ctx.storage.delete("loginInFlight");
-      }
+      await this.finishLoginOperation(token, "loginInFlight", "cas", runCompleted);
     }
   }
 
   /** 登录失败收尾: 按 `failEvent` 推进状态机(首登→unbound / 重登→expired) + 清 single-flight 锁。 */
   private async failLogin(
-    failEvent: "FIRST_LOGIN_FAIL" | "RELOGIN_FAIL"
+    failEvent: "FIRST_LOGIN_FAIL" | "RELOGIN_FAIL",
+    token: string
   ): Promise<void> {
-    const status = await this.getStatus();
-    await this.setStatus(nextStatus(status, failEvent));
-    await this.ctx.storage.delete("loginInFlight");
+    await this.ctx.storage.transaction(async (tx) => {
+      const currentLock =
+        (await tx.get<LoginInFlight>("loginInFlight")) ?? null;
+      if (currentLock?.token !== token) return;
+      const status = (await tx.get<CquStatus>("status")) ?? "unbound";
+      await tx.put("status", nextStatus(status, failEvent));
+    });
   }
 
   /** 取该用户的浏览器登录器容器实例(寻址 CQU_LOGIN 容器 DO: idFromName → get)。 */
@@ -3272,13 +3393,14 @@ export class CquSessionDO extends DurableObject<Env> {
     let acquired = false;
     await this.ctx.storage.transaction(async (tx) => {
       const existing = await tx.get<LoginInFlight>(lockKey);
-      if (!shouldStartLogin(existing ?? null, now)) return;
+      if (existing) return;
       await tx.put({
-        [lockKey]: { token, startedAt: now, browserRouteVersion: 1 },
+        [lockKey]: { token, startedAt: now, deadlineAt: resolveBrowserDeadline(undefined, now), browserRouteVersion: 1 },
         [this.browserRouteKey(token)]: record,
       });
       acquired = true;
     });
+    if (acquired) await this.scheduleSessionAlarm(resolveBrowserDeadline(undefined, now));
     return acquired ? { token, route } : null;
   }
 

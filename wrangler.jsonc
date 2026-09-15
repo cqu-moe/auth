@@ -66,6 +66,12 @@
     ]
   },
 
+  "workflows": [{
+    "name": "cqu-session-recovery",
+    "binding": "CQU_SESSION_RECOVERY",
+    "class_name": "CquSessionRecoveryWorkflow"
+  }],
+
   "containers": [{
     "class_name": "CquLoginContainer",
     "image": "./container/Dockerfile",

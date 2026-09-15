@@ -45,6 +45,12 @@ describe("quicklogin login broker", () => {
     const stub = freshStub("quicklogin-broker-success");
     await seedSession(stub, { status: "active", loginAt: 123_456 });
     await seedCredentials(stub);
+    await runInDurableObject(stub, async (_instance, state) => {
+      await state.storage.put({
+        quickloginTransientFailures: 3,
+        reloginRetryAt: Date.now() - 1,
+      });
+    });
     const before = await readState(stub);
     let runBody: Record<string, unknown> | null = null;
     spyBrowserFetch({
@@ -75,6 +81,8 @@ describe("quicklogin login broker", () => {
     );
     expect(await readStatus(stub)).toBe("active");
     expect(await readStorage(stub, "quickloginLogin:device-a")).toBeUndefined();
+    expect(await readStorage(stub, "quickloginTransientFailures")).toBeUndefined();
+    expect(await readStorage(stub, "reloginRetryAt")).toBeUndefined();
   });
 
   it("coalesces the same device generation into one container run", async () => {
@@ -144,6 +152,69 @@ describe("quicklogin login broker", () => {
 
     expect(result).toEqual({ kind: "cancelled" });
     expect(await readStorage(stub, "quickloginLogin:device-a")).toBeUndefined();
+  });
+
+  it("rejects a cached success after the binding epoch changes", async () => {
+    const stub = freshStub("quicklogin-broker-stale-cache");
+    await seedSession(stub, { status: "active" });
+    await seedCredentials(stub);
+    await runInDurableObject(stub, async (_instance, state) => {
+      await state.storage.put({
+        quickloginBindingEpoch: 2,
+        "quickloginResult:device-a:4": {
+          result: {
+            kind: "success",
+            storageState: JSON.stringify(freshDeviceState("cached")),
+            loginAt: Date.now(),
+            bindingEpoch: 1,
+          },
+          expiresAt: Date.now() + 60_000,
+        },
+      });
+    });
+
+    await expect(
+      (await broker(stub)).quickloginLogin({
+        ownerUserId: "u1",
+        deviceId: "device-a",
+        generation: 4,
+      })
+    ).resolves.toEqual({ kind: "cancelled" });
+    expect(await readStorage(stub, "quickloginResult:device-a:4")).toBeUndefined();
+  });
+
+  it("revalidates an otherwise successful result at the cache commit", async () => {
+    const stub = freshStub("quicklogin-broker-cache-commit-race");
+    await seedSession(stub, { status: "active" });
+    await seedCredentials(stub);
+
+    const result = await runInDurableObject(stub, async (instance, state) => {
+      const target = instance as unknown as {
+        quickloginLogin(input: {
+          ownerUserId: string;
+          deviceId: string;
+          generation: number;
+        }): Promise<DeviceLoginResult>;
+        runQuickloginLogin: () => Promise<DeviceLoginResult>;
+      };
+      target.runQuickloginLogin = async () => {
+        await state.storage.put("quickloginBindingEpoch", 1);
+        return {
+          kind: "success",
+          storageState: JSON.stringify(freshDeviceState("late-cache")),
+          loginAt: Date.now(),
+          bindingEpoch: 0,
+        };
+      };
+      return target.quickloginLogin({
+        ownerUserId: "u1",
+        deviceId: "device-a",
+        generation: 4,
+      });
+    });
+
+    expect(result).toEqual({ kind: "cancelled" });
+    expect(await readStorage(stub, "quickloginResult:device-a:4")).toBeUndefined();
   });
 
   it("returns explicit reauth results for unbound and rejected credentials", async () => {

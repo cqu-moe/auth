@@ -20,6 +20,8 @@ def _clear_code_state():
     server.REUSABLE_CODE_VALUES.clear()
     server.PERMIT_EVENTS.clear()
     server.PERMIT_VALUES.clear()
+    server.LOGIN_RUNS.clear()
+    server.LOGIN_TOMBSTONES.clear()
 
 
 class BrowserRuntimeTestCase(AioHTTPTestCase):

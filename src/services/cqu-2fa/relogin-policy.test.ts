@@ -181,3 +181,13 @@ describe("nextKeepaliveDelayMs", () => {
     expect(nextKeepaliveDelayMs(99, opts)).toBe(opts.capMs);
   });
 });
+
+describe('recovery retry policy', () => {
+  it('backs off repeated transient logins instead of issuing another immediate send', async () => {
+    const { recoveryRetryDelayMs } = await import('./relogin-policy');
+    expect([1,2,3,4,20].map(recoveryRetryDelayMs)).toEqual([60_000,120_000,300_000,600_000,900_000]);
+  });
+  it('recognizes the explicit browser credential rejection contract', () => {
+    expect(classifyLoginFailure('PASSWORD_REJECTED')).toBe('credential');
+  });
+});

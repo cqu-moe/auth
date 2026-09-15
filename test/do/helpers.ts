@@ -167,7 +167,8 @@ export async function readStMintLog(
 }
 
 /**
- * spy 掉某个 DO 自身的 storage.setAlarm, 把每次排定的目标时刻(ms)记入返回数组(仍透传真排)。
+ * 包装某个 DO 的 storage transaction，把 tx.setAlarm 每次排定的目标时刻(ms)记入返回数组
+ * （仍透传真事务与真实 setAlarm）。生产现在通过事务排 alarm，测试不替换 storage 内部行为。
  * 用于 H4 确定性断言「409 路径排了即时 alarm」—— 避开「setAlarm(now) 后即时 alarm 自动触发并
  * 被消费」造成的 getAlarm() 读取竞态(读到 null/已重排)。
  */
@@ -176,13 +177,21 @@ export async function captureSetAlarm(
 ): Promise<number[]> {
   const calls: number[] = [];
   await runInDurableObject(stub, async (_inst, state) => {
-    const orig = state.storage.setAlarm.bind(state.storage);
-    vi.spyOn(state.storage, "setAlarm").mockImplementation(
-      async (t: number | Date, opts?: DurableObjectSetAlarmOptions) => {
-        calls.push(t instanceof Date ? t.getTime() : t);
-        return orig(t, opts);
-      }
-    );
+    const transaction = state.storage.transaction.bind(state.storage);
+    vi.spyOn(state.storage, "transaction").mockImplementation((async (callback: (
+      tx: DurableObjectTransaction
+    ) => unknown) => transaction(async (tx) => callback(new Proxy(tx, {
+      get(target, property, receiver) {
+        if (property !== "setAlarm") {
+          const value = Reflect.get(target, property, receiver);
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+        return async (t: number | Date, opts?: DurableObjectSetAlarmOptions) => {
+          calls.push(t instanceof Date ? t.getTime() : t);
+          return target.setAlarm(t, opts);
+        };
+      },
+    })))) as typeof state.storage.transaction);
   });
   return calls;
 }

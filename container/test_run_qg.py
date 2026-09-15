@@ -41,6 +41,8 @@ class RunQgTestCase(AioHTTPTestCase):
         # 每个用例前清空模块级 session 状态, 避免串扰。
         server.CODE_EVENTS.clear()
         server.CODE_VALUES.clear()
+        server.LOGIN_RUNS.clear()
+        server.LOGIN_TOMBSTONES.clear()
         self._orig_acquire = server.acquire_qg_proxy
         self._orig_should = server.should_use_proxy
         self._orig_run_login = server.cqu_login.run_login
@@ -49,6 +51,8 @@ class RunQgTestCase(AioHTTPTestCase):
         server.acquire_qg_proxy = self._orig_acquire
         server.should_use_proxy = self._orig_should
         server.cqu_login.run_login = self._orig_run_login
+        server.LOGIN_RUNS.clear()
+        server.LOGIN_TOMBSTONES.clear()
         super().tearDown()
 
     async def test_qg_extract_failure_returns_502(self):

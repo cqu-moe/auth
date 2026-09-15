@@ -83,6 +83,7 @@ export function classifyLoginFailure(
   error: string | null | undefined
 ): "credential" | "transient" {
   const s = error ?? "";
+  if (s === "PASSWORD_REJECTED") return "credential";
   if (s.includes("credential_rejected:")) return "credential";
   if (s.includes("transient:")) return "transient";
   const transientMarkers = [
@@ -117,6 +118,11 @@ export function classifyLoginFailure(
 /** 连续「凭据」失败计数是否已达到熔断阈值(应落 needs_reauth 终态)。 */
 export function shouldRequireReauth(credentialFailures: number): boolean {
   return credentialFailures >= MAX_CREDENTIAL_FAILS;
+}
+
+/** Persist the next retry once per failed attempt; polling never resets this cooldown. */
+export function recoveryRetryDelayMs(failures: number): number {
+  return [60_000, 120_000, 300_000, 600_000][Math.max(0, failures - 1)] ?? 900_000;
 }
 
 /**

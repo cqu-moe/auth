@@ -102,7 +102,40 @@ async function restartDurableObject(stub: DurableObjectStub) {
   return env.CQU_SESSION.get(id);
 }
 
-describe("CAS activation recovery", () => {
+async function recoverInterruptedLogins(stub: DurableObjectStub): Promise<void> {
+  await runInDurableObject(stub, async (instance) => {
+    await (
+      instance as unknown as { recoverInterruptedLogins: () => Promise<void> }
+    ).recoverInterruptedLogins();
+  });
+}
+
+async function finishLoginOperation(
+  stub: DurableObjectStub,
+  token: string,
+  kind: "cas" | "atrust" | "quicklogin",
+  completed = true
+): Promise<void> {
+  await runInDurableObject(stub, async (instance) => {
+    await (
+      instance as unknown as {
+        finishLoginOperation: (
+          token: string,
+          lockKey: string,
+          kind: "cas" | "atrust" | "quicklogin",
+          completed: boolean
+        ) => Promise<void>;
+      }
+    ).finishLoginOperation(
+      token,
+      kind === "cas" ? "loginInFlight" : `${kind}LoginInFlight`,
+      kind,
+      completed
+    );
+  });
+}
+
+describe("login activation recovery", () => {
   it("promotes a freshly persisted first-login state when only the final status write was interrupted", async () => {
     const stub = freshStub("cas-interrupted-success");
     const loginAt = Date.now() - 60_000;
@@ -144,15 +177,38 @@ describe("CAS activation recovery", () => {
     });
 
     const restarted = await restartDurableObject(stub);
+    const cancellations: string[] = [];
+    spyBrowserFetch({
+      "/login-cancel": async (request) => {
+        cancellations.push((await request.json<{ session: string }>()).session);
+        return Response.json({ ok: true, stopped: true, mayHaveRequestedCode: false });
+      },
+    });
     const response = await restarted.fetch("http://do/status");
 
     expect(response.status).toBe(200);
     expect(await readStatus(restarted)).toBe("active");
     expect((await readState(restarted))?.storageState).toEqual(validStorageState());
+    expect(cancellations).toEqual([]);
+    expect(await readStorage(restarted, "loginInFlight")).toBeDefined();
+    expect(await readStorage(restarted, "browserRoute:interrupted-success")).toBeDefined();
+
+    await recoverInterruptedLogins(restarted);
+
+    expect(cancellations).toEqual(["interrupted-success"]);
     expect(await readStorage(restarted, "loginInFlight")).toBeUndefined();
-    expect(await readStorage(restarted, "codeLease")).toBeUndefined();
-    expect(await readStorage(restarted, "codePermitProven")).toBeUndefined();
-    expect(await readStorage(restarted, "browserRoute:interrupted-success")).toBeUndefined();
+    expect(await readStorage(restarted, "codeLease")).toMatchObject({
+      ownerToken: "interrupted-success",
+      ownerCodeReceivedAt: loginAt - 10_000,
+      recoveryFence: true,
+    });
+    expect(await readStorage(restarted, "interruptedLogins")).toEqual([
+      expect.objectContaining({
+        token: "interrupted-success",
+        stopped: true,
+        retryAt: loginAt - 10_000 + 10 * 60_000,
+      }),
+    ]);
     expect(await readAlarm(restarted)).not.toBeNull();
   });
 
@@ -191,32 +247,52 @@ describe("CAS activation recovery", () => {
     expect(await readStatus(restarted)).toBe("unbound");
   });
 
-  it("releases a CAS login lock orphaned by a Durable Object restart", async () => {
-    const stub = freshStub("cas-orphan-on-restart");
+  it.each(["cas", "quicklogin"] as const)(
+    "captures an interrupted %s login without browser I/O and releases it only after stopped proof",
+    async (kind) => {
+    const stub = freshStub(`${kind}-orphan-on-restart`);
     const now = Date.now();
+    const lockKey = kind === "cas" ? "loginInFlight" : "quickloginLogin:device-a";
+    const token = `${kind}-orphan`;
     await seedLease(stub, {
-      status: "binding",
+      status: kind === "cas" ? "binding" : "active",
       extra: {
-        loginInFlight: { token: "cas-orphan", startedAt: now },
+        [lockKey]: { token, startedAt: now },
         codeLease: {
-          ownerToken: "cas-orphan",
-          ownerKind: "cas",
+          ownerToken: token,
+          ownerKind: kind,
           acquiredAt: now,
           queue: [],
         },
-        codePermitPending: "cas-orphan",
+        codePermitPending: token,
       },
     });
 
     const restarted = await restartDurableObject(stub);
+    const cancellations: string[] = [];
+    const browserFetch = spyBrowserFetch({
+      "/login-cancel": async (request) => {
+        cancellations.push((await request.json<{ session: string }>()).session);
+        return Response.json({ ok: true, stopped: true, mayHaveRequestedCode: false });
+      },
+    });
     expect((await restarted.fetch("http://do/status")).status).toBe(200);
+    expect(browserFetch).not.toHaveBeenCalled();
+    expect(await readStorage(restarted, lockKey)).toMatchObject({ token });
+    expect(await readStorage(restarted, "interruptedLogins")).toEqual([
+      expect.objectContaining({ token, lockKey, kind }),
+    ]);
 
-    expect(await readStorage(restarted, "loginInFlight")).toBeUndefined();
-    expect(await readStorage(restarted, "browserRoute:cas-orphan")).toBeUndefined();
+    await recoverInterruptedLogins(restarted);
+
+    expect(cancellations).toEqual([token]);
+    expect(await readStorage(restarted, lockKey)).toBeUndefined();
+    expect(await readStorage(restarted, `browserRoute:${token}`)).toBeUndefined();
     expect(await readStorage(restarted, "codeLease")).toBeUndefined();
     expect(await readStorage(restarted, "codePermitPending")).toBeUndefined();
     expect(await readStorage(restarted, "codePermitProven")).toBeUndefined();
-    expect(await readStatus(restarted)).toBe("expired");
+    expect(await readStorage(restarted, "interruptedLogins")).toBeUndefined();
+    expect(await readStatus(restarted)).toBe(kind === "cas" ? "expired" : "active");
   });
 
   it("restores an interrupted first binding without a prior session to unbound", async () => {
@@ -237,12 +313,16 @@ describe("CAS activation recovery", () => {
     });
 
     const restarted = await restartDurableObject(stub);
-    expect((await restarted.fetch("http://do/status")).status).toBe(200);
+    spyBrowserFetch({
+      "/login-cancel": () =>
+        Response.json({ ok: true, stopped: true, mayHaveRequestedCode: false }),
+    });
+    await recoverInterruptedLogins(restarted);
     expect(await readStorage(restarted, "loginInFlight")).toBeUndefined();
     expect(await readStatus(restarted)).toBe("unbound");
   });
 
-  it("keeps a legacy observed-code proof fenced when its timestamp write was interrupted", async () => {
+  it("converts a legacy observed-code proof into a timestamped recovery fence", async () => {
     const stub = freshStub("cas-orphan-partial-code-proof");
     const now = Date.now();
     await seedLease(stub, {
@@ -260,15 +340,31 @@ describe("CAS activation recovery", () => {
     });
 
     const restarted = await restartDurableObject(stub);
-    expect((await restarted.fetch("http://do/status")).status).toBe(200);
-    expect(await readStorage(restarted, "loginInFlight")).toMatchObject({
-      token: "cas-orphan",
+    spyBrowserFetch({
+      "/login-cancel": () =>
+        Response.json({ ok: true, stopped: true, mayHaveRequestedCode: true }),
     });
-    expect(await readAlarm(restarted)).toBeGreaterThanOrEqual(now + 10 * 60_000);
+    await recoverInterruptedLogins(restarted);
+    const lease = await readStorage<{ ownerCodeReceivedAt: number; recoveryFence: boolean }>(
+      restarted,
+      "codeLease"
+    );
+    expect(await readStorage(restarted, "loginInFlight")).toBeUndefined();
+    expect(lease).toMatchObject({ recoveryFence: true });
+    expect(lease?.ownerCodeReceivedAt).toBeGreaterThanOrEqual(now);
+    expect(await readStorage(restarted, "interruptedLogins")).toEqual([
+      expect.objectContaining({
+        token: "cas-orphan",
+        stopped: true,
+        retryAt: (lease?.ownerCodeReceivedAt ?? 0) + 10 * 60_000,
+      }),
+    ]);
   });
 
-  it("keeps an orphaned CAS owner fenced only while its observed code is valid", async () => {
+  it("keeps an observed OTP fenced to its original expiry and releases it afterward", async () => {
+    vi.useFakeTimers();
     const now = Date.now();
+    vi.setSystemTime(now);
     const stub = freshStub("cas-orphan-with-code");
     await seedLease(stub, {
       status: "relogging",
@@ -286,152 +382,74 @@ describe("CAS activation recovery", () => {
     });
 
     const restarted = await restartDurableObject(stub);
-    expect((await restarted.fetch("http://do/status")).status).toBe(200);
-    expect(await readStorage(restarted, "loginInFlight")).toMatchObject({
-      token: "cas-orphan",
-    });
-
-    await runInDurableObject(restarted, async (_instance, state) => {
-      const lease = await state.storage.get<Record<string, unknown>>("codeLease");
-      await state.storage.put("codeLease", {
-        ...lease,
-        ownerCodeReceivedAt: Date.now() - 10 * 60_000 - 1,
-      });
-      await state.storage.deleteAlarm();
-    });
-    expect((await restarted.fetch("http://do/status")).status).toBe(200);
-    expect(await readStorage(restarted, "loginInFlight")).toBeUndefined();
-    expect(await readStorage(restarted, "codeLease")).toBeUndefined();
-    expect(await readStatus(restarted)).toBe("expired");
-  });
-
-  it("removes only a queued CAS orphan while preserving the QuickLogin owner", async () => {
-    const stub = freshStub("cas-orphan-queued-behind-quicklogin");
-    const now = Date.now();
-    await seedLease(stub, {
-      status: "binding",
-      extra: {
-        loginInFlight: { token: "cas-orphan", startedAt: now },
-        codeLease: {
-          ownerToken: "quicklogin-live",
-          ownerKind: "quicklogin",
-          acquiredAt: now,
-          queue: [{ token: "cas-orphan", kind: "cas", queuedAt: now }],
-        },
-        codePermitPending: "quicklogin-live",
-        codePermitProven: "quicklogin-live",
-      },
-    });
-
-    const restarted = await restartDurableObject(stub);
-    expect((await restarted.fetch("http://do/status")).status).toBe(200);
-
-    expect(await readStorage(restarted, "loginInFlight")).toBeUndefined();
-    expect(await readStorage(restarted, "browserRoute:cas-orphan")).toBeUndefined();
-    expect(await readStorage(restarted, "codeLease")).toMatchObject({
-      ownerToken: "quicklogin-live",
-      ownerKind: "quicklogin",
-      queue: [],
-    });
-    expect(await readStorage(restarted, "codePermitPending")).toBeUndefined();
-    expect(await readStorage(restarted, "codePermitProven")).toBeUndefined();
-    expect(await readStorage(restarted, "browserRoute:quicklogin-live")).toBeDefined();
-    expect(await readStatus(restarted)).toBe("expired");
-  });
-
-  it("promotes a queued QuickLogin owner and replays its permit", async () => {
-    const stub = freshStub("cas-orphan-promote-quicklogin");
-    const now = Date.now();
-    await seedLease(stub, {
-      status: "relogging",
-      extra: {
-        loginInFlight: { token: "cas-orphan", startedAt: now },
-        codeLease: {
-          ownerToken: "cas-orphan",
-          ownerKind: "cas",
-          acquiredAt: now,
-          queue: [{ token: "quicklogin-next", kind: "quicklogin", queuedAt: now }],
-        },
-        codePermitPending: "cas-orphan",
-      },
-    });
-    const restarted = await restartDurableObject(stub);
-    const permits: string[] = [];
     spyBrowserFetch({
-      "/code-permit": async (request) => {
-        permits.push((await request.json<{ session: string }>()).session);
-        return Response.json({ ok: true });
-      },
+      "/login-cancel": () =>
+        Response.json({ ok: true, stopped: true, mayHaveRequestedCode: true }),
+    });
+    await recoverInterruptedLogins(restarted);
+    expect(await readStorage(restarted, "loginInFlight")).toBeUndefined();
+    expect(await readStorage(restarted, "codeLease")).toMatchObject({
+      ownerToken: "cas-orphan",
+      ownerCodeReceivedAt: now,
+      recoveryFence: true,
     });
 
-    expect((await restarted.fetch("http://do/status")).status).toBe(200);
-    expect(await readStorage(restarted, "codeLease")).toMatchObject({
-      ownerToken: "quicklogin-next",
-      ownerKind: "quicklogin",
-      queue: [],
-    });
-    expect(permits).toEqual(["quicklogin-next"]);
+    vi.setSystemTime(now + 10 * 60_000 + 1);
+    await recoverInterruptedLogins(restarted);
+    expect(await readStorage(restarted, "codeLease")).toBeUndefined();
+    expect(await readStorage(restarted, "interruptedLogins")).toBeUndefined();
+    expect(await readStatus(restarted)).toBe("expired");
   });
 
-  it("replays the final promoted permit when an unrelated expired owner preceded the CAS orphan", async () => {
-    const stub = freshStub("cas-orphan-after-expired-quicklogin");
+  it("stops every activation-era lease owner and queued task without granting a lost permit", async () => {
+    const stub = freshStub("all-lost-lease-participants");
     const now = Date.now();
     await seedLease(stub, {
       status: "relogging",
       extra: {
         loginInFlight: { token: "cas-orphan", startedAt: now },
+        "quickloginLogin:device-a": {
+          token: "quicklogin-owner",
+          startedAt: now,
+          deviceId: "device-a",
+        },
         codeLease: {
-          ownerToken: "quicklogin-expired",
+          ownerToken: "quicklogin-owner",
           ownerKind: "quicklogin",
-          acquiredAt: 0,
+          acquiredAt: now,
           queue: [
             { token: "cas-orphan", kind: "cas", queuedAt: now },
-            { token: "quicklogin-next", kind: "quicklogin", queuedAt: now },
+            { token: "quicklogin-queued", kind: "quicklogin", queuedAt: now },
           ],
         },
-        codePermitPending: "quicklogin-expired",
+        codePermitPending: "quicklogin-owner",
       },
     });
+
     const restarted = await restartDurableObject(stub);
+    const cancellations: string[] = [];
     const permits: string[] = [];
     spyBrowserFetch({
+      "/login-cancel": async (request) => {
+        cancellations.push((await request.json<{ session: string }>()).session);
+        return Response.json({ ok: true, stopped: true, mayHaveRequestedCode: false });
+      },
       "/code-permit": async (request) => {
         permits.push((await request.json<{ session: string }>()).session);
         return Response.json({ ok: true });
       },
     });
+    await recoverInterruptedLogins(restarted);
 
-    expect((await restarted.fetch("http://do/status")).status).toBe(200);
-    expect(await readStorage(restarted, "codeLease")).toMatchObject({
-      ownerToken: "quicklogin-next",
-      ownerKind: "quicklogin",
-      queue: [],
-    });
-    expect(permits).toEqual(["quicklogin-next"]);
-  });
-
-  it("retries activation lock capture after a transient storage read failure", async () => {
-    const stub = freshStub("cas-orphan-capture-retry");
-    const now = Date.now();
-    await seedLease(stub, {
-      status: "binding",
-      extra: {
-        loginInFlight: { token: "cas-orphan", startedAt: now },
-      },
-    });
-
-    await runInDurableObject(stub, async (instance) => {
-      const target = instance as unknown as {
-        activationCasLockCaptureComplete: boolean;
-        orphanedCasLoginToken: string | null;
-        recoverOrphanedCasLogin: () => Promise<boolean>;
-      };
-      target.activationCasLockCaptureComplete = false;
-      target.orphanedCasLoginToken = null;
-      expect(await target.recoverOrphanedCasLogin()).toBe(true);
-    });
-
-    expect(await readStorage(stub, "loginInFlight")).toBeUndefined();
+    expect(new Set(cancellations)).toEqual(
+      new Set(["quicklogin-owner", "cas-orphan", "quicklogin-queued"])
+    );
+    expect(cancellations).toHaveLength(3);
+    expect(permits).toEqual([]);
+    expect(await readStorage(restarted, "loginInFlight")).toBeUndefined();
+    expect(await readStorage(restarted, "quickloginLogin:device-a")).toBeUndefined();
+    expect(await readStorage(restarted, "codeLease")).toBeUndefined();
+    expect(await readStorage(restarted, "interruptedLogins")).toBeUndefined();
   });
 });
 
@@ -604,10 +622,8 @@ describe("retired aTrust state cleanup", () => {
     await runInDurableObject(stub, async (instance) => {
       const target = instance as unknown as {
         retiredAtrustCleanupComplete: boolean;
-        activationPermitRecoveryComplete: boolean;
       };
       target.retiredAtrustCleanupComplete = false;
-      target.activationPermitRecoveryComplete = false;
     });
     const permits: string[] = [];
     spyBrowserFetch({
@@ -774,11 +790,7 @@ describe("verification-code lease orchestration", () => {
       },
     });
 
-    await runInDurableObject(stub, async (instance) => {
-      await (instance as unknown as {
-        releaseVerificationCodeLease: (token: string) => Promise<void>;
-      }).releaseVerificationCodeLease("cas-1");
-    });
+    await finishLoginOperation(stub, "cas-1", "cas");
 
     expect(permits).toEqual([{ session: "atrust-1" }]);
     expect(await readStorage(stub, "codeLease")).toMatchObject({
@@ -815,11 +827,7 @@ describe("verification-code lease orchestration", () => {
       },
     });
 
-    await runInDurableObject(stub, async (instance) => {
-      await (instance as unknown as {
-        releaseVerificationCodeLease: (token: string) => Promise<void>;
-      }).releaseVerificationCodeLease("cas-1");
-    });
+    await finishLoginOperation(stub, "cas-1", "cas");
 
     expect(attempts).toBe(3);
     expect(await readStorage(stub, "codeLease")).toMatchObject({
@@ -848,13 +856,7 @@ describe("verification-code lease orchestration", () => {
         Response.json({ ok: false }, { status: 502 }),
     });
 
-    await runInDurableObject(stub, async (instance) => {
-      await expect(
-        (instance as unknown as {
-          releaseVerificationCodeLease: (token: string) => Promise<void>;
-        }).releaseVerificationCodeLease("cas-1")
-      ).rejects.toThrow("code-permit failed");
-    });
+    await expect(finishLoginOperation(stub, "cas-1", "cas")).resolves.toBeUndefined();
 
     expect(await readStorage(stub, "codeLease")).toMatchObject({
       ownerToken: "atrust-1",
@@ -889,13 +891,7 @@ describe("verification-code lease orchestration", () => {
       },
     });
 
-    await runInDurableObject(stub, async (instance) => {
-      await expect(
-        (instance as unknown as {
-          releaseVerificationCodeLease: (token: string) => Promise<void>;
-        }).releaseVerificationCodeLease("cas-1")
-      ).rejects.toThrow("code-permit failed");
-    });
+    await expect(finishLoginOperation(stub, "cas-1", "cas")).resolves.toBeUndefined();
 
     expect(accepted).toEqual(["atrust-1", "atrust-1", "atrust-1"]);
     expect(await readStorage(stub, "codeLease")).toMatchObject({
@@ -922,19 +918,13 @@ describe("verification-code lease orchestration", () => {
       },
     });
     const permit = spyBrowserFetch({
+      "/login-cancel": async () => Response.json({ ok: false }, { status: 503 }),
       "/code-permit": async () => Response.json({ ok: true }),
     });
 
-    await runInDurableObject(stub, async (instance) => {
-      await (instance as unknown as {
-        releaseVerificationCodeLease: (
-          token: string,
-          ownerFinished: boolean
-        ) => Promise<void>;
-      }).releaseVerificationCodeLease("atrust-1", false);
-    });
+    await finishLoginOperation(stub, "atrust-1", "atrust", false);
 
-    expect(permit).not.toHaveBeenCalled();
+    expect(permit).toHaveBeenCalledTimes(1);
     expect(await readStorage(stub, "codeLease")).toMatchObject({
       ownerToken: "atrust-1",
       queue: [{ token: "cas-2", kind: "cas" }],
@@ -1016,7 +1006,7 @@ describe("verification-code lease orchestration", () => {
     expect(await readStorage(stub, "codePermitPending")).toBeUndefined();
   });
 
-  it("same-owner release promotes FIFO after its permit replay is acknowledged", async () => {
+  it("completed owner release promotes FIFO without replaying the finished owner's permit", async () => {
     const stub = freshStub("code-lease-pending-release-replay");
     await seedLease(stub, {
       status: "active",
@@ -1038,13 +1028,9 @@ describe("verification-code lease orchestration", () => {
       },
     });
 
-    await runInDurableObject(stub, async (instance) => {
-      await (instance as unknown as {
-        releaseVerificationCodeLease: (token: string) => Promise<void>;
-      }).releaseVerificationCodeLease("atrust-1");
-    });
+    await finishLoginOperation(stub, "atrust-1", "atrust");
 
-    expect(permits).toEqual(["atrust-1", "cas-2"]);
+    expect(permits).toEqual(["cas-2"]);
     expect(await readStorage(stub, "codeLease")).toMatchObject({
       ownerToken: "cas-2",
       queue: [],
@@ -1197,11 +1183,7 @@ describe("verification-code lease orchestration", () => {
       },
     });
 
-    await runInDurableObject(stub, async (instance) => {
-      await (instance as unknown as {
-        releaseVerificationCodeLease: (token: string) => Promise<void>;
-      }).releaseVerificationCodeLease("cas-1");
-    });
+    await finishLoginOperation(stub, "cas-1", "cas");
 
     expect(calls).toEqual([
       { path: "/code-permit", body: { session: "atrust-1" } },
@@ -1281,6 +1263,7 @@ describe("verification-code lease orchestration", () => {
             backend: "cloudflare",
             userId: "u1",
             containerKey: "quicklogin:u1:device-a",
+            bootId: "quicklogin-boot",
           },
           createdAt: Date.now(),
           expiresAt: Date.now() + 60_000,
@@ -1301,9 +1284,20 @@ describe("verification-code lease orchestration", () => {
     expect(response.status).toBe(200);
     expect(await readStatus(stub)).toBe("revoked");
     expect(await readStorage(stub, "quickloginLogin:device-a")).toBeUndefined();
-    expect(await readStorage(stub, "browserRoute:quicklogin-token")).toBeUndefined();
-    expect(await readAlarm(stub)).toBeNull();
+    expect(await readStorage(stub, "interruptedLogins")).toEqual([
+      expect.objectContaining({ token: "quicklogin-token", kind: "quicklogin" }),
+    ]);
+    expect(await readStorage(stub, "browserRoute:quicklogin-token")).toBeDefined();
     expect(notifyFetch).toHaveBeenCalledTimes(1);
+
+    spyBrowserFetch({
+      "/login-cancel": () =>
+        Response.json({ ok: true, stopped: true, mayHaveRequestedCode: false }),
+    });
+    await recoverInterruptedLogins(stub);
+
+    expect(await readStorage(stub, "interruptedLogins")).toBeUndefined();
+    expect(await readStorage(stub, "browserRoute:quicklogin-token")).toBeUndefined();
   });
 
   it("bounds QuickLogin keepalive mint idempotency receipts", async () => {
@@ -1439,9 +1433,35 @@ describe("persistent browser route records", () => {
 
     const runBodies: Array<{ session: string }> = [];
     const permitBodies: Array<{ session: string }> = [];
+    let durableState: DurableObjectState | undefined;
+    await runInDurableObject(stub, async (_instance, state) => {
+      durableState = state;
+    });
+    let routeDuringRun: {
+      token: string;
+      kind: string;
+      route: { version: number; backend: string; userId: string; bootId?: string };
+    } | undefined;
+    let lockDuringRun: { token: string; browserRouteVersion?: number } | undefined;
     spyCfLogin({
       "/run": async (request) => {
-        runBodies.push(await request.json());
+        const body = await request.json<{ session: string }>();
+        runBodies.push(body);
+        [lockDuringRun, routeDuringRun] = await Promise.all([
+          durableState!.storage.get<{ token: string; browserRouteVersion?: number }>(
+            "loginInFlight"
+          ),
+          durableState!.storage.get<{
+            token: string;
+            kind: string;
+            route: {
+              version: number;
+              backend: string;
+              userId: string;
+              bootId?: string;
+            };
+          }>(`browserRoute:${body.session}`),
+        ]);
         return Response.json({
           ok: false,
           error: "code wait timed out",
@@ -1468,7 +1488,20 @@ describe("persistent browser route records", () => {
     const [runBody] = runBodies;
     const [permitBody] = permitBodies;
     expect(permitBody.session).toBe(runBody.session);
-    const [lock, route] = await runInDurableObject(stub, async (_inst, state) => {
+    expect(lockDuringRun).toMatchObject({
+      token: runBody.session,
+      browserRouteVersion: 1,
+    });
+    expect(routeDuringRun?.token).toBe(runBody.session);
+    expect(routeDuringRun?.kind).toBe("cas");
+    expect(routeDuringRun?.route).toMatchObject({
+      version: 1,
+      backend: "cloudflare",
+      bootId: "boot-1",
+      userId: "u1",
+    });
+
+    const [lockAfterRun, routeAfterRun] = await runInDurableObject(stub, async (_inst, state) => {
       const lock = await state.storage.get<{
         token: string;
         browserRouteVersion?: number;
@@ -1480,16 +1513,8 @@ describe("persistent browser route records", () => {
       }>(`browserRoute:${runBody.session}`);
       return [lock, route];
     });
-    // 登录尝试已结束:finally 删除自己的锁,但 route 记录保留(迟到邮件/outbox
-    // 恢复仍按 token 寻址,由 expiresAt 与引用清理兜底)。
-    expect(lock).toBeUndefined();
-    // route 原子成对:拿到锁的 token 一定曾与锁一起写入(否则不发 permit)。
-    expect(route?.token).toBe(runBody.session);
-    expect(route?.kind).toBe("cas");
-    expect(route?.route.version).toBe(1);
-    expect(route?.route.backend).toBe("cloudflare");
-    expect((route?.route as { bootId?: string }).bootId).toBe("boot-1");
-    expect(route?.route.userId).toBe("u1");
+    expect(lockAfterRun).toBeUndefined();
+    expect(routeAfterRun).toBeUndefined();
   });
 
   it("repair login reuses only the same account's prior browser state", async () => {
@@ -2188,6 +2213,14 @@ function spyCfLogin(
           "browser-route-v1",
           "operation-deadline-v1",
         ],
+      });
+  }
+  if (!withHealth["/login-cancel"]) {
+    withHealth["/login-cancel"] = async () =>
+      Response.json({
+        ok: true,
+        stopped: true,
+        mayHaveRequestedCode: false,
       });
   }
   return spyBrowserFetch(withHealth);

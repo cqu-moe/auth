@@ -3,6 +3,7 @@ export interface Env {
   KV: KVNamespace;
   RESEND_API_KEY: string;
   CQU_SESSION: DurableObjectNamespace;
+  CQU_SESSION_RECOVERY: Workflow<CquSessionRecoveryParams>;
   CQU_LOGIN: DurableObjectNamespace;
   CQU_QUICKLOGIN_ACCOUNT: DurableObjectNamespace;
   CQU_QUICKLOGIN_DEVICE: DurableObjectNamespace;
@@ -14,6 +15,12 @@ export interface Env {
   QUICKLOGIN_EXTENSION_ORIGIN: string;
   QUICKLOGIN_DEVICE_MODE?: "off" | "on";
   BIND_EMAIL_DOMAIN: string;
+}
+
+export interface CquSessionRecoveryParams {
+  userId: string;
+  recoveryId: string;
+  deadlineAt: number;
 }
 
 export type Principal =

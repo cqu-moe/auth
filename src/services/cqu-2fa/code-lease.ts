@@ -26,6 +26,8 @@ export interface CodeLease {
   acquiredAt: number;
   /** 最近一次确实收到该 owner 邮件验证码的时间；孤儿恢复只保护到码有效期。 */
   ownerCodeReceivedAt?: number;
+  /** An interrupted owner stays isolated until recovery proves it safe to release. */
+  recoveryFence?: boolean;
   queue: CodeLeaseEntry[];
   /** 新格式 owner:FIFO 提升时从 entry 复制,锁删除后仍能区分新旧记录。 */
   ownerBrowserRouteVersion?: 1;
@@ -54,7 +56,7 @@ export function pruneCodeLease(
   const validQueue = lease.queue.filter(
     (entry) => now - entry.queuedAt <= CODE_LEASE_QUEUE_TTL_MS
   );
-  if (now - lease.acquiredAt <= CODE_LEASE_OWNER_TTL_MS) {
+  if (lease.recoveryFence || now - lease.acquiredAt <= CODE_LEASE_OWNER_TTL_MS) {
     return { ...lease, queue: validQueue };
   }
   return promote(validQueue, now);

@@ -41,6 +41,7 @@ NODE_CAPABILITIES = [
     "browser-route-v1",
     "operation-deadline-v1",
     "raw-cdp-login-v1",
+    "login-cancel-v1",
 ]
 
 # 进程级启动标识:实例停止/崩溃/更新后 Event 字典即清空,DO 必须能识别"同一个容器 ID
@@ -155,6 +156,44 @@ REUSABLE_CODE_VALUES: dict[str, tuple[str, float]] = {}
 PERMIT_EVENTS: dict[str, asyncio.Event] = {}
 # session -> permit 到达时刻；允许 permit 比浏览器注册 Event 更早到。
 PERMIT_VALUES: dict[str, float] = {}
+
+# Login tokens are single-use for one Python boot. A receipt outlives the legacy
+# 40-minute coordination window so delayed control messages cannot resurrect it.
+LOGIN_TOKEN_TTL = 40 * 60
+LOGIN_CANCEL_WAIT = 5.0
+LOGIN_RUNS: dict[str, dict] = {}
+LOGIN_TOMBSTONES: dict[str, dict] = {}
+
+
+def _sweep_login_tombstones() -> None:
+    cutoff = time.monotonic() - LOGIN_TOKEN_TTL
+    for session in [
+        s
+        for s, receipt in LOGIN_TOMBSTONES.items()
+        if receipt["retired_at"] < cutoff
+    ]:
+        LOGIN_TOMBSTONES.pop(session, None)
+
+
+def _retire_login_run(session: str, task: asyncio.Task) -> None:
+    control = LOGIN_RUNS.get(session)
+    if control is not None and control["task"] is task:
+        LOGIN_RUNS.pop(session, None)
+        previous = LOGIN_TOMBSTONES.get(session)
+        LOGIN_TOMBSTONES[session] = {
+            "retired_at": time.monotonic(),
+            "may_have_requested_code": bool(control["may_have_requested_code"])
+            or bool(previous and previous["may_have_requested_code"]),
+        }
+
+
+def _login_token_rejection(session: str) -> web.Response | None:
+    _sweep_login_tombstones()
+    if session in LOGIN_TOMBSTONES:
+        return web.json_response({"ok": False, "error": "LOGIN_SESSION_RETIRED"}, status=409)
+    if session in LOGIN_RUNS:
+        return web.json_response({"ok": False, "error": "LOGIN_SESSION_ACTIVE"}, status=409)
+    return None
 
 
 class CodeWaitTimeout(Exception):
@@ -389,6 +428,19 @@ async def run_handler(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": "service not allowed"}, status=400)
     service = canonical_service
 
+    token_rejection = _login_token_rejection(session)
+    if token_rejection is not None:
+        return token_rejection
+    run_task = asyncio.current_task()
+    if run_task is None:
+        return web.json_response({"ok": False, "error": "LOGIN_TASK_UNAVAILABLE"}, status=503)
+    LOGIN_RUNS[session] = {
+        "task": run_task,
+        "cancel_requested": False,
+        "may_have_requested_code": False,
+    }
+    run_task.add_done_callback(lambda task, token=session: _retire_login_run(token, task))
+
     # 灰度: QG_PROXY_LOGIN/QG_ENABLED 决定 /run 走青果(登录包)还是节点直连。走青果时拿不到 IP
     # → 502 硬依赖回退(绝不悄悄 fallback 直连); 直连时 proxy=None, 由节点境内 IP 连 CQU。
     # 放在 Event 注册之前: 早退路径不注册 Event/Value, 无需 finally 清理。
@@ -477,6 +529,11 @@ async def run_handler(request: web.Request) -> web.Response:
             raise PermitWaitTimeout(
                 f"code permit timed out (>{permit_wait_timeout}s)"
             ) from e
+        control = LOGIN_RUNS.get(session)
+        if control is not None and control["task"] is run_task:
+            # Once the browser receives this return it may immediately click send.
+            # Record the risk before yielding control back into the login driver.
+            control["may_have_requested_code"] = True
         PERMIT_VALUES.pop(session, None)
         permit_claimed.set()
 
@@ -556,6 +613,9 @@ async def code_handler(request: web.Request) -> web.Response:
         return boot_guard
 
     session = body.get("session") or "default"
+    _sweep_login_tombstones()
+    if session in LOGIN_TOMBSTONES:
+        return web.json_response({"ok": False, "error": "LOGIN_SESSION_RETIRED"}, status=409)
     code = body.get("code")
     reusable = body.get("reusable") is True
     if not code:
@@ -600,6 +660,10 @@ async def code_permit_handler(request: web.Request) -> web.Response:
             {"ok": False, "error": "missing session"}, status=400
         )
 
+    _sweep_login_tombstones()
+    if str(session) in LOGIN_TOMBSTONES:
+        return web.json_response({"ok": False, "error": "LOGIN_SESSION_RETIRED"}, status=409)
+
     _sweep_stale_permits()
     PERMIT_VALUES[str(session)] = time.time()
     event = PERMIT_EVENTS.get(str(session))
@@ -609,6 +673,83 @@ async def code_permit_handler(request: web.Request) -> web.Response:
         return web.json_response({"ok": True})
     log.info("code permit deposited (no in-flight login yet)")
     return web.json_response({"ok": True, "waiting": False})
+
+
+async def login_cancel_handler(request: web.Request) -> web.Response:
+    """Retire one login token and wait a bounded time for its cleanup to finish."""
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
+
+    boot_guard = boot_guard_response(request)
+    if boot_guard is not None:
+        return boot_guard
+    session = body.get("session")
+    if not isinstance(session, str) or not session:
+        return web.json_response({"ok": False, "error": "missing session"}, status=400)
+
+    _sweep_login_tombstones()
+    control = LOGIN_RUNS.get(session)
+    if control is None:
+        receipt = LOGIN_TOMBSTONES.get(session)
+        may_have_requested_code = bool(
+            receipt and receipt["may_have_requested_code"]
+        )
+        if receipt is None:
+            LOGIN_TOMBSTONES[session] = {
+                "retired_at": time.monotonic(),
+                "may_have_requested_code": False,
+            }
+        return web.json_response({
+            "ok": True,
+            "stopped": True,
+            "mayHaveRequestedCode": may_have_requested_code,
+        })
+
+    task = control["task"]
+    if not control["cancel_requested"]:
+        control["cancel_requested"] = True
+        LOGIN_TOMBSTONES[session] = {
+            "retired_at": time.monotonic(),
+            "may_have_requested_code": bool(control["may_have_requested_code"]),
+        }
+        task.cancel()
+    try:
+        await asyncio.wait_for(asyncio.shield(task), timeout=LOGIN_CANCEL_WAIT)
+    except asyncio.CancelledError:
+        pass
+    except asyncio.TimeoutError:
+        return web.json_response(
+            {
+                "ok": False,
+                "stopped": False,
+                "error": "LOGIN_CLEANUP_PENDING",
+                "mayHaveRequestedCode": bool(control["may_have_requested_code"]),
+            },
+            status=503,
+        )
+    except Exception:
+        # The cancelled handler may finish through an existing error response. Its
+        # result is irrelevant; task completion proves all handler cleanup ran.
+        pass
+    if not task.done():
+        return web.json_response(
+            {
+                "ok": False,
+                "stopped": False,
+                "error": "LOGIN_CLEANUP_PENDING",
+                "mayHaveRequestedCode": bool(control["may_have_requested_code"]),
+            },
+            status=503,
+        )
+    _retire_login_run(session, task)
+    receipt = LOGIN_TOMBSTONES[session]
+    return web.json_response({
+        "ok": True,
+        "stopped": True,
+        "mayHaveRequestedCode": bool(receipt["may_have_requested_code"]),
+    })
 
 
 async def service_ticket_handler(request: web.Request) -> web.Response:
@@ -855,6 +996,7 @@ def build_app() -> web.Application:
         web.post("/run", run_handler),
         web.post("/code", code_handler),
         web.post("/code-permit", code_permit_handler),
+        web.post("/login-cancel", login_cancel_handler),
         web.post("/service-ticket", service_ticket_handler),
         web.post("/keepalive", keepalive_handler),
         web.post("/data-harvest", data_harvest_handler),
