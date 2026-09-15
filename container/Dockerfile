@@ -3,6 +3,10 @@
 # 注: 不在此处写 `FROM --platform=linux/amd64`(会触发 docker lint 警告), 平台靠构建时 --platform 指定。
 FROM python:3.12-slim
 
+# Release marker: forces Cloudflare Containers to roll forward from the legacy
+# Patchright image even when the raw-CDP layers already exist in the registry.
+LABEL org.opencontainers.image.version="raw-cdp-login-v1-restore-20260915"
+
 # Chromium 渲染所需最小系统库集合(实测可在 basic 1 GiB 限制下构建并渲染真实登录页)。
 # tini: 轻量 init, 作 PID 1 收割孤儿/僵尸 —— 取票/探活反复起关临时 chromium, 其孤儿进程被
 # reparent 到 PID 1; 若 PID 1 是 python(从不 waitpid), 僵尸会累积。tini 作 PID 1 转发信号并
