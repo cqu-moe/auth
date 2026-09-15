@@ -43,6 +43,114 @@
   },
   {
     "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/capabilities",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/registrations",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/overview",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/:id/reconcile",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/:id/operations",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/:id/operations/:operationId",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/:id/exports",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/:id/receipts",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/:id/resume-ticket",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/cqu/quicklogin/capabilities",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/registrations",
+    "policy": "bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/devices/:id/resume-ticket",
+    "policy": "session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/cqu/quicklogin/overview",
+    "policy": "session",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/devices/:id/reconcile",
+    "policy": "bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/devices/:id/operations",
+    "policy": "bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/cqu/quicklogin/devices/:id/operations/:operationId",
+    "policy": "bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/devices/:id/exports",
+    "policy": "bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/devices/:id/receipts",
+    "policy": "bearer",
+    "source": "custom-contract"
+  },
+  {
+    "method": "OPTIONS",
     "path": "/api/v1/cqu/quicklogin/devices",
     "policy": "public",
     "source": "custom-contract"

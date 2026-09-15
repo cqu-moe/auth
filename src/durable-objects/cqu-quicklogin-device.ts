@@ -1,3 +1,5 @@
+import { DeviceV3Store, V3Error, settleV3Operation, sessionTuple } from "../services/quicklogin/device-v3-store";
+import { sameTuple, type VersionTuple, type ReasonCode } from "../services/quicklogin/protocol-v3";
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../types";
 import { QuickloginAccountClient } from "../services/quicklogin/account-client";
@@ -85,10 +87,28 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
           kind?: "status" | "export" | "refresh";
           limit?: number;
           now?: number;
+          input?: unknown;
+          expected?: VersionTuple;
+          operationId?: string;
         };
       }>();
       await this.ensureOwner(body.ownerUserId, body.deviceId);
       let result: unknown;
+      const v3 = new DeviceV3Store(this.ctx.storage, this.env, a => this.notify(a));
+      if (body.operation.startsWith("v3_")) {
+        if (!body.payload?.authority) throw new V3Error("INVALID_REQUEST");
+        const a = body.payload.authority;
+        switch (body.operation) {
+          case "v3_read": result = await v3.read(a); break;
+          case "v3_operation": result = await v3.operation(a, body.payload.input); break;
+          case "v3_operation_read": result = await v3.getOperation(a, body.payload.operationId ?? ""); break;
+          case "v3_export": if (!body.payload.expected) throw new V3Error("INVALID_REQUEST"); result = await v3.export(a, body.payload.expected); break;
+          case "v3_receipt": result = await v3.receipt(a, body.payload.input); break;
+          case "v3_report": result = await v3.report(a, body.payload.input); break;
+          default: throw new V3Error("INVALID_REQUEST");
+        }
+        return Response.json({ result });
+      }
       switch (body.operation) {
         case "notify":
           if (!body.payload?.authority) throw new DeviceDoError("INVALID_REQUEST");
@@ -122,13 +142,13 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       }
       return Response.json({ result });
     } catch (error) {
-      const code = error instanceof DeviceDoError
+      const code = error instanceof DeviceDoError || error instanceof V3Error
         ? error.code
         : "TEMPORARY_UNAVAILABLE";
       const status = code === "RATE_LIMITED" ? 429 :
         code === "PREPARING" ? 409 :
         code === "INVALID_REQUEST" ? 422 : 403;
-      return Response.json({ error: { code, message: code } }, { status });
+      return Response.json({ error: { code, message: code, ...(error instanceof V3Error ? { retryAt: error.retryAt } : {}) } }, { status });
     }
   }
 
@@ -146,8 +166,17 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       return;
     }
     if (!this.owner) return;
-    const session = await this.ctx.storage.get<StoredDeviceSession>(SESSION_KEY);
+    let session = await this.ctx.storage.get<StoredDeviceSession>(SESSION_KEY);
     if (!session) return;
+    if (session.operationId) {
+      const a = await new QuickloginAccountClient(this.env).getDeviceAuthority(this.owner.userId, this.owner.deviceId);
+      const read = await new DeviceV3Store(this.ctx.storage, this.env, value => this.notify(value)).read(a);
+      session = read.session;
+      if (read.operation?.state === "running" && read.operation.deadlineAt !== null && read.operation.deadlineAt + BROWSER_CLEANUP_MARGIN_MS > Date.now()) {
+        await this.ctx.storage.setAlarm(read.operation.deadlineAt + BROWSER_CLEANUP_MARGIN_MS);
+        return;
+      }
+    }
     await this.recoverPendingKeepalive(session, Date.now());
     const authority = await new QuickloginAccountClient(this.env)
       .getDeviceAuthority(this.owner.userId, this.owner.deviceId);
@@ -219,11 +248,12 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     await this.ctx.storage.put(key, { bucket, count: count + 1 });
   }
 
-  private async recordTransient(session: StoredDeviceSession): Promise<void> {
+  private async recordTransient(session: StoredDeviceSession, reasonCode: ReasonCode = "SCHOOL_UNREACHABLE", retryAfterMs = 0): Promise<void> {
     const now = Date.now();
     await this.ctx.storage.transaction(async (tx) => {
       const current = await tx.get<StoredDeviceSession>(SESSION_KEY);
-      if (!current || current.generation !== session.generation ||
+      if (!current || !sameTuple(sessionTuple(current), sessionTuple(session)) ||
+          current.operationId !== session.operationId || current.leaseToken !== session.leaseToken ||
           current.state === "disabled" || current.state === "revoked" ||
           !quickloginDeviceModeEnabled(this.env)) return;
       const next = { ...current };
@@ -231,8 +261,11 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       next.transientFailures += 1;
       next.transientStartedAt ??= now;
       const delay = nextQuickloginRetryDelayMs(next.transientStartedAt, now);
-      next.nextAttemptAt = now + delay;
+      next.nextAttemptAt = now + Math.max(delay, retryAfterMs);
+      next.reasonCode = reasonCode;
+      next.deviceRevision = (next.deviceRevision ?? 0) + 1;
       await tx.put(SESSION_KEY, next);
+      await settleV3Operation(tx, next);
       await tx.setAlarm(next.nextAttemptAt);
     });
   }
@@ -324,15 +357,19 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     const pendingStorageState = body.state === undefined
       ? undefined
       : JSON.stringify(body.state);
+    let staged = false;
     await this.ctx.storage.transaction(async (tx) => {
-      await tx.put(SESSION_KEY, session);
+      const latest = await tx.get<StoredDeviceSession>(SESSION_KEY);
+      if (!latest || !sameTuple(sessionTuple(latest), sessionTuple(session)) || latest.operationId !== session.operationId || latest.leaseToken !== session.leaseToken || (latest.deviceRevision ?? 0) !== (session.deviceRevision ?? 0) || latest.state !== session.state || !quickloginDeviceModeEnabled(this.env)) return;
+      await tx.put(SESSION_KEY, { ...latest, pendingKeepaliveMint: session.pendingKeepaliveMint });
       if (pendingStorageState === undefined) {
         await tx.delete(PENDING_KEEPALIVE_STATE_KEY);
       } else {
         await tx.put(PENDING_KEEPALIVE_STATE_KEY, pendingStorageState);
       }
+      staged = true;
     });
-    await this.confirmKeepaliveMint(session, authority);
+    if (staged) await this.confirmKeepaliveMint(session, authority);
   }
 
   private async confirmKeepaliveMint(
@@ -360,7 +397,9 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     let committed = false;
     await this.ctx.storage.transaction(async (tx) => {
       const current = await tx.get<StoredDeviceSession>(SESSION_KEY);
-      if (!current || current.generation !== session.generation ||
+      if (!current || !sameTuple(sessionTuple(current), sessionTuple(session)) ||
+          current.operationId !== session.operationId || current.leaseToken !== session.leaseToken ||
+          (current.deviceRevision ?? 0) !== (session.deviceRevision ?? 0) ||
           current.pendingKeepaliveMint?.operationId !== pending.operationId ||
           current.state === "disabled" || current.state === "revoked" ||
           !quickloginDeviceModeEnabled(this.env)) return;
@@ -370,6 +409,8 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
         next.storageState = session.storageState;
         next.exportDigest = session.exportDigest;
       }
+      next.reasonCode = null;
+      next.deviceRevision = (next.deviceRevision ?? 0) + 1;
       next.lastKeepAliveAt = pending.mintedAt;
       next.state = "ready";
       next.transientFailures = 0;
@@ -390,10 +431,15 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
   ): Promise<void> {
     const pending = session.pendingKeepaliveMint;
     if (pending && pending.expiresAt > now) return;
-    if (pending) delete session.pendingKeepaliveMint;
     await this.ctx.storage.transaction(async (tx) => {
-      if (pending) await tx.put(SESSION_KEY, session);
+      const current = await tx.get<StoredDeviceSession>(SESSION_KEY);
+      if (current?.pendingKeepaliveMint && current.pendingKeepaliveMint.expiresAt > now) return;
+      if (current?.pendingKeepaliveMint) {
+        delete current.pendingKeepaliveMint;
+        await tx.put(SESSION_KEY, current);
+      }
       await tx.delete(PENDING_KEEPALIVE_STATE_KEY);
+      if (pending) delete session.pendingKeepaliveMint;
     });
   }
 
@@ -418,7 +464,8 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     let started = false;
     await this.ctx.storage.transaction(async (tx) => {
       const current = await tx.get<StoredDeviceSession>(SESSION_KEY);
-      if (!current || current.generation !== session.generation ||
+      if (!current || !sameTuple(sessionTuple(current), sessionTuple(session)) ||
+          current.operationId !== session.operationId || current.leaseToken !== session.leaseToken ||
           current.state === "disabled" || current.state === "revoked" ||
           !quickloginDeviceModeEnabled(this.env)) return;
       await tx.put(SESSION_KEY, {
@@ -428,11 +475,17 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       started = true;
     });
     if (!started) return;
+    const v3 = new DeviceV3Store(this.ctx.storage, this.env, a => this.notify(a));
+    const running = await v3.markRunning(session, authority);
+    if (!running) return;
+    session = running;
     const result = await new QuickloginLoginBrokerClient(this.env)
       .quickloginLogin({
         ownerUserId: authority.ownerUserId,
         deviceId: authority.deviceId,
         generation: authority.generation,
+        seedState: session.storageState,
+        operationId: session.operationId,
       });
     const current = await new QuickloginAccountClient(this.env)
       .getDeviceAuthority(authority.ownerUserId, authority.deviceId);
@@ -445,36 +498,51 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       await this.ctx.storage.transaction(async (tx) => {
         const currentSession = await tx.get<StoredDeviceSession>(SESSION_KEY);
         if (!currentSession || currentSession.generation !== session.generation ||
+            (session.operationId !== undefined && (currentSession.operationId !== session.operationId || currentSession.leaseToken !== session.leaseToken)) ||
             currentSession.state === "disabled" || currentSession.state === "revoked" ||
             !quickloginDeviceModeEnabled(this.env)) return;
-        await tx.put(SESSION_KEY, {
+        const next: StoredDeviceSession = {
           ...currentSession,
           state: "needs_reauth",
-          storageState: null,
-          exportDigest: null,
+          reasonCode: result.reason === "unbound" ? "BINDING_UNBOUND" : result.reason === "credentials_rejected" ? "CREDENTIALS_REJECTED" : "INTERACTION_REQUIRED",
+          deviceRevision: (currentSession.deviceRevision ?? 0) + 1,
+          storageState: result.reason === "unbound" ? null : currentSession.storageState,
+          exportDigest: result.reason === "unbound" ? null : currentSession.exportDigest,
           transientFailures: 0,
           transientStartedAt: null,
-        });
+        };
+        await tx.put(SESSION_KEY, next);
+        await settleV3Operation(tx, next);
         committed = true;
       });
-      if (committed) await this.ctx.storage.deleteAlarm();
+      if (committed) { await this.ctx.storage.deleteAlarm(); await v3.finish(await this.readSession()); }
       return;
     }
     if (result.kind !== "success") {
-      await this.recordTransient(session);
+      await this.recordTransient(session, result.kind === "temporary_unavailable" ? result.reasonCode ?? "SCHOOL_UNREACHABLE" : "OPERATION_CANCELLED", result.kind === "temporary_unavailable" ? result.retryAfterMs : 60_000);
+      await v3.finish(await this.readSession());
       return;
     }
     const cookies = extractSsoCookies(result.storageState, Date.now());
     const digest = await digestSsoCookies(cookies);
+    const binding = await new QuickloginLoginBrokerClient(this.env).getBindingSnapshot(authority.ownerUserId);
+    if (binding.state !== "bound" || binding.bindingEpoch !== result.bindingEpoch || binding.credentialRevision !== (result.credentialRevision ?? result.bindingEpoch)) {
+      await this.recordTransient(session, "BINDING_CHANGED", 60_000);
+      return;
+    }
     let committed = false;
     await this.ctx.storage.transaction(async (tx) => {
       const currentSession = await tx.get<StoredDeviceSession>(SESSION_KEY);
       if (!currentSession || currentSession.generation !== session.generation ||
+            (session.operationId !== undefined && (currentSession.operationId !== session.operationId || currentSession.leaseToken !== session.leaseToken)) ||
           currentSession.state === "disabled" || currentSession.state === "revoked" ||
           !quickloginDeviceModeEnabled(this.env)) return;
-      await tx.put(SESSION_KEY, {
+      const next: StoredDeviceSession = {
         ...currentSession,
         bindingEpoch: result.bindingEpoch,
+        credentialRevision: result.credentialRevision ?? result.bindingEpoch,
+        reasonCode: null,
+        deviceRevision: (currentSession.deviceRevision ?? 0) + 1,
         storageState: result.storageState,
         exportDigest: digest,
         sessionVersion: currentSession.sessionVersion + 1,
@@ -485,10 +553,12 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
         transientStartedAt: null,
         fastRetries: 0,
         nextAttemptAt: null,
-      });
+      };
+      await tx.put(SESSION_KEY, next);
+      await settleV3Operation(tx, next);
       committed = true;
     });
-    if (committed) await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_MS);
+    if (committed) { await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_MS); await v3.finish(await this.readSession()); }
   }
 
   private async notify(authority: DeviceAuthority): Promise<void> {
@@ -497,7 +567,8 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       (await this.ctx.storage.get<StoredDeviceSession>(SESSION_KEY)) ??
       emptySession(authority);
     if (authority.generation < current.generation) return;
-    const next = { ...current, generation: authority.generation };
+    const next = { ...current, generation: authority.generation, deviceRevision: (current.deviceRevision ?? 0) + 1 };
+    if (authority.generation !== current.generation || !authority.allowed) { delete next.operationId; delete next.leaseToken; }
     if (
       authority.generation !== current.generation ||
       !authority.allowed ||

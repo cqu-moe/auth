@@ -71,6 +71,186 @@
   },
   {
     "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/capabilities",
+    "kind": "canonical",
+    "requestValidation": "parameters-only",
+    "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/registrations",
+    "kind": "canonical",
+    "requestValidation": "parameters-only",
+    "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/overview",
+    "kind": "canonical",
+    "requestValidation": "parameters-only",
+    "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/reconcile",
+    "kind": "canonical",
+    "requestValidation": "parameters-only",
+    "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/operations",
+    "kind": "canonical",
+    "requestValidation": "parameters-only",
+    "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/operations/{operationId}",
+    "kind": "canonical",
+    "requestValidation": "parameters-only",
+    "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/exports",
+    "kind": "canonical",
+    "requestValidation": "parameters-only",
+    "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/receipts",
+    "kind": "canonical",
+    "requestValidation": "parameters-only",
+    "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/resume-ticket",
+    "kind": "canonical",
+    "requestValidation": "parameters-only",
+    "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/cqu/quicklogin/capabilities",
+    "kind": "canonical",
+    "requestValidation": "parameters-only",
+    "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/registrations",
+    "kind": "canonical",
+    "requestValidation": "json-body-and-parameters",
+    "requestReason": "The Cloudflare projection retains the JSON body and path/query parameters; pattern and uniqueItems constraints remain application-validated.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/resume-ticket",
+    "kind": "canonical",
+    "requestValidation": "parameters-only",
+    "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/cqu/quicklogin/overview",
+    "kind": "canonical",
+    "requestValidation": "parameters-only",
+    "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/reconcile",
+    "kind": "canonical",
+    "requestValidation": "json-body-and-parameters",
+    "requestReason": "The Cloudflare projection retains the JSON body and path/query parameters; pattern and uniqueItems constraints remain application-validated.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/operations",
+    "kind": "canonical",
+    "requestValidation": "json-body-and-parameters",
+    "requestReason": "The Cloudflare projection retains the JSON body and path/query parameters; pattern and uniqueItems constraints remain application-validated.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/operations/{operationId}",
+    "kind": "canonical",
+    "requestValidation": "parameters-only",
+    "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/exports",
+    "kind": "canonical",
+    "requestValidation": "json-body-and-parameters",
+    "requestReason": "The Cloudflare projection retains the JSON body and path/query parameters; pattern and uniqueItems constraints remain application-validated.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/receipts",
+    "kind": "canonical",
+    "requestValidation": "json-body-and-parameters",
+    "requestReason": "The Cloudflare projection retains the JSON body and path/query parameters; pattern and uniqueItems constraints remain application-validated.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "OPTIONS",
     "path": "/api/v1/cqu/quicklogin/devices",
     "kind": "canonical",
     "requestValidation": "parameters-only",

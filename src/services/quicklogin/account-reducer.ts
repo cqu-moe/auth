@@ -36,7 +36,7 @@ export type AccountCommand =
       deviceId: string;
       metadata: DeviceMetadata;
     }
-  | { type: "set_device_enabled"; deviceId: string; enabled: boolean }
+  | { type: "set_device_enabled"; deviceId: string; enabled: boolean; expectedGeneration?: number }
   | { type: "set_master_enabled"; enabled: boolean }
   | { type: "revoke_device"; deviceId: string }
   | { type: "notify_binding_changed" }
@@ -285,6 +285,7 @@ export function reduceAccount(
     }
     case "set_device_enabled": {
       const device = requireLiveDevice(state, command.deviceId);
+      if (command.expectedGeneration !== undefined && device.generation !== command.expectedGeneration) fail("STALE_GENERATION");
       if (device.enabled === command.enabled) break;
       if (command.enabled) {
         if (!state.masterEnabled) fail("MASTER_DISABLED");

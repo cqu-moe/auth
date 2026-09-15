@@ -1,3 +1,5 @@
+import { parseRegistrationRequest, type ClientMetadata } from "../services/quicklogin/protocol-v3";
+import { V3Error } from "../services/quicklogin/device-v3-store";
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../types";
 import {
@@ -85,7 +87,7 @@ function sameDeviceSet(left: string[], right: string[]): boolean {
   return right.every((deviceId) => expected.has(deviceId));
 }
 
-function errorStatus(code: ErrorCode): number {
+function errorStatus(code: ErrorCode | import("../services/quicklogin/protocol-v3").ReasonCode): number {
   switch (code) {
     case "FORBIDDEN":
     case "DEVICE_REVOKED":
@@ -139,6 +141,23 @@ export class CquQuickloginAccountDO extends DurableObject<Env> {
       let result: unknown;
 
       switch (operation) {
+        case "v3_resume_ticket": result = await this.resumeTicket(readString(payload.deviceId)); break;
+        case "v3_registration": result = await this.registerV3(readString(payload.grantId), payload.input); break;
+        case "v3_projection": {
+          const deviceId = readString(payload.deviceId);
+          await this.ctx.storage.transaction(async tx => {
+            const state = (await tx.get<AccountState>(ACCOUNT_KEY)) ?? emptyAccountState();
+            const device = state.devices[deviceId];
+            if (!device || device.grantId !== payload.grantId || device.revokedAt !== null) throw new QuickloginAccountError("FORBIDDEN");
+            const key = `v3:projection:${deviceId}`;
+            const previous = await tx.get<{ epoch: string; seq: number }>(key);
+            const epoch = readString(payload.reportEpoch), seq = readNow(payload.clientReportSeq);
+            if (previous?.epoch === epoch && previous.seq >= seq) return;
+            await tx.put(key, { epoch, seq, report: payload.report, client: payload.client, receivedAt: Date.now() });
+            state.revision += 1; await tx.put(ACCOUNT_KEY, state);
+          });
+          break;
+        }
         case "create_pending_grant":
           result = await this.mutate(
             {
@@ -187,6 +206,7 @@ export class CquQuickloginAccountDO extends DurableObject<Env> {
               type: "set_device_enabled",
               deviceId: readString(payload.deviceId),
               enabled: readBoolean(payload.enabled),
+              ...(payload.expectedGeneration !== undefined ? { expectedGeneration: readNow(payload.expectedGeneration) } : {}),
             },
             Date.now()
           );
@@ -262,6 +282,18 @@ export class CquQuickloginAccountDO extends DurableObject<Env> {
           break;
         }
         case "notify_binding_changed":
+          if (payload.bindingRevision !== undefined) {
+            const revision = readNow(payload.bindingRevision);
+            await this.ctx.storage.transaction(async tx => {
+              if (((await tx.get<number>("bindingRevision")) ?? -1) >= revision) return;
+              const state = (await tx.get<AccountState>(ACCOUNT_KEY)) ?? emptyAccountState();
+              const reduced = reduceAccount(state, { type: "notify_binding_changed" }, Date.now());
+              const outbox = mergeOutboxEvents((await tx.get<OutboxEvent[]>(OUTBOX_KEY)) ?? [], reduced.events);
+              await tx.put({ [ACCOUNT_KEY]: reduced.state, [OUTBOX_KEY]: outbox, bindingRevision: revision });
+              const next = nextOutboxAlarm(outbox); if (next !== null) await tx.setAlarm(next);
+            });
+            break;
+          }
           result = await this.mutate(
             { type: "notify_binding_changed" },
             Date.now()
@@ -316,7 +348,7 @@ export class CquQuickloginAccountDO extends DurableObject<Env> {
           }
         );
       }
-      if (error instanceof QuickloginAccountError) {
+      if (error instanceof QuickloginAccountError || error instanceof V3Error) {
         return this.errorResponse(error.code, errorStatus(error.code));
       }
       return this.errorResponse("TEMPORARY_UNAVAILABLE", 503);
@@ -355,7 +387,7 @@ export class CquQuickloginAccountDO extends DurableObject<Env> {
     });
   }
 
-  private errorResponse(code: ErrorCode, status: number): Response {
+  private errorResponse(code: ErrorCode | import("../services/quicklogin/protocol-v3").ReasonCode, status: number): Response {
     return Response.json(
       { error: { code, message: code } },
       { status, headers: { "cache-control": "no-store" } }
@@ -414,6 +446,64 @@ export class CquQuickloginAccountDO extends DurableObject<Env> {
       (await this.ctx.storage.get<AccountState>(ACCOUNT_KEY)) ??
       emptyAccountState()
     );
+  }
+
+  private async resumeTicket(deviceId: string): Promise<{ resumeTicket: string; deviceId: string; expiresAt: number }> {
+    const resumeTicket = crypto.randomUUID() + crypto.randomUUID();
+    const expiresAt = Date.now() + 5 * 60_000;
+    await this.ctx.storage.transaction(async tx => {
+      const state = (await tx.get<AccountState>(ACCOUNT_KEY)) ?? emptyAccountState();
+      const device = state.devices[deviceId];
+      if (!device || device.revokedAt !== null) throw new QuickloginAccountError("FORBIDDEN");
+      const client = await tx.get<ClientMetadata>(`v3:client:${deviceId}`);
+      await tx.put(`v3:resume:${resumeTicket}`, { deviceId, generation: device.generation, installationId: client?.installationId ?? null, expiresAt });
+    });
+    return { resumeTicket, deviceId, expiresAt };
+  }
+
+  private async registerV3(grantId: string, raw: unknown) {
+    const input = parseRegistrationRequest(raw);
+    let result: unknown;
+    await this.ctx.storage.transaction(async tx => {
+      let state = (await tx.get<AccountState>(ACCOUNT_KEY)) ?? emptyAccountState();
+      const grant = state.grants[grantId];
+      if (!grant || grant.state !== "active") throw new QuickloginAccountError("FORBIDDEN");
+      const key = `v3:registration:${grantId}:${input.registrationId}`;
+      const fingerprint = JSON.stringify({ client: input.client, deviceName: input.deviceName, deviceId: input.deviceId ?? null, resumeTicket: input.resumeTicket ?? null });
+      const cached = await tx.get<{ deviceId: string; fingerprint: string }>(key);
+      if (cached) {
+        if (cached.fingerprint !== fingerprint) throw new V3Error("IDEMPOTENCY_CONFLICT");
+        result = state.devices[cached.deviceId]; return;
+      }
+      let outbox = (await tx.get<OutboxEvent[]>(OUTBOX_KEY)) ?? [];
+      if (input.resumeTicket) {
+        const ticket = await tx.get<{ deviceId: string; generation: number; installationId: string | null; expiresAt: number }>(`v3:resume:${input.resumeTicket}`);
+        if (!ticket || ticket.expiresAt <= Date.now() || (input.deviceId && input.deviceId !== ticket.deviceId) || (ticket.installationId && ticket.installationId !== input.client.installationId) || grant.deviceId !== null) throw new QuickloginAccountError("FORBIDDEN");
+        const device = state.devices[ticket.deviceId];
+        if (!device || device.revokedAt !== null || device.generation !== ticket.generation) throw new QuickloginAccountError("FORBIDDEN");
+        const oldGrant = state.grants[device.grantId];
+        if (!oldGrant || oldGrant.clientId !== grant.clientId) throw new QuickloginAccountError("FORBIDDEN");
+        oldGrant.state = "revoked"; oldGrant.revokedAt = Date.now();
+        device.grantId = grantId; device.generation += 1; device.appliedVersion = null;
+        grant.deviceId = device.deviceId; state.revision += 1;
+        outbox = mergeOutboxEvents(outbox, [
+          { id: crypto.randomUUID(), kind: "revoke-oauth-family", grantId: oldGrant.grantId, deviceId: device.deviceId, generation: device.generation, revision: state.revision, attempts: 0, nextAttemptAt: Date.now() },
+          { id: crypto.randomUUID(), kind: "device-notify", deviceId: device.deviceId, generation: device.generation, revision: state.revision, attempts: 0, nextAttemptAt: Date.now() },
+          { id: crypto.randomUUID(), kind: "projection", revision: state.revision, attempts: 0, nextAttemptAt: Date.now() },
+        ]);
+        await tx.delete(`v3:resume:${input.resumeTicket}`);
+      } else {
+        // The bearer grant is the authority; a remembered device ID is only a hint.
+        const reduced = reduceAccount(state, { type: "register_device", grantId, deviceId: crypto.randomUUID(), metadata: { deviceName: input.deviceName, browserFamily: "chrome", browserVersion: input.client.browserVersion } }, Date.now());
+        state = reduced.state; outbox = mergeOutboxEvents(outbox, reduced.events);
+      }
+      const device = state.devices[state.grants[grantId]!.deviceId!];
+      if (!device) throw new QuickloginAccountError("FORBIDDEN");
+      await tx.put({ [ACCOUNT_KEY]: state, [OUTBOX_KEY]: outbox, [key]: { deviceId: device.deviceId, fingerprint }, [`v3:client:${device.deviceId}`]: input.client });
+      const next = nextOutboxAlarm(outbox); if (next !== null) await tx.setAlarm(next);
+      result = device;
+    });
+    return result;
   }
 
   private async initializePolicy(input: {

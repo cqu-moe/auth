@@ -14,6 +14,7 @@ export interface Env {
   QUICKLOGIN_CLIENT_ID: string;
   QUICKLOGIN_EXTENSION_ORIGIN: string;
   QUICKLOGIN_DEVICE_MODE?: "off" | "on";
+  QUICKLOGIN_SERVER_BUILD?: string;
   BIND_EMAIL_DOMAIN: string;
 }
 

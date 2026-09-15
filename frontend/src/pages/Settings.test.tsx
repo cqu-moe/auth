@@ -14,7 +14,10 @@ vi.mock("../components/Layout", () => ({
 
 vi.mock("../components/AccountProfileSection", () => ({ default: () => null }));
 vi.mock("../components/SecuritySection", () => ({ default: () => null }));
-vi.mock("../components/quicklogin/QuickloginSettings", () => ({ default: () => null }));
+const quickloginProps = vi.hoisted(() => vi.fn());
+vi.mock("../components/quicklogin/QuickloginSettings", () => ({
+  default: (props: unknown) => { quickloginProps(props); return null; },
+}));
 
 vi.mock("../lib/auth-client", () => ({
   authClient: {
@@ -43,11 +46,11 @@ function bindingResponse(bindStatus: "active" | "unbound" = "active") {
   });
 }
 
-async function renderSettings() {
+async function renderSettings(path = "/settings") {
   await act(async () => {
     root.render(createElement(
       MemoryRouter,
-      { initialEntries: ["/settings"] },
+      { initialEntries: [path] },
       createElement(Settings),
     ));
     await Promise.resolve();
@@ -99,6 +102,7 @@ describe("CQU binding settings actions", () => {
       (button) => button.textContent?.includes("解除绑定"),
     )).toBe(true);
     expect(container.textContent).not.toContain("绑定新账号");
+    expect(container.textContent).toContain("Auth 服务端会话");
   });
 
   it("keeps the binding when the user cancels the destructive action", async () => {
@@ -115,4 +119,23 @@ describe("CQU binding settings actions", () => {
     expect(container.textContent).toContain("重新绑定邮箱");
     expect(container.textContent).not.toContain("已成功解除 CQU 账户绑定");
   });
+});
+
+it.each([["bind", "/cqu/bind"], ["repair", "/cqu/bind?repair=1"], ["verify", "/cqu/bind?repair=1"]])("routes cqu=%s to an explicit recovery link without mutating", async (hint, target) => {
+  await renderSettings(`/settings?cqu=${hint}`);
+  const link = container.querySelector('[data-cqu-action]');
+  expect(link?.getAttribute("href")).toBe(target);
+  expect(vi.mocked(fetch).mock.calls.every(([, options]) => !options?.method || options.method === "GET")).toBe(true);
+});
+
+
+it.each([
+  ["/settings?quickloginDevice=device-a&quickloginReconnect=1", "device-a"],
+  ["/settings?quickloginDevice=device-a", undefined],
+  ["/settings?quickloginDevice=device-a&quickloginReconnect=0", undefined],
+  ["/settings?quickloginReconnect=1", undefined],
+])("passes a reconnect device hint only for an explicit plugin reconnect entry: %s", async (path, expected) => {
+  await renderSettings(path);
+  expect(quickloginProps.mock.lastCall?.[0].reconnectDeviceHint).toBe(expected);
+  expect(vi.mocked(fetch).mock.calls.every(([, options]) => !options?.method || options.method === "GET")).toBe(true);
 });

@@ -1,3 +1,4 @@
+import type { BindingSnapshot } from "../services/quicklogin/binding-snapshot";
 import { DurableObject } from "cloudflare:workers";
 import { CquSsoClient, type CasCookies, type CquStorageState, CquSsoError } from "../services/cqu-sso";
 import { decrypt } from "../services/crypto";
@@ -30,6 +31,7 @@ import {
 import { fetchBrowser } from "../services/cqu-browser-routing";
 import {
   BROWSER_CLEANUP_MARGIN_MS,
+  BROWSER_INVOCATION_BUDGET_MS,
   CONTAINER_BROWSER_DEADLINE_MS,
   CONTAINER_HARVEST_DEADLINE_MS,
   remainingBrowserBudget,
@@ -494,22 +496,26 @@ export class CquSessionDO extends DurableObject<Env> {
               error: "CQU 登录正在进行中（请勿重复提交）",
             });
           }
+          await this.ctx.storage.transaction(async tx => {
+            const revision = ((await tx.get<number>("bindingRevision")) ?? (await tx.get<number>("quickloginBindingEpoch")) ?? 0) + 1;
+            await tx.put({ bindingTransition: { id: reservation.token, userId: body.userId, previousState: (await tx.get<SessionState>("state")) ?? null, previousStatus: (await tx.get<CquStatus>("status")) ?? "unbound", startedAt: Date.now(), deadlineAt: Date.now() + BROWSER_INVOCATION_BUDGET_MS },
+              pendingCredentials: { encryptedPassword: body.encryptedPassword, iv: body.iv }, bindingRevision: revision,
+              bindingOutbox: { ownerUserId: body.userId, revision } });
+            await tx.setAlarm(Date.now());
+          });
+          await this.flushBindingOutbox();
           try {
-            await this.bumpQuickloginBindingEpoch(body.userId);
-            await this.ctx.storage.put<StoredCredentials>("credentials", {
-              encryptedPassword: body.encryptedPassword,
-              iv: body.iv,
-            });
-            return Response.json(await this.initSession(
-              body.userId,
-              body.studentId,
-              reservation
-            ));
+            const result = await this.initSession(body.userId, body.studentId, reservation);
+            if (!result.success) await this.rollbackBindingTransition(reservation.token);
+            await this.flushBindingOutbox();
+            return Response.json(result);
           } catch (error) {
+            await this.rollbackBindingTransition(reservation.token);
             await this.releaseRoutedLoginReservation(reservation.token);
             throw error;
           }
         }
+
         case "service-ticket": {
           const service = url.searchParams.get("service");
           const serviceUrl = url.searchParams.get("serviceUrl");
@@ -555,6 +561,9 @@ export class CquSessionDO extends DurableObject<Env> {
         case "quicklogin-login": {
           const body = await request.json<DeviceLoginRequest>();
           return Response.json(await this.quickloginLogin(body));
+        }
+        case "quicklogin-binding-v3": {
+          return Response.json(await this.getBindingSnapshot());
         }
         case "quicklogin-binding": {
           return Response.json(await this.getQuickloginBindingEpoch());
@@ -653,13 +662,11 @@ export class CquSessionDO extends DurableObject<Env> {
     reservation: { token: string; route: BrowserRoute }
   ): Promise<{ success: boolean; error?: string; code?: string }> {
     try {
-      // 同一绑定的修复登录复用上一份浏览器状态，维持学校侧信任画像；真正成功前不覆盖落盘态。
-      // 换用户或换学号时绝不跨账号复用 state。
+      // Changed credentials require a fresh first factor; only ordinary recovery may reuse the same account seed.
       const previous = await this.ctx.storage.get<SessionState>("state");
-      const seedState =
-        previous?.userId === userId && previous.studentId === studentId
-          ? previous.storageState
-          : null;
+      const validatingCredentials = (await this.ctx.storage.get("pendingCredentials")) !== undefined;
+      const seedState = !validatingCredentials && previous?.userId === userId && previous.studentId === studentId
+        ? previous.storageState : null;
       // 占位 state, 让 runContainerLogin 能拿到 userId/studentId 与可选 seedState。
       this.state = {
         userId,
@@ -1381,8 +1388,8 @@ export class CquSessionDO extends DurableObject<Env> {
     return `quickloginLogin:${deviceId}`;
   }
 
-  private quickloginResultKey(deviceId: string, generation: number): string {
-    return `quickloginResult:${deviceId}:${generation}`;
+  private quickloginResultKey(deviceId: string, generation: number, operationId?: string): string {
+    return `quickloginResult:${deviceId}:${generation}${operationId ? `:${operationId}` : ""}`;
   }
 
   private async bumpQuickloginBindingEpoch(ownerUserId?: string): Promise<number> {
@@ -1413,13 +1420,15 @@ export class CquSessionDO extends DurableObject<Env> {
       if (lease && pending.some((entry) => entry.token === lease.ownerToken)) await tx.put("codeLease", {...lease, recoveryFence: true});
     });
     if (keys.length > 0) await this.ctx.storage.delete(keys);
-    await this.ctx.storage.put("quickloginBindingEpoch", next);
+    await this.ctx.storage.transaction(async tx => {
+      const revision = ((await tx.get<number>("bindingRevision")) ?? current) + 1;
+      const owner = ownerUserId ?? this.state?.userId;
+      await tx.put({ quickloginBindingEpoch: next, bindingRevision: revision });
+      if (owner) await tx.put("bindingOutbox", { ownerUserId: owner, revision });
+    });
     this.quickloginFlights.clear();
     if (locks.size) await this.scheduleSessionAlarm(Date.now());
-    if (ownerUserId) {
-      await new QuickloginAccountClient(this.env)
-        .notifyBindingChanged(ownerUserId);
-    }
+    await this.flushBindingOutbox();
     return next;
   }
 
@@ -1447,6 +1456,44 @@ export class CquSessionDO extends DurableObject<Env> {
     };
   }
 
+  private async flushBindingOutbox(): Promise<void> {
+    const event = await this.ctx.storage.get<{ ownerUserId: string; revision: number }>("bindingOutbox");
+    if (!event) return;
+    try {
+      await new QuickloginAccountClient(this.env).notifyBindingChanged(event.ownerUserId, event.revision);
+      await this.ctx.storage.transaction(async tx => { if ((await tx.get<typeof event>("bindingOutbox"))?.revision === event.revision) await tx.delete("bindingOutbox"); });
+    } catch {
+      await this.scheduleSessionAlarm(Date.now() + 60_000);
+    }
+  }
+
+  private async rollbackBindingTransition(token: string): Promise<void> {
+    await this.ctx.storage.transaction(async tx => {
+      const transition = await tx.get<{ id: string; userId: string; previousState: SessionState | null; previousStatus: CquStatus }>("bindingTransition");
+      if (transition?.id !== token) return;
+      const revision = ((await tx.get<number>("bindingRevision")) ?? 0) + 1;
+      await tx.put({ status: transition.previousStatus, bindingRevision: revision, bindingOutbox: { ownerUserId: transition.userId, revision } });
+      if (transition.previousState) await tx.put("state", transition.previousState); else await tx.delete("state");
+      await tx.delete(["bindingTransition", "pendingCredentials"]);
+      this.state = transition.previousState;
+      await tx.setAlarm(Date.now());
+    });
+  }
+
+  private async getBindingSnapshot(): Promise<BindingSnapshot> {
+    const binding = await this.getQuickloginBindingEpoch();
+    const transition = await this.ctx.storage.get<{ id: string }>("bindingTransition");
+    const revision = (await this.ctx.storage.get<number>("credentialRevision")) ?? binding.epoch;
+    const evidence = await this.ctx.storage.get<Pick<BindingSnapshot, "credentialsState" | "evidenceAt" | "evidenceKind" | "evidenceCredentialRevision">>("quickloginCredentialEvidence");
+    const current = evidence?.evidenceCredentialRevision === revision ? evidence : null;
+    return { state: transition ? "updating" : binding.bound ? "bound" : "unbound",
+      bindingEpoch: binding.epoch, credentialRevision: revision,
+      bindingRevision: (await this.ctx.storage.get<number>("bindingRevision")) ?? binding.epoch,
+      bindingTransitionId: transition?.id ?? null,
+      credentialsState: current?.credentialsState ?? "unknown", evidenceAt: current?.evidenceAt ?? null,
+      evidenceKind: current?.evidenceKind ?? "none", evidenceCredentialRevision: current?.evidenceCredentialRevision ?? null };
+  }
+
   private async quickloginLogin(
     input: DeviceLoginRequest
   ): Promise<DeviceLoginResult> {
@@ -1460,10 +1507,11 @@ export class CquSessionDO extends DurableObject<Env> {
     ) {
       return { kind: "cancelled" };
     }
-    const key = `${input.deviceId}:${input.generation}`;
+    const key = `${input.deviceId}:${input.generation}${input.operationId ? `:${input.operationId}` : ""}`;
     const resultKey = this.quickloginResultKey(
       input.deviceId,
-      input.generation
+      input.generation,
+      input.operationId
     );
     const validateSuccess = async (
       result: Extract<DeviceLoginResult, { kind: "success" }>,
@@ -1492,7 +1540,8 @@ export class CquSessionDO extends DurableObject<Env> {
           status !== "revoked" &&
           status !== "needs_reauth" &&
           (epoch ?? 0) === result.bindingEpoch &&
-          !(deviceLock && deviceLock.generation > input.generation);
+          !(deviceLock && deviceLock.generation > input.generation) &&
+          !(await tx.get("bindingTransition"));
         if (!cacheIsCurrent || !bindingIsCurrent) {
           if (
             cached &&
@@ -1563,6 +1612,7 @@ export class CquSessionDO extends DurableObject<Env> {
   ): Promise<DeviceLoginResult> {
     await this.loadState();
     const binding = await this.getQuickloginBindingEpoch();
+    if (await this.ctx.storage.get("bindingTransition")) return { kind: "temporary_unavailable", retryAfterMs: 60_000, reasonCode: "BINDING_UPDATING" };
     const status = await this.getStatus();
     const credentials =
       (await this.ctx.storage.get<StoredCredentials>("credentials")) ?? null;
@@ -1577,8 +1627,11 @@ export class CquSessionDO extends DurableObject<Env> {
       return { kind: "needs_reauth", reason: "unbound" };
     }
 
+    const evidence = await this.getBindingSnapshot();
+    if (evidence.credentialsState === "rejected" && evidence.evidenceCredentialRevision === evidence.credentialRevision) return { kind: "needs_reauth", reason: "credentials_rejected" };
+    if (evidence.credentialsState === "interaction_required" && evidence.evidenceCredentialRevision === evidence.credentialRevision) return { kind: "needs_reauth", reason: "interactive_required" };
     const retryAt = (await this.ctx.storage.get<number>("reloginRetryAt")) ?? 0;
-    if (retryAt > Date.now()) return {kind: "temporary_unavailable", retryAfterMs: retryAt - Date.now()};
+    if (retryAt > Date.now()) return {kind: "temporary_unavailable", reasonCode: "VERIFICATION_COOLDOWN", retryAfterMs: retryAt - Date.now()};
 
     const lockKey = this.quickloginLockKey(input.deviceId);
     const token = crypto.randomUUID();
@@ -1640,7 +1693,8 @@ export class CquSessionDO extends DurableObject<Env> {
         latestStatus === "revoked" ||
         (latestEpoch ?? 0) !== binding.epoch ||
         latestLock?.token !== token ||
-        latestLock.generation !== input.generation
+        latestLock.generation !== input.generation ||
+        (await this.ctx.storage.get("bindingTransition")) !== undefined
       ) {
         throw new CquSsoError(
           "LOGIN_BINDING_CHANGED",
@@ -1677,8 +1731,8 @@ export class CquSessionDO extends DurableObject<Env> {
         session: token,
         queuedPermit: permitRole === "queued",
       };
-      if (this.state.storageState) {
-        runBody.seedState = this.state.storageState;
+      if (input.seedState) {
+        runBody.seedState = JSON.parse(input.seedState);
       }
       if (loginRoute.backend === "cloudflare") {
         runBody.operationTimeoutMs = Math.max(
@@ -1705,6 +1759,11 @@ export class CquSessionDO extends DurableObject<Env> {
       await recheck();
 
       if (result?.error === "PASSWORD_REJECTED") {
+        await this.ctx.storage.transaction(async (tx) => {
+          if (((await tx.get<number>("quickloginBindingEpoch")) ?? 0) !== binding.epoch) return;
+          const revision = (await tx.get<number>("credentialRevision")) ?? binding.epoch;
+          await tx.put({ quickloginCredentialEvidence: { credentialsState: "rejected", evidenceKind: "password_rejected", evidenceAt: Date.now(), evidenceCredentialRevision: revision }, bindingRevision: ((await tx.get<number>("bindingRevision")) ?? binding.epoch) + 1 });
+        });
         return {
           kind: "needs_reauth",
           reason: "credentials_rejected",
@@ -1716,11 +1775,13 @@ export class CquSessionDO extends DurableObject<Env> {
         !result.state ||
         !hasValidTgt(result.state)
       ) {
-        return { kind: "temporary_unavailable", retryAfterMs: await this.deferQuickloginRetry(binding.epoch) };
+        const errorCode = typeof result?.error === "string" && ["OTP_SEND_FAILED", "OTP_TIMEOUT", "WAF_CHALLENGE", "CONTAINER_UNAVAILABLE", "VERIFICATION_COOLDOWN"].includes(result.error) ? result.error as import("../services/quicklogin/protocol-v3").ReasonCode : "SCHOOL_UNREACHABLE";
+        return { kind: "temporary_unavailable", reasonCode: errorCode, retryAfterMs: await this.deferQuickloginRetry(binding.epoch) };
       }
       await this.clearConsumedLoginCode();
       return {
         kind: "success",
+        credentialRevision: (await this.ctx.storage.get<number>("credentialRevision")) ?? binding.epoch,
         storageState: JSON.stringify(result.state),
         loginAt: Date.now(),
         bindingEpoch: binding.epoch,
@@ -1740,7 +1801,7 @@ export class CquSessionDO extends DurableObject<Env> {
       ) {
         return { kind: "cancelled" };
       }
-      return { kind: "temporary_unavailable", retryAfterMs: await this.deferQuickloginRetry(binding.epoch) };
+      return { kind: "temporary_unavailable", reasonCode: "SCHOOL_UNREACHABLE", retryAfterMs: await this.deferQuickloginRetry(binding.epoch) };
     } finally {
       runAbort?.abort();
       await this.finishLoginOperation(token, lockKey, "quicklogin", runCompleted);
@@ -1768,8 +1829,11 @@ export class CquSessionDO extends DurableObject<Env> {
       const pending = (values.get("interruptedLogins") as InterruptedLogin[] | undefined) ?? [];
       const preserved: Record<string, unknown> = {
         status: "unbound" satisfies CquStatus,
+        bindingRevision: ((values.get("bindingRevision") as number | undefined) ?? previousEpoch) + 1,
+        credentialRevision: ((values.get("credentialRevision") as number | undefined) ?? previousEpoch) + 1,
         quickloginBindingEpoch: Number.isSafeInteger(previousEpoch) && previousEpoch >= 0 ? Math.min(previousEpoch + 1, Number.MAX_SAFE_INTEGER) : 1,
       };
+      if (ownerUserId) preserved.bindingOutbox = { ownerUserId, revision: preserved.bindingRevision };
       if (pending.length) preserved.interruptedLogins = pending;
       for (const item of pending) {
         const key = this.browserRouteKey(item.token);
@@ -1788,10 +1852,7 @@ export class CquSessionDO extends DurableObject<Env> {
     this.state = null;
     this.quickloginFlights.clear();
     if ((await this.ctx.storage.get<InterruptedLogin[]>("interruptedLogins"))?.length) await this.scheduleSessionAlarm(Date.now());
-    if (ownerUserId) {
-      await new QuickloginAccountClient(this.env)
-        .notifyBindingChanged(ownerUserId);
-    }
+    await this.flushBindingOutbox();
   }
 
   /**
@@ -1811,17 +1872,8 @@ export class CquSessionDO extends DurableObject<Env> {
     await this.bumpQuickloginBindingEpoch();
     await this.ctx.storage.delete("loginInFlight");
     if ((await this.ctx.storage.get<InterruptedLogin[]>("interruptedLogins"))?.length) await this.scheduleSessionAlarm(Date.now());
+    else if (await this.ctx.storage.get("bindingOutbox")) await this.scheduleSessionAlarm(Date.now() + 60_000);
     else await this.ctx.storage.deleteAlarm();
-    if (ownerUserId) {
-      try {
-        await new QuickloginAccountClient(this.env)
-          .notifyBindingChanged(ownerUserId);
-      } catch {
-        console.warn(JSON.stringify({
-          event: "quicklogin.binding_change_notify_failed",
-        }));
-      }
-    }
   }
 
   /**
@@ -1843,6 +1895,9 @@ export class CquSessionDO extends DurableObject<Env> {
   }
 
   async alarm(): Promise<void> {
+    await this.flushBindingOutbox();
+    const transition = await this.ctx.storage.get<{ id: string; deadlineAt: number }>("bindingTransition");
+    if (transition && transition.deadlineAt + BROWSER_CLEANUP_MARGIN_MS < Date.now()) await this.rollbackBindingTransition(transition.id);
     await this.flushRecoveryWorkflow();
     if (!this.retiredAtrustCleanupComplete) {
       try {
@@ -2961,7 +3016,8 @@ export class CquSessionDO extends DurableObject<Env> {
       operationDeadline = Math.min(operationDeadline, lock.deadlineAt ?? operationDeadline);
       if (startEvent) await this.setStatus(nextStatus(await this.getStatus(), startEvent));
       await this.enqueueRecoveryWorkflow(state.userId);
-      const creds = await this.ctx.storage.get<StoredCredentials>("credentials");
+      const transition = await this.ctx.storage.get<{ id: string }>("bindingTransition");
+      const creds = await this.ctx.storage.get<StoredCredentials>(transition?.id === token ? "pendingCredentials" : "credentials");
       if (!creds) throw new Error("No stored credentials");
       // 锁获取跨 await:再核对绑定与状态,撤销/解绑已落地时不点火、不复位状态机。
       // 注意首登(initSession)的占位 state 尚未落盘:storage 无 state 属正常,不据此拦截;
@@ -3144,10 +3200,18 @@ export class CquSessionDO extends DurableObject<Env> {
           );
           return;
         }
-        await tx.put({
-          state: terminalState,
-          status: nextStatus(currentStatus ?? "unbound", okEvent),
-        });
+        const transition = await tx.get<{ id: string; userId: string }>("bindingTransition");
+        if (transition?.id === token) {
+          const candidate = await tx.get<StoredCredentials>("pendingCredentials");
+          if (!candidate) return;
+          const epoch = (currentBindingEpoch ?? 0) + 1;
+          const credentialRevision = ((await tx.get<number>("credentialRevision")) ?? currentBindingEpoch ?? 0) + 1;
+          const revision = ((await tx.get<number>("bindingRevision")) ?? 0) + 1;
+          await tx.put({ credentials: candidate, quickloginBindingEpoch: epoch, credentialRevision, bindingRevision: revision, bindingOutbox: { ownerUserId: transition.userId, revision },
+            quickloginCredentialEvidence: { credentialsState: "verified", evidenceKind: "first_factor_success", evidenceAt: Date.now(), evidenceCredentialRevision: credentialRevision } });
+          await tx.delete(["bindingTransition", "pendingCredentials"]);
+        }
+        await tx.put({ state: terminalState, status: nextStatus(currentStatus ?? "unbound", okEvent) });
         await tx.delete(["quickloginTransientFailures", "reloginRetryAt"]);
         this.state = terminalState;
         committed = true;

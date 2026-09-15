@@ -117,8 +117,7 @@ export function buildCoverageManifest(
     const content = operation.requestBody?.content as Record<string, unknown> | undefined;
     const contentTypes = Object.keys(content ?? {});
     const isForm = contentTypes.length > 0 && !contentTypes.includes("application/json");
-    const isNative = /^\/api\/(?:v1\/)?cqu\/quicklogin\/devices(?:\/|$)/
-      .test(endpoint.path);
+    const isNative = /^\/api\/(?:v1\/)?cqu\/quicklogin\/devices(?:\/|$)/.test(endpoint.path) && !/\/(reconcile|operations|exports|receipts|resume-ticket)(?:\/|$)/.test(endpoint.path);
     let requestValidation: CoverageManifestEntry["requestValidation"];
     let requestReason: string;
     if (endpoint.kind === "websocket") {
@@ -223,8 +222,7 @@ export function assertApiArtifactConsistency(input: {
          projected?.requestBody)) {
       throw new Error(`Form request-body exception is inconsistent for ${key}`);
     }
-    const native = /^\/api\/(?:v1\/)?cqu\/quicklogin\/devices(?:\/|$)/
-      .test(endpoint.path);
+    const native = /^\/api\/(?:v1\/)?cqu\/quicklogin\/devices(?:\/|$)/.test(endpoint.path) && !/\/(reconcile|operations|exports|receipts|resume-ticket)(?:\/|$)/.test(endpoint.path);
     if (coverage?.responseContract !==
         (native ? "quicklogin-native" : "problem-details-or-protocol")) {
       throw new Error(`Response coverage is inconsistent for ${key}`);

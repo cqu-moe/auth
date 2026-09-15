@@ -1,6 +1,41 @@
 import type { ApiSuccess } from "../../../../shared/api-response";
 import type { components } from "../../../../shared/api-types.generated";
 import { ApiError, apiRequest } from "./http";
+import { ContractError, parseApiResponse, parseOverview, type Overview } from "./quicklogin-protocol.generated";
+
+export async function getQuickloginOverview(signal?: AbortSignal): Promise<Overview> {
+  return parseApiResponse(await apiRequest<unknown>("/cqu/quicklogin/overview", { signal }), parseOverview).data;
+}
+
+type ResumeTicket = { resumeTicket: string; deviceId: string; expiresAt: number };
+function parseResumeTicket(value: unknown): ResumeTicket {
+  if (!value || typeof value !== "object") throw new ContractError();
+  const ticket = value as Partial<ResumeTicket>;
+  if (typeof ticket.resumeTicket !== "string" || ticket.resumeTicket.length === 0 || ticket.resumeTicket.length > 4096 ||
+    typeof ticket.deviceId !== "string" || !ticket.deviceId || typeof ticket.expiresAt !== "number" || !Number.isSafeInteger(ticket.expiresAt)) throw new ContractError();
+  return { resumeTicket: ticket.resumeTicket, deviceId: ticket.deviceId, expiresAt: ticket.expiresAt };
+}
+
+export async function reconnectQuickloginDevice(deviceId: string): Promise<void> {
+  const runtime = (globalThis as typeof globalThis & {
+    chrome?: { runtime?: { sendMessage: (extensionId: string, message: unknown) => Promise<unknown> } };
+  }).chrome?.runtime;
+  if (!runtime?.sendMessage) throw new Error("未找到快捷登录插件，请在安装此插件的浏览器中重试。");
+  const ticket = parseApiResponse(await apiRequest<unknown>(
+    `/cqu/quicklogin/devices/${encodeURIComponent(deviceId)}/resume-ticket`, { method: "POST" }
+  ), parseResumeTicket).data;
+  if (ticket.deviceId !== deviceId || ticket.expiresAt <= Date.now()) throw new ContractError();
+  let response: unknown;
+  try {
+    response = await runtime.sendMessage("igfidegfgfoofnoncpmbcokbffjmmook", { type: "RESUME_DEVICE", ...ticket });
+  } catch {
+    throw new Error("无法连接快捷登录插件，请确认插件已启用并更新后重试。");
+  }
+  if (!response || typeof response !== "object" || !("accepted" in response) || response.accepted !== true) {
+    throw new Error("插件未接受重新连接，请在对应浏览器中更新插件后重试。");
+  }
+}
+
 
 export type PublicDevice = components["schemas"]["PublicDevice"];
 export type DeviceListData = components["schemas"]["DeviceListData"];

@@ -3,10 +3,14 @@ import { ApiError } from "./http";
 import {
   applyQuickloginQuota,
   getQuickloginPreference,
+  getQuickloginOverview,
+  reconnectQuickloginDevice,
   listQuickloginDevices,
   previewQuickloginQuota,
   revokeQuickloginDevice,
 } from "./quicklogin";
+
+import { overview } from "./quicklogin.fixtures";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -96,4 +100,41 @@ describe("QuickLogin API client", () => {
       body: { preview },
     } satisfies Partial<ApiError>);
   });
+});
+
+describe("QuickLogin overview boundary", () => {
+  const meta = { protocolVersion: 3, requestId: "request-a", serverTime: 1_800_000_000_000, serverBuild: "build-a" };
+  it("reads and validates the v3 envelope instead of trusting a cast", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ data: overview(), meta })));
+    await expect(getQuickloginOverview()).resolves.toMatchObject({ accountRevision: 2 });
+    expect(fetch).toHaveBeenCalledWith("/api/v1/cqu/quicklogin/overview", expect.anything());
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ data: { ...overview(), devices: [{}] }, meta })));
+    await expect(getQuickloginOverview()).rejects.toMatchObject({ code: "CONTRACT_INVALID" });
+  });
+  it("sends an in-memory ticket to the fixed extension ID without URL or body transport", async () => {
+    const sendMessage = vi.fn().mockResolvedValue({ accepted: true, commandId: "command-a" });
+    vi.stubGlobal("chrome", { runtime: { sendMessage } });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ data: { resumeTicket: "test-only-ticket", deviceId: "device/a", expiresAt: Date.now() + 60_000 }, meta })));
+    await reconnectQuickloginDevice("device/a");
+    expect(fetch).toHaveBeenCalledWith("/api/v1/cqu/quicklogin/devices/device%2Fa/resume-ticket", expect.objectContaining({ method: "POST" }));
+    expect(vi.mocked(fetch).mock.calls[0][1]?.body).toBeUndefined();
+    expect(sendMessage).toHaveBeenCalledWith("igfidegfgfoofnoncpmbcokbffjmmook", expect.objectContaining({ type: "RESUME_DEVICE", deviceId: "device/a", resumeTicket: "test-only-ticket" }));
+  });
+  it("does not mint a ticket when the extension is unavailable", async () => {
+    vi.stubGlobal("chrome", undefined);
+    vi.stubGlobal("fetch", vi.fn());
+    await expect(reconnectQuickloginDevice("device-a")).rejects.toThrow("插件");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+it.each(["wrong-device", "expired", "rejected"])("rejects %s resume results without treating the device as connected", async (scenario) => {
+  const sendMessage = vi.fn().mockResolvedValue({ accepted: false });
+  vi.stubGlobal("chrome", { runtime: { sendMessage } });
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({
+    data: { resumeTicket: "test-only-ticket", deviceId: scenario === "wrong-device" ? "other-device" : "device-a", expiresAt: Date.now() + (scenario === "expired" ? -1 : 60_000) },
+    meta: { protocolVersion: 3, requestId: "request-a", serverTime: Date.now(), serverBuild: "build-a" },
+  })));
+  await expect(reconnectQuickloginDevice("device-a")).rejects.toThrow();
+  expect(sendMessage).toHaveBeenCalledTimes(scenario === "rejected" ? 1 : 0);
 });

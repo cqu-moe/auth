@@ -1,3 +1,4 @@
+import type { RegistrationRequest, ClientMetadata, ReportedLocal } from "./protocol-v3";
 import type { Env } from "../../types";
 import type {
   DeviceAuthority,
@@ -12,6 +13,7 @@ import type {
 } from "./contracts";
 
 type AccountOperation =
+  | "v3_registration" | "v3_resume_ticket" | "v3_projection"
   | "create_pending_grant"
   | "activate_grant"
   | "register_device"
@@ -77,6 +79,10 @@ export class QuickloginAccountClient {
     return body.result as T;
   }
 
+  registerV3(userId: string, grantId: string, input: RegistrationRequest): Promise<DeviceRecord> { return this.call(userId, "v3_registration", { grantId, input }); }
+  resumeTicket(userId: string, deviceId: string): Promise<{ resumeTicket: string; deviceId: string; expiresAt: number }> { return this.call(userId, "v3_resume_ticket", { deviceId }); }
+  projectV3(userId: string, deviceId: string, grantId: string, report: ReportedLocal | null, client: ClientMetadata | null): Promise<void> { if (!report) return Promise.resolve(); return this.call(userId, "v3_projection", { deviceId, grantId, reportEpoch: report.reportEpoch, clientReportSeq: report.clientReportSeq, report, client }); }
+
   createPendingGrant(
     userId: string,
     clientId: string,
@@ -104,9 +110,10 @@ export class QuickloginAccountClient {
   setDeviceEnabled(
     userId: string,
     deviceId: string,
-    enabled: boolean
+    enabled: boolean,
+    expectedGeneration?: number
   ): Promise<DeviceAuthority> {
-    return this.call(userId, "set_device_enabled", { deviceId, enabled });
+    return this.call(userId, "set_device_enabled", { deviceId, enabled, expectedGeneration });
   }
 
   setMasterEnabled(
@@ -153,8 +160,8 @@ export class QuickloginAccountClient {
     await this.call(userId, "heartbeat", { deviceId, input, ip, now });
   }
 
-  async notifyBindingChanged(userId: string): Promise<void> {
-    await this.call(userId, "notify_binding_changed", {});
+  async notifyBindingChanged(userId: string, bindingRevision?: number): Promise<void> {
+    await this.call(userId, "notify_binding_changed", { bindingRevision });
   }
 
   async getQuickloginTicketEligibility(userId: string): Promise<{

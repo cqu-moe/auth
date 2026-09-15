@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createElement, StrictMode } from "react";
+import { act, createElement, StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanupUi,
@@ -7,16 +7,18 @@ import {
   renderUi,
   settleUi,
 } from "../../lib/api/quicklogin.testbots";
-import type { DeviceListData } from "../../lib/api/quicklogin";
+import { deviceSnapshot, overview } from "../../lib/api/quicklogin.fixtures";
+import type { Overview } from "../../lib/api/quicklogin-protocol.generated";
 import QuickloginSettings from "./QuickloginSettings";
 import DeviceList from "./DeviceList";
-import { isDeviceOnline, QUICKLOGIN_REVOKE_WARNING } from "./device-list";
+import { QUICKLOGIN_REVOKE_WARNING } from "./device-list";
 
 const api = vi.hoisted(() => ({
   getQuickloginPreference: vi.fn(),
-  listQuickloginDevices: vi.fn(),
+  getQuickloginOverview: vi.fn(),
   setQuickloginMasterEnabled: vi.fn(),
   revokeQuickloginDevice: vi.fn(),
+  reconnectQuickloginDevice: vi.fn(),
   isDeviceQuickloginPreference: vi.fn((value: Record<string, unknown>) =>
     value.eligible === true && "masterEnabled" in value
   ),
@@ -24,26 +26,8 @@ const api = vi.hoisted(() => ({
 
 vi.mock("../../lib/api/quicklogin", () => api);
 
-const DEVICE_LIST: DeviceListData = {
-  masterEnabled: false,
-  deviceLimit: 0,
-  used: 0,
-  revision: 2,
-  devices: [{
-    deviceId: "device-a",
-    deviceName: "宿舍 Chrome",
-    browserFamily: "chrome",
-    browserVersion: "140.0.1",
-    enabled: false,
-    enabledAt: null,
-    lastSeenAt: null,
-    lastIp: null,
-    revokedAt: null,
-    generation: 2,
-    disabledReason: "quota_reduced",
-    appliedVersion: null,
-    online: false,
-  }],
+const DEVICE_LIST: Overview = {
+  ...overview(), masterEnabled: false, deviceLimit: 0, used: 0,
 };
 
 function deferred<T>() {
@@ -64,12 +48,16 @@ function button(container: HTMLElement, name: string): HTMLButtonElement {
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
     .IS_REACT_ACT_ENVIRONMENT = true;
-  vi.clearAllMocks();
+  vi.resetAllMocks();
+  api.isDeviceQuickloginPreference.mockImplementation((value) => value.eligible === true && "masterEnabled" in value);
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
 });
 
 afterEach(async () => {
   await cleanupUi();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("QuickLogin settings", () => {
@@ -79,17 +67,17 @@ describe("QuickLogin settings", () => {
     const container = await renderUi(createElement(QuickloginSettings));
 
     expect(container.textContent).toBe("");
-    expect(api.listQuickloginDevices).not.toHaveBeenCalled();
+    expect(api.getQuickloginOverview).not.toHaveBeenCalled();
   });
 
-  it("keeps quota-zero devices manageable with the exact ownership warning", async () => {
+  it("keeps quota-zero devices manageable and reserves consequences for confirmation", async () => {
     api.getQuickloginPreference.mockResolvedValue({
       eligible: true,
       masterEnabled: false,
       deviceLimit: 0,
       used: 0,
     });
-    api.listQuickloginDevices.mockResolvedValue(DEVICE_LIST);
+    api.getQuickloginOverview.mockResolvedValue(DEVICE_LIST);
 
     const container = await renderUi(createElement(QuickloginSettings, {
       currentDeviceHint: "device-a",
@@ -97,16 +85,20 @@ describe("QuickLogin settings", () => {
 
     expect(container.textContent).toContain("已启用 0 / 0 台");
     expect(container.textContent).toContain("当前插件");
-    expect(container.textContent).toContain("最近 IP：暂无");
+    expect(container.textContent).toContain("最近联系");
+    expect(container.textContent).not.toContain("最近 IP");
     expect(container.textContent).toContain("退出设备");
-    expect(container.textContent).toContain(QUICKLOGIN_REVOKE_WARNING);
+    expect(container.textContent).not.toContain(QUICKLOGIN_REVOKE_WARNING);
+    vi.stubGlobal("confirm", vi.fn(() => false));
+    await click(button(container, "退出设备"));
+    expect(confirm).toHaveBeenCalledWith(QUICKLOGIN_REVOKE_WARNING);
   });
 
   it("reloads the summary and devices after changing the master switch", async () => {
     api.getQuickloginPreference
       .mockResolvedValueOnce({ eligible: true, masterEnabled: false, deviceLimit: 2, used: 0 })
       .mockResolvedValueOnce({ eligible: true, masterEnabled: true, deviceLimit: 2, used: 0 });
-    api.listQuickloginDevices
+    api.getQuickloginOverview
       .mockResolvedValueOnce({
         ...DEVICE_LIST,
         deviceLimit: 2,
@@ -132,7 +124,7 @@ describe("QuickLogin settings", () => {
 
     expect(api.setQuickloginMasterEnabled).toHaveBeenCalledWith(true);
     expect(api.getQuickloginPreference).toHaveBeenCalledTimes(2);
-    expect(api.listQuickloginDevices).toHaveBeenCalledTimes(2);
+    expect(api.getQuickloginOverview).toHaveBeenCalledTimes(2);
     expect(toggle.getAttribute("aria-checked")).toBe("true");
   });
 
@@ -143,7 +135,7 @@ describe("QuickLogin settings", () => {
       deviceLimit: 0,
       used: 0,
     });
-    api.listQuickloginDevices
+    api.getQuickloginOverview
       .mockResolvedValueOnce(DEVICE_LIST)
       .mockRejectedValueOnce(new Error("offline"));
     api.revokeQuickloginDevice.mockResolvedValue(undefined);
@@ -157,14 +149,14 @@ describe("QuickLogin settings", () => {
     expect(container.textContent).toContain("无法刷新设备列表");
   });
 
-  it("shows the empty state and uses the exact ten-minute online boundary", async () => {
+  it("shows the empty state", async () => {
     api.getQuickloginPreference.mockResolvedValue({
       eligible: true,
       masterEnabled: true,
       deviceLimit: 3,
       used: 0,
     });
-    api.listQuickloginDevices.mockResolvedValue({
+    api.getQuickloginOverview.mockResolvedValue({
       ...DEVICE_LIST,
       masterEnabled: true,
       deviceLimit: 3,
@@ -173,33 +165,89 @@ describe("QuickLogin settings", () => {
     const container = await renderUi(createElement(QuickloginSettings));
 
     expect(container.textContent).toContain("还没有授权的浏览器");
-    expect(isDeviceOnline(400_000, 1_000_000)).toBe(true);
-    expect(isDeviceOnline(399_999, 1_000_000)).toBe(false);
+
   });
 
-  it("filters revoked devices before deciding the empty state and actions", async () => {
-    const revoked = { ...DEVICE_LIST.devices[0], revokedAt: 1_800_000_000_000 };
-    const active = {
-      ...DEVICE_LIST.devices[0],
-      deviceId: "device-active",
-      deviceName: "仍在使用的 Chrome",
-    };
-
-    const revokedOnly = await renderUi(createElement(DeviceList, {
-      data: { ...DEVICE_LIST, devices: [revoked] },
-      onRevoke: async () => undefined,
+  it("keeps revoked devices visible with a reconnect action", async () => {
+    const revoked = deviceSnapshot();
+    revoked.authorization.state = "revoked";
+    const container = await renderUi(createElement(DeviceList, {
+      data: overview([revoked]), onRevoke: async () => undefined,
+      onReconnect: async () => undefined, onRefresh: async () => undefined,
     }));
-    expect(revokedOnly.textContent).toContain("还没有授权的浏览器");
-    expect(revokedOnly.textContent).not.toContain("宿舍 Chrome");
-    expect(revokedOnly.querySelectorAll("button")).toHaveLength(0);
+    expect(container.textContent).toContain("此设备已退出");
+    expect(container.textContent).toContain("重新连接");
+    expect(container.textContent).not.toContain("退出设备");
+  });
 
-    const mixed = await renderUi(createElement(DeviceList, {
-      data: { ...DEVICE_LIST, devices: [revoked, active] },
-      onRevoke: async () => undefined,
+  it("regresses the screenshot contradiction: two devices never inherit presence as readiness", async () => {
+    const pending = deviceSnapshot();
+    pending.cloud.state = "logging_in";
+    pending.cloud.lastValidatedAt = null;
+    pending.capabilities.canUseExistingSession = false;
+    const noReport = deviceSnapshot();
+    noReport.identity = { ...noReport.identity, deviceId: "device-b", deviceName: "教室 Chrome" };
+    const container = await renderUi(createElement(DeviceList, {
+      data: overview([pending, noReport]), currentDeviceHint: "device-a",
+      onRevoke: async () => undefined, onReconnect: async () => undefined, onRefresh: async () => undefined,
     }));
-    expect(mixed.textContent).not.toContain("宿舍 Chrome");
-    expect(mixed.textContent).toContain("仍在使用的 Chrome");
-    expect(mixed.querySelectorAll("button")).toHaveLength(1);
+    const rows = [...container.querySelectorAll("li")];
+    expect(rows[0].textContent).toContain("正在准备学校登录");
+    expect(rows[0].textContent).toContain("当前插件");
+    expect(rows[1].textContent).toContain("等待插件同步");
+    for (const row of rows) {
+      expect(row.querySelectorAll("p")).toHaveLength(1);
+      expect(row.textContent).not.toContain("此设备云端会话");
+      expect(row.textContent).not.toContain("本地报告");
+      expect(row.textContent).not.toContain("尚未上报");
+    }
+    expect(container.textContent).not.toContain("在线");
+    expect(container.textContent).not.toContain("已就绪");
+    expect(container.querySelector(".text-green-700")).toBeNull();
+  });
+
+  it("polls active devices every five seconds, pauses hidden and reloads on focus", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const active = deviceSnapshot();
+    active.cloud.state = "logging_in";
+    api.getQuickloginPreference.mockResolvedValue({ eligible: true, masterEnabled: true });
+    api.getQuickloginOverview.mockResolvedValue(overview([active]));
+    await renderUi(createElement(QuickloginSettings));
+    await act(async () => vi.advanceTimersByTime(5_000));
+    expect(api.getQuickloginOverview).toHaveBeenCalledTimes(2);
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+    await act(async () => vi.advanceTimersByTime(60_000));
+    expect(api.getQuickloginOverview).toHaveBeenCalledTimes(2);
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+    expect(api.getQuickloginOverview).toHaveBeenCalledTimes(3);
+  });
+
+  it("polls idle devices every thirty seconds and marks retained results unreachable", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    api.getQuickloginPreference.mockResolvedValue({ eligible: true, masterEnabled: true });
+    api.getQuickloginOverview.mockResolvedValueOnce(overview()).mockRejectedValue(new Error("offline"));
+    const container = await renderUi(createElement(QuickloginSettings));
+    await act(async () => vi.advanceTimersByTime(29_999));
+    expect(api.getQuickloginOverview).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTime(1));
+    expect(container.textContent).toContain("暂时无法连接 Auth");
+    expect(container.textContent).toContain("仍显示上次结果");
+    expect(container.textContent).not.toContain("已就绪");
+  });
+
+  it("reconnects only on an explicit device action and reloads afterwards", async () => {
+    const revoked = deviceSnapshot();
+    revoked.authorization.state = "revoked";
+    api.getQuickloginPreference.mockResolvedValue({ eligible: true, masterEnabled: true });
+    api.getQuickloginOverview.mockResolvedValue(overview([revoked]));
+    api.reconnectQuickloginDevice.mockResolvedValue(undefined);
+    const container = await renderUi(createElement(QuickloginSettings, { currentDeviceHint: "device-a" }));
+    expect(api.reconnectQuickloginDevice).not.toHaveBeenCalled();
+    await click(button(container, "重新连接"));
+    expect(api.reconnectQuickloginDevice).toHaveBeenCalledWith("device-a");
+    expect(api.getQuickloginOverview).toHaveBeenCalledTimes(2);
   });
 
   it("ignores a superseded StrictMode load that resolves last", async () => {
@@ -213,10 +261,10 @@ describe("QuickLogin settings", () => {
     api.getQuickloginPreference
       .mockReturnValueOnce(first.promise)
       .mockReturnValueOnce(second.promise);
-    api.listQuickloginDevices.mockResolvedValue({
+    api.getQuickloginOverview.mockResolvedValue({
       ...DEVICE_LIST,
       deviceLimit: 1,
-      devices: [{ ...DEVICE_LIST.devices[0], deviceName: "最新 Chrome" }],
+      devices: [{ ...DEVICE_LIST.devices[0], identity: { ...DEVICE_LIST.devices[0].identity, deviceName: "最新 Chrome" } }],
     });
     const container = await renderUi(createElement(
       StrictMode,
@@ -258,7 +306,7 @@ describe("QuickLogin settings", () => {
     });
     await settleUi();
 
-    expect(api.listQuickloginDevices).not.toHaveBeenCalled();
+    expect(api.getQuickloginOverview).not.toHaveBeenCalled();
   });
 
   it("uses one action mutex so a master save blocks device revoke", async () => {
@@ -268,7 +316,7 @@ describe("QuickLogin settings", () => {
       deviceLimit: 1,
       used: 0,
     });
-    api.listQuickloginDevices.mockResolvedValue({ ...DEVICE_LIST, deviceLimit: 1 });
+    api.getQuickloginOverview.mockResolvedValue({ ...DEVICE_LIST, deviceLimit: 1 });
     const pending = deferred<{
       eligible: true;
       masterEnabled: boolean;
@@ -294,4 +342,86 @@ describe("QuickLogin settings", () => {
     });
     await settleUi();
   });
+});
+
+it("preserves an enabled master preference when the first overview fails", async () => {
+  api.getQuickloginPreference.mockResolvedValue({ eligible: true, masterEnabled: true });
+  api.getQuickloginOverview.mockRejectedValue(new Error("offline"));
+  const container = await renderUi(createElement(QuickloginSettings));
+  expect(container.querySelector('[role="switch"]')?.getAttribute("aria-checked")).toBe("true");
+});
+
+it("does not present a contract mismatch as a missing binding or expose machine error codes", async () => {
+  api.getQuickloginPreference.mockResolvedValue({ eligible: true, masterEnabled: true });
+  api.getQuickloginOverview.mockRejectedValue(Object.assign(new Error("CONTRACT_INVALID"), { code: "CONTRACT_INVALID" }));
+  const container = await renderUi(createElement(QuickloginSettings));
+  expect(container.textContent).toContain("状态格式暂时无法识别");
+  expect(container.textContent).not.toContain("尚未绑定");
+  expect(container.textContent).not.toContain("CONTRACT_INVALID");
+});
+
+it("updates the reported plugin version live and withdraws ready when refresh fails", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+  const device = deviceSnapshot();
+  const now = Date.now();
+  device.reportedLocal = {
+    reportEpoch: "epoch-a", clientReportSeq: 1, cookieState: "applied", receivedAt: now,
+    verificationAge: 0, acknowledgedAt: now, enabledIntent: true, mode: "automatic", schoolAccess: "unverified",
+    client: { extensionVersion: "0.2.0", buildId: "build-a", browserVersion: "140.0.1", installationId: "installation-a" },
+    receipt: { deviceId: "device-a", generation: 2, bindingEpoch: 1, credentialRevision: 1, sessionVersion: 2, exportId: "export-a", result: "applied", verifiedAt: now },
+  };
+  api.getQuickloginPreference.mockResolvedValue({ eligible: true, masterEnabled: true });
+  api.getQuickloginOverview.mockResolvedValueOnce(overview())
+    .mockResolvedValueOnce(overview([device])).mockRejectedValue(new Error("offline"));
+  const container = await renderUi(createElement(QuickloginSettings));
+  expect(container.textContent).not.toContain("已就绪");
+  await act(async () => vi.advanceTimersByTime(30_000));
+  expect(container.textContent).toContain("已就绪");
+  expect(container.textContent).toContain("插件 0.2.0 · 最近联系");
+  expect(container.textContent).not.toContain("Chrome 140.0.1");
+  await act(async () => vi.advanceTimersByTime(30_000));
+  expect(container.textContent).toContain("暂时无法连接 Auth");
+  expect(container.textContent).not.toContain("已就绪");
+  expect(container.querySelector(".text-green-700")).toBeNull();
+});
+
+it("ignores an older overview arriving after a focus refresh", async () => {
+  const old = deferred<Overview>();
+  const next = deviceSnapshot();
+  next.identity.deviceName = "更新后的设备";
+  api.getQuickloginPreference.mockResolvedValue({ eligible: true, masterEnabled: true });
+  api.getQuickloginOverview.mockReturnValueOnce(old.promise).mockResolvedValueOnce(overview([next]));
+  const container = await renderUi(createElement(QuickloginSettings));
+  await act(async () => window.dispatchEvent(new Event("focus")));
+  expect(container.textContent).toContain("更新后的设备");
+  old.resolve(overview());
+  await settleUi();
+  expect(container.textContent).toContain("更新后的设备");
+  expect(container.textContent).not.toContain("宿舍 Chrome");
+});
+
+
+it("offers reconnect for the explicitly hinted active device without adding it to other rows", async () => {
+  const second = deviceSnapshot();
+  second.identity = { ...second.identity, deviceId: "device-b", deviceName: "教室 Chrome" };
+  api.getQuickloginPreference.mockResolvedValue({ eligible: true, masterEnabled: true });
+  api.getQuickloginOverview.mockResolvedValue(overview([deviceSnapshot(), second]));
+  api.reconnectQuickloginDevice.mockResolvedValue(undefined);
+  const container = await renderUi(createElement(QuickloginSettings, {
+    currentDeviceHint: "device-a", reconnectDeviceHint: "device-a",
+  }));
+  const rows = [...container.querySelectorAll("li")];
+  expect(rows[0].textContent).toContain("重新连接");
+  expect(rows[1].textContent).not.toContain("重新连接");
+  expect(api.reconnectQuickloginDevice).not.toHaveBeenCalled();
+  await click(button(rows[0], "重新连接"));
+  expect(api.reconnectQuickloginDevice).toHaveBeenCalledWith("device-a");
+  expect(api.getQuickloginOverview).toHaveBeenCalledTimes(2);
+});
+
+it("keeps a normally opened active-device row free of reconnect controls", async () => {
+  api.getQuickloginPreference.mockResolvedValue({ eligible: true, masterEnabled: true });
+  api.getQuickloginOverview.mockResolvedValue(overview());
+  const container = await renderUi(createElement(QuickloginSettings, { currentDeviceHint: "device-a" }));
+  expect(container.textContent).not.toContain("重新连接");
 });

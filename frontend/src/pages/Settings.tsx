@@ -1,5 +1,5 @@
 import { useState, ReactNode, useEffect, useRef, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { authClient } from "../lib/auth-client";
 import {
   deleteBinding,
@@ -413,7 +413,7 @@ function CquBindingSection() {
 
             {/* Session status row */}
             <div className="flex items-center justify-between px-4 py-3">
-              <span className="text-sm text-gray-500">会话状态</span>
+              <span className="text-sm text-gray-500">Auth 服务端会话</span>
               <span
                 className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${badgeClasses[sessionBadge.variant].pill}`}
               >
@@ -505,6 +505,14 @@ function CquBindingSection() {
 }
 
 export default function Settings() {
+  const location = useLocation();
+  const search = new URLSearchParams(location.search);
+  const cquAction = search.get("cqu");
+  const currentDeviceHint = search.get("quickloginDevice") ?? undefined;
+  const reconnectDeviceHint = search.get("quickloginReconnect") === "1" ? currentDeviceHint : undefined;
+  const recovery = cquAction === "bind" ? { to: "/cqu/bind", label: "绑定学校账号" }
+    : cquAction === "repair" ? { to: "/cqu/bind?repair=1", label: "更新学校密码" }
+    : cquAction === "verify" ? { to: "/cqu/bind?repair=1", label: "完成学校验证" } : null;
   const { data: session, refetch: refetchSession } = authClient.useSession();
   const user = session?.user as { email?: string; name?: string; createdAt?: string; twoFactorEnabled?: boolean } | undefined;
 
@@ -528,13 +536,13 @@ export default function Settings() {
           </SettingsGroup>
 
           <SettingsGroup label="CQU 集成">
+            {recovery && <Link data-cqu-action to={recovery.to} className="inline-flex min-h-11 items-center rounded-lg bg-blue-600 px-4 text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">{recovery.label}</Link>}
             {/* CQU 绑定 */}
             <CquBindingSection />
 
             <QuickloginSettings
-              currentDeviceHint={
-                new URLSearchParams(window.location.search).get("quickloginDevice") ?? undefined
-              }
+              currentDeviceHint={currentDeviceHint}
+              reconnectDeviceHint={reconnectDeviceHint}
             />
           </SettingsGroup>
         </div>

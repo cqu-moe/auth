@@ -91,6 +91,168 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cqu/quicklogin/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /api/v1/cqu/quicklogin/capabilities */
+        get: operations["get_api_v1_cqu_quicklogin_capabilities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        /** OPTIONS /api/v1/cqu/quicklogin/capabilities */
+        options: operations["options_api_v1_cqu_quicklogin_capabilities"];
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cqu/quicklogin/registrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /api/v1/cqu/quicklogin/registrations */
+        post: operations["post_api_v1_cqu_quicklogin_registrations"];
+        delete?: never;
+        /** OPTIONS /api/v1/cqu/quicklogin/registrations */
+        options: operations["options_api_v1_cqu_quicklogin_registrations"];
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cqu/quicklogin/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /api/v1/cqu/quicklogin/overview */
+        get: operations["get_api_v1_cqu_quicklogin_overview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        /** OPTIONS /api/v1/cqu/quicklogin/overview */
+        options: operations["options_api_v1_cqu_quicklogin_overview"];
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cqu/quicklogin/devices/{id}/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /api/v1/cqu/quicklogin/devices/:id/reconcile */
+        post: operations["post_api_v1_cqu_quicklogin_devices_id_reconcile"];
+        delete?: never;
+        /** OPTIONS /api/v1/cqu/quicklogin/devices/:id/reconcile */
+        options: operations["options_api_v1_cqu_quicklogin_devices_id_reconcile"];
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cqu/quicklogin/devices/{id}/operations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /api/v1/cqu/quicklogin/devices/:id/operations */
+        post: operations["post_api_v1_cqu_quicklogin_devices_id_operations"];
+        delete?: never;
+        /** OPTIONS /api/v1/cqu/quicklogin/devices/:id/operations */
+        options: operations["options_api_v1_cqu_quicklogin_devices_id_operations"];
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cqu/quicklogin/devices/{id}/operations/{operationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /api/v1/cqu/quicklogin/devices/:id/operations/:operationId */
+        get: operations["get_api_v1_cqu_quicklogin_devices_id_operations_operationId"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        /** OPTIONS /api/v1/cqu/quicklogin/devices/:id/operations/:operationId */
+        options: operations["options_api_v1_cqu_quicklogin_devices_id_operations_operationId"];
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cqu/quicklogin/devices/{id}/exports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /api/v1/cqu/quicklogin/devices/:id/exports */
+        post: operations["post_api_v1_cqu_quicklogin_devices_id_exports"];
+        delete?: never;
+        /** OPTIONS /api/v1/cqu/quicklogin/devices/:id/exports */
+        options: operations["options_api_v1_cqu_quicklogin_devices_id_exports"];
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cqu/quicklogin/devices/{id}/receipts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /api/v1/cqu/quicklogin/devices/:id/receipts */
+        post: operations["post_api_v1_cqu_quicklogin_devices_id_receipts"];
+        delete?: never;
+        /** OPTIONS /api/v1/cqu/quicklogin/devices/:id/receipts */
+        options: operations["options_api_v1_cqu_quicklogin_devices_id_receipts"];
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cqu/quicklogin/devices/{id}/resume-ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /api/v1/cqu/quicklogin/devices/:id/resume-ticket */
+        post: operations["post_api_v1_cqu_quicklogin_devices_id_resume_ticket"];
+        delete?: never;
+        /** OPTIONS /api/v1/cqu/quicklogin/devices/:id/resume-ticket */
+        options: operations["options_api_v1_cqu_quicklogin_devices_id_resume_ticket"];
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cqu/quicklogin/devices": {
         parameters: {
             query?: never;
@@ -2330,6 +2492,299 @@ export interface components {
             enable_end_session?: boolean;
             disabled?: boolean;
         };
+        QuickloginV3Capabilities: {
+            /** @constant */
+            protocolVersion: 3;
+            supportedProtocolVersions: number[];
+            minExtensionVersion: string;
+            serverBuild: string;
+            features: {
+                reconcile: boolean;
+                operations: boolean;
+                receipts: boolean;
+                overview: boolean;
+            };
+        };
+        QuickloginV3RegistrationRequest: {
+            /** @constant */
+            protocolVersion: 3;
+            requestId: string;
+            registrationId: string;
+            client: components["schemas"]["QuickloginV3ClientMetadata"];
+            deviceName: string;
+            deviceId?: string;
+            resumeTicket?: string;
+        };
+        QuickloginV3RegistrationResponse: {
+            deviceId: string;
+            snapshot: components["schemas"]["QuickloginV3DeviceSnapshot"];
+        };
+        QuickloginV3ReconcileRequest: {
+            /** @constant */
+            protocolVersion: 3;
+            requestId: string;
+            client: components["schemas"]["QuickloginV3ClientMetadata"];
+            observed: components["schemas"]["QuickloginV3ObservedVersions"] | null;
+            reportEpoch: string;
+            clientReportSeq: number;
+            local: components["schemas"]["QuickloginV3LocalReport"];
+        };
+        QuickloginV3ReconcileResponse: {
+            snapshot: components["schemas"]["QuickloginV3DeviceSnapshot"];
+            receiptAck: components["schemas"]["QuickloginV3ReceiptAck"] | null;
+        };
+        QuickloginV3OperationRequest: {
+            /** @constant */
+            protocolVersion: 3;
+            requestId: string;
+            command: components["schemas"]["QuickloginV3OperationCommand"];
+            idempotencyKey: string;
+            expected: components["schemas"]["QuickloginV3VersionTuple"];
+            enabled?: boolean;
+        };
+        QuickloginV3OperationResponse: {
+            operation: components["schemas"]["QuickloginV3Operation"];
+            snapshot: components["schemas"]["QuickloginV3DeviceSnapshot"];
+        };
+        QuickloginV3ExportRequest: {
+            /** @constant */
+            protocolVersion: 3;
+            requestId: string;
+            expected: components["schemas"]["QuickloginV3VersionTuple"];
+        };
+        QuickloginV3ExportEnvelope: components["schemas"]["QuickloginV3VersionTuple"] & {
+            /** @constant */
+            protocolVersion: 3;
+            exportId: string;
+            createdAt: number;
+            applyBefore: number;
+            cookies: components["schemas"]["QuickloginV3SsoCookie"][];
+        };
+        QuickloginV3ReceiptRequest: {
+            /** @constant */
+            protocolVersion: 3;
+            requestId: string;
+            reportEpoch: string;
+            clientReportSeq: number;
+            receipt: components["schemas"]["QuickloginV3Receipt"];
+        };
+        QuickloginV3ReceiptAck: {
+            accepted: boolean;
+            exportId: string | null;
+            acceptedTuple: components["schemas"]["QuickloginV3VersionTuple"] | null;
+            reportEpoch: string;
+            clientReportSeq: number;
+            receivedAt: number;
+            reasonCode: components["schemas"]["QuickloginV3ReasonCode"] | null;
+            snapshot: components["schemas"]["QuickloginV3DeviceSnapshot"];
+        };
+        QuickloginV3Overview: {
+            binding: components["schemas"]["QuickloginV3BindingFacts"];
+            accountRevision: number;
+            masterEnabled: boolean;
+            deviceLimit: number;
+            used: number;
+            devices: components["schemas"]["QuickloginV3DeviceSnapshot"][];
+        };
+        QuickloginV3ApiProblem: {
+            type: string;
+            title: string;
+            status: number;
+            detail: string;
+            code: components["schemas"]["QuickloginV3ReasonCode"];
+            requestId: string;
+            retryAt: number | null;
+            action: components["schemas"]["QuickloginV3ActionCode"];
+        };
+        QuickloginV3ApiMeta: {
+            /** @constant */
+            protocolVersion: 3;
+            requestId: string;
+            serverTime: number;
+            serverBuild: string;
+        };
+        QuickloginV3ClientMetadata: {
+            extensionVersion: string;
+            buildId: string;
+            browserVersion: string;
+            installationId: string;
+        };
+        QuickloginV3DeviceSnapshot: {
+            snapshotId: string;
+            serverTime: number;
+            observedAt: number;
+            freshUntil: number;
+            identity: {
+                deviceId: string;
+                installationId: string | null;
+                deviceName: string | null;
+            };
+            presence: {
+                lastSeenAt: number | null;
+                lastIp: string | null;
+            };
+            versions: components["schemas"]["QuickloginV3VersionVector"];
+            authorization: {
+                state: components["schemas"]["QuickloginV3AuthorizationState"];
+                policy: components["schemas"]["QuickloginV3PolicyState"];
+                /** @enum {string|null} */
+                disabledReason: "user" | "quota_reduced" | null;
+                masterEnabled: boolean;
+                deviceEnabled: boolean;
+                deviceLimit: number;
+                used: number;
+            };
+            binding: components["schemas"]["QuickloginV3BindingFacts"];
+            cloud: components["schemas"]["QuickloginV3CloudFacts"];
+            reportedLocal: components["schemas"]["QuickloginV3ReportedLocal"] | null;
+            observation: components["schemas"]["QuickloginV3ObservationState"];
+            presentation: components["schemas"]["QuickloginV3Presentation"];
+            capabilities: {
+                canEnsure: boolean;
+                canRetry: boolean;
+                canExport: boolean;
+                canEnable: boolean;
+                canUseExistingSession: boolean;
+            };
+        };
+        QuickloginV3ObservedVersions: {
+            generation: number;
+            bindingEpoch: number | null;
+            credentialRevision: number | null;
+            sessionVersion: number;
+            deviceRevision: number;
+        };
+        QuickloginV3LocalReport: {
+            enabledIntent: boolean;
+            /** @enum {string} */
+            mode: "automatic" | "manual";
+            cookieState: components["schemas"]["QuickloginV3CookieState"];
+            receipt: components["schemas"]["QuickloginV3Receipt"] | null;
+            schoolAccess?: components["schemas"]["QuickloginV3SchoolAccess"];
+        };
+        /** @enum {string} */
+        QuickloginV3OperationCommand: "ensure_session" | "retry_session" | "set_enabled";
+        QuickloginV3VersionTuple: {
+            deviceId: string;
+            generation: number;
+            bindingEpoch: number;
+            credentialRevision: number;
+            sessionVersion: number;
+        };
+        QuickloginV3Operation: {
+            operationId: string;
+            command: components["schemas"]["QuickloginV3OperationCommand"];
+            versions: components["schemas"]["QuickloginV3VersionTuple"];
+            state: components["schemas"]["QuickloginV3OperationState"];
+            stage: components["schemas"]["QuickloginV3OperationStage"] | null;
+            attempt: number;
+            createdAt: number;
+            startedAt: number | null;
+            deadlineAt: number | null;
+            completedAt: number | null;
+            retryAt: number | null;
+            resultCode: components["schemas"]["QuickloginV3ReasonCode"] | null;
+            cancelReason: components["schemas"]["QuickloginV3ReasonCode"] | null;
+        };
+        QuickloginV3SsoCookie: {
+            name: string;
+            value: string;
+            /** @enum {string} */
+            domain: "sso.cqu.edu.cn" | ".sso.cqu.edu.cn";
+            path: string;
+            secure: boolean;
+            httpOnly: boolean;
+            /** @enum {string} */
+            sameSite: "Strict" | "Lax" | "None";
+            expires: number;
+        };
+        QuickloginV3Receipt: components["schemas"]["QuickloginV3VersionTuple"] & {
+            exportId: string | null;
+            /** @enum {string} */
+            result: "applied" | "foreign" | "permission_denied" | "write_failed" | "missing" | "manual";
+            verifiedAt: number | null;
+        };
+        /** @enum {string} */
+        QuickloginV3ReasonCode: "AUTH_RECONNECT_REQUIRED" | "DEVICE_REVOKED" | "MASTER_DISABLED" | "DEVICE_DISABLED" | "QUOTA_BLOCKED" | "SERVICE_PAUSED" | "BINDING_UNBOUND" | "BINDING_UPDATING" | "BINDING_CHANGED" | "CREDENTIALS_REJECTED" | "INTERACTION_REQUIRED" | "STALE_SNAPSHOT" | "SESSION_CHANGED" | "RECONCILING" | "RATE_LIMITED" | "VERIFICATION_COOLDOWN" | "SCHOOL_UNREACHABLE" | "WAF_CHALLENGE" | "OTP_SEND_FAILED" | "OTP_TIMEOUT" | "CONTAINER_UNAVAILABLE" | "INTERNAL_STATE_UNAVAILABLE" | "LOCAL_PERMISSION_DENIED" | "LOCAL_COOKIE_CONFLICT" | "LOCAL_WRITE_FAILED" | "PROTOCOL_UNSUPPORTED" | "CLIENT_UPDATE_REQUIRED" | "CONTRACT_INVALID" | "UNKNOWN_SERVER_ERROR" | "IDEMPOTENCY_CONFLICT" | "INVALID_REQUEST" | "FORBIDDEN" | "BLOCKED_UNKNOWN" | "OPERATION_CANCELLED" | "OPERATION_TIMEOUT";
+        QuickloginV3BindingFacts: {
+            state: components["schemas"]["QuickloginV3BindingState"];
+            credentialsState: components["schemas"]["QuickloginV3CredentialsState"];
+            evidenceAt: number | null;
+            /** @enum {string} */
+            evidenceKind: "first_factor_success" | "password_rejected" | "session_reuse" | "none";
+            evidenceCredentialRevision: number | null;
+            bindingTransitionId: string | null;
+        };
+        /** @enum {string} */
+        QuickloginV3ActionCode: "none" | "connect_auth" | "update_extension" | "open_auth" | "enable_device" | "manage_devices" | "resume_automatic" | "switch_to_quicklogin" | "reconcile" | "bind_school" | "update_password" | "complete_verification" | "retry_session" | "fix_permissions" | "retry_local" | "confirm_receipt" | "disable";
+        QuickloginV3VersionVector: {
+            generation: number;
+            bindingEpoch: number | null;
+            credentialRevision: number | null;
+            sessionVersion: number;
+            accountRevision: number;
+            deviceRevision: number;
+            bindingRevision: number | null;
+        };
+        /** @enum {string} */
+        QuickloginV3AuthorizationState: "disconnected" | "authorizing" | "authorized" | "refreshing_token" | "reconnect_required" | "revoked";
+        /** @enum {string} */
+        QuickloginV3PolicyState: "enabled" | "master_off" | "device_off" | "quota_blocked" | "service_paused";
+        QuickloginV3CloudFacts: {
+            state: components["schemas"]["QuickloginV3CloudState"];
+            operationId: string | null;
+            stage: components["schemas"]["QuickloginV3OperationStage"] | null;
+            loginAt: number | null;
+            lastValidatedAt: number | null;
+            usableUntil: number | null;
+            retryAt: number | null;
+            reasonCode: components["schemas"]["QuickloginV3ReasonCode"] | null;
+            deadlineAt: number | null;
+        };
+        QuickloginV3ReportedLocal: {
+            reportEpoch: string;
+            clientReportSeq: number;
+            cookieState: components["schemas"]["QuickloginV3CookieState"];
+            receipt: components["schemas"]["QuickloginV3Receipt"] | null;
+            receivedAt: number;
+            verificationAge: number | null;
+            acknowledgedAt: number | null;
+            enabledIntent: boolean;
+            /** @enum {string} */
+            mode: "automatic" | "manual";
+            schoolAccess: components["schemas"]["QuickloginV3SchoolAccess"];
+            client: components["schemas"]["QuickloginV3ClientMetadata"] | null;
+        };
+        /** @enum {string} */
+        QuickloginV3ObservationState: "fresh" | "checking" | "stale" | "unreachable";
+        QuickloginV3Presentation: {
+            statusCode: components["schemas"]["QuickloginV3StatusCode"];
+            title: string;
+            detail: string | null;
+            reasonCode: components["schemas"]["QuickloginV3ReasonCode"] | null;
+            actionCode: components["schemas"]["QuickloginV3ActionCode"];
+            actionTarget: components["schemas"]["QuickloginV3ActionTarget"];
+            nextCheckAt: number | null;
+            freshUntil: number | null;
+        };
+        /** @enum {string} */
+        QuickloginV3CookieState: "unknown" | "missing" | "applying" | "applied" | "foreign" | "manual" | "permission_denied" | "write_failed";
+        /** @enum {string} */
+        QuickloginV3SchoolAccess: "unverified" | "accepted" | "login_form_seen";
+        /** @enum {string} */
+        QuickloginV3OperationState: "queued" | "running" | "succeeded" | "retry_wait" | "blocked" | "cancelled";
+        /** @enum {string} */
+        QuickloginV3OperationStage: "waiting_capacity" | "waiting_verification_lease" | "launching_browser" | "authenticating" | "waiting_verification" | "validating_session" | "saving_session";
+        /** @enum {string} */
+        QuickloginV3BindingState: "unbound" | "updating" | "bound" | "unknown";
+        /** @enum {string} */
+        QuickloginV3CredentialsState: "unknown" | "verified" | "rejected" | "interaction_required";
+        /** @enum {string} */
+        QuickloginV3CloudState: "absent" | "queued" | "logging_in" | "ready" | "refreshing" | "retry_wait" | "blocked" | "expired" | "paused" | "revoked";
+        /** @enum {string} */
+        QuickloginV3StatusCode: "disabled" | "disconnecting" | "revoked" | "disconnected" | "authorizing" | "reconnect_required" | "update_required" | "service_upgrading" | "master_off" | "device_off" | "quota_blocked" | "service_paused" | "manual" | "foreign" | "unreachable" | "checking" | "unbound" | "binding_updating" | "credentials_rejected" | "interaction_required" | "preparing" | "refreshing" | "retry_wait" | "syncing" | "permission_denied" | "write_failed" | "pending_ack" | "usable_credentials_rejected" | "usable_retry_wait" | "ready" | "unknown";
+        /** @enum {string|null} */
+        QuickloginV3ActionTarget: "/settings" | "/settings?quicklogin=1" | "/settings?cqu=bind" | "/settings?cqu=repair" | "/settings?cqu=verify" | null;
         QuickloginNativeError: {
             error: {
                 /** @enum {string} */
@@ -2858,6 +3313,1073 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
+        };
+    };
+    get_api_v1_cqu_quicklogin_capabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Protocol v3 success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["QuickloginV3Capabilities"];
+                        meta: components["schemas"]["QuickloginV3ApiMeta"];
+                    };
+                };
+            };
+            /** @description Protocol v3 problem */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+        };
+    };
+    options_api_v1_cqu_quicklogin_capabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Allowed fixed extension Origin */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Origin rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+        };
+    };
+    post_api_v1_cqu_quicklogin_registrations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuickloginV3RegistrationRequest"];
+            };
+        };
+        responses: {
+            /** @description Protocol v3 success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["QuickloginV3RegistrationResponse"];
+                        meta: components["schemas"]["QuickloginV3ApiMeta"];
+                    };
+                };
+            };
+            /** @description Protocol v3 problem */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+        };
+    };
+    options_api_v1_cqu_quicklogin_registrations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Allowed fixed extension Origin */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Origin rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+        };
+    };
+    get_api_v1_cqu_quicklogin_overview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Protocol v3 success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["QuickloginV3Overview"];
+                        meta: components["schemas"]["QuickloginV3ApiMeta"];
+                    };
+                };
+            };
+            /** @description Protocol v3 problem */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+        };
+    };
+    options_api_v1_cqu_quicklogin_overview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Allowed fixed extension Origin */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Origin rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+        };
+    };
+    post_api_v1_cqu_quicklogin_devices_id_reconcile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuickloginV3ReconcileRequest"];
+            };
+        };
+        responses: {
+            /** @description Protocol v3 success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["QuickloginV3ReconcileResponse"];
+                        meta: components["schemas"]["QuickloginV3ApiMeta"];
+                    };
+                };
+            };
+            /** @description Protocol v3 problem */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+        };
+    };
+    options_api_v1_cqu_quicklogin_devices_id_reconcile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Allowed fixed extension Origin */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Origin rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+        };
+    };
+    post_api_v1_cqu_quicklogin_devices_id_operations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuickloginV3OperationRequest"];
+            };
+        };
+        responses: {
+            /** @description Protocol v3 success */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["QuickloginV3OperationResponse"];
+                        meta: components["schemas"]["QuickloginV3ApiMeta"];
+                    };
+                };
+            };
+            /** @description Protocol v3 problem */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+        };
+    };
+    options_api_v1_cqu_quicklogin_devices_id_operations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Allowed fixed extension Origin */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Origin rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+        };
+    };
+    get_api_v1_cqu_quicklogin_devices_id_operations_operationId: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                operationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Protocol v3 success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["QuickloginV3OperationResponse"];
+                        meta: components["schemas"]["QuickloginV3ApiMeta"];
+                    };
+                };
+            };
+            /** @description Protocol v3 problem */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+        };
+    };
+    options_api_v1_cqu_quicklogin_devices_id_operations_operationId: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                operationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Allowed fixed extension Origin */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Origin rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+        };
+    };
+    post_api_v1_cqu_quicklogin_devices_id_exports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuickloginV3ExportRequest"];
+            };
+        };
+        responses: {
+            /** @description Protocol v3 success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["QuickloginV3ExportEnvelope"];
+                        meta: components["schemas"]["QuickloginV3ApiMeta"];
+                    };
+                };
+            };
+            /** @description Protocol v3 problem */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+        };
+    };
+    options_api_v1_cqu_quicklogin_devices_id_exports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Allowed fixed extension Origin */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Origin rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+        };
+    };
+    post_api_v1_cqu_quicklogin_devices_id_receipts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuickloginV3ReceiptRequest"];
+            };
+        };
+        responses: {
+            /** @description Protocol v3 success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["QuickloginV3ReceiptAck"];
+                        meta: components["schemas"]["QuickloginV3ApiMeta"];
+                    };
+                };
+            };
+            /** @description Protocol v3 problem */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+        };
+    };
+    options_api_v1_cqu_quicklogin_devices_id_receipts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Allowed fixed extension Origin */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Origin rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+        };
+    };
+    post_api_v1_cqu_quicklogin_devices_id_resume_ticket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Protocol v3 success */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            resumeTicket: string;
+                            deviceId: string;
+                            expiresAt: number;
+                        };
+                        meta: components["schemas"]["QuickloginV3ApiMeta"];
+                    };
+                };
+            };
+            /** @description Protocol v3 problem */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            426: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+            /** @description Protocol v3 problem */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
+                };
+            };
+        };
+    };
+    options_api_v1_cqu_quicklogin_devices_id_resume_ticket: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Allowed fixed extension Origin */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Origin rejected */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickloginV3ApiProblem"];
                 };
             };
         };

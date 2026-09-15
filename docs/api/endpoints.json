@@ -51,6 +51,132 @@
   {
     "host": "auth.cqu.moe",
     "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/capabilities",
+    "operationId": "options_api_v1_cqu_quicklogin_capabilities",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/registrations",
+    "operationId": "options_api_v1_cqu_quicklogin_registrations",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/overview",
+    "operationId": "options_api_v1_cqu_quicklogin_overview",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/reconcile",
+    "operationId": "options_api_v1_cqu_quicklogin_devices_id_reconcile",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/operations",
+    "operationId": "options_api_v1_cqu_quicklogin_devices_id_operations",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/operations/{operationId}",
+    "operationId": "options_api_v1_cqu_quicklogin_devices_id_operations_operationId",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/exports",
+    "operationId": "options_api_v1_cqu_quicklogin_devices_id_exports",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/receipts",
+    "operationId": "options_api_v1_cqu_quicklogin_devices_id_receipts",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "OPTIONS",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/resume-ticket",
+    "operationId": "options_api_v1_cqu_quicklogin_devices_id_resume_ticket",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/cqu/quicklogin/capabilities",
+    "operationId": "get_api_v1_cqu_quicklogin_capabilities",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/registrations",
+    "operationId": "post_api_v1_cqu_quicklogin_registrations",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/resume-ticket",
+    "operationId": "post_api_v1_cqu_quicklogin_devices_id_resume_ticket",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/cqu/quicklogin/overview",
+    "operationId": "get_api_v1_cqu_quicklogin_overview",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/reconcile",
+    "operationId": "post_api_v1_cqu_quicklogin_devices_id_reconcile",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/operations",
+    "operationId": "post_api_v1_cqu_quicklogin_devices_id_operations",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/operations/{operationId}",
+    "operationId": "get_api_v1_cqu_quicklogin_devices_id_operations_operationId",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/exports",
+    "operationId": "post_api_v1_cqu_quicklogin_devices_id_exports",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/cqu/quicklogin/devices/{id}/receipts",
+    "operationId": "post_api_v1_cqu_quicklogin_devices_id_receipts",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "OPTIONS",
     "path": "/api/v1/cqu/quicklogin/devices",
     "operationId": "options_api_v1_cqu_quicklogin_devices",
     "kind": "canonical"

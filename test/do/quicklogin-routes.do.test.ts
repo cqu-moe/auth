@@ -278,3 +278,31 @@ describe("quicklogin device HTTP", () => {
     expect(offUnknown.headers.get("content-type")).toContain("json");
   });
 });
+
+describe('QuickLogin v3 HTTP contracts', () => {
+ it('serves capabilities and registers the existing bearer device with a parsed v3 snapshot', async () => {
+  const { parseApiResponse, parseCapabilities, parseRegistrationResponse, parseReconcileResponse } = await import('../../src/services/quicklogin/protocol-v3');
+  const capabilities = await SELF.fetch('http://localhost:8787/api/v1/cqu/quicklogin/capabilities', { headers: { Origin: env.QUICKLOGIN_EXTENSION_ORIGIN } });
+  expect(capabilities.status).toBe(200);
+  expect(parseApiResponse(await capabilities.json(), parseCapabilities).data.supportedProtocolVersions).toEqual([2,3]);
+  const fixture = await createOAuthFixture(env), install = await authorizeOfficialInstall(fixture, { websiteSession: fixture.websiteSession });
+  const authorization = install.request().headers.get('authorization')!;
+  const client = { installationId:'http-install', extensionVersion:'0.2.0', buildId:'test', browserVersion:'152' };
+  const request = { protocolVersion:3, requestId:'http-r', registrationId:'http-reg', client, deviceName:'HTTP Chrome' };
+  const registered = await SELF.fetch('http://localhost:8787/api/v1/cqu/quicklogin/registrations',{method:'POST',headers:extensionHeaders(authorization),body:JSON.stringify(request)});
+  expect(registered.status).toBe(200);
+  const data = parseApiResponse(await registered.json(),parseRegistrationResponse).data;
+  const replay = await SELF.fetch('http://localhost:8787/api/v1/cqu/quicklogin/registrations',{method:'POST',headers:extensionHeaders(authorization),body:JSON.stringify(request)});
+  expect(parseApiResponse(await replay.json(),parseRegistrationResponse).data.deviceId).toBe(data.deviceId);
+  const reconciled=await SELF.fetch(`http://localhost:8787/api/v1/cqu/quicklogin/devices/${data.deviceId}/reconcile`,{method:'POST',headers:extensionHeaders(authorization),body:JSON.stringify({protocolVersion:3,requestId:'http-sync',client,observed:null,reportEpoch:'http-epoch',clientReportSeq:1,local:{enabledIntent:true,mode:'automatic',cookieState:'missing',receipt:null}})});
+  expect(reconciled.status).toBe(200);
+  expect(parseApiResponse(await reconciled.json(),parseReconcileResponse).data.snapshot.identity.installationId).toBe('http-install');
+ });
+ it('enforces Origin on v3 routes and exposes structured protocol failures',async()=>{
+  const response=await SELF.fetch('http://localhost:8787/api/v1/cqu/quicklogin/registrations',{method:'POST',headers:{Origin:'https://evil.example','Content-Type':'application/json'},body:'{}'});
+  expect(response.status).toBe(403); expect(await response.json()).toMatchObject({code:'FORBIDDEN',action:'reconcile',retryAt:null});
+  const ticket=await SELF.fetch('http://localhost:8787/api/v1/cqu/quicklogin/devices/any/resume-ticket',{method:'POST',headers:{Origin:env.QUICKLOGIN_EXTENSION_ORIGIN}});
+  expect(ticket.status).toBe(403);
+  expect(ticket.headers.get('access-control-allow-origin')).toBeNull();
+ });
+});

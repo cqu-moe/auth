@@ -1517,7 +1517,7 @@ describe("persistent browser route records", () => {
     expect(routeAfterRun).toBeUndefined();
   });
 
-  it("repair login reuses only the same account's prior browser state", async () => {
+  it("credential repair validates in a clean context while preserving the prior committed state", async () => {
     const stub = freshStub("repair-seed-state");
     const previousState = validStorageState();
     await seedSession(stub, {
@@ -1545,7 +1545,7 @@ describe("persistent browser route records", () => {
     });
 
     expect(runBodies).toHaveLength(1);
-    expect(runBodies[0].seedState).toEqual(previousState);
+    expect(runBodies[0].seedState).toBeUndefined();
     expect((await readState(stub))?.storageState).toEqual(previousState);
   });
 

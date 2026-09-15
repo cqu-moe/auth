@@ -101,6 +101,14 @@ export function buildAuthPolicy(operations: readonly HttpOperation[]): AuthPolic
         policy = "bearer";
       } else if (path.includes("/cqu/binding")) {
         policy = "session-or-bearer";
+      } else if (path.endsWith("/cqu/quicklogin/capabilities")) {
+        policy = "public";
+      } else if (path.endsWith("/cqu/quicklogin/registrations")) {
+        policy = "bearer";
+      } else if (path.endsWith("/cqu/quicklogin/overview") || path.endsWith("/resume-ticket")) {
+        policy = "session";
+      } else if (/\/cqu\/quicklogin\/devices\/:id\/operations\/:operationId$/.test(path)) {
+        policy = "bearer";
       } else if (path.endsWith("/cqu/quicklogin")) {
         policy = "session";
       } else if (/\/cqu\/quicklogin\/devices(?:\/|$)/.test(path)) {

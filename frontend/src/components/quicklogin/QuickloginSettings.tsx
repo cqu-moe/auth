@@ -2,39 +2,49 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getQuickloginPreference,
   isDeviceQuickloginPreference,
-  listQuickloginDevices,
+  getQuickloginOverview,
   revokeQuickloginDevice,
+  reconnectQuickloginDevice,
   setQuickloginMasterEnabled,
-  type DeviceListData,
   type QuickloginPreference,
 } from "../../lib/api/quicklogin";
+import type { Overview } from "../../lib/api/quicklogin-protocol.generated";
+import { ApiError } from "../../lib/api/http";
 import SettingsCard from "../SettingsCard";
 import DeviceList from "./DeviceList";
 
-export default function QuickloginSettings({ currentDeviceHint }: {
+export default function QuickloginSettings({ currentDeviceHint, reconnectDeviceHint }: {
   currentDeviceHint?: string;
+  reconnectDeviceHint?: string;
 }) {
   const [preference, setPreference] = useState<QuickloginPreference | null>(null);
-  const [data, setData] = useState<DeviceListData | null>(null);
-  const dataRef = useRef<DeviceListData | null>(null);
+  const [data, setData] = useState<Overview | null>(null);
+  const dataRef = useRef<Overview | null>(null);
+  const requestAbortRef = useRef<AbortController | null>(null);
+  const [unreachable, setUnreachable] = useState(false);
   const requestGenerationRef = useRef(0);
   const lifecycleGenerationRef = useRef(0);
   const actionLockRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [action, setAction] = useState<
     | { kind: "toggle" }
-    | { kind: "revoke"; deviceId: string }
+    | { kind: "revoke" | "reconnect"; deviceId: string }
     | null
   >(null);
   const [error, setError] = useState("");
 
   const load = useCallback(async (signal?: AbortSignal) => {
+    requestAbortRef.current?.abort();
+    const controller = new AbortController();
+    requestAbortRef.current = controller;
+    signal?.addEventListener("abort", () => controller.abort(), { once: true });
+    if (signal?.aborted) controller.abort();
     const generation = ++requestGenerationRef.current;
     const isCurrent = () =>
-      requestGenerationRef.current === generation && !signal?.aborted;
+      requestGenerationRef.current === generation && !controller.signal.aborted;
     setLoading(true);
     try {
-      const nextPreference = await getQuickloginPreference(signal);
+      const nextPreference = await getQuickloginPreference(controller.signal);
       if (!isCurrent()) return;
       setPreference(nextPreference);
       if (!nextPreference.eligible) {
@@ -50,19 +60,23 @@ export default function QuickloginSettings({ currentDeviceHint }: {
         return;
       }
       try {
-        const nextData = await listQuickloginDevices(signal);
+        const nextData = await getQuickloginOverview(controller.signal);
         if (!isCurrent()) return;
         dataRef.current = nextData;
         setData(nextData);
+        setUnreachable(false);
         setError("");
-      } catch {
+      } catch (error) {
         if (!isCurrent()) return;
-        setError(dataRef.current
+        setUnreachable(true);
+        const invalidContract = error instanceof Error && "code" in error && error.code === "CONTRACT_INVALID";
+        setError(invalidContract ? "状态格式暂时无法识别，请稍后重新检查。" : dataRef.current
           ? "无法刷新设备列表，仍显示上次结果。"
           : "无法读取快捷登录设备，请检查网络后重试。");
       }
     } catch {
       if (!isCurrent()) return;
+      setUnreachable(true);
       setError("无法检查快捷登录状态，请检查网络后重试。");
     } finally {
       if (isCurrent()) setLoading(false);
@@ -70,6 +84,7 @@ export default function QuickloginSettings({ currentDeviceHint }: {
   }, []);
 
   const invalidateLifecycle = useCallback(() => {
+    requestAbortRef.current?.abort();
     ++requestGenerationRef.current;
     ++lifecycleGenerationRef.current;
   }, []);
@@ -77,19 +92,51 @@ export default function QuickloginSettings({ currentDeviceHint }: {
   useEffect(() => {
     ++lifecycleGenerationRef.current;
     const controller = new AbortController();
-    void load(controller.signal);
+    if (document.visibilityState === "visible") void load(controller.signal);
     return () => {
       controller.abort();
       invalidateLifecycle();
     };
   }, [invalidateLifecycle, load]);
 
+  const pollingMs = data?.devices.some((device) =>
+    ["queued", "logging_in", "refreshing"].includes(device.cloud.state)
+  ) ? 5_000 : 30_000;
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const refresh = () => {
+      if (document.visibilityState === "visible" && !actionLockRef.current) void load();
+    };
+    const schedule = () => {
+      clearInterval(timer);
+      if (document.visibilityState === "visible") timer = setInterval(refresh, pollingMs);
+    };
+    const visibilityChanged = () => {
+      requestAbortRef.current?.abort();
+      ++requestGenerationRef.current;
+      schedule();
+      refresh();
+    };
+    schedule();
+    document.addEventListener("visibilitychange", visibilityChanged);
+    window.addEventListener("focus", refresh);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", visibilityChanged);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [load, pollingMs]);
+
   const enabled = data?.masterEnabled ??
-    (preference && "enabled" in preference ? preference.enabled : false);
+    (preference && "masterEnabled" in preference ? preference.masterEnabled
+      : preference && "enabled" in preference ? preference.enabled : false);
 
   const toggleMaster = async () => {
     if (!preference?.eligible || actionLockRef.current) return;
     actionLockRef.current = true;
+    requestAbortRef.current?.abort();
+    ++requestGenerationRef.current;
     const lifecycle = lifecycleGenerationRef.current;
     setAction({ kind: "toggle" });
     setError("");
@@ -110,6 +157,8 @@ export default function QuickloginSettings({ currentDeviceHint }: {
   const remove = async (deviceId: string) => {
     if (actionLockRef.current) return;
     actionLockRef.current = true;
+    requestAbortRef.current?.abort();
+    ++requestGenerationRef.current;
     const lifecycle = lifecycleGenerationRef.current;
     setAction({ kind: "revoke", deviceId });
     setError("");
@@ -120,6 +169,29 @@ export default function QuickloginSettings({ currentDeviceHint }: {
     } catch {
       if (lifecycleGenerationRef.current === lifecycle) {
         setError("设备退出失败，请稍后重试。");
+      }
+    } finally {
+      actionLockRef.current = false;
+      if (lifecycleGenerationRef.current === lifecycle) setAction(null);
+    }
+  };
+
+  const reconnect = async (deviceId: string) => {
+    if (actionLockRef.current) return;
+    actionLockRef.current = true;
+    requestAbortRef.current?.abort();
+    ++requestGenerationRef.current;
+    const lifecycle = lifecycleGenerationRef.current;
+    setAction({ kind: "reconnect", deviceId });
+    setError("");
+    try {
+      await reconnectQuickloginDevice(deviceId);
+      if (lifecycleGenerationRef.current === lifecycle) await load();
+    } catch (error) {
+      if (lifecycleGenerationRef.current === lifecycle) {
+        const retryAt = error instanceof ApiError ? error.body?.retryAt : null;
+        setError((error instanceof Error ? error.message : "重新连接失败，请重试。") +
+          (typeof retryAt === "number" ? ` 可在 ${new Date(retryAt).toLocaleString("zh-CN")} 后重试。` : ""));
       }
     } finally {
       actionLockRef.current = false;
@@ -170,7 +242,12 @@ export default function QuickloginSettings({ currentDeviceHint }: {
       ) : data ? (
         <DeviceList
           data={data}
+          unreachable={unreachable}
+          onReconnect={reconnect}
+          reconnectingDeviceId={action?.kind === "reconnect" ? action.deviceId : null}
+          onRefresh={load}
           currentDeviceHint={currentDeviceHint}
+          reconnectDeviceHint={reconnectDeviceHint}
           busy={action !== null}
           revokingDeviceId={action?.kind === "revoke" ? action.deviceId : null}
           onRevoke={remove}

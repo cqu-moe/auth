@@ -1,3 +1,4 @@
+import type { ReasonCode } from "./protocol-v3";
 export const PROTOCOL_VERSION = 1 as const;
 export const HEARTBEAT_MS = 5 * 60_000;
 export const ONLINE_MS = 10 * 60_000;
@@ -157,6 +158,12 @@ export interface StoredDeviceSession {
   transientStartedAt: EpochMs | null;
   fastRetries: number;
   nextAttemptAt: EpochMs | null;
+  credentialRevision?: number;
+  deviceRevision?: number;
+  reasonCode?: ReasonCode | null;
+  operationId?: string;
+  leaseToken?: string;
+  legacyRecoveryEpoch?: number;
   pendingKeepaliveMint?: {
     operationId: string;
     mintedAt: EpochMs;
@@ -166,6 +173,8 @@ export interface StoredDeviceSession {
 }
 
 export interface DeviceLoginRequest {
+  seedState?: string | null;
+  operationId?: string;
   ownerUserId: string;
   deviceId: DeviceId;
   generation: number;
@@ -177,12 +186,13 @@ export type DeviceLoginResult =
       storageState: string;
       loginAt: EpochMs;
       bindingEpoch: number;
+      credentialRevision?: number;
     }
   | {
       kind: "needs_reauth";
       reason: "unbound" | "credentials_rejected" | "interactive_required";
     }
-  | { kind: "temporary_unavailable"; retryAfterMs: number }
+  | { kind: "temporary_unavailable"; retryAfterMs: number; reasonCode?: ReasonCode }
   | { kind: "cancelled" };
 
 export interface HeartbeatInput {

@@ -1,3 +1,4 @@
+import { QUICKLOGIN_V3_SCHEMAS } from "./quicklogin-v3.generated";
 import type { HttpOperation } from "../operations";
 import { z } from "@hono/zod-openapi";
 import { QuickloginPreferenceBody } from "../v1/cqu-quicklogin.schema";
@@ -47,6 +48,7 @@ const ERROR_CODES = [
 ];
 
 export const QUICKLOGIN_SCHEMAS: Record<string, Schema> = {
+  ...QUICKLOGIN_V3_SCHEMAS,
   QuickloginNativeError: {
     type: "object",
     additionalProperties: false,
@@ -327,6 +329,22 @@ export function quickloginOperationContract(
   operation: HttpOperation
 ): Record<string, unknown> | undefined {
   const { method, path } = operation;
+  const v3 = path.match(/^\/api\/v1\/cqu\/quicklogin\/(capabilities|registrations|overview|devices\/:id\/(reconcile|operations(?:\/:operationId)?|exports|receipts|resume-ticket))$/);
+  if (v3) {
+    const suffix = v3[1]!, kind = v3[2] ?? suffix;
+    if (method === "OPTIONS") return { security: [], responses: { "204": { description: "Allowed fixed extension Origin" }, "403": { description: "Origin rejected", ...json(ref("QuickloginV3ApiProblem")) } } };
+    const mappings: Record<string, [string | null, string]> = {
+      capabilities: [null, "Capabilities"], registrations: ["RegistrationRequest", "RegistrationResponse"], overview: [null, "Overview"], reconcile: ["ReconcileRequest", "ReconcileResponse"], operations: ["OperationRequest", "OperationResponse"], "operations/:operationId": [null, "OperationResponse"], exports: ["ExportRequest", "ExportEnvelope"], receipts: ["ReceiptRequest", "ReceiptAck"], "resume-ticket": [null, "ResumeTicket"],
+    };
+    const [input, output] = mappings[kind]!;
+    const responseSchema = output === "ResumeTicket" ? { type: "object", required: ["resumeTicket", "deviceId", "expiresAt"], properties: { resumeTicket: { type: "string" }, deviceId: { type: "string" }, expiresAt: { type: "number" } } } : ref(`QuickloginV3${output}`);
+    const response = { type: "object", required: ["data", "meta"], properties: { data: responseSchema, meta: ref("QuickloginV3ApiMeta") } };
+    const errors = Object.fromEntries([401,403,409,422,426,429,503].map(status => [String(status), { description: "Protocol v3 problem", ...json(ref("QuickloginV3ApiProblem")) }]));
+    return { security: kind === "capabilities" ? [] : kind === "overview" || kind === "resume-ticket" ? [{ cookieAuth: [] }] : [{ bearerAuth: [] }],
+      "x-runtime-origin": kind === "overview" || kind === "resume-ticket" ? "same-origin-website" : "configured-extension-origin",
+      ...(input ? { requestBody: requestBody(`QuickloginV3${input}`) } : {}),
+      responses: { [kind === "operations" ? "202" : "200"]: { description: "Protocol v3 success", ...json(response) }, ...errors } };
+  }
   const isDevice = /^\/api\/(?:v1\/)?cqu\/quicklogin\/devices(?:\/|$)/.test(path);
   if (isDevice) {
     const suffix = path.replace(/^\/api\/(?:v1\/)?cqu\/quicklogin\/devices/, "");

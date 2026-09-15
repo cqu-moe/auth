@@ -1,3 +1,4 @@
+import { validBindingSnapshot, type BindingSnapshot } from "./binding-snapshot";
 import type { Env } from "../../types";
 import type {
   DeviceLoginRequest,
@@ -29,8 +30,20 @@ export class QuickloginLoginBrokerClient {
       this.env.CQU_SESSION.idFromName(userId)
     );
     const response = await stub.fetch("https://cqu-session/quicklogin-binding");
-    if (!response.ok) return { bound: false, epoch: 0 };
-    return response.json<{ bound: boolean; epoch: number }>();
+    if (!response.ok) throw new Error("INTERNAL_STATE_UNAVAILABLE");
+    const binding = await response.json<{ bound: boolean; epoch: number }>().catch(() => null);
+    if (!binding || typeof binding.bound !== "boolean" || !Number.isSafeInteger(binding.epoch) || binding.epoch < 0) {
+      throw new Error("INTERNAL_STATE_UNAVAILABLE");
+    }
+    return binding;
+  }
+
+  async getBindingSnapshot(userId: string): Promise<BindingSnapshot> {
+    const stub = this.env.CQU_SESSION.get(this.env.CQU_SESSION.idFromName(userId));
+    const response = await stub.fetch("https://cqu-session/quicklogin-binding-v3");
+    const data: unknown = await response.json().catch(() => null);
+    if (!response.ok || !validBindingSnapshot(data)) throw new Error("INTERNAL_STATE_UNAVAILABLE");
+    return data;
   }
 
   async recordQuickloginKeepaliveMint(

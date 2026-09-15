@@ -56,6 +56,24 @@ describe("HTTP operation inventory", () => {
       .sort();
 
     expect(quicklogin).toEqual([
+      "GET /api/v1/cqu/quicklogin/capabilities",
+      "GET /api/v1/cqu/quicklogin/overview",
+      "GET /api/v1/cqu/quicklogin/devices/:id/operations/:operationId",
+      "POST /api/v1/cqu/quicklogin/registrations",
+      "POST /api/v1/cqu/quicklogin/devices/:id/reconcile",
+      "POST /api/v1/cqu/quicklogin/devices/:id/operations",
+      "POST /api/v1/cqu/quicklogin/devices/:id/exports",
+      "POST /api/v1/cqu/quicklogin/devices/:id/receipts",
+      "POST /api/v1/cqu/quicklogin/devices/:id/resume-ticket",
+      "OPTIONS /api/v1/cqu/quicklogin/capabilities",
+      "OPTIONS /api/v1/cqu/quicklogin/registrations",
+      "OPTIONS /api/v1/cqu/quicklogin/overview",
+      "OPTIONS /api/v1/cqu/quicklogin/devices/:id/reconcile",
+      "OPTIONS /api/v1/cqu/quicklogin/devices/:id/operations",
+      "OPTIONS /api/v1/cqu/quicklogin/devices/:id/operations/:operationId",
+      "OPTIONS /api/v1/cqu/quicklogin/devices/:id/exports",
+      "OPTIONS /api/v1/cqu/quicklogin/devices/:id/receipts",
+      "OPTIONS /api/v1/cqu/quicklogin/devices/:id/resume-ticket",
       "DELETE /api/v1/cqu/quicklogin/devices/:id",
       "GET /api/v1/cqu/quicklogin",
       "GET /api/v1/cqu/quicklogin/devices",
@@ -74,7 +92,7 @@ describe("HTTP operation inventory", () => {
       "PUT /api/v1/admin/users/:id/quicklogin-quota",
       "PUT /api/v1/cqu/quicklogin",
       "PUT /api/v1/cqu/quicklogin/devices/:id",
-    ]);
+    ].sort());
     expect(quicklogin.some((entry) => entry.includes("*"))).toBe(false);
     expect(quicklogin).not.toContain("GET /api/cqu/quicklogin");
   });

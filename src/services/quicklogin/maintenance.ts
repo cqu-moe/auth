@@ -43,6 +43,7 @@ export function nextDeviceAction(
   }
   if (state.nextAttemptAt !== null && state.nextAttemptAt > now) return "wait";
   if (state.state === "needs_reauth") return "wait";
+  if (state.operationId && (state.state === "refreshing" || state.state === "preparing")) return "login";
   if (!state.storageState || state.loginAt === null) return "login";
   if (now - state.loginAt >= RELOGIN_MS) return "login";
   if (state.lastKeepAliveAt === null || now - state.lastKeepAliveAt >= KEEPALIVE_MS) {

@@ -1,0 +1,239 @@
+/** Canonical QuickLogin v3 wire contract. Generated consumers must not edit it. */
+export const PROTOCOL_VERSION = 3 as const;
+export const MAX_JSON_BYTES = 64 * 1024;
+export const MAX_COOKIE_BYTES = 256 * 1024;
+export const MAX_EXPORT_BYTES = MAX_COOKIE_BYTES;
+/** Exact Cookie readback expires after two normal five-minute reconciliation periods. */
+export const LOCAL_VERIFICATION_FRESH_MS = 10 * 60_000;
+export type AuthorizationState = 'disconnected' | 'authorizing' | 'authorized' | 'refreshing_token' | 'reconnect_required' | 'revoked';
+export type PolicyState = 'enabled' | 'master_off' | 'device_off' | 'quota_blocked' | 'service_paused';
+export type BindingState = 'unbound' | 'updating' | 'bound' | 'unknown';
+export type CredentialsState = 'unknown' | 'verified' | 'rejected' | 'interaction_required';
+export type CloudState = 'absent' | 'queued' | 'logging_in' | 'ready' | 'refreshing' | 'retry_wait' | 'blocked' | 'expired' | 'paused' | 'revoked';
+export type CookieState = 'unknown' | 'missing' | 'applying' | 'applied' | 'foreign' | 'manual' | 'permission_denied' | 'write_failed';
+export type ObservationState = 'fresh' | 'checking' | 'stale' | 'unreachable';
+export type SchoolAccess = 'unverified' | 'accepted' | 'login_form_seen';
+export const REASON_CODES = ['AUTH_RECONNECT_REQUIRED', 'DEVICE_REVOKED', 'MASTER_DISABLED', 'DEVICE_DISABLED', 'QUOTA_BLOCKED', 'SERVICE_PAUSED', 'BINDING_UNBOUND', 'BINDING_UPDATING', 'BINDING_CHANGED', 'CREDENTIALS_REJECTED', 'INTERACTION_REQUIRED', 'STALE_SNAPSHOT', 'SESSION_CHANGED', 'RECONCILING', 'RATE_LIMITED', 'VERIFICATION_COOLDOWN', 'SCHOOL_UNREACHABLE', 'WAF_CHALLENGE', 'OTP_SEND_FAILED', 'OTP_TIMEOUT', 'CONTAINER_UNAVAILABLE', 'INTERNAL_STATE_UNAVAILABLE', 'LOCAL_PERMISSION_DENIED', 'LOCAL_COOKIE_CONFLICT', 'LOCAL_WRITE_FAILED', 'PROTOCOL_UNSUPPORTED', 'CLIENT_UPDATE_REQUIRED', 'CONTRACT_INVALID', 'UNKNOWN_SERVER_ERROR', 'IDEMPOTENCY_CONFLICT', 'INVALID_REQUEST', 'FORBIDDEN', 'BLOCKED_UNKNOWN', 'OPERATION_CANCELLED', 'OPERATION_TIMEOUT'] as const;
+export type ReasonCode = typeof REASON_CODES[number];
+export const ACTION_CODES = ['none', 'connect_auth', 'update_extension', 'open_auth', 'enable_device', 'manage_devices', 'resume_automatic', 'switch_to_quicklogin', 'reconcile', 'bind_school', 'update_password', 'complete_verification', 'retry_session', 'fix_permissions', 'retry_local', 'confirm_receipt', 'disable'] as const;
+export type ActionCode = typeof ACTION_CODES[number];
+export type ActionTarget = '/settings' | '/settings?quicklogin=1' | '/settings?cqu=bind' | '/settings?cqu=repair' | '/settings?cqu=verify' | null;
+export const STATUS_CODES = ['disabled', 'disconnecting', 'revoked', 'disconnected', 'authorizing', 'reconnect_required', 'update_required', 'service_upgrading', 'master_off', 'device_off', 'quota_blocked', 'service_paused', 'manual', 'foreign', 'unreachable', 'checking', 'unbound', 'binding_updating', 'credentials_rejected', 'interaction_required', 'preparing', 'refreshing', 'retry_wait', 'syncing', 'permission_denied', 'write_failed', 'pending_ack', 'usable_credentials_rejected', 'usable_retry_wait', 'ready', 'unknown'] as const;
+export type StatusCode = typeof STATUS_CODES[number];
+export type OperationState = 'queued' | 'running' | 'succeeded' | 'retry_wait' | 'blocked' | 'cancelled';
+export type OperationStage = 'waiting_capacity' | 'waiting_verification_lease' | 'launching_browser' | 'authenticating' | 'waiting_verification' | 'validating_session' | 'saving_session';
+export type OperationCommand = 'ensure_session' | 'retry_session' | 'set_enabled';
+export interface VersionTuple { deviceId: string; generation: number; bindingEpoch: number; credentialRevision: number; sessionVersion: number }
+export interface VersionVector { generation: number; bindingEpoch: number | null; credentialRevision: number | null; sessionVersion: number; accountRevision: number; deviceRevision: number; bindingRevision: number | null }
+export interface ObservedVersions { generation: number; bindingEpoch: number | null; credentialRevision: number | null; sessionVersion: number; deviceRevision: number }
+export interface ClientMetadata { extensionVersion: string; buildId: string; browserVersion: string; installationId: string }
+export interface Receipt extends VersionTuple { exportId: string | null; result: 'applied' | 'foreign' | 'permission_denied' | 'write_failed' | 'missing' | 'manual'; verifiedAt: number | null }
+export interface LocalReport { enabledIntent: boolean; mode: 'automatic' | 'manual'; cookieState: CookieState; receipt: Receipt | null; schoolAccess?: SchoolAccess }
+export interface ReconcileRequest { protocolVersion: 3; requestId: string; client: ClientMetadata; observed: ObservedVersions | null; reportEpoch: string; clientReportSeq: number; local: LocalReport }
+export interface RegistrationRequest { protocolVersion: 3; requestId: string; registrationId: string; client: ClientMetadata; deviceName: string; deviceId?: string; resumeTicket?: string }
+export interface OperationRequest { protocolVersion: 3; requestId: string; command: OperationCommand; idempotencyKey: string; expected: VersionTuple; enabled?: boolean }
+export interface ExportRequest { protocolVersion: 3; requestId: string; expected: VersionTuple }
+export interface ReceiptRequest { protocolVersion: 3; requestId: string; reportEpoch: string; clientReportSeq: number; receipt: Receipt }
+/** Lease tokens remain internal to the DO; they are never part of the public operation. */
+export interface Operation { operationId: string; command: OperationCommand; versions: VersionTuple; state: OperationState; stage: OperationStage | null; attempt: number; createdAt: number; startedAt: number | null; deadlineAt: number | null; completedAt: number | null; retryAt: number | null; resultCode: ReasonCode | null; cancelReason: ReasonCode | null }
+export interface BindingFacts { state: BindingState; credentialsState: CredentialsState; evidenceAt: number | null; evidenceKind: 'first_factor_success' | 'password_rejected' | 'session_reuse' | 'none'; evidenceCredentialRevision: number | null; bindingTransitionId: string | null }
+export interface CloudFacts { state: CloudState; operationId: string | null; stage: OperationStage | null; loginAt: number | null; lastValidatedAt: number | null; usableUntil: number | null; retryAt: number | null; reasonCode: ReasonCode | null; deadlineAt: number | null }
+export interface ReportedLocal { reportEpoch: string; clientReportSeq: number; cookieState: CookieState; receipt: Receipt | null; receivedAt: number; verificationAge: number | null; acknowledgedAt: number | null; enabledIntent: boolean; mode: 'automatic' | 'manual'; schoolAccess: SchoolAccess; client: ClientMetadata | null }
+export interface Presentation { statusCode: StatusCode; title: string; detail: string | null; reasonCode: ReasonCode | null; actionCode: ActionCode; actionTarget: ActionTarget; nextCheckAt: number | null; freshUntil: number | null }
+export interface DeviceSnapshot {
+  snapshotId: string; serverTime: number; observedAt: number; freshUntil: number;
+  identity: { deviceId: string; installationId: string | null; deviceName: string | null };
+  presence: { lastSeenAt: number | null; lastIp: string | null };
+  versions: VersionVector;
+  authorization: { state: AuthorizationState; policy: PolicyState; disabledReason: 'user' | 'quota_reduced' | null; masterEnabled: boolean; deviceEnabled: boolean; deviceLimit: number; used: number };
+  binding: BindingFacts; cloud: CloudFacts; reportedLocal: ReportedLocal | null;
+  observation: ObservationState; presentation: Presentation;
+  capabilities: { canEnsure: boolean; canRetry: boolean; canExport: boolean; canEnable: boolean; canUseExistingSession: boolean };
+}
+export interface LocalPresentation { enabledIntent?: boolean; disconnecting?: boolean; authorization?: AuthorizationState; protocolSupport?: 'supported' | 'client_update_required' | 'service_upgrading'; mode?: 'automatic' | 'manual'; cookieState?: CookieState; receipt?: Receipt | null; pendingAck?: boolean; observation?: ObservationState; schoolAccess?: SchoolAccess }
+export interface Capabilities { protocolVersion: 3; supportedProtocolVersions: number[]; minExtensionVersion: string; serverBuild: string; features: { reconcile: boolean; operations: boolean; receipts: boolean; overview: boolean } }
+export interface SsoCookie { name: string; value: string; domain: 'sso.cqu.edu.cn' | '.sso.cqu.edu.cn'; path: string; secure: boolean; httpOnly: boolean; sameSite: 'Strict' | 'Lax' | 'None'; expires: number }
+export interface ExportEnvelope extends VersionTuple { protocolVersion: 3; exportId: string; createdAt: number; applyBefore: number; cookies: SsoCookie[] }
+export interface ReceiptAck { accepted: boolean; exportId: string | null; acceptedTuple: VersionTuple | null; reportEpoch: string; clientReportSeq: number; receivedAt: number; reasonCode: ReasonCode | null; snapshot: DeviceSnapshot }
+export interface ReconcileResponse { snapshot: DeviceSnapshot; receiptAck: ReceiptAck | null }
+export interface OperationResponse { operation: Operation; snapshot: DeviceSnapshot }
+export interface RegistrationResponse { deviceId: string; snapshot: DeviceSnapshot }
+export interface Overview { binding: BindingFacts; accountRevision: number; masterEnabled: boolean; deviceLimit: number; used: number; devices: DeviceSnapshot[] }
+export interface ApiMeta { protocolVersion: 3; requestId: string; serverTime: number; serverBuild: string }
+export interface ApiResponse<T> { data: T; meta: ApiMeta }
+export interface ApiProblem { type: string; title: string; status: number; detail: string; code: ReasonCode; requestId: string; retryAt: number | null; action: ActionCode }
+export class ContractError extends Error { readonly code: ReasonCode; constructor(code: ReasonCode = 'CONTRACT_INVALID') { super(code); this.name = 'ContractError'; this.code = code; } }
+type Parser<T> = (value: unknown) => T;
+function invalid(): never { throw new ContractError(); }
+function record(value: unknown): Record<string, unknown> { if (typeof value !== 'object' || value === null || Array.isArray(value)) invalid(); return value as Record<string, unknown>; }
+function size(value: unknown, limit = MAX_JSON_BYTES): void { let json: string | undefined; try { json = JSON.stringify(value); } catch { invalid(); } if (json === undefined || new TextEncoder().encode(json).byteLength > limit) invalid(); }
+// eslint-disable-next-line no-control-regex -- Wire text must reject control characters.
+function text(value: unknown, max = 512): string { if (typeof value !== 'string' || value.length === 0 || value.length > max || /[\u0000-\u001f\u007f]/.test(value)) invalid(); return value; }
+const identifier: Parser<string> = value => { const id = text(value, 256); if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(id)) invalid(); return id; };
+const integer: Parser<number> = value => { if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) invalid(); return value; };
+const boolean: Parser<boolean> = value => { if (typeof value !== 'boolean') invalid(); return value; };
+function oneOf<const T extends readonly (string | number)[]>(options: T): Parser<T[number]> { return value => { if (!options.includes(value as T[number])) invalid(); return value as T[number]; }; }
+function nullable<T>(parser: Parser<T>): Parser<T | null> { return value => value === null ? null : parser(value); }
+function optional<T>(parser: Parser<T>): Parser<T | undefined> { return value => value === undefined ? undefined : parser(value); }
+function list<T>(parser: Parser<T>, max: number): Parser<T[]> { return value => { if (!Array.isArray(value) || value.length > max) invalid(); return value.map(parser); }; }
+function object<T>(shape: { [K in keyof T]-?: Parser<T[K]> }): Parser<T> { return value => { const input = record(value); const result = {} as T; for (const key of Object.keys(shape) as (keyof T)[]) result[key] = shape[key](input[key as string]); return result; }; }
+function boundary<T>(parser: Parser<T>, limit = MAX_JSON_BYTES): Parser<T> { return value => { size(value, limit); return parser(value); }; }
+const protocol: Parser<3> = value => { if (value !== PROTOCOL_VERSION) throw new ContractError('PROTOCOL_UNSUPPORTED'); return PROTOCOL_VERSION; };
+const version: Parser<string> = value => { const v = text(value, 64); if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(v)) invalid(); return v; };
+const reason = oneOf(REASON_CODES);
+const action = oneOf(ACTION_CODES);
+const timestamp = nullable(integer);
+const authorizationState = oneOf(['disconnected', 'authorizing', 'authorized', 'refreshing_token', 'reconnect_required', 'revoked'] as const);
+const cookieState = oneOf(['unknown', 'missing', 'applying', 'applied', 'foreign', 'manual', 'permission_denied', 'write_failed'] as const);
+const observationState = oneOf(['fresh', 'checking', 'stale', 'unreachable'] as const);
+const mode = oneOf(['automatic', 'manual'] as const);
+const schoolAccess = oneOf(['unverified', 'accepted', 'login_form_seen'] as const);
+const stage = nullable(oneOf(['waiting_capacity', 'waiting_verification_lease', 'launching_browser', 'authenticating', 'waiting_verification', 'validating_session', 'saving_session'] as const));
+const command = oneOf(['ensure_session', 'retry_session', 'set_enabled'] as const);
+export const parseVersionTuple: Parser<VersionTuple> = boundary(object<VersionTuple>({ deviceId: identifier, generation: integer, bindingEpoch: integer, credentialRevision: integer, sessionVersion: integer }));
+export const parseVersionVector: Parser<VersionVector> = boundary(object<VersionVector>({ generation: integer, bindingEpoch: timestamp, credentialRevision: timestamp, sessionVersion: integer, accountRevision: integer, deviceRevision: integer, bindingRevision: timestamp }));
+export const parseClientMetadata: Parser<ClientMetadata> = boundary(object<ClientMetadata>({ extensionVersion: version, buildId: identifier, browserVersion: value => { const v = text(value, 64); if (!/^\d+(?:\.\d+){0,3}$/.test(v)) invalid(); return v; }, installationId: identifier }));
+export const parseObservedVersions: Parser<ObservedVersions> = boundary(object<ObservedVersions>({ generation: integer, bindingEpoch: timestamp, credentialRevision: timestamp, sessionVersion: integer, deviceRevision: integer }));
+export const parseReceipt: Parser<Receipt> = boundary(value => {
+  const v = object<Receipt>({ deviceId: identifier, generation: integer, bindingEpoch: integer, credentialRevision: integer, sessionVersion: integer, exportId: nullable(identifier), result: oneOf(['applied', 'foreign', 'permission_denied', 'write_failed', 'missing', 'manual'] as const), verifiedAt: timestamp })(value);
+  if (v.result === 'applied' && (v.exportId === null || v.verifiedAt === null)) invalid();
+  return v;
+});
+export const parseLocalReport: Parser<LocalReport> = boundary(object<LocalReport>({ enabledIntent: boolean, mode, cookieState, receipt: nullable(parseReceipt), schoolAccess: optional(schoolAccess) }));
+export const parseReconcileRequest: Parser<ReconcileRequest> = boundary(object<ReconcileRequest>({ protocolVersion: protocol, requestId: identifier, client: parseClientMetadata, observed: nullable(parseObservedVersions), reportEpoch: identifier, clientReportSeq: integer, local: parseLocalReport }));
+export const parseRegistrationRequest: Parser<RegistrationRequest> = boundary(object<RegistrationRequest>({ protocolVersion: protocol, requestId: identifier, registrationId: identifier, client: parseClientMetadata, deviceName: value => text(value, 120), deviceId: optional(identifier), resumeTicket: optional(value => text(value, 4096)) }));
+export const parseOperationRequest: Parser<OperationRequest> = boundary(value => {
+  const v = object<OperationRequest>({ protocolVersion: protocol, requestId: identifier, command, idempotencyKey: identifier, expected: parseVersionTuple, enabled: optional(boolean) })(value);
+  if ((v.command === 'set_enabled') !== (v.enabled !== undefined)) invalid();
+  return v;
+});
+export const parseExportRequest: Parser<ExportRequest> = boundary(object<ExportRequest>({ protocolVersion: protocol, requestId: identifier, expected: parseVersionTuple }));
+export const parseReceiptRequest: Parser<ReceiptRequest> = boundary(object<ReceiptRequest>({ protocolVersion: protocol, requestId: identifier, reportEpoch: identifier, clientReportSeq: integer, receipt: parseReceipt }));
+export const parseOperation: Parser<Operation> = boundary(value => {
+  const v = object<Operation>({ operationId: identifier, command, versions: parseVersionTuple, state: oneOf(['queued', 'running', 'succeeded', 'retry_wait', 'blocked', 'cancelled'] as const), stage, attempt: integer, createdAt: integer, startedAt: timestamp, deadlineAt: timestamp, completedAt: timestamp, retryAt: timestamp, resultCode: nullable(reason), cancelReason: nullable(reason) })(value);
+  if (v.startedAt !== null && v.startedAt < v.createdAt) invalid();
+  if (v.deadlineAt !== null && v.deadlineAt <= (v.startedAt ?? v.createdAt)) invalid();
+  if (v.completedAt !== null && v.completedAt < (v.startedAt ?? v.createdAt)) invalid();
+  if (v.state === 'running' && (v.startedAt === null || v.deadlineAt === null)) invalid();
+  if (v.state === 'retry_wait' && v.retryAt === null) invalid();
+  return v;
+});
+export const parseBindingFacts: Parser<BindingFacts> = boundary(value => {
+  const facts = object<BindingFacts>({ state: oneOf(['unbound', 'updating', 'bound', 'unknown'] as const), credentialsState: oneOf(['unknown', 'verified', 'rejected', 'interaction_required'] as const), evidenceAt: timestamp, evidenceKind: oneOf(['first_factor_success', 'password_rejected', 'session_reuse', 'none'] as const), evidenceCredentialRevision: timestamp, bindingTransitionId: nullable(identifier) })(value);
+  if (facts.credentialsState === 'verified' && facts.evidenceKind !== 'first_factor_success') invalid();
+  if (facts.credentialsState === 'rejected' && facts.evidenceKind !== 'password_rejected') invalid();
+  if (['verified', 'rejected', 'interaction_required'].includes(facts.credentialsState) && (facts.evidenceAt === null || facts.evidenceCredentialRevision === null)) invalid();
+  return facts;
+});
+export const parseCloudFacts: Parser<CloudFacts> = boundary(object<CloudFacts>({ state: oneOf(['absent', 'queued', 'logging_in', 'ready', 'refreshing', 'retry_wait', 'blocked', 'expired', 'paused', 'revoked'] as const), operationId: nullable(identifier), stage, loginAt: timestamp, lastValidatedAt: timestamp, usableUntil: timestamp, retryAt: timestamp, reasonCode: nullable(reason), deadlineAt: timestamp }));
+export const parseReportedLocal: Parser<ReportedLocal> = boundary(object<ReportedLocal>({ reportEpoch: identifier, clientReportSeq: integer, cookieState, receipt: nullable(parseReceipt), receivedAt: integer, verificationAge: timestamp, acknowledgedAt: timestamp, enabledIntent: boolean, mode, schoolAccess, client: nullable(parseClientMetadata) }));
+export const parsePresentation: Parser<Presentation> = boundary(object<Presentation>({ statusCode: oneOf(STATUS_CODES), title: value => text(value, 120), detail: nullable(value => text(value, 1024)), reasonCode: nullable(reason), actionCode: action, actionTarget: nullable(oneOf(['/settings', '/settings?quicklogin=1', '/settings?cqu=bind', '/settings?cqu=repair', '/settings?cqu=verify'] as const)), nextCheckAt: timestamp, freshUntil: timestamp }));
+const parseSnapshotShape = object<DeviceSnapshot>({
+  snapshotId: identifier, serverTime: integer, observedAt: integer, freshUntil: integer,
+  identity: object({ deviceId: identifier, installationId: nullable(identifier), deviceName: nullable(value => text(value, 120)) }),
+  presence: object({ lastSeenAt: timestamp, lastIp: nullable(value => text(value, 64)) }),
+  versions: parseVersionVector,
+  authorization: object({ state: authorizationState, policy: oneOf(['enabled', 'master_off', 'device_off', 'quota_blocked', 'service_paused'] as const), disabledReason: nullable(oneOf(['user', 'quota_reduced'] as const)), masterEnabled: boolean, deviceEnabled: boolean, deviceLimit: integer, used: integer }),
+  binding: parseBindingFacts, cloud: parseCloudFacts, reportedLocal: nullable(parseReportedLocal), observation: observationState, presentation: parsePresentation,
+  capabilities: object({ canEnsure: boolean, canRetry: boolean, canExport: boolean, canEnable: boolean, canUseExistingSession: boolean }),
+});
+export const parseDeviceSnapshot: Parser<DeviceSnapshot> = boundary(value => {
+  const s = parseSnapshotShape(value);
+  if (s.observedAt > s.serverTime || s.freshUntil < s.observedAt) invalid();
+  if (s.capabilities.canExport && (!tupleForSnapshot(s) || !cloudSessionUsable(s, s.serverTime) || s.binding.state !== 'bound' || s.authorization.state !== 'authorized' || s.authorization.policy !== 'enabled' || !s.authorization.masterEnabled || !s.authorization.deviceEnabled)) invalid();
+  if (s.presentation.statusCode === 'ready' && derivePresentation(s, {}, s.serverTime).statusCode !== 'ready') invalid();
+  return s;
+});
+export const parseCapabilities: Parser<Capabilities> = boundary(value => {
+  const v = object<Capabilities>({ protocolVersion: protocol, supportedProtocolVersions: list(integer, 16), minExtensionVersion: version, serverBuild: identifier, features: object({ reconcile: boolean, operations: boolean, receipts: boolean, overview: boolean }) })(value);
+  if (!v.supportedProtocolVersions.includes(PROTOCOL_VERSION)) throw new ContractError('PROTOCOL_UNSUPPORTED');
+  return v;
+});
+function parseCookie(value: unknown): SsoCookie {
+  const raw = record(value);
+  if (Object.keys(raw).some(key => key.toLowerCase().includes('partition'))) throw new ContractError('PROTOCOL_UNSUPPORTED');
+  // eslint-disable-next-line no-control-regex -- Cookie values must reject control characters.
+  const v = object<SsoCookie>({ name: value => { const n = text(value, 1024); if (/[;=\s]/.test(n)) invalid(); return n; }, value: value => { if (typeof value !== 'string' || /[\u0000-\u001f\u007f;]/.test(value)) invalid(); return value; }, domain: oneOf(['sso.cqu.edu.cn', '.sso.cqu.edu.cn'] as const), path: value => { const p = text(value, 2048); if (!p.startsWith('/')) invalid(); return p; }, secure: boolean, httpOnly: boolean, sameSite: oneOf(['Strict', 'Lax', 'None'] as const), expires: value => { if (typeof value !== 'number' || !Number.isFinite(value) || (value < 0 && value !== -1)) invalid(); return value; } })(raw);
+  if (v.sameSite === 'None' && !v.secure) invalid();
+  return v;
+}
+export const parseExportEnvelope: Parser<ExportEnvelope> = boundary(value => {
+  const v = object<ExportEnvelope>({ protocolVersion: protocol, deviceId: identifier, generation: integer, bindingEpoch: integer, credentialRevision: integer, sessionVersion: integer, exportId: identifier, createdAt: integer, applyBefore: integer, cookies: list(parseCookie, 64) })(value);
+  if (v.applyBefore <= v.createdAt || v.applyBefore - v.createdAt > 30_000) invalid();
+  const keys = new Set<string>();
+  for (const c of v.cookies) { const key = `${c.domain}\0${c.path}\0${c.name}`; if (keys.has(key) || (c.expires !== -1 && c.expires * 1000 <= v.createdAt)) invalid(); keys.add(key); }
+  if (!v.cookies.some(c => c.name === 'SOURCEID_TGC' && c.value.length > 0)) invalid();
+  size(v.cookies, MAX_COOKIE_BYTES);
+  return v;
+}, MAX_EXPORT_BYTES);
+export const parseReceiptAck: Parser<ReceiptAck> = boundary(value => {
+  const v = object<ReceiptAck>({ accepted: boolean, exportId: nullable(identifier), acceptedTuple: nullable(parseVersionTuple), reportEpoch: identifier, clientReportSeq: integer, receivedAt: integer, reasonCode: nullable(reason), snapshot: parseDeviceSnapshot })(value);
+  if (v.accepted && (v.acceptedTuple === null || !sameTuple(v.acceptedTuple, tupleForSnapshot(v.snapshot)) || v.reasonCode !== null)) invalid();
+  if (!v.accepted && v.reasonCode === null) invalid();
+  return v;
+});
+export const parseReconcileResponse: Parser<ReconcileResponse> = boundary(object<ReconcileResponse>({ snapshot: parseDeviceSnapshot, receiptAck: nullable(parseReceiptAck) }));
+export const parseOperationResponse: Parser<OperationResponse> = boundary(value => { const v = object<OperationResponse>({ operation: parseOperation, snapshot: parseDeviceSnapshot })(value); if (v.operation.versions.deviceId !== v.snapshot.identity.deviceId) invalid(); return v; });
+export const parseRegistrationResponse: Parser<RegistrationResponse> = boundary(value => { const v = object<RegistrationResponse>({ deviceId: identifier, snapshot: parseDeviceSnapshot })(value); if (v.deviceId !== v.snapshot.identity.deviceId) invalid(); return v; });
+export const parseOverview: Parser<Overview> = boundary(object<Overview>({ binding: parseBindingFacts, accountRevision: integer, masterEnabled: boolean, deviceLimit: integer, used: integer, devices: list(parseDeviceSnapshot, 100) }));
+export const parseApiMeta: Parser<ApiMeta> = boundary(object<ApiMeta>({ protocolVersion: protocol, requestId: identifier, serverTime: integer, serverBuild: identifier }));
+export function parseApiResponse<T>(value: unknown, parseData: Parser<T>): ApiResponse<T> { size(value, parseData === parseExportEnvelope ? MAX_EXPORT_BYTES : MAX_JSON_BYTES); const v = record(value); return { data: parseData(v.data), meta: parseApiMeta(v.meta) }; }
+export const parseApiProblem: Parser<ApiProblem> = boundary(object<ApiProblem>({ type: value => text(value, 512), title: value => text(value, 120), status: value => { const n = integer(value); if (n < 400 || n > 599) invalid(); return n; }, detail: value => text(value, 4096), code: reason, requestId: identifier, retryAt: timestamp, action }));
+export function sameTuple(a: VersionTuple | null, b: VersionTuple | null): boolean { return a !== null && b !== null && a.deviceId === b.deviceId && a.generation === b.generation && a.bindingEpoch === b.bindingEpoch && a.credentialRevision === b.credentialRevision && a.sessionVersion === b.sessionVersion; }
+export function tupleForSnapshot(s: DeviceSnapshot): VersionTuple | null { const v = s.versions; if (v.bindingEpoch === null || v.credentialRevision === null) return null; return { deviceId: s.identity.deviceId, generation: v.generation, bindingEpoch: v.bindingEpoch, credentialRevision: v.credentialRevision, sessionVersion: v.sessionVersion }; }
+export function cloudSessionUsable(s: DeviceSnapshot, now: number): boolean { return s.capabilities.canUseExistingSession && ['ready', 'refreshing', 'retry_wait'].includes(s.cloud.state) && s.cloud.lastValidatedAt !== null && s.cloud.lastValidatedAt <= now && s.cloud.usableUntil !== null && s.cloud.usableUntil > now; }
+const TITLES: Record<StatusCode, string> = { disabled: '已关闭', disconnecting: '正在退出', revoked: '此设备已退出', disconnected: '未连接 Auth', authorizing: '正在连接 Auth', reconnect_required: '需要重新连接 Auth', update_required: '请更新插件', service_upgrading: '服务正在升级', master_off: '快捷登录已暂停', device_off: '此设备已关闭', quota_blocked: '设备名额已满', service_paused: '快捷登录暂时不可用', manual: '手动登录中', foreign: '已有学校登录', unreachable: '暂时无法连接 Auth', checking: '正在检查', unbound: '尚未绑定学校账号', binding_updating: '正在更新学校登录', credentials_rejected: '学校密码需要更新', interaction_required: '需要完成学校验证', preparing: '正在准备学校登录', refreshing: '正在更新登录', retry_wait: '学校登录暂时不可用', syncing: '正在同步到浏览器', permission_denied: '浏览器权限不足', write_failed: '浏览器同步失败', pending_ack: '浏览器已同步，正在确认', usable_credentials_rejected: '当前可用，续期需处理', usable_retry_wait: '当前可用，正在重试续期', ready: '已就绪', unknown: '状态暂时无法确认' };
+const TARGETS: Partial<Record<ActionCode, ActionTarget>> = { open_auth: '/settings?quicklogin=1', manage_devices: '/settings?quicklogin=1', bind_school: '/settings?cqu=bind', update_password: '/settings?cqu=repair', complete_verification: '/settings?cqu=verify' };
+export function derivePresentation(snapshot: DeviceSnapshot | null, local: LocalPresentation = {}, now = Date.now()): Presentation {
+  const show = (statusCode: StatusCode, actionCode: ActionCode = 'none', reasonCode: ReasonCode | null = null, detail: string | null = null): Presentation => ({ statusCode, title: TITLES[statusCode], detail, reasonCode, actionCode, actionTarget: TARGETS[actionCode] ?? null, nextCheckAt: snapshot?.presentation.nextCheckAt ?? null, freshUntil: snapshot?.freshUntil ?? null });
+  if (local.disconnecting) return show('disconnecting');
+  const authorities = [snapshot?.authorization.state, local.authorization];
+  const auth = (['revoked', 'reconnect_required', 'disconnected', 'authorizing', 'refreshing_token', 'authorized'] as const).find(state => authorities.includes(state));
+  if (auth === 'revoked' || snapshot?.authorization.state === 'revoked' || snapshot?.cloud.state === 'revoked') return show('revoked', 'connect_auth', 'DEVICE_REVOKED');
+  if (auth === 'disconnected') return show('disconnected', 'connect_auth');
+  if (auth === 'reconnect_required') return show('reconnect_required', 'connect_auth', 'AUTH_RECONNECT_REQUIRED');
+  if ((local.enabledIntent ?? snapshot?.reportedLocal?.enabledIntent) === false) return show('disabled', 'enable_device');
+  if (auth === 'authorizing') return show('authorizing');
+  if (local.protocolSupport === 'client_update_required') return show('update_required', 'update_extension', 'CLIENT_UPDATE_REQUIRED');
+  if (local.protocolSupport === 'service_upgrading') return show('service_upgrading', 'reconcile', 'PROTOCOL_UNSUPPORTED');
+  if (!snapshot) return show('unknown', 'reconcile');
+  const s = snapshot, a = s.authorization, r = s.reportedLocal;
+  if (a.policy === 'master_off' || !a.masterEnabled) return show('master_off', 'open_auth', 'MASTER_DISABLED');
+  if (a.policy === 'quota_blocked') return show('quota_blocked', 'manage_devices', 'QUOTA_BLOCKED');
+  if (a.policy === 'device_off' || !a.deviceEnabled) return show('device_off', 'enable_device', 'DEVICE_DISABLED');
+  if (a.policy === 'service_paused') return show('service_paused', 'reconcile', 'SERVICE_PAUSED');
+  const currentCookie = local.cookieState ?? r?.cookieState ?? 'unknown';
+  if ((local.mode ?? r?.mode) === 'manual' || currentCookie === 'manual') return show('manual', 'resume_automatic');
+  if (currentCookie === 'foreign') return show('foreign', 'switch_to_quicklogin', 'LOCAL_COOKIE_CONFLICT');
+  const observations = [s.observation, local.observation ?? 'fresh'];
+  if (observations.includes('unreachable')) return show('unreachable', 'reconcile');
+  if (observations.some(state => state !== 'fresh') || s.freshUntil <= now || auth === 'refreshing_token') return show('checking', 'reconcile');
+  if (s.binding.state === 'unbound') return show('unbound', 'bind_school', 'BINDING_UNBOUND');
+  if (s.binding.state === 'updating' || s.binding.bindingTransitionId !== null) return show('binding_updating', 'none', 'BINDING_UPDATING');
+  if (s.binding.state !== 'bound' || !tupleForSnapshot(s) || auth !== 'authorized') return show('unknown', 'reconcile', 'INTERNAL_STATE_UNAVAILABLE');
+  const usable = cloudSessionUsable(s, now);
+  const currentEvidence = s.binding.evidenceCredentialRevision !== null && s.binding.evidenceCredentialRevision === s.versions.credentialRevision;
+  const rejected = currentEvidence && s.binding.credentialsState === 'rejected' && s.binding.evidenceKind === 'password_rejected' && s.binding.evidenceAt !== null;
+  const interactive = currentEvidence && s.binding.credentialsState === 'interaction_required';
+  if (!usable && rejected) return show('credentials_rejected', 'update_password', 'CREDENTIALS_REJECTED');
+  if (!usable && interactive) return show('interaction_required', 'complete_verification', 'INTERACTION_REQUIRED');
+  if (!usable && ['queued', 'logging_in', 'refreshing'].includes(s.cloud.state) && s.cloud.deadlineAt !== null && now > s.cloud.deadlineAt) return show('unknown', 'reconcile', 'OPERATION_TIMEOUT');
+  if (!usable && ['queued', 'logging_in'].includes(s.cloud.state)) return show('preparing');
+  if (!usable && s.cloud.state === 'refreshing') return show('refreshing');
+  if (!usable && s.cloud.state === 'retry_wait') return show('retry_wait', s.capabilities.canRetry && (s.cloud.retryAt === null || now >= s.cloud.retryAt) ? 'retry_session' : 'none', s.cloud.reasonCode, '系统会按允许的时间自动重试');
+  if (currentCookie === 'permission_denied') return show('permission_denied', 'fix_permissions', 'LOCAL_PERMISSION_DENIED');
+  if (currentCookie === 'write_failed') return show('write_failed', 'retry_local', 'LOCAL_WRITE_FAILED');
+  if (!usable) return show('unknown', s.capabilities.canEnsure ? 'retry_session' : 'reconcile', s.cloud.reasonCode);
+  if ((local.schoolAccess ?? r?.schoolAccess) === 'login_form_seen') return show('unknown', 'retry_session');
+  const appliedReceipt = local.receipt !== undefined ? local.receipt : r?.receipt ?? null;
+  if (currentCookie !== 'applied' || appliedReceipt?.result !== 'applied' || appliedReceipt.verifiedAt === null || !sameTuple(appliedReceipt, tupleForSnapshot(s))) return show('syncing');
+  const reportedAge = r?.verificationAge == null ? null : r.verificationAge + Math.max(0, now - r.receivedAt);
+  const reportFresh = reportedAge !== null && reportedAge < LOCAL_VERIFICATION_FRESH_MS;
+  const localAge = local.receipt === undefined ? null : now - appliedReceipt.verifiedAt;
+  if (local.receipt === undefined ? !reportFresh : localAge === null || localAge < 0 || localAge >= LOCAL_VERIFICATION_FRESH_MS) return show('checking', 'reconcile', 'STALE_SNAPSHOT');
+  if (local.pendingAck || !reportFresh || r?.acknowledgedAt == null || r.receipt?.result !== 'applied' || r.receipt.exportId !== appliedReceipt.exportId || !sameTuple(r.receipt, appliedReceipt)) return show('pending_ack', 'confirm_receipt');
+  if (rejected) return show('usable_credentials_rejected', 'update_password', 'CREDENTIALS_REJECTED');
+  if (interactive) return show('usable_credentials_rejected', 'complete_verification', 'INTERACTION_REQUIRED');
+  if (s.cloud.state === 'retry_wait' || s.cloud.state === 'refreshing') return show('usable_retry_wait', 'none', s.cloud.reasonCode);
+  return show('ready', 'disable');
+}

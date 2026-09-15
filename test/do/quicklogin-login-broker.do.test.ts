@@ -76,9 +76,7 @@ describe("quicklogin login broker", () => {
       .toMatchObject({ cookies: expect.any(Array) });
     expect(await readState(stub)).toEqual(before);
     expect(runBody).not.toBeNull();
-    expect((runBody as unknown as Record<string, unknown>).seedState).toEqual(
-      before?.storageState
-    );
+    expect((runBody as unknown as Record<string, unknown>).seedState).toBeUndefined();
     expect(await readStatus(stub)).toBe("active");
     expect(await readStorage(stub, "quickloginLogin:device-a")).toBeUndefined();
     expect(await readStorage(stub, "quickloginTransientFailures")).toBeUndefined();
@@ -247,4 +245,15 @@ describe("quicklogin login broker", () => {
       reason: "credentials_rejected",
     });
   });
+});
+
+it('does not reuse another v3 operation success when an explicit retry asks for a new login', async () => {
+ const stub = freshStub('quicklogin-operation-cache');
+ await seedSession(stub,{status:'active'});await seedCredentials(stub);
+ let runs=0;
+ spyBrowserFetch({'/health':health,'/code-permit':()=>Response.json({ok:true}),'/run':()=>{runs++;return Response.json({ok:true,state:freshDeviceState(`operation-${runs}`)});}});
+ const client=await broker(stub),base={ownerUserId:'u1',deviceId:'device-operation',generation:3};
+ expect((await client.quickloginLogin({...base,operationId:'operation-a'})).kind).toBe('success');
+ expect((await client.quickloginLogin({...base,operationId:'operation-b'})).kind).toBe('success');
+ expect(runs).toBe(2);
 });

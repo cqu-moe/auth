@@ -53,3 +53,8 @@ describe("nextQuickloginRetryDelayMs", () => {
     expect(nextQuickloginRetryDelayMs(now + minute, now)).toBe(minute);
   });
 });
+
+it('executes an explicit refresh even when the old session was recently validated', () => {
+ const state = { operationId:'explicit-command', state:'refreshing', generation:1, nextAttemptAt:null, storageState:'present', loginAt:Date.now(),lastKeepAliveAt:Date.now() } as any;
+ expect(nextDeviceAction(state,{allowed:true,generation:1,lastSeenAt:Date.now()} as any,Date.now())).toBe('login');
+});
