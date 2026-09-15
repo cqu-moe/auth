@@ -213,14 +213,19 @@ async def _wait_devtools_http(
     raise TimeoutError("Chrome DevTools endpoint did not start")
 
 
-async def _first_page_websocket(http: aiohttp.ClientSession, port: int) -> str:
-    async with http.get(f"http://127.0.0.1:{port}/json/list") as response:
-        response.raise_for_status()
-        targets = await response.json()
-    page = next((item for item in targets if item.get("type") == "page"), None)
-    if not page:
-        raise RuntimeError("Chrome did not expose a page target")
-    return page["webSocketDebuggerUrl"]
+async def _first_page_websocket(
+    http: aiohttp.ClientSession, port: int, timeout_s: float = 5
+) -> str:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        async with http.get(f"http://127.0.0.1:{port}/json/list") as response:
+            response.raise_for_status()
+            targets = await response.json()
+        page = next((item for item in targets if item.get("type") == "page"), None)
+        if page:
+            return page["webSocketDebuggerUrl"]
+        await asyncio.sleep(0.1)
+    raise TimeoutError("Chrome did not expose a page target")
 
 
 async def _set_seed_cookies(cdp: CdpSession, seed_state: dict | None) -> None:
@@ -441,7 +446,11 @@ async def run_login(
         await _wait_devtools_http(
             http, debug_port, browser_profile.BROWSER_LAUNCH_TIMEOUT_MS / 1000
         )
-        page_ws = await _first_page_websocket(http, debug_port)
+        page_ws = await _first_page_websocket(
+            http,
+            debug_port,
+            browser_profile.BROWSER_LAUNCH_TIMEOUT_MS / 1000,
+        )
         websocket = await http.ws_connect(page_ws, origin=None)
         cdp = CdpSession(websocket)
         await cdp.call("Page.enable")

@@ -113,3 +113,39 @@ def test_interaction_jitter_uses_the_requested_half_to_one_second_range():
 
     asyncio.run(cqu_login_cdp.interaction_jitter(uniform=uniform, sleep=sleep))
     assert seen == [0.75]
+
+
+def test_first_page_websocket_waits_until_chrome_exposes_a_page_target():
+    class FakeResponse:
+        def __init__(self, targets):
+            self.targets = targets
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        async def json(self):
+            return self.targets
+
+    class FakeHttp:
+        def __init__(self):
+            self.calls = 0
+
+        def get(self, _url):
+            self.calls += 1
+            targets = [] if self.calls == 1 else [{
+                "type": "page",
+                "webSocketDebuggerUrl": "ws://127.0.0.1/devtools/page/1",
+            }]
+            return FakeResponse(targets)
+
+    http = FakeHttp()
+    websocket = asyncio.run(cqu_login_cdp._first_page_websocket(http, 43123))
+
+    assert websocket == "ws://127.0.0.1/devtools/page/1"
+    assert http.calls == 2
