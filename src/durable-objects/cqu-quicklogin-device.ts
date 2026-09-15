@@ -360,7 +360,10 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     let staged = false;
     await this.ctx.storage.transaction(async (tx) => {
       const latest = await tx.get<StoredDeviceSession>(SESSION_KEY);
-      if (!latest || !sameTuple(sessionTuple(latest), sessionTuple(session)) || latest.operationId !== session.operationId || latest.leaseToken !== session.leaseToken || (latest.deviceRevision ?? 0) !== (session.deviceRevision ?? 0) || latest.state !== session.state || !quickloginDeviceModeEnabled(this.env)) return;
+      if (!latest || !sameTuple(sessionTuple(latest), sessionTuple(session)) ||
+          latest.operationId !== session.operationId || latest.leaseToken !== session.leaseToken ||
+          latest.state !== session.state || latest.pendingKeepaliveMint !== undefined ||
+          !quickloginDeviceModeEnabled(this.env)) return;
       await tx.put(SESSION_KEY, { ...latest, pendingKeepaliveMint: session.pendingKeepaliveMint });
       if (pendingStorageState === undefined) {
         await tx.delete(PENDING_KEEPALIVE_STATE_KEY);
@@ -399,7 +402,7 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       const current = await tx.get<StoredDeviceSession>(SESSION_KEY);
       if (!current || !sameTuple(sessionTuple(current), sessionTuple(session)) ||
           current.operationId !== session.operationId || current.leaseToken !== session.leaseToken ||
-          (current.deviceRevision ?? 0) !== (session.deviceRevision ?? 0) ||
+          current.state !== session.state ||
           current.pendingKeepaliveMint?.operationId !== pending.operationId ||
           current.state === "disabled" || current.state === "revoked" ||
           !quickloginDeviceModeEnabled(this.env)) return;

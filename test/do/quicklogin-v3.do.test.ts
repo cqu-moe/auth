@@ -276,3 +276,61 @@ it('starts a new automatic attempt after retry_wait without reopening the previo
  expect(recovered.session.sessionVersion).toBe(1);expect(recovered.session.leaseToken).toBeUndefined();
  expect((await t.call('v3_operation_read',{operationId:old.operationId})).result.state).toBe('retry_wait');
 });
+
+describe('keepalive survives observational updates', () => {
+ it.each([
+  ['browser', 'report'], ['browser', 'receipt'],
+  ['mint confirmation', 'report'], ['mint confirmation', 'receipt'],
+ ] as const)('commits after a %s wait overlaps a valid %s', async (phase, observation) => {
+  const now = Date.now() + 1_000_000;
+  vi.spyOn(Date, 'now').mockReturnValue(now);
+  const { spyBrowserFetch } = await import('./helpers');
+  const { DeviceV3Store } = await import('../../src/services/quicklogin/device-v3-store');
+  const t = await setup();
+  const browserState = (marker: string) => ({
+   ...validStorageState(),
+   cookies: validStorageState().cookies.map(c => ({ ...c, value: `${c.value}-${marker}`, secure: true, httpOnly: true, sameSite: 'Lax', expires: -1 })),
+  });
+  const oldState = browserState('before'), renewedState = browserState('renewed');
+  await runInDurableObject(t.stub, async (_, state) => {
+   const session: any = await state.storage.get('session');
+   await state.storage.put('session', { ...session, state:'ready', storageState:JSON.stringify(oldState), sessionVersion:1, loginAt:now, lastKeepAliveAt:now-60_000 });
+  });
+  const expected = { deviceId:t.device.deviceId, generation:t.authority.generation, bindingEpoch:0, credentialRevision:0, sessionVersion:1 };
+  const exported = (await t.call('v3_export', { expected })).result;
+  let started!: () => void, release!: () => void;
+  const began = new Promise<void>(resolve => { started = resolve; });
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  spyBrowserFetch({ '/keepalive': async () => {
+   if (phase === 'browser') { started(); await hold; }
+   return Response.json({ ok:true, status:'alive', state:renewedState });
+  } });
+  vi.spyOn(QuickloginLoginBrokerClient.prototype, 'recordQuickloginKeepaliveMint').mockImplementation(async () => {
+   if (phase === 'mint confirmation') { started(); await hold; }
+  });
+  await runInDurableObject(t.stub, async (instance, state) => {
+   const store = new DeviceV3Store(state.storage, (instance as any).env, a => (instance as any).notify(a));
+   const original: any = await state.storage.get('session');
+   const keepalive = (instance as any).performKeepalive(original, t.authority);
+   await began;
+   if (observation === 'report') {
+    await store.report(t.authority, { protocolVersion:3, requestId:'observation', client, observed:null, reportEpoch:'observation-epoch', clientReportSeq:1, local:{enabledIntent:true, mode:'automatic', cookieState:'missing', receipt:null} });
+   } else {
+    const ack = await store.receipt(t.authority, { protocolVersion:3, requestId:'observation', reportEpoch:'observation-epoch', clientReportSeq:1, receipt:{...expected, exportId:exported.exportId, result:'applied', verifiedAt:now} });
+    expect(ack.accepted).toBe(true);
+   }
+   const observed: any = await state.storage.get('session');
+   expect(observed.deviceRevision).toBeGreaterThan(original.deviceRevision ?? 0);
+   release(); await keepalive;
+   const completed: any = await state.storage.get('session');
+   expect(completed.sessionVersion).toBe(2);
+   expect(JSON.parse(completed.storageState)).toEqual(renewedState);
+   expect(completed.state).toBe('ready');
+   expect(completed.lastKeepAliveAt).toBe(now);
+   expect(completed.pendingKeepaliveMint).toBeUndefined();
+   expect(completed.deviceRevision).toBeGreaterThan(observed.deviceRevision);
+   expect(await state.storage.get('v3:report')).toMatchObject({clientReportSeq:1, cookieState:observation === 'receipt' ? 'applied' : 'missing'});
+   expect(await state.storage.getAlarm()).toBe(now + 60 * 60_000);
+  });
+ });
+});
