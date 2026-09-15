@@ -1,0 +1,171 @@
+[
+  {
+    "id": "credential",
+    "raw": "first-factor failed: credential_rejected:用户名或密码错误",
+    "response": {
+      "ok": false,
+      "error": "PASSWORD_REJECTED",
+      "errorCode": "PASSWORD_REJECTED",
+      "phase": "first_factor",
+      "detail": "School credentials were rejected."
+    },
+    "workerKind": "needs_reauth",
+    "workerReason": "credentials_rejected"
+  },
+  {
+    "id": "first_factor_unrecognized",
+    "raw": "first-factor failed: transient:第一因素提交后页面未进入可识别状态 {\"url\":\"https://sso.cqu.edu.cn/login\"}",
+    "response": {
+      "ok": false,
+      "error": "FIRST_FACTOR_UNRECOGNIZED",
+      "errorCode": "FIRST_FACTOR_UNRECOGNIZED",
+      "phase": "first_factor",
+      "detail": "The first-factor result was not recognized."
+    },
+    "workerKind": "temporary_unavailable",
+    "workerReason": "SCHOOL_UNREACHABLE"
+  },
+  {
+    "id": "send_failed",
+    "raw": "发码失败 status=400 bodyLength=0(验证码未发出)",
+    "response": {
+      "ok": false,
+      "error": "OTP_SEND_FAILED",
+      "errorCode": "OTP_SEND_FAILED",
+      "phase": "sending_code",
+      "detail": "The school did not send a verification code."
+    },
+    "workerKind": "temporary_unavailable",
+    "workerReason": "OTP_SEND_FAILED"
+  },
+  {
+    "id": "send_timeout",
+    "raw": "发码响应超时(验证码状态未知)",
+    "response": {
+      "ok": false,
+      "error": "OTP_SEND_TIMEOUT",
+      "errorCode": "OTP_SEND_TIMEOUT",
+      "phase": "sending_code",
+      "detail": "The verification-code send result is unknown."
+    },
+    "workerKind": "temporary_unavailable",
+    "workerReason": "OTP_TIMEOUT"
+  },
+  {
+    "id": "code_timeout",
+    "raw": "code wait timed out (>570s, code never arrived)",
+    "response": {
+      "ok": false,
+      "error": "OTP_TIMEOUT",
+      "errorCode": "OTP_TIMEOUT",
+      "phase": "waiting_code",
+      "detail": "The verification code did not arrive before the deadline."
+    },
+    "workerKind": "temporary_unavailable",
+    "workerReason": "OTP_TIMEOUT"
+  },
+  {
+    "id": "empty_code",
+    "raw": "未取到验证码(code_provider 返回空)",
+    "response": {
+      "ok": false,
+      "error": "OTP_TIMEOUT",
+      "errorCode": "OTP_TIMEOUT",
+      "phase": "waiting_code",
+      "detail": "The verification code did not arrive before the deadline."
+    },
+    "workerKind": "temporary_unavailable",
+    "workerReason": "OTP_TIMEOUT"
+  },
+  {
+    "id": "captcha",
+    "raw": "CAPTCHA_REQUIRED",
+    "response": {
+      "ok": false,
+      "error": "CAPTCHA_REQUIRED",
+      "errorCode": "CAPTCHA_REQUIRED",
+      "phase": "first_factor",
+      "detail": "Interactive school verification is required."
+    },
+    "workerKind": "needs_reauth",
+    "workerReason": "interactive_required"
+  },
+  {
+    "id": "permit_timeout",
+    "raw": "code permit timed out",
+    "response": {
+      "ok": false,
+      "error": "CODE_PERMIT_TIMEOUT",
+      "errorCode": "CODE_PERMIT_TIMEOUT",
+      "phase": "waiting_verification_lease",
+      "detail": "The verification-code permit was not available before the deadline."
+    },
+    "workerKind": "temporary_unavailable",
+    "workerReason": "VERIFICATION_COOLDOWN"
+  },
+  {
+    "id": "deadline",
+    "raw": "BROWSER_DEADLINE",
+    "response": {
+      "ok": false,
+      "error": "BROWSER_DEADLINE",
+      "errorCode": "BROWSER_DEADLINE",
+      "phase": "operation",
+      "detail": "The browser operation reached its deadline."
+    },
+    "workerKind": "temporary_unavailable",
+    "workerReason": "OPERATION_TIMEOUT"
+  },
+  {
+    "id": "total_timeout",
+    "raw": "login timed out (>660s)",
+    "response": {
+      "ok": false,
+      "error": "BROWSER_DEADLINE",
+      "errorCode": "BROWSER_DEADLINE",
+      "phase": "operation",
+      "detail": "The browser operation reached its deadline."
+    },
+    "workerKind": "temporary_unavailable",
+    "workerReason": "OPERATION_TIMEOUT"
+  },
+  {
+    "id": "busy",
+    "raw": "BROWSER_BUSY",
+    "response": {
+      "ok": false,
+      "error": "BROWSER_BUSY",
+      "errorCode": "BROWSER_BUSY",
+      "phase": "waiting_capacity",
+      "detail": "The browser instance is busy."
+    },
+    "workerKind": "temporary_unavailable",
+    "workerReason": "CONTAINER_UNAVAILABLE"
+  },
+  {
+    "id": "ticket_missing",
+    "raw": "未捕获 ST ticket(验证码可能错误/过期)",
+    "response": {
+      "ok": false,
+      "error": "TICKET_MISSING",
+      "errorCode": "TICKET_MISSING",
+      "phase": "validating_session",
+      "detail": "No service ticket was observed after verification."
+    },
+    "workerKind": "temporary_unavailable",
+    "workerReason": "SCHOOL_UNREACHABLE"
+  },
+  {
+    "id": "generic_400",
+    "raw": "HTTP 400 from upstream",
+    "response": {
+      "ok": false,
+      "error": "UNKNOWN_LOGIN_ERROR",
+      "errorCode": "UNKNOWN_LOGIN_ERROR",
+      "phase": "unknown",
+      "detail": "The school login did not complete."
+    },
+    "workerKind": "temporary_unavailable",
+    "workerReason": "SCHOOL_UNREACHABLE"
+  }
+]

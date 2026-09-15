@@ -257,3 +257,17 @@ it('does not reuse another v3 operation success when an explicit retry asks for 
  expect((await client.quickloginLogin({...base,operationId:'operation-b'})).kind).toBe('success');
  expect(runs).toBe(2);
 });
+
+// The Python /run response test verifies this same fixture against raw-CDP errors.
+import loginFailureFixtures from '../../container/fixtures/login-failures.json';
+it.each(loginFailureFixtures)('classifies production /run $id results and legacy raw responses', async fixture => {
+ for (const response of [fixture.response, {ok:false,error:fixture.raw}]) {
+  const stub=freshStub(`producer-contract-${fixture.id}`);
+  await seedSession(stub,{status:'active'});await seedCredentials(stub);
+  spyBrowserFetch({'/health':health,'/code-permit':()=>Response.json({ok:true}),'/run':()=>Response.json(response,{status:500})});
+  const result=await (await broker(stub)).quickloginLogin({ownerUserId:'u1',deviceId:'producer-contract',generation:1});
+  expect(result).toMatchObject(fixture.workerKind==='needs_reauth' ? {kind:fixture.workerKind,reason:fixture.workerReason} : {kind:fixture.workerKind,reasonCode:fixture.workerReason});
+  const binding=await (await broker(stub)).getBindingSnapshot('u1');
+  expect(binding.credentialsState).toBe(fixture.workerReason==='credentials_rejected' ? 'rejected' : 'unknown');
+ }
+});

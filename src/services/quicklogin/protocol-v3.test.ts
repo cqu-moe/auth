@@ -166,6 +166,38 @@ describe('shared presentation priority and evidence', () => {
     expect(localView.statusCode).toBe(state);
     expect(localView.actionCode).toBe('connect_auth');
   });
+  it('offers verification for a blocked device CAPTCHA without changing binding evidence', () => {
+    const s = snapshot();
+    s.cloud.state = 'blocked'; s.cloud.reasonCode = 'INTERACTION_REQUIRED'; s.cloud.usableUntil = null;
+    s.capabilities.canEnsure = false; s.capabilities.canRetry = false; s.capabilities.canExport = false; s.capabilities.canUseExistingSession = false;
+    const bindingBefore = structuredClone(s.binding);
+    expect(derivePresentation(s, {}, now)).toMatchObject({ statusCode: 'interaction_required', actionCode: 'complete_verification', reasonCode: 'INTERACTION_REQUIRED' });
+    expect(s.binding).toEqual(bindingBefore);
+    expect(s.binding.credentialsState).toBe('verified');
+  });
+  it('keeps a verified current session usable while directing device CAPTCHA renewal to verification', () => {
+    const s = snapshot();
+    s.cloud.reasonCode = 'INTERACTION_REQUIRED'; s.capabilities.canEnsure = false; s.capabilities.canRetry = false;
+    const bindingBefore = structuredClone(s.binding);
+    expect(derivePresentation(s, {}, now)).toMatchObject({ statusCode: 'usable_credentials_rejected', actionCode: 'complete_verification', reasonCode: 'INTERACTION_REQUIRED' });
+    expect(s.binding).toEqual(bindingBefore);
+    expect(s.binding.credentialsState).toBe('verified');
+  });
+  it.each([
+    ['OTP_TIMEOUT', '验证码未收到'],
+    ['OTP_SEND_FAILED', '学校未发出验证码'],
+    ['OPERATION_TIMEOUT', '学校登录超时'],
+    ['CONTAINER_UNAVAILABLE', '登录服务暂不可用'],
+    ['VERIFICATION_COOLDOWN', '等待验证恢复'],
+    ['WAF_CHALLENGE', '学校暂时拦截登录'],
+    ['SCHOOL_UNREACHABLE', '学校登录暂时不可用'],
+  ] as const)('names retry reason %s while preserving the retry guard', (reasonCode, title) => {
+    const s = snapshot(); s.cloud.state = 'retry_wait'; s.cloud.usableUntil = null;
+    s.cloud.reasonCode = reasonCode; s.cloud.retryAt = now + 60000;
+    expect(derivePresentation(s, {}, now)).toMatchObject({ statusCode: 'retry_wait', title, reasonCode, actionCode: 'none' });
+    expect(derivePresentation(s, {}, now + 60000)).toMatchObject({ statusCode: 'retry_wait', title, reasonCode, actionCode: 'retry_session' });
+    expect(s.binding.credentialsState).toBe('verified');
+  });
   it('never converts missing data to bound or ready', () => { expect(derivePresentation(null, {}, now).statusCode).toBe('unknown'); });
   it('uses no arbitrary action URL from a server string', () => { const s = snapshot(); s.binding.state = 'unbound'; expect(derivePresentation(s, {}, now).actionTarget).toBe('/settings?cqu=bind'); });
 });

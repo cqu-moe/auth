@@ -474,6 +474,7 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       await tx.put(SESSION_KEY, {
         ...current,
         state: current.storageState ? "refreshing" : "preparing",
+        reasonCode: null,
       });
       started = true;
     });

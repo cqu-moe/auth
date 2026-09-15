@@ -74,7 +74,7 @@ class RunQgTestCase(AioHTTPTestCase):
         assert resp.status == 502, f"expected 502, got {resp.status}"
         data = await resp.json()
         assert data["ok"] is False
-        assert "qg proxy unavailable" in data["error"]
+        assert data["error"] == data["errorCode"] == "CONTAINER_UNAVAILABLE"
         assert called["run_login"] is False, "run_login must not run when qg fails"
         # 502 早退不得泄漏已注册的 Event/Value。
         assert _VALID_BODY["session"] not in server.CODE_EVENTS

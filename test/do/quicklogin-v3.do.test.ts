@@ -334,3 +334,39 @@ describe('keepalive survives observational updates', () => {
   });
  });
 });
+
+it('clears the previous terminal reason when a new login actually starts', async () => {
+ const t=await setup();
+ let readStarted:()=>Promise<any> = async()=>null;
+ vi.spyOn(QuickloginLoginBrokerClient.prototype,'quickloginLogin').mockImplementation(async()=>{
+  expect((await readStarted()).reasonCode).toBeNull();
+  return {kind:'temporary_unavailable',retryAfterMs:60_000,reasonCode:'OTP_TIMEOUT'};
+ });
+ await runInDurableObject(t.stub,async(instance,state)=>{
+  const s:any=await state.storage.get('session');
+  await state.storage.put('session',{...s,state:'temporary_unavailable',reasonCode:'SCHOOL_UNREACHABLE'});
+  readStarted=()=>state.storage.get('session');
+  await (instance as any).performLogin(await state.storage.get('session'),t.authority);
+ });
+});
+
+it('keeps a device CAPTCHA blocked without disabling other devices or claiming rejected credentials', async () => {
+ const { snapshotV3 } = await import('../../src/services/quicklogin/snapshot-v3');
+ const t=await setup();
+ vi.spyOn(QuickloginLoginBrokerClient.prototype,'quickloginLogin').mockResolvedValue({kind:'needs_reauth',reason:'interactive_required'});
+ await runInDurableObject(t.stub,async(instance,state)=>{await (instance as any).performLogin(await state.storage.get('session'),t.authority);});
+ const blocked=await snapshotV3(env,t.userId,t.device.deviceId);
+ expect(blocked.cloud).toMatchObject({state:'blocked',reasonCode:'INTERACTION_REQUIRED'});
+ expect(blocked.binding.credentialsState).toBe('unknown');
+ expect(blocked.capabilities.canEnsure).toBe(false);
+ expect(blocked.capabilities.canRetry).toBe(false);
+ const grant=await t.accounts.createPendingGrant(t.userId,'test-client',Date.now());
+ await t.accounts.activateGrant(t.userId,grant.grantId,Date.now());
+ const other=await t.accounts.registerDevice(t.userId,grant.grantId,{deviceName:'Other device',browserFamily:'chrome',browserVersion:'152'});
+ const authority=await t.accounts.setDeviceEnabled(t.userId,other.deviceId,true);
+ await t.devices.notifyDevice(authority);
+ const available=await snapshotV3(env,t.userId,other.deviceId);
+ expect(available.binding.credentialsState).toBe('unknown');
+ expect(available.capabilities.canEnsure).toBe(true);
+ expect(available.cloud.reasonCode).not.toBe('INTERACTION_REQUIRED');
+});

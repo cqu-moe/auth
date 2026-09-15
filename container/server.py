@@ -33,6 +33,55 @@ from qg_proxy import acquire_qg_proxy, QgExtractError, should_use_proxy  # 青�
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("cqu-login-server")
+LOGIN_FAILURES = {
+    "PASSWORD_REJECTED": ("first_factor", "School credentials were rejected."),
+    "FIRST_FACTOR_UNRECOGNIZED": ("first_factor", "The first-factor result was not recognized."),
+    "CAPTCHA_REQUIRED": ("first_factor", "Interactive school verification is required."),
+    "OTP_SEND_FAILED": ("sending_code", "The school did not send a verification code."),
+    "OTP_SEND_TIMEOUT": ("sending_code", "The verification-code send result is unknown."),
+    "OTP_TIMEOUT": ("waiting_code", "The verification code did not arrive before the deadline."),
+    "CODE_PERMIT_TIMEOUT": ("waiting_verification_lease", "The verification-code permit was not available before the deadline."),
+    "VERIFICATION_COOLDOWN": ("waiting_verification_lease", "Verification is waiting for the permitted retry time."),
+    "BROWSER_DEADLINE": ("operation", "The browser operation reached its deadline."),
+    "BROWSER_BUSY": ("waiting_capacity", "The browser instance is busy."),
+    "BROWSER_INSTANCE_REPLACED": ("launching_browser", "The browser instance was replaced."),
+    "CONTAINER_UNAVAILABLE": ("launching_browser", "The browser service is unavailable."),
+    "WAF_CHALLENGE": ("first_factor", "The school access challenge did not complete."),
+    "TICKET_MISSING": ("validating_session", "No service ticket was observed after verification."),
+    "UNKNOWN_LOGIN_ERROR": ("unknown", "The school login did not complete."),
+}
+
+
+def normalize_login_failure(error: object) -> dict:
+    raw = str(error).strip()
+    code = raw if raw in LOGIN_FAILURES else "UNKNOWN_LOGIN_ERROR"
+    if raw.startswith("first-factor failed: credential_rejected:"):
+        code = "PASSWORD_REJECTED"
+    elif raw.startswith("first-factor failed:"):
+        code = "FIRST_FACTOR_UNRECOGNIZED"
+    elif raw.startswith("发码失败 status="):
+        code = "OTP_SEND_FAILED"
+    elif raw.startswith("发码响应超时"):
+        code = "OTP_SEND_TIMEOUT"
+    elif raw.startswith(("code wait timed out", "等验证码超时", "未取到验证码", "reusable code never arrived")):
+        code = "OTP_TIMEOUT"
+    elif raw.startswith(("code permit timed out", "code permit phase timed out")):
+        code = "CODE_PERMIT_TIMEOUT"
+    elif raw.startswith("login timed out"):
+        code = "BROWSER_DEADLINE"
+    elif raw.startswith("未捕获 ST ticket"):
+        code = "TICKET_MISSING"
+    phase, detail = LOGIN_FAILURES[code]
+    # Keep the legacy error field as a stable alias; never return page text or URLs.
+    return {"ok": False, "error": code, "errorCode": code, "phase": phase, "detail": detail}
+
+
+def login_failure_response(error: object, status: int = 500) -> web.Response:
+    payload = normalize_login_failure(error)
+    log.warning("run terminal phase=%s errorCode=%s", payload["phase"], payload["errorCode"])
+    return web.json_response(payload, status=status)
+
+
 NODE_API_VERSION = "direct-harvest-v1"
 NODE_CAPABILITIES = [
     "code-permit",
@@ -449,10 +498,7 @@ async def run_handler(request: web.Request) -> web.Response:
         try:
             proxy = await acquire_qg_proxy("login")
         except QgExtractError as e:
-            log.warning("run abort qg extract failed: %s", e)
-            return web.json_response(
-                {"ok": False, "error": f"qg proxy unavailable: {e}"}, status=502
-            )
+            return login_failure_response("CONTAINER_UNAVAILABLE", status=502)
 
     # 单任务互斥在所有参数/boot 校验之后、Event 注册之前:被拒请求不创建任何
     # CODE_EVENTS,也不影响在途任务的锁。
@@ -461,7 +507,7 @@ async def run_handler(request: web.Request) -> web.Response:
         job_acquired = await acquire_browser_job()
     except BrowserBusyError:
         log.warning("run busy (another heavy browser job holds this instance)")
-        return web.json_response({"ok": False, "error": "BROWSER_BUSY"}, status=503)
+        return login_failure_response("BROWSER_BUSY", status=503)
 
     ev = asyncio.Event()
     CODE_EVENTS[session] = ev
@@ -564,34 +610,23 @@ async def run_handler(request: web.Request) -> web.Response:
         # operationTimeoutMs 预算耗尽:内层协程已被取消,其 finally 已关浏览器;
         # 本 handler 的 finally 会清本 token 的全部 Event/Value 并释放重型锁。
         log.warning("run deadline exceeded (operationTimeoutMs=%d)", operation_timeout_ms or -1)
-        return web.json_response(
-            {"ok": False, "error": "BROWSER_DEADLINE"}, status=503
-        )
+        return login_failure_response("BROWSER_DEADLINE", status=503)
     except CodeWaitTimeout:
         # 内层: 等码超时, 验证码始终没到(邮件未送达 / DO 未推码)。
         log.warning(
             "run timeout (code-wait >%ds, code never arrived)",
             CODE_WAIT_TIMEOUT,
         )
-        return web.json_response(
-            {"ok": False, "error": f"code wait timed out (>{CODE_WAIT_TIMEOUT}s, code never arrived)"},
-            status=504,
-        )
+        return login_failure_response("OTP_TIMEOUT", status=504)
     except PermitWaitTimeout:
         log.warning("run timeout (code permit never arrived)")
-        return web.json_response(
-            {"ok": False, "error": "code permit timed out"}, status=504
-        )
+        return login_failure_response("CODE_PERMIT_TIMEOUT", status=504)
     except asyncio.TimeoutError:
         # 外层: 单次 /run 整体超时(第一因素/发码/提交某段太慢, 非单纯等码)。
         log.warning("run timeout (total >%ds)", RUN_TOTAL_TIMEOUT)
-        return web.json_response(
-            {"ok": False, "error": f"login timed out (>{RUN_TOTAL_TIMEOUT}s)"},
-            status=504,
-        )
+        return login_failure_response("BROWSER_DEADLINE", status=504)
     except Exception as e:  # noqa: BLE001 - surface any login failure to the caller
-        log.warning("run fail error=%s", type(e).__name__)
-        return web.json_response({"ok": False, "error": str(e)}, status=500)
+        return login_failure_response(e, status=500)
     finally:
         CODE_EVENTS.pop(session, None)
         CODE_VALUES.pop(session, None)

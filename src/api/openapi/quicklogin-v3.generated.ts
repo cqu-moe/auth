@@ -1,4 +1,4 @@
-// Generated from canonical protocol-v3.ts; SHA-256 87fd95beb7977753374e1a43539c549c1bcd9e2b278dde4afcdfdf7e6080ad74
+// Generated from canonical protocol-v3.ts; SHA-256 0263d6f205e113cdc2da8661f2fdf8c7e5b52b5a41045b90633d8d5989625a38
 export const QUICKLOGIN_V3_SCHEMAS: Record<string, Record<string, unknown>> = {
   "QuickloginV3Capabilities": {
     "type": "object",

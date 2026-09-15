@@ -184,6 +184,14 @@ export function sameTuple(a: VersionTuple | null, b: VersionTuple | null): boole
 export function tupleForSnapshot(s: DeviceSnapshot): VersionTuple | null { const v = s.versions; if (v.bindingEpoch === null || v.credentialRevision === null) return null; return { deviceId: s.identity.deviceId, generation: v.generation, bindingEpoch: v.bindingEpoch, credentialRevision: v.credentialRevision, sessionVersion: v.sessionVersion }; }
 export function cloudSessionUsable(s: DeviceSnapshot, now: number): boolean { return s.capabilities.canUseExistingSession && ['ready', 'refreshing', 'retry_wait'].includes(s.cloud.state) && s.cloud.lastValidatedAt !== null && s.cloud.lastValidatedAt <= now && s.cloud.usableUntil !== null && s.cloud.usableUntil > now; }
 const TITLES: Record<StatusCode, string> = { disabled: '已关闭', disconnecting: '正在退出', revoked: '此设备已退出', disconnected: '未连接 Auth', authorizing: '正在连接 Auth', reconnect_required: '需要重新连接 Auth', update_required: '请更新插件', service_upgrading: '服务正在升级', master_off: '快捷登录已暂停', device_off: '此设备已关闭', quota_blocked: '设备名额已满', service_paused: '快捷登录暂时不可用', manual: '手动登录中', foreign: '已有学校登录', unreachable: '暂时无法连接 Auth', checking: '正在检查', unbound: '尚未绑定学校账号', binding_updating: '正在更新学校登录', credentials_rejected: '学校密码需要更新', interaction_required: '需要完成学校验证', preparing: '正在准备学校登录', refreshing: '正在更新登录', retry_wait: '学校登录暂时不可用', syncing: '正在同步到浏览器', permission_denied: '浏览器权限不足', write_failed: '浏览器同步失败', pending_ack: '浏览器已同步，正在确认', usable_credentials_rejected: '当前可用，续期需处理', usable_retry_wait: '当前可用，正在重试续期', ready: '已就绪', unknown: '状态暂时无法确认' };
+const RETRY_TITLES: Partial<Record<ReasonCode, string>> = {
+  OTP_TIMEOUT: '验证码未收到',
+  OTP_SEND_FAILED: '学校未发出验证码',
+  OPERATION_TIMEOUT: '学校登录超时',
+  CONTAINER_UNAVAILABLE: '登录服务暂不可用',
+  VERIFICATION_COOLDOWN: '等待验证恢复',
+  WAF_CHALLENGE: '学校暂时拦截登录',
+};
 const TARGETS: Partial<Record<ActionCode, ActionTarget>> = { open_auth: '/settings?quicklogin=1', manage_devices: '/settings?quicklogin=1', bind_school: '/settings?cqu=bind', update_password: '/settings?cqu=repair', complete_verification: '/settings?cqu=verify' };
 export function derivePresentation(snapshot: DeviceSnapshot | null, local: LocalPresentation = {}, now = Date.now()): Presentation {
   const show = (statusCode: StatusCode, actionCode: ActionCode = 'none', reasonCode: ReasonCode | null = null, detail: string | null = null): Presentation => ({ statusCode, title: TITLES[statusCode], detail, reasonCode, actionCode, actionTarget: TARGETS[actionCode] ?? null, nextCheckAt: snapshot?.presentation.nextCheckAt ?? null, freshUntil: snapshot?.freshUntil ?? null });
@@ -215,13 +223,16 @@ export function derivePresentation(snapshot: DeviceSnapshot | null, local: Local
   const usable = cloudSessionUsable(s, now);
   const currentEvidence = s.binding.evidenceCredentialRevision !== null && s.binding.evidenceCredentialRevision === s.versions.credentialRevision;
   const rejected = currentEvidence && s.binding.credentialsState === 'rejected' && s.binding.evidenceKind === 'password_rejected' && s.binding.evidenceAt !== null;
-  const interactive = currentEvidence && s.binding.credentialsState === 'interaction_required';
+  const interactive = (currentEvidence && s.binding.credentialsState === 'interaction_required') || s.cloud.reasonCode === 'INTERACTION_REQUIRED';
   if (!usable && rejected) return show('credentials_rejected', 'update_password', 'CREDENTIALS_REJECTED');
   if (!usable && interactive) return show('interaction_required', 'complete_verification', 'INTERACTION_REQUIRED');
   if (!usable && ['queued', 'logging_in', 'refreshing'].includes(s.cloud.state) && s.cloud.deadlineAt !== null && now > s.cloud.deadlineAt) return show('unknown', 'reconcile', 'OPERATION_TIMEOUT');
   if (!usable && ['queued', 'logging_in'].includes(s.cloud.state)) return show('preparing');
   if (!usable && s.cloud.state === 'refreshing') return show('refreshing');
-  if (!usable && s.cloud.state === 'retry_wait') return show('retry_wait', s.capabilities.canRetry && (s.cloud.retryAt === null || now >= s.cloud.retryAt) ? 'retry_session' : 'none', s.cloud.reasonCode, '系统会按允许的时间自动重试');
+  if (!usable && s.cloud.state === 'retry_wait') {
+    const presentation = show('retry_wait', s.capabilities.canRetry && (s.cloud.retryAt === null || now >= s.cloud.retryAt) ? 'retry_session' : 'none', s.cloud.reasonCode, '系统会按允许的时间自动重试');
+    return { ...presentation, title: s.cloud.reasonCode === null ? presentation.title : RETRY_TITLES[s.cloud.reasonCode] ?? presentation.title };
+  }
   if (currentCookie === 'permission_denied') return show('permission_denied', 'fix_permissions', 'LOCAL_PERMISSION_DENIED');
   if (currentCookie === 'write_failed') return show('write_failed', 'retry_local', 'LOCAL_WRITE_FAILED');
   if (!usable) return show('unknown', s.capabilities.canEnsure ? 'retry_session' : 'reconcile', s.cloud.reasonCode);
@@ -239,4 +250,4 @@ export function derivePresentation(snapshot: DeviceSnapshot | null, local: Local
   return show('ready', 'disable');
 }
 
-export const CONTRACT_DIGEST = '87fd95beb7977753374e1a43539c549c1bcd9e2b278dde4afcdfdf7e6080ad74' as const;
+export const CONTRACT_DIGEST = '0263d6f205e113cdc2da8661f2fdf8c7e5b52b5a41045b90633d8d5989625a38' as const;

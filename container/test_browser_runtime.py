@@ -201,7 +201,10 @@ class DeadlineTests(BrowserRuntimeTestCase):
             headers=self.boot_headers(),
         )
         assert resp.status == 503
-        assert await resp.json() == {"ok": False, "error": "BROWSER_DEADLINE"}
+        payload = await resp.json()
+        assert payload["ok"] is False
+        assert payload["error"] == payload["errorCode"] == "BROWSER_DEADLINE"
+        assert payload["phase"] == "operation"
         assert await asyncio.wait_for(cancelled.wait(), timeout=2)
         assert "tok-c" not in server.CODE_EVENTS
         assert "tok-c" not in server.CODE_VALUES

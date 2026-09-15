@@ -28,6 +28,7 @@ export async function snapshotV3(env: Env, userId: string, deviceId: string): Pr
   const policy = !quickloginDeviceModeEnabled(env) ? 'service_paused' : !live.masterEnabled ? 'master_off' : device?.disabledReason === 'quota_reduced' || live.reason === 'NO_DEVICE_CAPACITY' ? 'quota_blocked' : !live.enabled ? 'device_off' : 'enabled';
   const state = session.state === 'ready' ? 'ready' : session.state === 'preparing' ? data.operation?.state === 'running' ? 'logging_in' : 'queued' : session.state === 'needs_reauth' ? usable ? 'ready' : 'blocked' : session.state === 'temporary_unavailable' ? 'retry_wait' : session.state === 'disabled' ? 'paused' : session.state;
   const reason = !aligned ? binding === null || afterBinding === null ? 'INTERNAL_STATE_UNAVAILABLE' : 'RECONCILING' : session.reasonCode ?? (session.state === 'needs_reauth' ? 'BLOCKED_UNKNOWN' : null);
+  const canAttempt = aligned && live.allowed && binding?.state === 'bound' && binding.credentialsState !== 'rejected' && binding.credentialsState !== 'interaction_required' && session.reasonCode !== 'INTERACTION_REQUIRED';
   snapshot = {
    snapshotId: crypto.randomUUID(), serverTime: now, observedAt: now, freshUntil: now + 5 * 60_000,
    identity: { deviceId, installationId: data.client?.installationId ?? null, deviceName: device?.deviceName ?? null },
@@ -38,7 +39,7 @@ export async function snapshotV3(env: Env, userId: string, deviceId: string): Pr
    cloud: { state: aligned ? state : 'queued', operationId: data.operation?.operationId ?? null, stage: data.operation?.stage ?? null, loginAt: session.loginAt, lastValidatedAt: session.lastKeepAliveAt, usableUntil: usable ? usableUntil : null, retryAt: session.nextAttemptAt, reasonCode: reason as ReasonCode | null, deadlineAt: data.operation?.deadlineAt ?? null },
    reportedLocal: data.report, observation: stable ? 'fresh' : 'checking',
    presentation: { statusCode: 'unknown', title: '状态暂时无法确认', detail: null, reasonCode: null, actionCode: 'reconcile', actionTarget: null, nextCheckAt: now + 5000, freshUntil: now + 5 * 60_000 },
-   capabilities: { canEnsure: aligned && live.allowed && binding?.state === 'bound' && binding.credentialsState !== 'rejected', canRetry: aligned && live.allowed && binding?.state === 'bound' && binding.credentialsState !== 'rejected' && (session.nextAttemptAt === null || session.nextAttemptAt <= now), canExport: usable && live.allowed && binding?.state === 'bound', canEnable: !live.enabled && live.masterEnabled && afterList.used < afterList.deviceLimit && live.reason !== 'DEVICE_REVOKED', canUseExistingSession: usable && live.allowed },
+   capabilities: { canEnsure: canAttempt, canRetry: canAttempt && (session.nextAttemptAt === null || session.nextAttemptAt <= now), canExport: usable && live.allowed && binding?.state === 'bound', canEnable: !live.enabled && live.masterEnabled && afterList.used < afterList.deviceLimit && live.reason !== 'DEVICE_REVOKED', canUseExistingSession: usable && live.allowed },
   };
   snapshot.presentation = derivePresentation(snapshot, {}, now);
   return snapshot;

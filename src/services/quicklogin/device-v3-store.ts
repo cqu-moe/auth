@@ -64,7 +64,8 @@ export class DeviceV3Store {
   try { binding = await this.binding(live); } catch { /* Readiness is withheld by the aggregator when binding authority is unavailable. */ }
   if (binding && live.allowed) {
    const changed = session.bindingEpoch !== binding.bindingEpoch || (session.credentialRevision ?? session.bindingEpoch) !== binding.credentialRevision;
-   const legacy = session.state === 'needs_reauth' && binding.state === 'bound' && binding.credentialsState !== 'rejected' && binding.credentialsState !== 'interaction_required' && session.legacyRecoveryEpoch !== binding.bindingEpoch;
+   const recoverableLegacyReason = session.reasonCode == null || session.reasonCode === 'BLOCKED_UNKNOWN' || session.reasonCode === 'BINDING_UNBOUND';
+   const legacy = recoverableLegacyReason && session.state === 'needs_reauth' && binding.state === 'bound' && binding.credentialsState !== 'rejected' && binding.credentialsState !== 'interaction_required' && session.legacyRecoveryEpoch !== binding.bindingEpoch;
    if (changed || legacy) {
     await this.storage.transaction(async tx => {
      const current = await tx.get<StoredDeviceSession>(SESSION);
@@ -123,13 +124,14 @@ export class DeviceV3Store {
   if (input.command !== 'set_enabled') {
    this.assertAllowed(live); this.assertBinding(binding);
    if (binding.credentialsState === 'rejected' && binding.evidenceCredentialRevision === binding.credentialRevision) throw new V3Error('CREDENTIALS_REJECTED');
-   if (binding.credentialsState === 'interaction_required') throw new V3Error('INTERACTION_REQUIRED');
+   if (binding.credentialsState === 'interaction_required' || read.session.reasonCode === 'INTERACTION_REQUIRED') throw new V3Error('INTERACTION_REQUIRED');
    if (read.session.nextAttemptAt !== null && read.session.nextAttemptAt > Date.now()) throw new V3Error('VERIFICATION_COOLDOWN', read.session.nextAttemptAt);
   }
   const now = Date.now(); let result!: Operation;
   await this.storage.transaction(async tx => {
    const session = await tx.get<StoredDeviceSession>(SESSION);
    if (!session || !sameTuple(input.expected, sessionTuple(session))) throw new V3Error('STALE_SNAPSHOT');
+   if (input.command !== 'set_enabled' && session.reasonCode === 'INTERACTION_REQUIRED') throw new V3Error('INTERACTION_REQUIRED');
    const active = await tx.get<StoredOperation>(ACTIVE);
    if (input.command !== 'set_enabled' && active && ['running','queued'].includes(active.operation.state) && sameTuple(active.operation.versions, input.expected)) { result = active.operation; await tx.put(key, { operationId: result.operationId, fingerprint }); return; }
    const operation: Operation = { operationId: crypto.randomUUID(), command: input.command, versions: input.expected, state: 'queued', stage: 'waiting_capacity', attempt: 0, createdAt: now, startedAt: null, deadlineAt: now + BROWSER_INVOCATION_BUDGET_MS, completedAt: null, retryAt: null, resultCode: null, cancelReason: null };
@@ -229,8 +231,8 @@ export class DeviceV3Store {
    if (epoch && epoch.grantId === a.grantId && epoch.epoch !== input.reportEpoch) { ack.reasonCode = 'INVALID_REQUEST'; return; }
    const prior = await tx.get<ReportedLocal>(REPORT);
    if (prior && prior.reportEpoch === input.reportEpoch && prior.clientReportSeq >= input.clientReportSeq) {
-    if (prior.clientReportSeq === input.clientReportSeq && JSON.stringify(prior.receipt) === JSON.stringify(input.receipt)) { ack.accepted = true; ack.reasonCode = null; ack.receivedAt = prior.receivedAt; ack.acceptedTuple = sessionTuple(session); }
-    return;
+    if (prior.clientReportSeq > input.clientReportSeq || JSON.stringify(prior.receipt) !== JSON.stringify(input.receipt)) return;
+    if (prior.acknowledgedAt !== null) ack.receivedAt = prior.receivedAt;
    }
    if (input.receipt.result === 'applied') {
     const issued = await tx.get<IssuedExport>(`v3:export:${input.receipt.exportId}`);

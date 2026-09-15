@@ -14,7 +14,6 @@ function contactTime(value: number | null): string {
 const actionLabels: Partial<Record<ActionCode, string>> = {
   bind_school: "绑定学校账号",
   update_password: "更新学校密码",
-  complete_verification: "完成学校验证",
   open_auth: "查看总开关",
   manage_devices: "管理设备",
 };
@@ -57,7 +56,7 @@ export default function DeviceList({
         const id = device.identity.deviceId;
         const client = device.reportedLocal?.client;
         const revoked = device.authorization.state === "revoked";
-        const title = presentation.statusCode === "syncing" && !device.reportedLocal
+        const title = presentation.actionCode === "complete_verification" ? "需手动登录" : presentation.statusCode === "syncing" && !device.reportedLocal
           ? "等待插件同步" : presentation.title;
 
         return (

@@ -1,3 +1,4 @@
+import { classifyContainerLoginFailure } from "../services/cqu-2fa/login-failure";
 import type { BindingSnapshot } from "../services/quicklogin/binding-snapshot";
 import { DurableObject } from "cloudflare:workers";
 import { CquSsoClient, type CasCookies, type CquStorageState, CquSsoError } from "../services/cqu-sso";
@@ -45,7 +46,6 @@ import {
   RELOGIN_RATE_WINDOW_MS,
   MAX_RELOGINS_PER_WINDOW,
   CONSECUTIVE_RELOGIN_FAIL_ALERT,
-  classifyLoginFailure,
   shouldRequireReauth,
   nextKeepaliveDelayMs,
   recoveryRetryDelayMs,
@@ -219,6 +219,9 @@ interface DepositCodePayload {
 
 // 容器 /run 的返回(见 container/server.py + cqu_login.run_login)。
 interface ContainerRunResult {
+  errorCode?: string;
+  phase?: string;
+  detail?: string;
   ok: boolean;
   state?: CquStorageState;
   ticket?: string;
@@ -1758,15 +1761,16 @@ export class CquSessionDO extends DurableObject<Env> {
       runCompleted = response.ok && result?.ok === true && !!result.state && hasValidTgt(result.state);
       await recheck();
 
-      if (result?.error === "PASSWORD_REJECTED") {
-        await this.ctx.storage.transaction(async (tx) => {
+      const failure = classifyContainerLoginFailure(result);
+      if (failure.reauthReason !== null) {
+        if (failure.reauthReason === "credentials_rejected") await this.ctx.storage.transaction(async (tx) => {
           if (((await tx.get<number>("quickloginBindingEpoch")) ?? 0) !== binding.epoch) return;
           const revision = (await tx.get<number>("credentialRevision")) ?? binding.epoch;
           await tx.put({ quickloginCredentialEvidence: { credentialsState: "rejected", evidenceKind: "password_rejected", evidenceAt: Date.now(), evidenceCredentialRevision: revision }, bindingRevision: ((await tx.get<number>("bindingRevision")) ?? binding.epoch) + 1 });
         });
         return {
           kind: "needs_reauth",
-          reason: "credentials_rejected",
+          reason: failure.reauthReason,
         };
       }
       if (
@@ -1775,8 +1779,7 @@ export class CquSessionDO extends DurableObject<Env> {
         !result.state ||
         !hasValidTgt(result.state)
       ) {
-        const errorCode = typeof result?.error === "string" && ["OTP_SEND_FAILED", "OTP_TIMEOUT", "WAF_CHALLENGE", "CONTAINER_UNAVAILABLE", "VERIFICATION_COOLDOWN"].includes(result.error) ? result.error as import("../services/quicklogin/protocol-v3").ReasonCode : "SCHOOL_UNREACHABLE";
-        return { kind: "temporary_unavailable", reasonCode: errorCode, retryAfterMs: await this.deferQuickloginRetry(binding.epoch) };
+        return { kind: "temporary_unavailable", reasonCode: failure.reasonCode, retryAfterMs: await this.deferQuickloginRetry(binding.epoch) };
       }
       await this.clearConsumedLoginCode();
       return {
@@ -1801,7 +1804,7 @@ export class CquSessionDO extends DurableObject<Env> {
       ) {
         return { kind: "cancelled" };
       }
-      return { kind: "temporary_unavailable", reasonCode: "SCHOOL_UNREACHABLE", retryAfterMs: await this.deferQuickloginRetry(binding.epoch) };
+      return { kind: "temporary_unavailable", reasonCode: classifyContainerLoginFailure({ error: code }).reasonCode, retryAfterMs: await this.deferQuickloginRetry(binding.epoch) };
     } finally {
       runAbort?.abort();
       await this.finishLoginOperation(token, lockKey, "quicklogin", runCompleted);
@@ -3116,14 +3119,14 @@ export class CquSessionDO extends DurableObject<Env> {
       // 交 keepalive 退避自愈, 绝不误累计熔断。
       if (!res.ok || !result.ok || !result.state || !hasValidTgt(result.state)) {
         const invalidState = !!result.state && !hasValidTgt(result.state);
-        console.warn(
-          `[CquSession] ${state.studentId}: container /run not ok — httpStatus=${res.status} ok=${result.ok} hasState=${!!result.state} validTgt=${!invalidState && !!result.state} error=${result.error ?? "(none)"}`
-        );
+        console.warn({ evt: "cqu.login.failed", httpStatus: res.status,
+          errorCode: classifyContainerLoginFailure(result).code,
+          validSession: !invalidState && !!result.state });
         // 熔断: 把失败归类(凭据真死 vs 瑞数/瞬态)暂存, 供 relogin 决定是否落 needs_reauth。
         // 半残 state(invalidState)归 transient: 不是凭据问题, 不累计凭据熔断。
         this.lastLoginFailReason = invalidState
           ? "transient"
-          : classifyLoginFailure(result.error);
+          : classifyContainerLoginFailure(result).reauthReason === "credentials_rejected" ? "credential" : "transient";
         await this.failLogin(failEvent, token);
         return "failed";
       }
