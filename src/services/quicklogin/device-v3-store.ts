@@ -103,6 +103,19 @@ export class DeviceV3Store {
     });
    }
   }
+  if (live.allowed && binding?.state === 'bound' && binding.credentialsState !== 'rejected' && binding.credentialsState !== 'interaction_required') {
+   await this.storage.transaction(async tx => {
+    const current = await tx.get<StoredDeviceSession>(SESSION);
+    const operation = await tx.get<StoredOperation>(ACTIVE);
+    if (!current || current.generation !== live.generation || current.bindingEpoch !== binding!.bindingEpoch ||
+        (current.credentialRevision ?? current.bindingEpoch) !== binding!.credentialRevision ||
+        current.state !== 'preparing' || current.storageState || current.operationId ||
+        current.reasonCode === 'INTERACTION_REQUIRED' ||
+        (operation && ['queued', 'running'].includes(operation.operation.state)) ||
+        !(await tx.get('v3:client')) || (await tx.getAlarm()) !== null) return;
+    await tx.setAlarm(Math.max(Date.now(), current.nextAttemptAt ?? 0));
+   });
+  }
   return { session, report: (await this.storage.get<ReportedLocal>(REPORT)) ?? null, operation: active?.operation ?? null, client: (await this.storage.get<ClientMetadata>('v3:client')) ?? null };
  }
  async operation(a: DeviceAuthority, raw: unknown): Promise<Operation> {

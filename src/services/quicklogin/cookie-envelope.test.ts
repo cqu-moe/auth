@@ -1,3 +1,4 @@
+import cdpFixture from "../../../container/fixtures/cdp-session-cookie.json";
 import { describe, expect, it } from "vitest";
 import type { SsoCookie } from "./contracts";
 import {
@@ -156,4 +157,9 @@ describe("digestSsoCookies", () => {
       digestSsoCookies([first, { ...second, value: "rotated-session" }])
     ).resolves.not.toBe(digest);
   });
+});
+
+
+it("accepts the real CDP producer session-cookie fixture", () => {
+  expect(extractSsoCookies(JSON.stringify(cdpFixture.storageState), NOW_MS)).toEqual(cdpFixture.storageState.cookies);
 });

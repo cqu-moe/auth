@@ -149,3 +149,26 @@ def test_first_page_websocket_waits_until_chrome_exposes_a_page_target():
 
     assert websocket == "ws://127.0.0.1/devtools/page/1"
     assert http.calls == 2
+
+
+def test_cdp_session_cookie_export_keeps_expiry_and_default_same_site():
+    state = cqu_login_cdp.cookies_to_storage_state([{
+        "name": "SOURCEID_TGC", "value": "synthetic-session", "domain": "sso.cqu.edu.cn",
+        "path": "/", "expires": -1, "session": True, "httpOnly": True, "secure": True,
+    }], [])
+    assert state["cookies"][0]["expires"] == -1
+    assert state["cookies"][0]["sameSite"] == "Lax"
+
+
+def test_cdp_export_does_not_drop_partition_metadata():
+    cookie = {"name": "SOURCEID_TGC", "value": "synthetic", "domain": "sso.cqu.edu.cn",
+        "path": "/", "expires": -1, "httpOnly": True, "secure": True,
+        "partitionKey": {"topLevelSite": "https://cqu.edu.cn", "hasCrossSiteAncestor": False}}
+    assert cqu_login_cdp.cookies_to_storage_state([cookie], [])["cookies"][0]["partitionKey"] == cookie["partitionKey"]
+
+
+def test_cdp_export_matches_worker_cookie_fixture():
+    import json
+    from pathlib import Path
+    fixture = json.loads((Path(__file__).parent / "fixtures/cdp-session-cookie.json").read_text())
+    assert cqu_login_cdp.cookies_to_storage_state(fixture["rawCookies"], []) == fixture["storageState"]

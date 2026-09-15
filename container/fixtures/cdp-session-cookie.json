@@ -1,0 +1,29 @@
+{
+  "rawCookies": [
+    {
+      "name": "SOURCEID_TGC",
+      "value": "synthetic-session",
+      "domain": "sso.cqu.edu.cn",
+      "path": "/",
+      "expires": -1,
+      "session": true,
+      "httpOnly": true,
+      "secure": true
+    }
+  ],
+  "storageState": {
+    "cookies": [
+      {
+        "name": "SOURCEID_TGC",
+        "value": "synthetic-session",
+        "domain": "sso.cqu.edu.cn",
+        "path": "/",
+        "expires": -1,
+        "httpOnly": true,
+        "secure": true,
+        "sameSite": "Lax"
+      }
+    ],
+    "origins": []
+  }
+}

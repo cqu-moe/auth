@@ -370,3 +370,63 @@ it('keeps a device CAPTCHA blocked without disabling other devices or claiming r
  expect(available.capabilities.canEnsure).toBe(true);
  expect(available.cloud.reasonCode).not.toBe('INTERACTION_REQUIRED');
 });
+
+
+it('settles malformed successful login results instead of leaving a running operation', async () => {
+ const t = await setup();
+ const expected = { deviceId: t.device.deviceId, generation: t.authority.generation, bindingEpoch: 0, credentialRevision: 0, sessionVersion: 0 };
+ await t.call('v3_operation', { input: { protocolVersion: 3, requestId: 'r', command: 'ensure_session', idempotencyKey: 'bad-cookie', expected } });
+ vi.spyOn(QuickloginLoginBrokerClient.prototype, 'quickloginLogin').mockResolvedValue({
+  kind: 'success', bindingEpoch: 0, credentialRevision: 0, loginAt: Date.now(),
+  storageState: JSON.stringify({ cookies: [{ name: 'SOURCEID_TGC', value: 'synthetic', domain: 'sso.cqu.edu.cn', path: '/', secure: true, httpOnly: true }], origins: [] }),
+ });
+ await runInDurableObject(t.stub, async (instance, state) => {
+  await expect((instance as any).performLogin(await state.storage.get('session'), t.authority)).resolves.toBeUndefined();
+ });
+ const result = (await t.call('v3_read')).result;
+ expect(result.session.state).toBe('temporary_unavailable');
+ expect(result.session.reasonCode).toBe('CONTRACT_INVALID');
+ expect(result.session.operationId).toBeUndefined();
+ expect(result.operation.state).toBe('retry_wait');
+ expect(result.operation.completedAt).toBeTypeOf('number');
+});
+
+it('repairs a missing alarm for an aligned preparing device without a running task', async () => {
+ const t = await setup();
+ const retryAt = Date.now() + 60_000;
+ await t.call('v3_read');
+ await runInDurableObject(t.stub, async (_, state) => {
+  await state.storage.put('v3:client', client);
+  const session: any = await state.storage.get('session');
+  await state.storage.put('session', { ...session, nextAttemptAt: retryAt });
+  await state.storage.deleteAlarm();
+ });
+ await t.call('v3_read');
+ const alarm = await runInDurableObject(t.stub, (_, state) => state.storage.getAlarm());
+ expect(alarm).not.toBeNull();
+ expect(alarm).toBe(retryAt);
+});
+
+
+it('does not let an old rejected broker call settle a successor operation', async () => {
+ const t = await setup();
+ await runInDurableObject(t.stub, (_, state) => state.storage.put('v3:client', client));
+ let reject!: (error: Error) => void;
+ let started!: () => void;
+ const began = new Promise<void>(resolve => { started = resolve; });
+ vi.spyOn(QuickloginLoginBrokerClient.prototype, 'quickloginLogin').mockImplementation(() => {
+  started(); return new Promise((_, rejectCall) => { reject = rejectCall; });
+ });
+ await runInDurableObject(t.stub, async (instance, state) => {
+  const flight = (instance as any).performLogin(await state.storage.get('session'), t.authority);
+  await began;
+  const current: any = await state.storage.get('session');
+  const next = { ...current, operationId: 'successor', leaseToken: 'successor-lease', state: 'preparing' };
+  const alarm = Date.now() + 600_000;
+  await state.storage.put('session', next); await state.storage.setAlarm(alarm);
+  reject(new Error('synthetic broker transport failure'));
+  await expect(flight).resolves.toBeUndefined();
+  expect(await state.storage.get('session')).toEqual(next);
+  expect(await state.storage.getAlarm()).toBe(alarm);
+ });
+});

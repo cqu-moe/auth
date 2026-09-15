@@ -483,86 +483,93 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     const running = await v3.markRunning(session, authority);
     if (!running) return;
     session = running;
-    const result = await new QuickloginLoginBrokerClient(this.env)
-      .quickloginLogin({
-        ownerUserId: authority.ownerUserId,
-        deviceId: authority.deviceId,
-        generation: authority.generation,
-        seedState: session.storageState,
-        operationId: session.operationId,
-      });
-    const current = await new QuickloginAccountClient(this.env)
-      .getDeviceAuthority(authority.ownerUserId, authority.deviceId);
-    if (!current.allowed || current.generation !== authority.generation) {
-      await this.notify(current);
-      return;
-    }
-    if (result.kind === "needs_reauth") {
+    try {
+      const result = await new QuickloginLoginBrokerClient(this.env)
+        .quickloginLogin({
+          ownerUserId: authority.ownerUserId,
+          deviceId: authority.deviceId,
+          generation: authority.generation,
+          seedState: session.storageState,
+          operationId: session.operationId,
+        });
+      const current = await new QuickloginAccountClient(this.env)
+        .getDeviceAuthority(authority.ownerUserId, authority.deviceId);
+      if (!current.allowed || current.generation !== authority.generation) {
+        await this.notify(current);
+        return;
+      }
+      if (result.kind === "needs_reauth") {
+        let committed = false;
+        await this.ctx.storage.transaction(async (tx) => {
+          const currentSession = await tx.get<StoredDeviceSession>(SESSION_KEY);
+          if (!currentSession || currentSession.generation !== session.generation ||
+              (session.operationId !== undefined && (currentSession.operationId !== session.operationId || currentSession.leaseToken !== session.leaseToken)) ||
+              currentSession.state === "disabled" || currentSession.state === "revoked" ||
+              !quickloginDeviceModeEnabled(this.env)) return;
+          const next: StoredDeviceSession = {
+            ...currentSession,
+            state: "needs_reauth",
+            reasonCode: result.reason === "unbound" ? "BINDING_UNBOUND" : result.reason === "credentials_rejected" ? "CREDENTIALS_REJECTED" : "INTERACTION_REQUIRED",
+            deviceRevision: (currentSession.deviceRevision ?? 0) + 1,
+            storageState: result.reason === "unbound" ? null : currentSession.storageState,
+            exportDigest: result.reason === "unbound" ? null : currentSession.exportDigest,
+            transientFailures: 0,
+            transientStartedAt: null,
+          };
+          await tx.put(SESSION_KEY, next);
+          await settleV3Operation(tx, next);
+          committed = true;
+        });
+        if (committed) { await this.ctx.storage.deleteAlarm(); await v3.finish(await this.readSession()); }
+        return;
+      }
+      if (result.kind !== "success") {
+        await this.recordTransient(session, result.kind === "temporary_unavailable" ? result.reasonCode ?? "SCHOOL_UNREACHABLE" : "OPERATION_CANCELLED", result.kind === "temporary_unavailable" ? result.retryAfterMs : 60_000);
+        await v3.finish(await this.readSession());
+        return;
+      }
+      const cookies = extractSsoCookies(result.storageState, Date.now());
+      const digest = await digestSsoCookies(cookies);
+      const binding = await new QuickloginLoginBrokerClient(this.env).getBindingSnapshot(authority.ownerUserId);
+      if (binding.state !== "bound" || binding.bindingEpoch !== result.bindingEpoch || binding.credentialRevision !== (result.credentialRevision ?? result.bindingEpoch)) {
+        await this.recordTransient(session, "BINDING_CHANGED", 60_000);
+        return;
+      }
       let committed = false;
       await this.ctx.storage.transaction(async (tx) => {
         const currentSession = await tx.get<StoredDeviceSession>(SESSION_KEY);
         if (!currentSession || currentSession.generation !== session.generation ||
-            (session.operationId !== undefined && (currentSession.operationId !== session.operationId || currentSession.leaseToken !== session.leaseToken)) ||
+              (session.operationId !== undefined && (currentSession.operationId !== session.operationId || currentSession.leaseToken !== session.leaseToken)) ||
             currentSession.state === "disabled" || currentSession.state === "revoked" ||
             !quickloginDeviceModeEnabled(this.env)) return;
         const next: StoredDeviceSession = {
           ...currentSession,
-          state: "needs_reauth",
-          reasonCode: result.reason === "unbound" ? "BINDING_UNBOUND" : result.reason === "credentials_rejected" ? "CREDENTIALS_REJECTED" : "INTERACTION_REQUIRED",
+          bindingEpoch: result.bindingEpoch,
+          credentialRevision: result.credentialRevision ?? result.bindingEpoch,
+          reasonCode: null,
           deviceRevision: (currentSession.deviceRevision ?? 0) + 1,
-          storageState: result.reason === "unbound" ? null : currentSession.storageState,
-          exportDigest: result.reason === "unbound" ? null : currentSession.exportDigest,
+          storageState: result.storageState,
+          exportDigest: digest,
+          sessionVersion: currentSession.sessionVersion + 1,
+          loginAt: result.loginAt,
+          lastKeepAliveAt: result.loginAt,
+          state: "ready",
           transientFailures: 0,
           transientStartedAt: null,
+          fastRetries: 0,
+          nextAttemptAt: null,
         };
         await tx.put(SESSION_KEY, next);
         await settleV3Operation(tx, next);
         committed = true;
       });
-      if (committed) { await this.ctx.storage.deleteAlarm(); await v3.finish(await this.readSession()); }
-      return;
+      if (committed) { await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_MS); await v3.finish(await this.readSession()); }
+    } catch (error) {
+      const reason = error instanceof Error && ["INVALID_REQUEST", "PROTOCOL_UNSUPPORTED"].includes(error.message)
+        ? "CONTRACT_INVALID" : "INTERNAL_STATE_UNAVAILABLE";
+      console.warn(JSON.stringify({ event: "quicklogin.result_processing_failed", reasonCode: reason, operationId: session.operationId ?? null }));
+      await this.recordTransient(session, reason, 60_000);
     }
-    if (result.kind !== "success") {
-      await this.recordTransient(session, result.kind === "temporary_unavailable" ? result.reasonCode ?? "SCHOOL_UNREACHABLE" : "OPERATION_CANCELLED", result.kind === "temporary_unavailable" ? result.retryAfterMs : 60_000);
-      await v3.finish(await this.readSession());
-      return;
-    }
-    const cookies = extractSsoCookies(result.storageState, Date.now());
-    const digest = await digestSsoCookies(cookies);
-    const binding = await new QuickloginLoginBrokerClient(this.env).getBindingSnapshot(authority.ownerUserId);
-    if (binding.state !== "bound" || binding.bindingEpoch !== result.bindingEpoch || binding.credentialRevision !== (result.credentialRevision ?? result.bindingEpoch)) {
-      await this.recordTransient(session, "BINDING_CHANGED", 60_000);
-      return;
-    }
-    let committed = false;
-    await this.ctx.storage.transaction(async (tx) => {
-      const currentSession = await tx.get<StoredDeviceSession>(SESSION_KEY);
-      if (!currentSession || currentSession.generation !== session.generation ||
-            (session.operationId !== undefined && (currentSession.operationId !== session.operationId || currentSession.leaseToken !== session.leaseToken)) ||
-          currentSession.state === "disabled" || currentSession.state === "revoked" ||
-          !quickloginDeviceModeEnabled(this.env)) return;
-      const next: StoredDeviceSession = {
-        ...currentSession,
-        bindingEpoch: result.bindingEpoch,
-        credentialRevision: result.credentialRevision ?? result.bindingEpoch,
-        reasonCode: null,
-        deviceRevision: (currentSession.deviceRevision ?? 0) + 1,
-        storageState: result.storageState,
-        exportDigest: digest,
-        sessionVersion: currentSession.sessionVersion + 1,
-        loginAt: result.loginAt,
-        lastKeepAliveAt: result.loginAt,
-        state: "ready",
-        transientFailures: 0,
-        transientStartedAt: null,
-        fastRetries: 0,
-        nextAttemptAt: null,
-      };
-      await tx.put(SESSION_KEY, next);
-      await settleV3Operation(tx, next);
-      committed = true;
-    });
-    if (committed) { await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_MS); await v3.finish(await this.readSession()); }
   }
 
   private async notify(authority: DeviceAuthority): Promise<void> {

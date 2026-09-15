@@ -57,6 +57,12 @@ def cookies_to_storage_state(cookies: list[dict], origins: list[dict]) -> dict:
     exported = []
     for cookie in cookies:
         value = cookie_to_cdp(cookie)
+        # Import omits session expiry; exported storage state requires it.
+        value["expires"] = cookie.get("expires", -1)
+        value["sameSite"] = cookie.get("sameSite", "Lax")
+        for key in cookie:
+            if "partition" in key.lower():
+                value[key] = cookie[key]
         if value.get("name") and value.get("domain"):
             exported.append(value)
     return {"cookies": exported, "origins": origins}
