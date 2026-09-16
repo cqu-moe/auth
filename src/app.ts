@@ -14,7 +14,6 @@ import { AUTH_BASE_PATH } from "../shared/api-paths";
 import { buildOpenApiDocument } from "./api/openapi/document";
 import { getBetterAuthOpenApi, mergeBetterAuthOpenApi } from "./api/openapi/auth";
 import { captureHonoException } from "./lib/posthog";
-import { postHogCookieResetResponse } from "./lib/posthog-cookie";
 
 export function createApp() {
   const app = new Hono<HonoEnv>();
@@ -57,8 +56,6 @@ export function createApp() {
     await next();
   });
 
-  app.get("/api/v1/telemetry/reset", (c) =>
-    postHogCookieResetResponse(c.env.POSTHOG_PROJECT_TOKEN));
   app.route("/api/v1", createV1Api());
 
   const oauthMetadata = async (c: Parameters<typeof problem>[0]) => {

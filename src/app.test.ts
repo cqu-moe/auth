@@ -3,23 +3,6 @@ import { createApp } from "./app";
 import { createHttpFixture } from "./test-utils/http";
 
 describe("API and SPA routing boundary", () => {
-  it("clears the legacy cross-domain PostHog cookie", async () => {
-    const fixture = createHttpFixture();
-    try {
-      fixture.env.POSTHOG_PROJECT_TOKEN = "test";
-      const response = await createApp().request("/api/v1/telemetry/reset", {}, fixture.env);
-      expect(response.status).toBe(302);
-      expect(response.headers.get("location")).toBe("/");
-      const cookie = response.headers.get("set-cookie") ?? "";
-      expect(cookie).toContain("ph_test_posthog=");
-      expect(cookie).toContain("Max-Age=0");
-      expect(cookie).toContain("Domain=.cqu.moe");
-      expect(cookie).not.toContain("better-auth");
-    } finally {
-      await fixture.close();
-    }
-  });
-
   it.each(["/api", "/api/", "/api/v1/does-not-exist", "/api/v99/health", "/api/unknown"])(
     "keeps unknown API path %s out of ASSETS",
     async (path) => {
