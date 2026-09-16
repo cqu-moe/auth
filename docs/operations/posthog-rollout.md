@@ -54,12 +54,15 @@ The pre-change version IDs remain the tested rollback targets.
 - Isolated Chromium tests injected a synthetic `.cqu.moe` legacy cookie. Each recovery endpoint removed it, redirected to the normal app, and the new frontend did not recreate it. Auth and Schedule both rendered without the Cloudflare block page.
 - Schedule full verification after the fix: 39 Worker files, 401 passed / 21 skipped; 25 frontend files, 295 passed / 13 skipped. Auth branch and main CI passed all repository gates before production deployment.
 
-## QuickLogin 0.3.0 CSP incident and 0.3.1 repair
+## QuickLogin 0.3.0–0.3.1 CSP incidents and 0.3.2 repair
 
 - Chrome extension errors showed `connect-src 'self' https://*.posthog.com` blocking `https://auth.cqu.moe/api/v1/cqu/quicklogin/capabilities` and device reconcile before either request reached Auth. Host permissions were correct; the extension-page CSP added for PostHog had accidentally omitted the required Auth origin.
 - QuickLogin `9631cf1` changes the exact CSP to `self`, `https://auth.cqu.moe`, and `https://us.i.posthog.com`. The package gate now rejects any CSP that omits Auth or broadens the approved destinations.
 - Version 0.3.1 passed typecheck, 18 files / 83 tests, build, package checks and ZIP integrity. Artifact: `releases/cqu-quicklogin-0.3.1-canary.zip`, SHA-256 `0fd1e571c07c4e1bd400dc4e784276b6ebf3ba5e9ae1ac7b4a655cfd865dac92`.
 - The exact unpacked directory loaded by Chrome was verified as 0.3.0, backed up, and replaced byte-for-byte with the 0.3.1 `dist`. Chrome Reload and live toggle/reconcile verification remain a distinct user action.
+- After the 0.3.1 Reload, Chrome correctly reached Auth but rejected PostHog's `/array/<token>/config` request to `us-assets.i.posthog.com`. The installed SDK source confirmed that `advanced_disable_feature_flags` does not disable remote config; `advanced_disable_flags` is the current option that suppresses flags/config external calls.
+- QuickLogin `1c7de1a` uses `advanced_disable_flags=true` without widening CSP. Version 0.3.2 passed typecheck, 18 files / 83 tests, build, package checks and ZIP integrity. Artifact: `releases/cqu-quicklogin-0.3.2-canary.zip`, SHA-256 `b8b16dc4c164dcfbeb0e9ac1ba90476818e3addd86fa6e82ebf8293314ea603a`.
+- The loaded unpacked directory was backed up again and replaced byte-for-byte with 0.3.2. Chrome Reload and live toggle/reconcile verification remain pending.
 
 ## Implemented code
 
