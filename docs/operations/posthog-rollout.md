@@ -54,6 +54,13 @@ The pre-change version IDs remain the tested rollback targets.
 - Isolated Chromium tests injected a synthetic `.cqu.moe` legacy cookie. Each recovery endpoint removed it, redirected to the normal app, and the new frontend did not recreate it. Auth and Schedule both rendered without the Cloudflare block page.
 - Schedule full verification after the fix: 39 Worker files, 401 passed / 21 skipped; 25 frontend files, 295 passed / 13 skipped. Auth branch and main CI passed all repository gates before production deployment.
 
+## QuickLogin 0.3.0 CSP incident and 0.3.1 repair
+
+- Chrome extension errors showed `connect-src 'self' https://*.posthog.com` blocking `https://auth.cqu.moe/api/v1/cqu/quicklogin/capabilities` and device reconcile before either request reached Auth. Host permissions were correct; the extension-page CSP added for PostHog had accidentally omitted the required Auth origin.
+- QuickLogin `9631cf1` changes the exact CSP to `self`, `https://auth.cqu.moe`, and `https://us.i.posthog.com`. The package gate now rejects any CSP that omits Auth or broadens the approved destinations.
+- Version 0.3.1 passed typecheck, 18 files / 83 tests, build, package checks and ZIP integrity. Artifact: `releases/cqu-quicklogin-0.3.1-canary.zip`, SHA-256 `0fd1e571c07c4e1bd400dc4e784276b6ebf3ba5e9ae1ac7b4a655cfd865dac92`.
+- The exact unpacked directory loaded by Chrome was verified as 0.3.0, backed up, and replaced byte-for-byte with the 0.3.1 `dist`. Chrome Reload and live toggle/reconcile verification remain a distinct user action.
+
 ## Implemented code
 
 ### Auth Web and Worker
