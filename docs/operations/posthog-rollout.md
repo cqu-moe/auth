@@ -135,6 +135,10 @@ Synthetic secret tests cover event properties and URL normalization. They do not
 
 ## Release and acceptance boundary
 
+- Auth implementation commit: `ab2dd1c` (`feat(observability): instrument auth with PostHog`).
+- Schedule implementation commit: `955e48e` (`feat(observability): instrument schedule with PostHog`).
+- QuickLogin implementation commit: `bc54201`; package evidence commit: `8bb2cb6`.
+- QuickLogin local artifact: `releases/cqu-quicklogin-0.3.0-canary.zip`, SHA-256 `dfaa011400985fc297ffa7e55fe66eb43cfaa7b63848c209ad604266750319dc`. It was built without a project token, so telemetry is intentionally disabled until the authenticated tokenized rebuild.
 - No branch was pushed. No Worker, Container, Git Connector build, source map, PostHog resource, extension Reload, Store action, alert notification or uptime monitor was deployed/triggered.
 - Local tests/builds are not online acceptance.
 - Production release needs a later explicit instruction. Then verify deployed SHAs/versions, Container health, real login/binding/sync, extension Reload, unique smoke event/error, symbol sets, replay privacy, Logs/Traces, alerts and recovery.
