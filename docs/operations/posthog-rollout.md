@@ -145,7 +145,7 @@ Every saved insight applies the production environment filter and excludes the s
 - [活跃用户（30天）](https://us.posthog.com/project/608620/cohorts/573463) — calculated, current count 0.
 - [CQU 绑定失败（30天）](https://us.posthog.com/project/608620/cohorts/573465) — calculated, current count 0.
 - [首次同步失败候选（30天）](https://us.posthog.com/project/608620/cohorts/573464) — calculated, current count 0.
-- [CQU PostHog rollout analysis](https://us.posthog.com/project/608620/notebooks/vxKsuNZN) — notebook version 1 with dashboards, key analyses, controlled resources and activation boundaries.
+- [CQU PostHog rollout analysis](https://us.posthog.com/project/608620/notebooks/vxKsuNZN) — notebook version 2 with production releases, dashboards, key analyses, controlled resources and activation boundaries.
 
 ## Product/function coverage
 
