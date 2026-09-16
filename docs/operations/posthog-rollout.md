@@ -101,7 +101,7 @@ The pre-change version IDs remain the tested rollback targets.
 | PostHog Error Tracking | issue grouping | one active medium issue, one occurrence, library `posthog-node` |
 | PostHog privacy | forbidden property query | password, cookie, token, student ID, email, schedule and subscription URL absent from taxonomy and null on both smoke rows |
 | PostHog dashboards | forced fresh read | all three dashboards returned zero/no production data; preview/smoke data is excluded by saved filters |
-| PostHog project | settings readback | timezone, IP anonymization, exception capture, performance, replay, 10% sample, masking and heatmaps confirmed |
+| PostHog project | settings readback | timezone, IP anonymization, exception capture, performance, replay, 100% sample, masking and heatmaps confirmed |
 | Auth CI | [branch run 35058711400](https://github.com/cqu-moe/auth/actions/runs/35058711400) | all gates passed; 0% version uploaded; Auth Web release and one source-map chunk uploaded |
 | Auth production | [main run 35059202947](https://github.com/cqu-moe/auth/actions/runs/35059202947) | all gates and D1 migration passed; version `d7924cda-4891-406e-ae6f-50aa753f3c39` serves 100% |
 | Schedule production | [Git Connector build 083c7897](https://dash.cloudflare.com/a666c560407022706a52a703923548d5/workers/services/view/schedule-beta-cqu-moe/production/builds/083c7897-a19f-4748-8bf6-9de58964c877) | success; commit `89148fe`; version `bbd97dbb-d216-488e-8602-4e4867a56875` serves 100% |
@@ -153,7 +153,7 @@ Every saved insight applies the production environment filter and excludes the s
 |---|---|---|
 | Error Tracking | 已验证 | Auth/Schedule production-tagged Worker exceptions ingested with release/service properties; Auth/Schedule Web source maps are present. Python, real browser and QuickLogin exception symbolization still await natural/authorized paths. |
 | Web/Product Analytics | 已配置待真实数据 | Production code and tokens are deployed. Synthetic Worker release events are verified, but real login/binding/sync/QuickLogin events and stable browser pageviews are not; existing WAF blocked the automated browser after health checks. |
-| Session Replay | 已配置待真实数据 | Project enabled at 10%; inputs and all text masked; application safe-route controls deployed. No recording was produced/inspected because the safe Auth page was WAF-blocked and 10% sampling does not guarantee a Schedule recording. |
+| Session Replay | 已配置待真实数据 | Project enabled at 100% per operator request; inputs and all text masked; application safe-route controls deployed. No recording has yet been inspected because the safe Auth page was WAF-blocked. Reduce sampling after enough representative recordings accumulate. |
 | Heatmaps | 已配置待真实数据 | Project enabled and application capture restricted to safe pages. No deployed heatmap data exists. |
 | Dashboards/Insights | 已验证 | Three dashboards and twelve saved insights created and read back. Synthetic smoke is excluded; normal production results remain unknown until real traffic arrives. |
 | Alerts | 草案待启用 | Slack and email integration lists are empty. Alert creation requires a subscribed recipient; none was selected and no notification was sent. Planned rules remain: exception spike, two missed heartbeats, failure-rate threshold, latency threshold and recovery. |
@@ -178,7 +178,7 @@ Every saved insight applies the production environment filter and excludes the s
 
 - `anonymize_ips=true`, timezone `Asia/Shanghai`, week starts Monday.
 - exception autocapture enabled; console log capture disabled; performance capture enabled.
-- replay enabled at `0.10`; `maskAllInputs=true`; `maskTextSelector="*"`; no network payload capture configuration.
+- replay enabled at `1.00` (100%, raised from 10% on 2026-09-16); `maskAllInputs=true`; `maskTextSelector="*"`; no network payload capture configuration.
 - heatmaps enabled.
 
 ## Remaining external configuration
