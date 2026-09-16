@@ -138,6 +138,7 @@ export function initPostHog(): boolean {
   clearLegacyPostHogCookie(token);
   posthog.init(token, {
     api_host: host,
+    asset_host: host,
     ui_host: "https://us.posthog.com",
     persistence: "localStorage",
     cross_subdomain_cookie: false,
