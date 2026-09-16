@@ -5,16 +5,20 @@ import { createApp } from "./app";
 import { postHogCookieResetResponse } from "./lib/posthog-cookie";
 
 const app = createApp();
+const fetch: typeof app.fetch = async (request, env, ctx) => {
+  if (new URL(request.url).pathname === "/api/v1/telemetry/reset") {
+    const projectToken = env && "POSTHOG_PROJECT_TOKEN" in env
+      ? env.POSTHOG_PROJECT_TOKEN
+      : undefined;
+    return postHogCookieResetResponse(projectToken);
+  }
+  return app.fetch(request, env, ctx);
+};
 
 // 显式默认导出：HTTP 走 Hono（含末尾 app.all("*") catch-all），
 // 入站邮件走 Cloudflare Email Routing 的 email() handler。
 export default {
-  fetch(request, env, ctx) {
-    if (new URL(request.url).pathname === "/api/v1/telemetry/reset") {
-      return Promise.resolve(postHogCookieResetResponse(env.POSTHOG_PROJECT_TOKEN));
-    }
-    return app.fetch(request, env, ctx);
-  },
+  fetch,
   async email(message, env, _ctx) {
     await handleEmail(message, env);
   },
