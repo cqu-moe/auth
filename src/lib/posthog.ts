@@ -105,7 +105,7 @@ function createClient(env: TelemetryEnv): PostHog | null {
   const token = env.POSTHOG_PROJECT_TOKEN?.trim();
   if (!token) return null;
   return new PostHog(token, {
-    host: env.POSTHOG_HOST?.trim() || "https://us.i.posthog.com",
+    host: env.POSTHOG_HOST?.trim() || "https://p.cqu.moe",
     flushAt: 1,
     flushInterval: 0,
     requestTimeout: 2_000,

@@ -23,7 +23,7 @@ export class CquLoginContainer extends Container<Env> {
     CQU_BROWSER_PROFILE: "cloudflare",
     QG_ENABLED: "0",
     POSTHOG_PROJECT_TOKEN: this.env.POSTHOG_PROJECT_TOKEN ?? "",
-    POSTHOG_HOST: this.env.POSTHOG_HOST ?? "https://us.i.posthog.com",
+    POSTHOG_HOST: this.env.POSTHOG_HOST ?? "https://p.cqu.moe",
     ENVIRONMENT: this.env.ENVIRONMENT ?? "development",
     RELEASE: this.env.RELEASE ?? "development",
   };

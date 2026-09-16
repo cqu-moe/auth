@@ -81,7 +81,7 @@ def create_posthog_client() -> Posthog | None:
         return None
     return Posthog(
         project_api_key=token,
-        host=os.getenv("POSTHOG_HOST", "https://us.i.posthog.com"),
+        host=os.getenv("POSTHOG_HOST", "https://p.cqu.moe"),
         enable_exception_autocapture=True,
         before_send=sanitize_event,
         max_queue_size=1000,

@@ -12,7 +12,7 @@
     "QUICKLOGIN_DEVICE_MODE": "on",
     "QUICKLOGIN_CLIENT_ID": "cqu-quicklogin-chrome",
     "QUICKLOGIN_EXTENSION_ORIGIN": "chrome-extension://igfidegfgfoofnoncpmbcokbffjmmook",
-    "POSTHOG_HOST": "https://us.i.posthog.com",
+    "POSTHOG_HOST": "https://p.cqu.moe",
     "ENVIRONMENT": "production",
     // 浏览器后端已固定为 Cloudflare APAC Containers(2026-09-08 全量切换,
     // 2026-09-09 移除腾讯云节点绑定 LOGIN_NODE 与 node 回退路径)。

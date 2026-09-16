@@ -112,7 +112,7 @@ export function identityTransition(
 }
 
 const token = import.meta.env.VITE_POSTHOG_PROJECT_TOKEN?.trim();
-const host = import.meta.env.VITE_POSTHOG_HOST?.trim() || "https://us.i.posthog.com";
+const host = import.meta.env.VITE_POSTHOG_HOST?.trim() || "https://p.cqu.moe";
 const environment = import.meta.env.PROD ? "production" : import.meta.env.MODE === "test" ? "test" : "development";
 const release = import.meta.env.VITE_RELEASE?.trim() || "development";
 let initialized = false;
