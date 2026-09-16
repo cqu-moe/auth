@@ -30,8 +30,8 @@ Production deployment readback before this change:
 
 Production deployment after this change:
 
-- Auth commit `9546241f46852603e02911deff6097a63f94f0d9`, Cloudflare 100% version `d7924cda-4891-406e-ae6f-50aa753f3c39`, deployed `2026-09-16T05:27:54.369Z`. Container state `ready`, 5 live instances.
-- Schedule commit `89148fe466c259d3f3159dc9f6e4731f042672b9`, Cloudflare 100% version `bbd97dbb-d216-488e-8602-4e4867a56875`, deployed `2026-09-16T05:33:09.356Z` through Git Connector build `083c7897-a19f-4748-8bf6-9de58964c877`.
+- Auth cookie-recovery commit `8c04601`, Cloudflare 100% version `4a3cb23e-a599-42be-a096-1f572526da96`, deployed `2026-09-16T09:42:00.823Z` after [main run 35080356830](https://github.com/cqu-moe/auth/actions/runs/35080356830); Container returned to `ready` with 5 live instances.
+- Schedule cookie-recovery commit `eec9f04`, Cloudflare 100% version `ee019c59-8e0b-4a96-acf6-934c7c4fff7f`, deployed `2026-09-16T09:20:08.199Z` through Git Connector build `ea7f6531-bdef-4461-879a-1bb94e20d57e`.
 
 The pre-change version IDs remain the tested rollback targets.
 
@@ -43,6 +43,16 @@ The pre-change version IDs remain the tested rollback targets.
 - The official Wizard was run for both Vite frontends. Its TUI requires at least 80x28 while the controlled PTY is fixed at 80x24; published `--ci` mode is disabled. The equivalent official SDK setup was applied manually.
 - Authenticated CLI readback confirms US project ID `608620`, name `cqu.moe`, and administrator access. The public project token is deliberately omitted from this document.
 - Auth and Schedule Cloudflare secret-name readback confirms `POSTHOG_PROJECT_TOKEN` is configured. Auth GitHub Actions and Schedule Git Connector build variables/secrets were written and read back without recording the management key.
+
+## PostHog cookie / WAF incident and recovery
+
+- Cloudflare event `a3bea295cb916827` was a normal `GET /dashboard` with JavaScript detection passed, but the OWASP inbound anomaly score reached 41 and rule 949110 blocked it. The contributing rules included invalid request-header characters, SQL/RCE patterns, and two cookie special-character anomaly rules.
+- Installed `posthog-js@1.433.5` defaults were verified from the actual bundle: `persistence="localStorage+cookie"`, cross-subdomain cookies enabled for this hostname, and 365-day cookie lifetime. The emitted persistence cookie is `ph_<project-token>_posthog`. The Auth/Schedule initialization had not overridden these defaults, so the new `.cqu.moe` cookie reached every sibling hostname and was inspected as hostile Cookie input by the existing managed WAF.
+- Both frontends now set `persistence="localStorage"` and `cross_subdomain_cookie=false`, and delete the legacy host/domain cookie before initialization. Auth/Schedule red→green tests assert the storage options and deletion behavior.
+- Both Workers expose a no-store recovery redirect that expires only the legacy PostHog cookie: Auth `/api/v1/telemetry/reset`, Schedule `/api/v2/telemetry/reset`. It does not clear Better Auth/CQU cookies.
+- Cloudflare custom rule `4be23cb49ad34cf3b7498f3d571e676d` is active and skips only managed WAF rules for GET requests to those two exact recovery paths; logging is enabled. It does not skip custom rules, rate limits, API traffic, ordinary pages, or other paths.
+- Isolated Chromium tests injected a synthetic `.cqu.moe` legacy cookie. Each recovery endpoint removed it, redirected to the normal app, and the new frontend did not recreate it. Auth and Schedule both rendered without the Cloudflare block page.
+- Schedule full verification after the fix: 39 Worker files, 401 passed / 21 skipped; 25 frontend files, 295 passed / 13 skipped. Auth branch and main CI passed all repository gates before production deployment.
 
 ## Implemented code
 
