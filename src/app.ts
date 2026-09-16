@@ -13,9 +13,14 @@ import { createAuthApi } from "./api/v1/auth";
 import { AUTH_BASE_PATH } from "../shared/api-paths";
 import { buildOpenApiDocument } from "./api/openapi/document";
 import { getBetterAuthOpenApi, mergeBetterAuthOpenApi } from "./api/openapi/auth";
+import { captureHonoException } from "./lib/posthog";
 
 export function createApp() {
   const app = new Hono<HonoEnv>();
+  app.onError((error, c) => {
+    captureHonoException(error, c);
+    return problem(c, "INTERNAL_ERROR", "服务器内部错误", 500);
+  });
   let runtimeOperations: ReturnType<typeof listHttpOperations> = [];
 
   const rejectWebSocketHead = async (c: Parameters<typeof problem>[0], next: () => Promise<void>) => {

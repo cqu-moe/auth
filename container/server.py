@@ -30,6 +30,13 @@ import cqu_keepalive  # 国内节点浏览器水化探活, 暴露 probe_session_
 import cqu_ticket_browser  # 浏览器水化取 ST(过瑞数 JS 挑战), 暴露 fetch_service_ticket_browser(...)
 import cqu_data_harvest  # 浏览器 organic harvest(navigate+capture+in-page fetch), 暴露 harvest(...)
 from qg_proxy import acquire_qg_proxy, QgExtractError, should_use_proxy  # 青果代理 + 灰度门(/run 登录仍用)
+from posthog_client import (
+    POSTHOG_CLIENT_KEY,
+    create_posthog_client,
+    flush_posthog,
+    posthog_exception_middleware,
+    safe_capture_exception,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("cqu-login-server")
@@ -626,6 +633,11 @@ async def run_handler(request: web.Request) -> web.Response:
         log.warning("run timeout (total >%ds)", RUN_TOTAL_TIMEOUT)
         return login_failure_response("BROWSER_DEADLINE", status=504)
     except Exception as e:  # noqa: BLE001 - surface any login failure to the caller
+        safe_capture_exception(
+            request.app.get(POSTHOG_CLIENT_KEY),
+            e,
+            {"operation": "login", "error_code": "UNKNOWN_LOGIN_ERROR"},
+        )
         return login_failure_response(e, status=500)
     finally:
         CODE_EVENTS.pop(session, None)
@@ -854,6 +866,11 @@ async def service_ticket_handler(request: web.Request) -> web.Response:
         log.warning("service-ticket expired: %s", type(e).__name__)
         return web.json_response({"ok": False, "error": type(e).__name__}, status=409)
     except Exception as e:  # noqa: BLE001 - NoTicketError/浏览器崩/超时 → 502 瞬态, 让上游退避
+        safe_capture_exception(
+            request.app.get(POSTHOG_CLIENT_KEY),
+            e,
+            {"operation": "service_ticket", "error_code": "SERVICE_TICKET_TRANSIENT"},
+        )
         # 同上脱敏: error/log 只记 type(e).__name__, 不拼 str(e)(防 cookie/state 明文外泄)。
         # 状态码语义(502)不变 → DO 据状态码分类, 不依赖 body 文案。
         log.warning("service-ticket transient: %s", type(e).__name__)
@@ -903,6 +920,11 @@ async def keepalive_handler(request: web.Request) -> web.Response:
             {"ok": False, "error": "BROWSER_DEADLINE"}, status=503
         )
     except Exception as e:  # noqa: BLE001 - 纵深兜底, 探活对 DO 永远只返回探测事实(200)
+        safe_capture_exception(
+            request.app.get(POSTHOG_CLIENT_KEY),
+            e,
+            {"operation": "keepalive", "error_code": "KEEPALIVE_UNREACHABLE"},
+        )
         # M9: detail(body)与 log 都只记 type(e).__name__, 不拼 str(e): 异常 message 可能含
         # state/cookie 片段, 经 200 body 回传 DO 并落 CF observability(下游 sanitizeNodeDetail
         # 只截断不脱敏, 救不了)。补齐"body 防了 log 没防"的不一致。
@@ -1002,6 +1024,11 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
             status=cqu_data_harvest.HARVEST_ERROR_STATUS[code],
         )
     except Exception as e:  # noqa: BLE001 - Unknown browser/transport failures are residual.
+        safe_capture_exception(
+            request.app.get(POSTHOG_CLIENT_KEY),
+            e,
+            {"operation": "data_harvest", "error_code": "HARVEST_TRANSIENT"},
+        )
         log.warning("data-harvest transient: %s", type(e).__name__)
         return web.json_response({"ok": False, "error": "HARVEST_TRANSIENT"}, status=503)
     finally:
@@ -1026,7 +1053,9 @@ async def health_handler(_request: web.Request) -> web.Response:
 
 
 def build_app() -> web.Application:
-    app = web.Application()
+    app = web.Application(middlewares=[posthog_exception_middleware])
+    app[POSTHOG_CLIENT_KEY] = create_posthog_client()
+    app.on_cleanup.append(flush_posthog)
     app.add_routes([
         web.post("/run", run_handler),
         web.post("/code", code_handler),

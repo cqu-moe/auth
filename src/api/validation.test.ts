@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createRoute, z } from "@hono/zod-openapi";
 import { createApiRouter, JsonBodyError, parseJsonBody } from "./validation";
 
@@ -92,5 +92,20 @@ describe("v1 request validation", () => {
     await expect(parseJsonBody(new Request("https://auth.test/write", {
       method: "POST",
     }), Body)).rejects.toBeInstanceOf(JsonBodyError);
+  });
+
+  it("reports an unexpected sub-router error once and preserves the 500 response", async () => {
+    const report = vi.fn();
+    const app = createApiRouter({ reportUnexpectedError: report });
+    app.get("/explode", () => {
+      throw new Error("safe synthetic failure");
+    });
+
+    const response = await app.request("/explode");
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ status: 500, code: "INTERNAL_ERROR" });
+    expect(report).toHaveBeenCalledOnce();
+    expect(report.mock.calls[0]?.[0]).toBeInstanceOf(Error);
   });
 });

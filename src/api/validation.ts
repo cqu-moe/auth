@@ -1,5 +1,5 @@
 import { OpenAPIHono } from "@hono/zod-openapi";
-import type { Env } from "hono";
+import type { Context, Env } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { problem } from "./problem";
 
@@ -45,7 +45,9 @@ export function jsonBodyProblem(c: Parameters<typeof problem>[0], error: JsonBod
     : problem(c, error.code, "请求体无效", error.status);
 }
 
-export function createApiRouter<E extends Env = Env>() {
+export function createApiRouter<E extends Env = Env>(
+  options: { reportUnexpectedError?: (error: unknown, c: Context<E>) => void } = {}
+) {
   const app = new OpenAPIHono<E>({
     defaultHook: (result, c) => {
       if (!result.success) {
@@ -61,6 +63,7 @@ export function createApiRouter<E extends Env = Env>() {
     if (error instanceof HTTPException && error.status === 400) {
       return problem(c, "INVALID_BODY", "请求体不是合法 JSON", 400);
     }
+    options.reportUnexpectedError?.(error, c);
     return problem(c, "INTERNAL_ERROR", "服务器内部错误", 500);
   });
 

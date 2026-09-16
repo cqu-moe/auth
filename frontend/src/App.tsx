@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { useEffect, useRef } from "react";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { authClient } from "./lib/auth-client";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -15,6 +16,26 @@ import TwoFactorSettings from "./pages/TwoFactorSettings";
 import ProtectedRoute from "./components/ProtectedRoute";
 import EmailVerificationGate from "./components/EmailVerificationGate";
 import AuthError from "./pages/AuthError";
+import { syncPostHogIdentity, syncPostHogReplay } from "./lib/posthog";
+
+function PostHogLifecycle() {
+  const { data: session, isPending } = authClient.useSession();
+  const location = useLocation();
+  const previousUserId = useRef<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (isPending) return;
+    const currentUserId = (session?.user as { id?: string } | undefined)?.id ?? null;
+    syncPostHogIdentity(previousUserId.current, currentUserId);
+    previousUserId.current = currentUserId;
+  }, [isPending, session]);
+
+  useEffect(() => {
+    syncPostHogReplay(location.pathname);
+  }, [location.pathname]);
+
+  return null;
+}
 
 function RootRedirect() {
   const { data: session, isPending } = authClient.useSession();
@@ -33,6 +54,7 @@ function RootRedirect() {
 export default function App() {
   return (
     <BrowserRouter>
+      <PostHogLifecycle />
       <EmailVerificationGate>
         <Routes>
           <Route path="/" element={<RootRedirect />} />

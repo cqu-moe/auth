@@ -26,7 +26,18 @@ export function createCquBindingApi() {
       return problem(c, "INVALID_QUERY", "请求参数无效", 400);
     }
     url.pathname = resourcePath(url.pathname);
-    const response = await cquBinding.request(new Request(url, c.req.raw), undefined, c.env);
+    let executionCtx: ExecutionContext | undefined;
+    try {
+      executionCtx = c.executionCtx;
+    } catch {
+      executionCtx = undefined;
+    }
+    const response = await cquBinding.request(
+      new Request(url, c.req.raw),
+      undefined,
+      c.env,
+      executionCtx
+    );
     if (response.status === 101 || response.status === 204) return response;
 
     const contentType = response.headers.get("content-type") ?? "";

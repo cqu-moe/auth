@@ -16,6 +16,10 @@ export interface Env {
   QUICKLOGIN_DEVICE_MODE?: "off" | "on";
   QUICKLOGIN_SERVER_BUILD?: string;
   BIND_EMAIL_DOMAIN: string;
+  POSTHOG_PROJECT_TOKEN?: string;
+  POSTHOG_HOST?: string;
+  ENVIRONMENT?: "production" | "preview" | "development";
+  RELEASE?: string;
 }
 
 export interface CquSessionRecoveryParams {

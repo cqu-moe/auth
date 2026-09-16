@@ -10,6 +10,7 @@ import { getCquBinding } from "../services/cqu-binding";
 import { requireSessionOrBearer } from "../middleware/authentication";
 import { JsonBodyError, parseJsonBody } from "../api/validation";
 import { CquCredentialsBody, CreateCquBindingBody } from "../api/v1/cqu-binding.schema";
+import { captureHonoEvent, captureHonoException } from "../lib/posthog";
 
 // CQU 绑定资源路由（RESTful 重构）。
 //
@@ -145,6 +146,7 @@ cquBinding.get("/", async (c) => {
 // 首登失败不写 D1 凭据，绑定地址保留原状态；并发提交也不会覆盖当前有效凭据。
 cquBinding.put("/credentials", async (c) => {
   const user = c.get("user") as { id: string };
+  const startedAt = Date.now();
 
   // #5: 畸形 JSON body 不应裸 500，统一返回 400 INVALID_BODY。
   let body: { studentId: string; password: string };
@@ -265,6 +267,7 @@ cquBinding.put("/credentials", async (c) => {
       userId: user.id,
       err,
     });
+    captureHonoException(err, c, { component: "cqu-binding", error_code: "BIND_ACTIVATE_FAILED" });
     return errorResponse(
       c,
       "BIND_ACTIVATE_FAILED",
@@ -272,6 +275,11 @@ cquBinding.put("/credentials", async (c) => {
       503
     );
   }
+
+  captureHonoEvent(c, "cqu_binding_completed", user.id, {
+    outcome: "success",
+    duration_ms: Date.now() - startedAt,
+  });
 
   return c.json({ success: true, studentId });
 });

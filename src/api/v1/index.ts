@@ -14,6 +14,7 @@ import { createAdminEntitlementsApi } from "./admin/entitlements";
 import { createAdminOAuthClientsApi } from "./admin/oauth-clients";
 import { createAdminQuickloginApi } from "./admin/quicklogin";
 import { cquQuickloginDevices } from "../../routes/cqu-quicklogin-devices";
+import { captureHonoException } from "../../lib/posthog";
 
 const Health = z.object({
   data: z.object({
@@ -35,7 +36,7 @@ const healthRoute = createRoute({
 });
 
 export function createV1Api() {
-  const api = createApiRouter<HonoEnv>();
+  const api = createApiRouter<HonoEnv>({ reportUnexpectedError: captureHonoException });
   api.openapi(healthRoute, (c) =>
     c.json({ data: { status: "ok" as const, timestamp: new Date().toISOString() } }, 200)
   );
