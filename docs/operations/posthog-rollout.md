@@ -8,7 +8,7 @@ Date: 2026-09-16 (Asia/Shanghai)
 - [x] Task 2: Auth Web/Worker events, identity, privacy, error capture and source-map upload implemented and deployed. Production Worker SDK smoke and a valid Auth Web symbol set were read back.
 - [x] Task 3: Schedule Web/Worker events, terminal CAS outcomes, duration and Cron heartbeat implemented and deployed. Production Worker SDK smoke and 18 valid Schedule Web symbol sets were read back; real sync traffic remains pending.
 - [x] Task 4: Auth Python/aiohttp SDK integration covers unexpected and converted exception exits. The Container image is deployed and `ready` with 5 live instances; an actual Container failure path has not been induced.
-- [x] Task 5: QuickLogin MV3 integration and privacy controls implemented. A tokenized 0.3.0 canary was rebuilt from the verified project configuration and passed package integrity checks. Unpacked Chrome Reload acceptance remains pending.
+- [x] Task 5: QuickLogin MV3 integration and privacy controls implemented. A tokenized 0.3.3 canary was rebuilt from the verified project configuration and passed package integrity checks. Unpacked Chrome/Ego Reload acceptance remains pending.
 - [ ] Task 6: native Cloudflare logs/traces are enabled. PostHog OTLP destinations, PostHog metrics and independent uptime remain blocked as recorded below.
 - [x] Task 7: applicable project settings, analyses, dashboards, cohorts, a test-only flag, a draft experiment, a draft survey and a rollout notebook were created with dry-run/apply/readback. Alerts and Product Tours remain blocked.
 - [x] Task 8: all branches and main commits were pushed; Auth CI and Schedule Git Connector deployed production; health, versions, source maps, production-tagged smoke and privacy were read back. Real login/binding/sync and extension Reload remain pending.
@@ -32,6 +32,8 @@ Production deployment after this change:
 
 - Auth cookie-recovery commit `8c04601`, Cloudflare 100% version `4a3cb23e-a599-42be-a096-1f572526da96`, deployed `2026-09-16T09:42:00.823Z` after [main run 35080356830](https://github.com/cqu-moe/auth/actions/runs/35080356830); Container returned to `ready` with 5 live instances.
 - Schedule cookie-recovery commit `eec9f04`, Cloudflare 100% version `ee019c59-8e0b-4a96-acf6-934c7c4fff7f`, deployed `2026-09-16T09:20:08.199Z` through Git Connector build `ea7f6531-bdef-4461-879a-1bb94e20d57e`.
+- Auth managed-proxy commits through `d7362de`, Cloudflare 100% version `cb076913-dea8-46ea-a43c-74c0847f8564`, deployed by [main run 35089543209](https://github.com/cqu-moe/auth/actions/runs/35089543209); Container application version 72 is `ready` with 5 instances on image tag `cb076913`.
+- Schedule managed-proxy commits through `f83cd88`, Cloudflare 100% version `78403ed8-1e33-47a9-a9b5-b64af6e890de`, deployed with no pending D1 migrations.
 
 The pre-change version IDs remain the tested rollback targets.
 
@@ -50,11 +52,12 @@ The pre-change version IDs remain the tested rollback targets.
 - Installed `posthog-js@1.433.5` defaults were verified from the actual bundle: `persistence="localStorage+cookie"`, cross-subdomain cookies enabled for this hostname, and 365-day cookie lifetime. The emitted persistence cookie is `ph_<project-token>_posthog`. The Auth/Schedule initialization had not overridden these defaults, so the new `.cqu.moe` cookie reached every sibling hostname and was inspected as hostile Cookie input by the existing managed WAF.
 - Both frontends now set `persistence="localStorage"` and `cross_subdomain_cookie=false`, and delete the legacy host/domain cookie before initialization. Auth/Schedule red→green tests assert the storage options and deletion behavior.
 - Both Workers expose a no-store recovery redirect that expires only the legacy PostHog cookie: Auth `/api/v1/telemetry/reset`, Schedule `/api/v2/telemetry/reset`. It does not clear Better Auth/CQU cookies.
-- Cloudflare custom rule `4be23cb49ad34cf3b7498f3d571e676d` is active and skips only managed WAF rules for GET requests to those two exact recovery paths; logging is enabled. It does not skip custom rules, rate limits, API traffic, ordinary pages, or other paths.
+- Cloudflare custom rule `4be23cb49ad34cf3b7498f3d571e676d`, renamed `Recover legacy PostHog cookie clients`, remains active with logging. It skips only managed WAF rules for the two exact reset paths or requests to Auth/Schedule/Schedule Beta that contain the exact legacy PostHog cookie name. It does not skip custom rules, rate limits, DDoS protection, other hosts, or requests without that cookie.
 - Isolated Chromium tests injected a synthetic `.cqu.moe` legacy cookie. Each recovery endpoint removed it, redirected to the normal app, and the new frontend did not recreate it. Auth and Schedule both rendered without the Cloudflare block page.
+- A second production incident (`a3bf351a0a0bec38`; login POST `a3bf3f1a89f9ec38`) proved that an already-open old bundle could recreate the legacy cookie and make Cloudflare reject normal login before Auth ran. After the targeted rule update, a synthetic-cookie Auth page load deleted the cookie and a synthetic-cookie login POST reached Auth, returning its own `401 application/json` response instead of Cloudflare `403 text/html`.
 - Schedule full verification after the fix: 39 Worker files, 401 passed / 21 skipped; 25 frontend files, 295 passed / 13 skipped. Auth branch and main CI passed all repository gates before production deployment.
 
-## QuickLogin 0.3.0–0.3.1 CSP incidents and 0.3.2 repair
+## QuickLogin 0.3.0–0.3.2 incidents and 0.3.3 repair
 
 - Chrome extension errors showed `connect-src 'self' https://*.posthog.com` blocking `https://auth.cqu.moe/api/v1/cqu/quicklogin/capabilities` and device reconcile before either request reached Auth. Host permissions were correct; the extension-page CSP added for PostHog had accidentally omitted the required Auth origin.
 - QuickLogin `9631cf1` changes the exact CSP to `self`, `https://auth.cqu.moe`, and `https://us.i.posthog.com`. The package gate now rejects any CSP that omits Auth or broadens the approved destinations.
@@ -63,6 +66,17 @@ The pre-change version IDs remain the tested rollback targets.
 - After the 0.3.1 Reload, Chrome correctly reached Auth but rejected PostHog's `/array/<token>/config` request to `us-assets.i.posthog.com`. The installed SDK source confirmed that `advanced_disable_feature_flags` does not disable remote config; `advanced_disable_flags` is the current option that suppresses flags/config external calls.
 - QuickLogin `1c7de1a` uses `advanced_disable_flags=true` without widening CSP. Version 0.3.2 passed typecheck, 18 files / 83 tests, build, package checks and ZIP integrity. Artifact: `releases/cqu-quicklogin-0.3.2-canary.zip`, SHA-256 `b8b16dc4c164dcfbeb0e9ac1ba90476818e3addd86fa6e82ebf8293314ea603a`.
 - The loaded unpacked directory was backed up again and replaced byte-for-byte with 0.3.2. Chrome Reload and live toggle/reconcile verification remain pending.
+- Direct 0.3.2 testing in Ego showed the extension background was alive and had a fresh protocol-v3 snapshot, but the build still allowed and retried the legacy PostHog ingest host. Version 0.3.3 routes ingestion through `https://p.cqu.moe`, keeps `ui_host=https://us.posthog.com` only for console links, and narrows host permissions/CSP to Auth, SSO and the managed proxy.
+- QuickLogin now records expected state transitions such as reconnect-required, device-disabled, rate-limited and user-cancelled as operation outcomes without also creating runtime exception issues. WAF, container, contract, internal-state and unknown server failures remain reportable exceptions.
+- Version 0.3.3 passed typecheck, 18 files / 84 tests, build, contract/package checks and ZIP integrity. Artifact: `releases/cqu-quicklogin-0.3.3-canary.zip`, SHA-256 `e60af524c917dd5478c48c3de5333c40648ee9d259500d9ed30dbab0d131cc21`; build provenance commit `27d76932abc807b5f9304e92c3a1341dce53e8e2`.
+- Chrome and Ego loaded directories were backed up and replaced byte-for-byte with 0.3.3. Reload is intentionally pending explicit action-time confirmation; no Chrome Web Store upload was performed.
+
+## Managed reverse proxy verification
+
+- `api_host` for Auth Web/Worker/Container, Schedule Web/Worker and QuickLogin is `https://p.cqu.moe`; Auth/Schedule browser SDKs also set `asset_host` to the proxy. `ui_host` remains `https://us.posthog.com` for links only.
+- Auth CI and the Schedule build script explicitly pin `VITE_POSTHOG_HOST=https://p.cqu.moe`; this prevents an older shell or repository variable from overriding the source fallback at build time.
+- Schedule CSP allows only `p.cqu.moe` in `script-src` and `connect-src` in addition to its existing Cloudflare Analytics sources. Production browser capture returned 200 for proxy-hosted config, flags, error capture, Web Vitals, surveys, recorder and `/e/` event requests. Auth production returned 200 for the same applicable proxy paths. No direct `us.i.posthog.com` or `us-assets.i.posthog.com` request appeared in these final traces.
+- Official Node SDK canary `posthog_proxy_canary` was sent through `p.cqu.moe` and read back from project 608620 with `service=verification`, `environment=production`, `transport=managed_proxy`, release `d7362de`. This proves managed-proxy ingestion for a synthetic event; it is not real-user acceptance.
 
 ## Implemented code
 
@@ -96,9 +110,9 @@ The pre-change version IDs remain the tested rollback targets.
 
 ### QuickLogin MV3
 
-- Version 0.3.0 in package, lockfile and manifest.
+- Version 0.3.3 in package, lockfile and manifest.
 - Static `posthog-js/dist/module.no-external`; remote dependency loading disabled; memory persistence; no pageview/autocapture/replay/surveys/tours/flags; random installation ID in `chrome.storage.local`.
-- Only `https://us.i.posthog.com/*` was added to host permissions, with the official PostHog `connect-src` CSP. No collector is injected into Auth/CQU pages.
+- Only `https://p.cqu.moe/*` is allowed for PostHog transport, alongside the existing exact Auth and SSO origins. No collector is injected into Auth/CQU pages.
 - Connect, user-triggered sync/enable/disable/resume/switch, verified Cookie application and safe exceptions are recorded without Cookie/token values.
 - SDK capture plus browser SDK `shutdown()` provides best-effort flush in existing async work. No telemetry alarm, persistent retry queue or business retry change was added.
 
@@ -116,7 +130,8 @@ The pre-change version IDs remain the tested rollback targets.
 | Schedule | Worker tests | 39 files; 400 passed, 21 skipped |
 | Schedule | frontend tests | 24 files; 294 passed, 13 skipped |
 | Schedule | frontend build | passed |
-| QuickLogin | typecheck/test/build/package | passed; 18 files/83 tests; package gate 8 files and 3 manifest references |
+| QuickLogin | typecheck/test/build/package | passed; 18 files/84 tests; package gate 8 files and 3 manifest references; 0.3.3 ZIP integrity passed |
+| Managed proxy | browser + SDK canary | Auth/Schedule dynamic SDK resources and `/e/` returned 200 only through `p.cqu.moe`; `posthog_proxy_canary` was read back in project 608620 |
 | PostHog ingestion | unique smoke event and `$exception` | both read back with service `auth-worker`, environment `preview`, release `ab2dd1c` |
 | PostHog Error Tracking | issue grouping | one active medium issue, one occurrence, library `posthog-node` |
 | PostHog privacy | forbidden property query | password, cookie, token, student ID, email, schedule and subscription URL absent from taxonomy and null on both smoke rows |
@@ -209,10 +224,10 @@ Every saved insight applies the production environment filter and excludes the s
 
 ## Release and acceptance boundary
 
-- Auth commits: `ab2dd1c` (`feat(observability): instrument auth with PostHog`), `a5ae686` (`docs(observability): finalize rollout evidence`); this updated evidence is committed separately after final verification.
-- Schedule commits: `955e48e` (`feat(observability): instrument schedule with PostHog`), `89148fe` (`chore(observability): stamp schedule release`).
-- QuickLogin commits: `bc54201` (`feat(observability): instrument quicklogin with PostHog`), `8bb2cb6` and `fd8649c` (canary evidence).
-- QuickLogin tokenized local artifact: `releases/cqu-quicklogin-0.3.0-canary.zip`, SHA-256 `c55434507cab339d18c0e6e23346810d3a920fd1694f34cf2bef8c0962e9910e`, 8 files and 3 manifest references. `unzip -t` found no errors. It has not been loaded into Chrome or uploaded to the Store.
-- All three `codex/posthog-fresh` branches and all three `main` branches were pushed. Auth/Schedule production and source maps were deployed. Extension Reload, Chrome Web Store action, alert notification, OTLP destination and uptime monitor were not performed.
-- Auth and Schedule health/version acceptance passed. Normal login, CQU binding, one real Schedule sync, QuickLogin Reload/operation, replay inspection and failure/recovery alerts remain manual/traffic-dependent acceptance gates. No OTP or CAPTCHA flow was retried.
+- Auth commits now include `a4f2d0e` (managed proxy), `9d73f00` (`asset_host`) and `d7362de` (CI build host pin).
+- Schedule commits now include `402d008` (managed proxy), `cd395f8` (proxy CSP), `3258e99` (`asset_host`) and `f83cd88` (build host pin).
+- QuickLogin commit `27d7693` releases 0.3.3 with managed-proxy transport and expected-state exception suppression.
+- QuickLogin tokenized local artifact: `releases/cqu-quicklogin-0.3.3-canary.zip`, SHA-256 `e60af524c917dd5478c48c3de5333c40648ee9d259500d9ed30dbab0d131cc21`, 8 files and 3 manifest references. `unzip -t` found no errors. Its files are staged in the loaded Chrome/Ego directories but have not been reloaded or uploaded to the Store.
+- All three `codex/posthog-fresh` branches and all three `main` branches were pushed. Auth/Schedule production, managed-proxy browser assets and source maps were deployed. Extension Reload, Chrome Web Store action, alert notification, OTLP destination and uptime monitor were not performed.
+- Auth and Schedule health/version/managed-proxy acceptance passed. Targeted synthetic-cookie Auth GET/POST acceptance passed. A real credential login, CQU binding, one real Schedule sync, QuickLogin 0.3.3 Reload/operation, replay inspection and failure/recovery alerts remain manual/traffic-dependent acceptance gates. No real password, OTP or CAPTCHA flow was exercised by the agent.
 - Rollback begins by disabling telemetry/replay/export, then uses normal Git revert and release. The pre-change Cloudflare version IDs above are the current rollback references.
