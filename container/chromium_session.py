@@ -530,7 +530,32 @@ class ChromiumSession:
                     })
                 return
             await asyncio.sleep(0.1)
-        raise RuntimeError("School login control did not become actionable")
+        # Carry the selector, target text, and why the control stayed unclickable so error
+        # tracking can tell the two call sites apart. The probe reports counts only, never
+        # page text; the /run response never echoes this message either.
+        state = await self._describe_missing_control(selector, text)
+        raise RuntimeError(
+            f"login control not actionable: selector={selector} text={text!r} state={state}"
+        )
+
+    async def _describe_missing_control(self, selector, text):
+        try:
+            report = await self.evaluate("""({selector,text}) => {
+              const nodes = [...document.querySelectorAll(selector)];
+              const withText = nodes.filter(element => (element.innerText || '').trim() === text);
+              return {
+                matched: nodes.length,
+                withText: withText.length,
+                hidden: withText.filter(element =>
+                  !element.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})).length,
+                disabled: withText.filter(element =>
+                  element.closest(':disabled,[aria-disabled="true"],[inert]')).length,
+                readyState: document.readyState,
+              };
+            }""", {"selector": selector, "text": text})
+        except Exception as error:
+            report = {"probeError": type(error).__name__}
+        return json.dumps(report, ensure_ascii=False, separators=(",", ":"))
 
     async def intercept_requests(self, should_abort):
         async def handle(params):

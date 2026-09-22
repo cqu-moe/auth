@@ -50,6 +50,7 @@ LOGIN_FAILURES = {
     "CODE_PERMIT_TIMEOUT": ("waiting_verification_lease", "The verification-code permit was not available before the deadline."),
     "VERIFICATION_COOLDOWN": ("waiting_verification_lease", "Verification is waiting for the permitted retry time."),
     "BROWSER_DEADLINE": ("operation", "The browser operation reached its deadline."),
+    "CONTROL_NOT_ACTIONABLE": ("operation", "A school login control did not become clickable."),
     "BROWSER_BUSY": ("waiting_capacity", "The browser instance is busy."),
     "BROWSER_INSTANCE_REPLACED": ("launching_browser", "The browser instance was replaced."),
     "CONTAINER_UNAVAILABLE": ("launching_browser", "The browser service is unavailable."),
@@ -78,6 +79,8 @@ def normalize_login_failure(error: object) -> dict:
         code = "CODE_PERMIT_TIMEOUT"
     elif raw.startswith("login timed out"):
         code = "BROWSER_DEADLINE"
+    elif raw.startswith("login control not actionable:"):
+        code = "CONTROL_NOT_ACTIONABLE"
     elif raw.startswith("未捕获 ST ticket"):
         code = "TICKET_MISSING"
     phase, detail = LOGIN_FAILURES[code]
