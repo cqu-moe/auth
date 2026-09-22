@@ -64,6 +64,7 @@ import { resolveCaps } from "../services/entitlements";
 import { cquErrorHttpStatus } from "../services/cqu-error-status";
 import {
   tgtFromState,
+  freshCasLoginSeed,
   hasValidTgt,
   isValidHarvestStorageState,
   classifyNodeTicketResponse,
@@ -145,6 +146,8 @@ interface SessionState {
   lastKeepAlive: number;
   lastRequestedAt: number;
   consecutiveFailures: number;
+  /** A confirmed expiry cannot be undone by a concurrent failed proactive refresh. */
+  confirmedExpiredAt?: number;
 }
 
 interface StoredCredentials {
@@ -325,6 +328,7 @@ export class CquSessionDO extends DurableObject<Env> {
     const now = Date.now();
     if (
       status !== "unbound" ||
+      storedState?.confirmedExpiredAt !== undefined ||
       !storedState?.storageState ||
       !hasValidTgt(storedState.storageState) ||
       !Number.isSafeInteger(storedState.loginAt) ||
@@ -854,21 +858,17 @@ export class CquSessionDO extends DurableObject<Env> {
       );
     }
 
-    // H4 快自愈: 铸票遇节点 409 → mintServiceTicketViaNode 抛 CquSsoError("TGT_EXPIRED")。
-    // catch 它顺手 setAlarm(now) 把下轮 keepalive/relogin 提前(复用 relogin single-flight,
-    // **绝不在热路径同步重登** —— 同步重登走容器含 2FA 邮件往返数分钟会阻塞 DO 单线程),
-    // 然后 re-throw 让外层把 409(TGT_EXPIRED)原样回给调用方(语义不变, 只顺手排了快自愈)。
-    // 刻意**不**在此 setStatus("expired"): 节点 409 是服务端权威过期, 异步 relogin 会翻 status;
-    // 与 M8 legacy(本地 storageState===null 的已知坏态)主动标 expired 不同 —— 别为"对称"补 setStatus。
+    // Confirmed expiry enters asynchronous recovery; a late result cannot expire a newer session.
+    const sourceSession = structuredClone(this.state);
     let ticket: string;
     try {
       ticket = await this.mintServiceTicketViaBrowser(
-        this.state.storageState,
+        sourceSession.storageState,
         target
       );
     } catch (e) {
       if (e instanceof CquSsoError && e.code === "TGT_EXPIRED") {
-        await this.scheduleSessionAlarm(Date.now());
+        await this.markSessionExpired(sourceSession);
       }
       throw e;
     }
@@ -1082,19 +1082,14 @@ export class CquSessionDO extends DurableObject<Env> {
       );
     }
 
-    // ⑤ 出站 /data-harvest(套容器 deadline)。Direct 409 只排 alarm。
-    const sourceSession = {
-      userId: sessionState.userId,
-      studentId: sessionState.studentId,
-      loginAt: sessionState.loginAt,
-      storageState: JSON.stringify(sessionState.storageState),
-    };
+    // ⑤ 出站 /data-harvest(套容器 deadline)。
+    const sourceSession = structuredClone(sessionState);
     let outcome = "INTERNAL_ERROR";
     try {
       let result: { captures: HarvestCapture[]; fetches: HarvestFetch[]; state?: CquStorageState };
       try {
         result = await this.harvestViaBrowser(
-          sessionState.storageState,
+          sourceSession.storageState,
           canonicalRecipe,
           harvestRoute,
           deadlineAt
@@ -1104,7 +1099,7 @@ export class CquSessionDO extends DurableObject<Env> {
           error instanceof CquSsoError &&
           error.code === "TGT_EXPIRED"
         ) {
-          await this.scheduleSessionAlarm(Date.now());
+          await this.markSessionExpired(sourceSession);
         }
         throw error;
       }
@@ -1126,7 +1121,7 @@ export class CquSessionDO extends DurableObject<Env> {
               if (stored.get("status") !== "active" || !latest
                 || latest.userId !== sourceSession.userId || latest.studentId !== sourceSession.studentId
                 || latest.loginAt !== sourceSession.loginAt
-                || JSON.stringify(latest.storageState) !== sourceSession.storageState) {
+                || JSON.stringify(latest.storageState) !== JSON.stringify(sourceSession.storageState)) {
                 console.warn("[CquSession] harvest state refresh skipped (session changed)");
                 return;
               }
@@ -1221,6 +1216,28 @@ export class CquSessionDO extends DurableObject<Env> {
       throw new CquSsoError(c.code ?? "HARVEST_TRANSIENT", `browser /data-harvest ${c.detail ?? "transient"}`);
     }
     return { captures: c.captures ?? [], fetches: c.fetches ?? [], state: c.state };
+  }
+
+  private async markSessionExpired(source: SessionState): Promise<boolean> {
+    const expired = await this.ctx.storage.transaction(async (tx) => {
+      const latest = await tx.get<SessionState>("state");
+      const status = await tx.get<CquStatus>("status");
+      if ((status !== "active" && status !== "relogging") || !latest
+        || latest.userId !== source.userId || latest.studentId !== source.studentId
+        || latest.loginAt !== source.loginAt
+        || JSON.stringify(latest.storageState) !== JSON.stringify(source.storageState)) {
+        return null;
+      }
+      const next = { ...latest, confirmedExpiredAt: latest.confirmedExpiredAt ?? Date.now() };
+      const login = status === "relogging" ? await tx.get<LoginInFlight>("loginInFlight") : null;
+      await tx.put({ status: login ? "relogging" : "expired", state: next });
+      await tx.setAlarm(Date.now());
+      return next;
+    });
+    if (!expired) return false;
+    this.state = expired;
+    await this.enqueueRecoveryWorkflow(expired.userId);
+    return true;
   }
 
   /**
@@ -1970,34 +1987,53 @@ export class CquSessionDO extends DurableObject<Env> {
       return;
     }
 
+    const sourceSession = structuredClone(this.state);
     const outcome = await this.runKeepAlive(deadlineAt);
 
-    if (outcome === "active") {
-      // M7 防复活: runKeepAlive 的浏览器出站(最长 90s)await 期间 input gate 打开,
-      // 期间 admin revoke/unbind 可能把 status 改成撤销/解绑/需重登。此处写回 active 前重查
-      // status, 命中撤销/终态即放弃本轮(不 setStatus active / 不 putState / 不 setAlarm),
-      // 否则会把已撤销会话复活。
-      if (shouldAbandonKeepaliveWriteback(await this.getStatus())) {
-        console.warn(
-          `[CquSession] ${this.state.studentId}: status changed during keepalive probe, abandoning active writeback (anti-resurrection)`
-        );
+    if (outcome.status === "active") {
+      let refreshed: SessionState | null;
+      try {
+        refreshed = await this.ctx.storage.transaction(async (tx) => {
+          const latest = await tx.get<SessionState>("state");
+          if ((await tx.get<CquStatus>("status")) !== "active" || !latest
+            || latest.confirmedExpiredAt !== undefined
+            || latest.userId !== sourceSession.userId || latest.studentId !== sourceSession.studentId
+            || latest.loginAt !== sourceSession.loginAt
+            || JSON.stringify(latest.storageState) !== JSON.stringify(sourceSession.storageState)) {
+            return null;
+          }
+          const next = { ...latest, lastKeepAlive: Date.now(), consecutiveFailures: 0 };
+          if (outcome.state) {
+            const candidate = { ...next, storageState: outcome.state };
+            if (hasValidTgt(outcome.state) && !stateExceedsHardLimit(serializedStateBytes(candidate))) {
+              next.storageState = outcome.state;
+            } else {
+              console.warn("[CquSession] keepalive refresh invalid or oversized, keeping previous storage state");
+            }
+          }
+          if (stateExceedsHardLimit(serializedStateBytes(next))) return latest;
+          await tx.put({ state: next, reloginFailures: 0, credentialFailures: 0 });
+          return next;
+        });
+      } catch {
+        console.warn("[CquSession] keepalive writeback failed, keeping previous state");
+        await this.scheduleSessionAlarm(Date.now() + RETRY_INTERVAL_MS);
         return;
       }
-      await this.setStatus("active");
-      this.state.lastKeepAlive = Date.now();
-      this.state.consecutiveFailures = 0;
-      // H2 落盘前体量守卫(此处可能携 keepalive 刚回写的刷新 state, localStorage 体量不受控);
-      // putStateGuarded 超限/抛错均降级返回 false 而非抛穿 alarm。
-      await this.putStateGuarded(this.state);
-      // 探针自愈回 active 也打断「连续重登失败」链, 避免遗留的 reloginFailures
-      // 误触告警; 同时清零熔断的「连续凭据失败」计数(会话已证实健康)。
-      await this.ctx.storage.put("reloginFailures", 0);
-      await this.ctx.storage.put("credentialFailures", 0);
+      if (!refreshed) {
+        await this.scheduleSessionAlarm(Date.now() + KEEPALIVE_INTERVAL_MS, { activeOnly: true });
+        return;
+      }
+      this.state = refreshed;
       await this.scheduleSessionAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
       return;
     }
 
-    if (outcome === "expired") {
+    if (outcome.status === "expired") {
+      if (!(await this.markSessionExpired(sourceSession))) {
+        await this.scheduleSessionAlarm(Date.now() + KEEPALIVE_INTERVAL_MS, { activeOnly: true });
+        return;
+      }
       // 探针证实 TGT 服务端失效 — 触发容器重登铸新 TGT。
       // relogin 自带 single-flight + 状态机(RELOGIN_START/OK/FAIL), 失败落 expired。
       console.warn(
@@ -2048,7 +2084,7 @@ export class CquSessionDO extends DurableObject<Env> {
    */
   private async runKeepAlive(
     deadlineAt?: number
-  ): Promise<"active" | "expired" | "transient"> {
+  ): Promise<{ status: "active" | "expired" | "transient"; state?: CquStorageState }> {
     const state = this.state!;
     // 旧会话迁移守卫:改造前只存 3 cookie(无完整 storageState)。报 expired 让 alarm 触发重登,
     // 铸一套新的完整 storageState 自愈;绝不把 null state 发给节点(否则 400 → 永远退避不重登)。
@@ -2056,7 +2092,7 @@ export class CquSessionDO extends DurableObject<Env> {
       console.warn(
         `[CquSession] ${state.studentId}: no storageState (legacy session), forcing relogin`
       );
-      return "expired";
+      return { status: "expired" };
     }
     // 探活走集中 transport(node→国内节点;CF→该用户 APAC 容器)。
     // 节点恒返回 200 {ok, status: alive|expired|unreachable}, 映射回三态:
@@ -2086,7 +2122,7 @@ export class CquSessionDO extends DurableObject<Env> {
       console.warn(
         `[CquSession] ${state.studentId}: probe unreachable (node fetch failed): ${errMsg(e)}`
       );
-      return "transient";
+      return { status: "transient" };
     }
     let body: { ok?: boolean; status?: string; detail?: string; state?: CquStorageState };
     try {
@@ -2095,59 +2131,33 @@ export class CquSessionDO extends DurableObject<Env> {
       console.warn(
         `[CquSession] ${state.studentId}: probe unreachable (node non-JSON status=${res.status})`
       );
-      return "transient";
+      return { status: "transient" };
     }
     if (!res.ok || !body.ok) {
       console.warn(
         `[CquSession] ${state.studentId}: probe unreachable (node not ok status=${res.status} detail=${sanitizeNodeDetail(body.detail)})`
       );
-      return "transient";
+      return { status: "transient" };
     }
     if (body.status === "alive") {
       // #1 探针在节点侧 navigate /login?service=PROBE 真铸了一张 ST(再丢弃) —— 把这次出票
       // 记入 st_mint 审计 + 限流窗口(记账但豁免拒绝, 见 recordKeepaliveMint)。await 落盘后才回写,
       // 顺序无关(两者各写不同 storage key)。
       await this.recordKeepaliveMint();
-      // #2 回写校验: 仅当节点刷新后的 state 含 CAS 三件套(hasValidTgt) **且** 并入后不超 DO
-      // 硬上限时才覆盖, 否则保留旧 state。
-      // 节点导出的 refreshed state 可能半截/退化(如 {cookies:[],origins:[]} 空但 truthy), 无 TGT
-      // 顶替好 state 会让下轮取票 storageState 非 null 却无 TGT → 落登录页 409 → 误判过期重登。
-      // H2 体量守卫: 刷新后的 state(含不受控的 localStorage)若超硬上限, 直接丢弃刷新态、保留旧
-      // state —— 旧 state 已能取票, 刷新只续期, 不值得为续期而把 state 撑到落不下盘。因 state===
-      // this.state, alarm() 的 active 分支随后 putStateGuarded(this.state) 落盘; 这里先剔掉超限的
-      // 刷新态, 让那次 put 写的是仍在限内的旧 state(否则 putStateGuarded 会拒 put 整条 state)。
-      if (body.state) {
-        if (!hasValidTgt(body.state)) {
-          console.warn(
-            `[CquSession] ${state.studentId}: probe alive but refreshed state lacks required CAS cookies, keeping old storageState`
-          );
-        } else {
-          const candidate: SessionState = {
-            ...state,
-            storageState: body.state,
-          };
-          if (stateExceedsHardLimit(serializedStateBytes(candidate))) {
-            console.error(
-              `[CquSession] ${state.studentId}: ALERT refreshed state exceeds DO hard limit, discarding refresh and keeping old storageState (session stays mintable)`
-            );
-          } else {
-            state.storageState = body.state;
-          }
-        }
-      }
-      return "active";
+      // The caller fences and commits this candidate; the probe must not mutate shared session state.
+      return { status: "active", state: body.state };
     }
     if (body.status === "expired") {
       console.warn(
         `[CquSession] ${state.studentId}: probe says expired: ${sanitizeNodeDetail(body.detail)}`
       );
-      return "expired";
+      return { status: "expired" };
     }
     // "unreachable" 或未知 status → 保会话退避。
     console.warn(
       `[CquSession] ${state.studentId}: probe unreachable: status=${body.status ?? "(none)"} detail=${sanitizeNodeDetail(body.detail)}`
     );
-    return "transient";
+    return { status: "transient" };
   }
 
   /**
@@ -2333,7 +2343,8 @@ export class CquSessionDO extends DurableObject<Env> {
     if (outcome === "failed") {
       // containerLogin 失败时已把状态推到 RELOGIN_FAIL(→ expired) 并清锁。
       const reason = this.lastLoginFailReason;
-      if (priorStatus === "active" && reason === "transient" && this.state.storageState) {
+      if (priorStatus === "active" && reason === "transient" && this.state.storageState
+        && this.state.confirmedExpiredAt === undefined) {
         // A failed proactive refresh does not invalidate the previously usable session.
         await this.setStatus("active");
       }
@@ -2915,14 +2926,21 @@ export class CquSessionDO extends DurableObject<Env> {
   }
 
   /** One alarm serves keepalive, operation deadlines and recovery; no caller may postpone maintenance. */
-  private async scheduleSessionAlarm(at: number): Promise<void> {
+  private async scheduleSessionAlarm(at: number, options: { activeOnly?: boolean } = {}): Promise<void> {
     await this.ctx.storage.transaction(async (tx) => {
+      if (options.activeOnly) {
+        const state = await tx.get<SessionState>("state");
+        if ((await tx.get<CquStatus>("status")) !== "active" || !state
+          || state.confirmedExpiredAt !== undefined) return;
+      }
       const pending = (await tx.get<InterruptedLogin[]>("interruptedLogins")) ?? [];
       const recovering = new Set(pending.map((item) => item.token));
       const locks = [...(await tx.list<LoginInFlight>({prefix: "quickloginLogin:"})).values()];
       const cas = await tx.get<LoginInFlight>("loginInFlight");
       if (cas) locks.push(cas);
       const deadlines = locks.filter((lock) => !recovering.has(lock.token) && lock.deadlineAt !== undefined).map((lock) => lock.deadlineAt!);
+      const existingAlarm = options.activeOnly ? await tx.getAlarm() : null;
+      if (existingAlarm !== null) deadlines.push(existingAlarm);
       const retryAt = await tx.get<number>("reloginRetryAt");
       if (retryAt && retryAt > Date.now()) deadlines.push(retryAt);
       const cycle = await tx.get<SessionRecoveryCycle>("sessionRecoveryCycle");
@@ -2985,6 +3003,7 @@ export class CquSessionDO extends DurableObject<Env> {
     reservation?: { token: string; route: BrowserRoute }
   ): Promise<"in_flight" | "ok" | "failed"> {
     const state = this.state!;
+    const previousTgt = tgtFromState(state.storageState);
     // deadline 只在操作链入口 resolve 一次:alarm 链由 alarm() 传入;首登(init)链
     // 在此 resolve。内部函数不得再次重新取得 13 分钟预算。
     let operationDeadline =
@@ -3091,7 +3110,7 @@ export class CquSessionDO extends DurableObject<Env> {
         queuedPermit: permitRole === "queued",
       };
       if (state.storageState) {
-        runBody.seedState = state.storageState;
+        runBody.seedState = freshCasLoginSeed(state.storageState);
       }
       if (loginRoute.backend === "cloudflare") {
         runBody.operationTimeoutMs = runTimeoutMs;
@@ -3127,6 +3146,13 @@ export class CquSessionDO extends DurableObject<Env> {
         this.lastLoginFailReason = invalidState
           ? "transient"
           : classifyContainerLoginFailure(result).reauthReason === "credentials_rejected" ? "credential" : "transient";
+        await this.failLogin(failEvent, token);
+        return "failed";
+      }
+
+      if (previousTgt && tgtFromState(result.state) === previousTgt) {
+        console.warn({ evt: "cqu.login.tgt_not_refreshed" });
+        this.lastLoginFailReason = "transient";
         await this.failLogin(failEvent, token);
         return "failed";
       }

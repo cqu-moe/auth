@@ -3,12 +3,19 @@ import os
 import re
 import uuid
 from typing import Any, Mapping
+from time import monotonic
 
 from aiohttp import web
 from posthog import Posthog
 
 
 POSTHOG_CLIENT_KEY = web.AppKey("posthog_client", object)
+BROWSER_OPERATIONS = {
+    "/run": "login",
+    "/service-ticket": "ticket",
+    "/keepalive": "keepalive",
+    "/data-harvest": "harvest",
+}
 REDACTED = "[redacted]"
 EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 LABELED_SECRET = re.compile(
@@ -120,9 +127,18 @@ def safe_capture_exception(
 
 @web.middleware
 async def posthog_exception_middleware(request: web.Request, handler):
+    started_at = monotonic()
+    response = None
+    outcome = "failure"
     try:
-        return await handler(request)
-    except web.HTTPException:
+        response = await handler(request)
+        outcome = "success" if 200 <= response.status < 400 else "failure"
+        return response
+    except asyncio.CancelledError:
+        outcome = "cancelled"
+        raise
+    except web.HTTPException as error:
+        response = error
         raise
     except Exception as error:
         safe_capture_exception(
@@ -131,6 +147,24 @@ async def posthog_exception_middleware(request: web.Request, handler):
             {"method": request.method, "route": request.path},
         )
         raise
+    finally:
+        client = request.app.get(POSTHOG_CLIENT_KEY)
+        operation = BROWSER_OPERATIONS.get(request.path)
+        if client is not None and operation and request.method == "POST":
+            try:
+                client.capture(
+                    "browser_operation_completed",
+                    distinct_id=f"request:{uuid.uuid4().hex}",
+                    properties={
+                        "operation": operation,
+                        "http_outcome": outcome,
+                        "duration_ms": round((monotonic() - started_at) * 1000),
+                        "http_status": response.status if response is not None else None,
+                        "$process_person_profile": False,
+                    },
+                )
+            except Exception:
+                pass
 
 
 async def flush_posthog(app: web.Application) -> None:

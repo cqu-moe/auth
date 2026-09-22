@@ -748,3 +748,49 @@ def test_classify_outcome_transient_when_partial_captures():
     assert m.classify_harvest_outcome(
         {"a/b"}, ["a/b", "c/d"], "<html>normal</html>", "https://my.cqu.edu.cn/x"
     ) == "transient"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("initial_status", [412, 503])
+async def test_successful_retry_replaces_previous_failure_for_same_capture(initial_status):
+    trace = m.StageTrace()
+    captured = {}
+    collector = m.ResponseStageCollector(trace, ["/my-table-detail"], captured)
+    for status in (initial_status, 200):
+        collector.on_response(_FakeResponse("https://my.cqu.edu.cn/api/my-table-detail", status=status))
+        await asyncio.sleep(0)
+    await collector.close()
+    assert captured["/my-table-detail"]["status"] == 200
+    assert m.harvest_failure_code(trace, ["/my-table-detail"], captured,
+                                 collector.required_statuses, [],
+                                 table_statuses=collector.table_statuses) is None
+
+
+@pytest.mark.asyncio
+async def test_successful_capture_does_not_hide_another_required_endpoint_failure():
+    trace = m.StageTrace()
+    captured = {}
+    patterns = ["/my-table-detail", "/session/list"]
+    collector = m.ResponseStageCollector(trace, patterns, captured)
+    collector.on_response(_FakeResponse("https://my.cqu.edu.cn/api/session/list", status=412))
+    collector.on_response(_FakeResponse("https://my.cqu.edu.cn/api/my-table-detail", status=200))
+    await collector.close()
+    assert m.harvest_failure_code(trace, patterns, captured, collector.required_statuses, [],
+                                 table_statuses=collector.table_statuses) == "WAF_CHALLENGE"
+
+
+@pytest.mark.asyncio
+async def test_late_failed_body_cannot_overwrite_a_newer_successful_response():
+    trace = m.StageTrace()
+    captured = {}
+    collector = m.ResponseStageCollector(trace, ["/my-table-detail"], captured)
+    gate = asyncio.Event()
+    collector.on_response(_FakeResponse("https://my.cqu.edu.cn/api/my-table-detail", status=412,
+                                       body_gate=gate))
+    collector.on_response(_FakeResponse("https://my.cqu.edu.cn/api/my-table-detail", status=200,
+                                       body='{"data":"complete"}'))
+    await asyncio.sleep(0)
+    gate.set()
+    await collector.close()
+    assert captured["/my-table-detail"]["status"] == 200
+    assert captured["/my-table-detail"]["body"] == '{"data":"complete"}'

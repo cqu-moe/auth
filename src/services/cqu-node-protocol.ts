@@ -21,6 +21,15 @@ const REQUIRED_CAS_COOKIES = [
   "rg_objectid",
 ] as const satisfies readonly (keyof CasCookies)[];
 
+export function freshCasLoginSeed(state: CquStorageState): CquStorageState {
+  return {
+    ...state,
+    cookies: state.cookies.filter((cookie) =>
+      !REQUIRED_CAS_COOKIES.some((name) => cookie.name === name)
+    ),
+  };
+}
+
 /**
  * 回写完整性校验: state 的 cookies 里 CAS 三件套(SOURCEID_TGC + SESSION + rg_objectid)
  * 是否都存在且非空。

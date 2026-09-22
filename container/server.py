@@ -97,6 +97,7 @@ NODE_CAPABILITIES = [
     "browser-route-v1",
     "operation-deadline-v1",
     "raw-cdp-login-v1",
+    "unified-cdp-v1",
     "login-cancel-v1",
 ]
 
@@ -633,10 +634,11 @@ async def run_handler(request: web.Request) -> web.Response:
         log.warning("run timeout (total >%ds)", RUN_TOTAL_TIMEOUT)
         return login_failure_response("BROWSER_DEADLINE", status=504)
     except Exception as e:  # noqa: BLE001 - surface any login failure to the caller
+        failure = normalize_login_failure(e)
         safe_capture_exception(
             request.app.get(POSTHOG_CLIENT_KEY),
             e,
-            {"operation": "login", "error_code": "UNKNOWN_LOGIN_ERROR"},
+            {"operation": "login", "error_code": failure["errorCode"]},
         )
         return login_failure_response(e, status=500)
     finally:

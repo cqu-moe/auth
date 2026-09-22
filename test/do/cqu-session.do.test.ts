@@ -2087,7 +2087,7 @@ describe("cloudflare CAS migration", () => {
     expect(run?.body.operationTimeoutMs).toBeGreaterThan(0);
     expect(run?.body.operationTimeoutMs).toBeLessThanOrEqual(780_000);
     expect(run?.body.session).toEqual(expect.any(String));
-    expect(run?.body.seedState).toEqual(validStorageState());
+    expect(run?.body.seedState).toEqual({ cookies: [], origins: [] });
   });
 
   it("keepalive below the relogin threshold goes to the container with a bounded budget", async () => {

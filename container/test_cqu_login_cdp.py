@@ -7,7 +7,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import cqu_login_cdp
 
 
-def test_chrome_args_use_raw_headless_cdp_without_automation_switches():
+def test_chrome_args_use_raw_headless_cdp_without_automation_switches(monkeypatch):
+    monkeypatch.delenv("DISPLAY", raising=False)
     args = cqu_login_cdp.build_chrome_args(
         "/browser/chrome", "/app/runtime/profile", 43123, proxy=None
     )
@@ -20,6 +21,13 @@ def test_chrome_args_use_raw_headless_cdp_without_automation_switches():
     assert "--disable-dev-shm-usage" in args
     assert not any("enable-automation" in arg for arg in args)
     assert not any("user-agent=" in arg for arg in args)
+
+
+def test_chrome_uses_normal_window_when_virtual_display_is_available(monkeypatch):
+    monkeypatch.setenv("DISPLAY", ":99")
+    args = cqu_login_cdp.build_chrome_args("/browser/chrome", "/app/runtime/profile", 43123)
+    assert not any(arg.startswith("--headless") for arg in args)
+    assert "--window-size=1440,1000" in args
 
 
 def test_chrome_args_pass_an_unauthenticated_proxy_server():

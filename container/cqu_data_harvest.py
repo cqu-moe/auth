@@ -15,10 +15,10 @@ import random
 import re
 import urllib.parse
 import time
-from patchright.async_api import async_playwright
+from chromium_session import ChromiumSession
 import browser_profile
-import cqu_login  # UA / locale 等浏览器对抗参数,与取票统一
-import cqu_ticket_browser  # 复用 _close_browser_driver / TICKET_SEMAPHORE / 超时常量
+import cqu_login
+import cqu_ticket_browser  # 复用 TICKET_SEMAPHORE / 排队时限
 
 log = logging.getLogger("cqu-data-harvest")
 
@@ -423,8 +423,17 @@ class ResponseStageCollector:
         self._captured = captured
         self._tasks: set[asyncio.Task] = set()
         self._closed = False
-        self.required_statuses: set[int] = set()
-        self.table_statuses: set[int] = set()
+        self._required_statuses: dict[str, int] = {}
+        self._table_statuses: dict[str, int] = {}
+        self._latest_capture: dict[str, object] = {}
+
+    @property
+    def required_statuses(self) -> set[int]:
+        return set(self._required_statuses.values())
+
+    @property
+    def table_statuses(self) -> set[int]:
+        return set(self._table_statuses.values())
 
     def on_request(self, request) -> None:
         if self._closed:
@@ -465,13 +474,16 @@ class ResponseStageCollector:
             resource_type == "document" and path.startswith("/workspace/")
         ):
             if isinstance(metadata["status"], int):
-                self.required_statuses.add(metadata["status"])
+                self._required_statuses[path] = metadata["status"]
                 if is_table_response:
-                    self.table_statuses.add(metadata["status"])
+                    self._table_statuses[path] = metadata["status"]
         if is_table_response:
             # This must stay synchronous and before create_task/response.text().
             self._trace.record("TABLE_RESPONSE_SEEN", **metadata)
         if pattern is not None or is_table_response:
+            if pattern is not None:
+                self._latest_capture[pattern] = response
+                self._captured.pop(pattern, None)
             task = asyncio.create_task(self._read_capture_body(response, pattern, metadata))
             self._tasks.add(task)
 
@@ -488,7 +500,7 @@ class ResponseStageCollector:
             return
         if _TABLE_PATH_MARKER in urllib.parse.urlsplit(metadata["url"]).path.lower():
             self._trace.record("TABLE_BODY_READY", body=body, **metadata)
-        if pattern is not None:
+        if pattern is not None and self._latest_capture.get(pattern) is response:
             self._captured[pattern] = {
                 "url": metadata["url"],
                 "status": metadata["status"],
@@ -623,12 +635,13 @@ async def wait_for_harvest_captures(
     failure gate. A table request or response already in flight prevents reload.
     """
     def complete():
-        return all_captures_present(set(captured), patterns)
+        return all(pattern in captured and 200 <= captured[pattern]["status"] < 300
+                   for pattern in patterns)
 
     async def wait_until(predicate, until):
         until = min(until, deadline)
         while not complete() and not predicate() and clock() < until:
-            await page.wait_for_timeout(min(CAPTURE_POLL_MS, (until - clock()) * 1000))
+            await page.pause(min(CAPTURE_POLL_MS, (until - clock()) * 1000))
         return complete() or predicate()
 
     if complete():
@@ -651,7 +664,7 @@ async def wait_for_harvest_captures(
             break
         if clock() >= cookie_deadline:
             break
-        await page.wait_for_timeout(min(CAPTURE_POLL_MS, (cookie_deadline - clock()) * 1000))
+        await page.pause(min(CAPTURE_POLL_MS, (cookie_deadline - clock()) * 1000))
 
     for stage, milestone_ms in (("APP_DOCUMENT_REACHED", APP_READY_WAIT_MS),
                                 ("APP_READY_API", APP_READY_WAIT_MS),
@@ -690,7 +703,7 @@ async def wait_for_harvest_captures(
     try:
         await page.reload(
             wait_until="commit",
-            timeout=min(browser_profile.HARVEST_NAV_TIMEOUT_MS, remaining_ms),
+            timeout_s=min(browser_profile.HARVEST_NAV_TIMEOUT_MS, remaining_ms) / 1000,
         )
     except Exception:
         trace.record("NAV_FAILURE", url=nav_url, resource_type="document")
@@ -750,9 +763,8 @@ async def harvest(state: dict, recipe: dict) -> dict:
     """在水化 state 的临时浏览器里 navigate recipe.navUrl(过瑞数,页面有机 fire 课表/学期),
     截获命中 capture 模式的响应 + 跑 fetch[] in-page GET,返回 {captures, fetches}。
 
-    recipe 已由 parse_harvest_recipe 校验/规范化(host 全过白名单)。浏览器对抗参数(launch
-    args / UA / locale / timezone / 显式 start-stop 驱动 / 限时 cleanup)复用 cqu_ticket_browser
-    的 _hydrate_navigate 骨架,统一瑞数对抗。返回结构对 server/schedule 稳定。
+    recipe 已由 parse_harvest_recipe 校验/规范化(host 全过白名单)。启动、原生身份、
+    locale/timezone、状态恢复与有界清理由共享 ChromiumSession 管理。
 
     captures[i] = {url, status, contentType, body};fetches[i] = {url, status, body}。
     body 是文本(JSON 由上层 schedule 解析)。绝不记录 cookie/state/token 明文。
@@ -760,7 +772,7 @@ async def harvest(state: dict, recipe: dict) -> dict:
     nav_url = recipe["navUrl"]
     patterns: list[str] = recipe["capture"]
     fetch_list: list[dict] = recipe["fetch"]
-    handles: dict = {"pw": None, "browser": None}
+    browser = ChromiumSession(seed_state=state)
     trace = StageTrace()
     diagnostics = trace.diagnostics()
     captured: dict[str, dict] = {}
@@ -778,30 +790,19 @@ async def harvest(state: dict, recipe: dict) -> dict:
         )
 
     async def _run(work_deadline: float) -> dict:
-        pw = await async_playwright().start()
-        handles["pw"] = pw
-        browser = await pw.chromium.launch(headless=True, args=[
-            "--headless=new", "--disable-blink-features=AutomationControlled",
-            "--no-sandbox", "--disable-dev-shm-usage"],
-            timeout=browser_profile.BROWSER_LAUNCH_TIMEOUT_MS)
-        handles["browser"] = browser
-        ctx = await browser.new_context(
-            storage_state=state,
-            viewport={"width": 1440, "height": 900},
-            locale="zh-CN", timezone_id="Asia/Shanghai")
-        page = await ctx.new_page()
-        await cqu_login.apply_browser_identity(ctx, page, browser.version)
-        page.on("request", response_collector.on_request)
-        page.on("response", response_collector.on_response)
+        await browser.__aenter__()
+        page = ctx = browser
+        browser.on_request(response_collector.on_request)
+        browser.on_response(response_collector.on_response)
 
         try:
             navigation_started_at = time.monotonic()
             trace.record("NAV_START", url=nav_url, resource_type="document")
             try:
-                await page.goto(
+                await page.navigate(
                     nav_url,
                     wait_until="commit" if requires_table_capture(patterns) else "domcontentloaded",
-                    timeout=browser_profile.HARVEST_NAV_TIMEOUT_MS,
+                    timeout_s=browser_profile.HARVEST_NAV_TIMEOUT_MS / 1000,
                 )
             except Exception:
                 trace.record("NAV_FAILURE", url=nav_url, resource_type="document")
@@ -910,4 +911,4 @@ async def harvest(state: dict, recipe: dict) -> dict:
             raise
     finally:
         cqu_ticket_browser.TICKET_SEMAPHORE.release()
-        await cqu_ticket_browser._close_browser_driver(handles["browser"], handles["pw"])
+        await browser.close()

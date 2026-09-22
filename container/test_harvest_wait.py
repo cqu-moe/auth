@@ -36,7 +36,7 @@ class TimelinePage:
         return [{"name": name, "value": "present", "domain": "my.cqu.edu.cn"}
                 for name in ("CtLgrmkSWHBZS", "CtLgrmkSWHBZT")]
 
-    async def wait_for_timeout(self, ms):
+    async def pause(self, ms):
         self.now = round(self.now + ms / 1000, 6)
         for at, request in list(self.requests):
             if at <= self.now:
@@ -53,12 +53,23 @@ class TimelinePage:
         self.events.extend((self.now + after, response)
                            for after, response in self.reload_events)
 
-    async def goto(self, url, **kwargs):
+    async def navigate(self, url, **kwargs):
         self.goto_modes.append(kwargs["wait_until"])
 
-    def on(self, event, callback):
-        if event == "response":
-            self.collector.on_response = callback
+    async def __aenter__(self):
+        if hasattr(self, "counts"):
+            self.counts["open"] += 1
+        return self
+
+    async def close(self):
+        if hasattr(self, "counts"):
+            self.counts["close"] += 1
+
+    def on_request(self, callback):
+        self.collector.on_request = callback
+
+    def on_response(self, callback):
+        self.collector.on_response = callback
 
     async def content(self):
         return "normal app"
@@ -101,6 +112,15 @@ async def test_late_route_and_table_succeed_without_reload_in_soft_wait():
         "NAV_START", "DYNAMIC_COOKIES_PRESENT", "FIRST_RESPONSE",
         "APP_DOCUMENT_REACHED", "APP_READY_API", "JUDGE_RESPONSE", "TABLE_RESPONSE_SEEN", "TABLE_BODY_READY",
     ]
+
+
+@pytest.mark.asyncio
+async def test_challenged_table_can_finish_its_own_successful_retry():
+    page = TimelinePage(bootstrap() + [(45, response(TABLE, status=412)), (46, response(TABLE))])
+    await wait(page)
+    assert page.captured[TABLE]["status"] == 200
+    assert 46 <= page.now < 47
+    assert page.reloads == []
 
 
 @pytest.mark.asyncio
@@ -197,7 +217,7 @@ async def test_recovery_and_waits_respect_remaining_overall_budget():
     await wait(page, deadline=70)
     assert len(page.reloads) == 1
     assert page.now == pytest.approx(70)
-    assert page.reloads[0][1]["timeout"] <= 4000
+    assert page.reloads[0][1]["timeout_s"] <= 4
     assert page.captured == {}
 
 
@@ -228,33 +248,9 @@ async def test_generic_capture_body_arriving_at_wait_edge_is_preserved(monkeypat
         (m.CAPTURE_WAIT_MS / 1000, response(SESSION_INFO, body_gate=gate)),
     ], cookie_at=100)
 
-    async def new_page():
-        return page
-
     async def storage_state():
         return {"cookies": [], "origins": []}
-
-    async def new_cdp_session(_page):
-        return SimpleNamespace(send=lambda *_args, **_kwargs: asyncio.sleep(0))
-
-    context = SimpleNamespace(
-        new_page=new_page,
-        cookies=page.cookies,
-        storage_state=storage_state,
-        new_cdp_session=new_cdp_session,
-    )
-
-    async def new_context(**_kwargs):
-        return context
-
-    async def launch(**_kwargs):
-        return SimpleNamespace(new_context=new_context, version="148.0.7778.96")
-
-    async def start():
-        return SimpleNamespace(chromium=SimpleNamespace(launch=launch))
-
-    async def close(*_args):
-        return None
+    page.storage_state = storage_state
 
     original_wait = m.wait_for_harvest_captures
 
@@ -271,9 +267,8 @@ async def test_generic_capture_body_arriving_at_wait_edge_is_preserved(monkeypat
         await asyncio.sleep(0.01)
         gate.set()
 
-    monkeypatch.setattr(m, "async_playwright", lambda: SimpleNamespace(start=start))
+    monkeypatch.setattr(m, "ChromiumSession", lambda **kwargs: page)
     monkeypatch.setattr(m, "wait_for_harvest_captures", timed_wait)
-    monkeypatch.setattr(m.cqu_ticket_browser, "_close_browser_driver", close)
 
     releaser = asyncio.create_task(release_body())
     result = await m.harvest({}, {
@@ -286,72 +281,6 @@ async def test_generic_capture_body_arriving_at_wait_edge_is_preserved(monkeypat
     assert result["captures"][0]["body"] == "{}"
 
 
-@pytest.mark.asyncio
-async def test_harvest_applies_runtime_browser_identity_before_navigation(monkeypatch):
-    calls = {"context": None, "cdp": [], "goto": 0}
-
-    class Page:
-        url = NAV
-
-        def on(self, *_args):
-            return None
-
-        async def goto(self, *_args, **_kwargs):
-            calls["goto"] += 1
-
-        async def evaluate(self, *_args):
-            return {"status": 200, "body": "{}"}
-
-        async def content(self):
-            return "normal app"
-
-    page = Page()
-
-    class Session:
-        async def send(self, method, params):
-            assert calls["goto"] == 0
-            calls["cdp"].append((method, params))
-
-    async def new_cdp_session(identity_page):
-        assert identity_page is page
-        return Session()
-
-    async def new_page():
-        return page
-
-    async def storage_state():
-        return {"cookies": [], "origins": []}
-
-    async def new_context(**kwargs):
-        calls["context"] = kwargs
-        return SimpleNamespace(
-            new_page=new_page,
-            new_cdp_session=new_cdp_session,
-            storage_state=storage_state,
-        )
-
-    async def launch(**_kwargs):
-        return SimpleNamespace(new_context=new_context, version="148.0.7778.96")
-
-    async def start():
-        return SimpleNamespace(chromium=SimpleNamespace(launch=launch))
-
-    async def close(*_args):
-        return None
-
-    monkeypatch.setattr(m, "async_playwright", lambda: SimpleNamespace(start=start))
-    monkeypatch.setattr(m.cqu_ticket_browser, "_close_browser_driver", close)
-
-    result = await m.harvest({}, {
-        "navUrl": NAV,
-        "capture": [],
-        "fetch": [{"url": "https://my.cqu.edu.cn/api/example"}],
-    })
-
-    assert result["fetches"][0]["status"] == 200
-    assert "user_agent" not in calls["context"]
-    assert calls["cdp"][0][0] == "Network.setUserAgentOverride"
-    assert "Chrome/148.0.7778.96" in calls["cdp"][0][1]["userAgent"]
 
 
 @pytest.mark.asyncio
@@ -436,7 +365,8 @@ async def test_harvest_uses_one_browser_context_page_and_preserves_failure_gate(
     monkeypatch, fetch_only, missing, fetch_status, export_fails, capture_status, include_fetch,
 ):
     page = TimelinePage(bootstrap(), reload_events=[] if missing else [(5, response(TABLE, status=capture_status))])
-    counts = {"launch": 0, "context": 0, "page": 0}
+    counts = {"open": 0, "close": 0}
+    page.counts = counts
     exports = []
     refreshed = {"cookies": [{"name": "marker", "value": "refreshed"}], "origins": []}
 
@@ -455,31 +385,7 @@ async def test_harvest_uses_one_browser_context_page_and_preserves_failure_gate(
 
     page.evaluate = evaluate
 
-    async def new_page():
-        counts["page"] += 1
-        return page
-
-    async def new_cdp_session(_page):
-        return SimpleNamespace(send=lambda *_args, **_kwargs: asyncio.sleep(0))
-
-    async def new_context(**kwargs):
-        counts["context"] += 1
-        return SimpleNamespace(
-            new_page=new_page,
-            new_cdp_session=new_cdp_session,
-            cookies=page.cookies,
-            storage_state=storage_state,
-        )
-
-    async def launch(**kwargs):
-        counts["launch"] += 1
-        return SimpleNamespace(new_context=new_context, version="148.0.7778.96")
-
-    async def start():
-        return SimpleNamespace(chromium=SimpleNamespace(launch=launch))
-
-    async def close(*args):
-        pass
+    page.storage_state = storage_state
 
     original_wait = m.wait_for_harvest_captures
 
@@ -490,9 +396,8 @@ async def test_harvest_uses_one_browser_context_page_and_preserves_failure_gate(
                             started_at=0, deadline=150, clock=lambda: page.now,
                             uniform=lambda low, high: (low + high) / 2)
 
-    monkeypatch.setattr(m, "async_playwright", lambda: SimpleNamespace(start=start))
+    monkeypatch.setattr(m, "ChromiumSession", lambda **kwargs: page)
     monkeypatch.setattr(m, "wait_for_harvest_captures", timed_wait)
-    monkeypatch.setattr(m.cqu_ticket_browser, "_close_browser_driver", close)
     recipe = {"navUrl": NAV, "capture": [] if fetch_only else [TABLE],
               "fetch": [{"url": "https://my.cqu.edu.cn/api/example"}] if include_fetch else []}
     if missing or fetch_status == 503 or capture_status == 503:
@@ -514,7 +419,7 @@ async def test_harvest_uses_one_browser_context_page_and_preserves_failure_gate(
         else:
             assert "state" not in result
             assert len(exports) == (1 if export_fails else 0)
-    assert counts == {"launch": 1, "context": 1, "page": 1}
+    assert counts == {"open": 1, "close": 1}
     assert len(page.reloads) == (0 if fetch_only else 1)
     assert page.goto_modes == ["domcontentloaded" if fetch_only else "commit"]
     if fetch_only:
@@ -523,47 +428,21 @@ async def test_harvest_uses_one_browser_context_page_and_preserves_failure_gate(
 
 @pytest.fixture
 def complete_harvest_browser(monkeypatch):
-    callbacks = {}
-    counts = {"launch": 0, "context": 0, "page": 0, "close": 0}
+    page = TimelinePage()
+    counts = {"open": 0, "close": 0}
+    page.counts = counts
 
-    async def goto(*args, **kwargs):
-        callbacks["response"](response(TABLE, body='{"courses":["complete"]}'))
+    async def navigate(*args, **kwargs):
+        page.collector.on_response(response(TABLE, body='{"courses":["complete"]}'))
         await asyncio.sleep(0)
 
     async def evaluate(*args):
         return {"status": 200, "body": '["complete exam"]'}
 
-    page = SimpleNamespace(
-        on=lambda event, callback: callbacks.update({event: callback}),
-        goto=goto, evaluate=evaluate, url=NAV,
-    )
-
-    async def new_page():
-        counts["page"] += 1
-        return page
-
-    async def new_cdp_session(_page):
-        return SimpleNamespace(send=lambda *_args, **_kwargs: asyncio.sleep(0))
-
-    context = SimpleNamespace(new_page=new_page, new_cdp_session=new_cdp_session)
-
-    async def new_context(**kwargs):
-        counts["context"] += 1
-        return context
-
-    async def launch(**kwargs):
-        counts["launch"] += 1
-        return SimpleNamespace(new_context=new_context, version="148.0.7778.96")
-
-    async def start():
-        return SimpleNamespace(chromium=SimpleNamespace(launch=launch))
-
-    async def close(*args):
-        counts["close"] += 1
-
-    monkeypatch.setattr(m, "async_playwright", lambda: SimpleNamespace(start=start))
-    monkeypatch.setattr(m.cqu_ticket_browser, "_close_browser_driver", close)
-    return context, counts
+    page.navigate = navigate
+    page.evaluate = evaluate
+    monkeypatch.setattr(m, "ChromiumSession", lambda **kwargs: page)
+    return page, counts
 
 
 @pytest.mark.asyncio
@@ -601,7 +480,7 @@ async def test_optional_export_stall_preserves_complete_data(
     assert result["diagnostics"]["timeline"][-1]["stage"] == "DONE"
     assert started.is_set() is export_started
     assert cancelled.is_set() is export_started
-    assert counts == {"launch": 1, "context": 1, "page": 1, "close": 1}
+    assert counts == {"open": 1, "close": 1}
 
 
 @pytest.mark.asyncio
@@ -637,7 +516,7 @@ async def test_optional_export_propagates_external_cancellation(
             await task
     assert started.is_set()
     assert cancelled.is_set()
-    assert counts == {"launch": 1, "context": 1, "page": 1, "close": 1}
+    assert counts == {"open": 1, "close": 1}
 
 
 @pytest.mark.asyncio
@@ -752,37 +631,14 @@ async def test_outer_short_budget_classifies_observed_hung_body(monkeypatch, ext
         return [{"name": name, "value": "present"}
                 for name in ("CtLgrmkSWHBZS", "CtLgrmkSWHBZT")]
 
-    page = SimpleNamespace(
-        on=lambda event, callback: callbacks.update({event: callback}),
-        goto=goto, content=content, url=NAV,
-        wait_for_timeout=lambda ms: asyncio.sleep(ms / 1000),
-    )
-
-    async def new_page():
-        return page
-
-    async def new_cdp_session(_page):
-        return SimpleNamespace(send=lambda *_args, **_kwargs: asyncio.sleep(0))
-
-    async def new_context(**kwargs):
-        return SimpleNamespace(
-            new_page=new_page,
-            new_cdp_session=new_cdp_session,
-            cookies=cookies,
-        )
-
-    async def launch(**kwargs):
-        return SimpleNamespace(new_context=new_context, version="148.0.7778.96")
-
-    async def start():
-        return SimpleNamespace(chromium=SimpleNamespace(launch=launch))
-
-    async def close(*args):
-        pass
-
-    monkeypatch.setattr(m, "async_playwright", lambda: SimpleNamespace(start=start))
+    page = TimelinePage()
+    page.navigate = goto
+    page.content = content
+    page.cookies = cookies
+    page.pause = lambda ms: asyncio.sleep(ms / 1000)
+    page.on_response = lambda callback: callbacks.update(response=callback)
+    monkeypatch.setattr(m, "ChromiumSession", lambda **kwargs: page)
     monkeypatch.setattr(m, "HARVEST_OVERALL_TIMEOUT", 1 if external_deadline else 0.03)
-    monkeypatch.setattr(m.cqu_ticket_browser, "_close_browser_driver", close)
     operation = m.harvest({}, {"navUrl": NAV, "capture": [TABLE], "fetch": []})
     if external_deadline:
         with pytest.raises(server.BrowserDeadlineExceeded):

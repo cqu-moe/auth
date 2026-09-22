@@ -69,6 +69,12 @@ jobs:
         env:
           WRANGLER_LOG_PATH: /tmp/auth-api-v1-wrangler.log
 
+      - name: Test (Chromium container)
+        run: |
+          docker build --platform linux/amd64 -t cqu-browser-tests ./container
+          docker run --rm --platform linux/amd64 -v "$PWD:/workspace:ro" cqu-browser-tests \
+            sh -c 'python -m pip install --disable-pip-version-check pytest pytest-asyncio && PYTHONPATH=/app python -m pytest -q -o cache_dir=/tmp/pytest-cache /workspace/container'
+
       - name: Check API artifacts
         run: npm run check:api
 
