@@ -9,6 +9,22 @@ FIXTURES = json.loads((Path(__file__).parent / "fixtures/login-failures.json").r
 
 
 class LoginFailureContractTests(BrowserRuntimeTestCase):
+    async def test_cleanup_failure_reports_temporary_container_unavailability(self):
+        async def failed_login(**_kwargs):
+            raise RuntimeError("BROWSER_CLEANUP_FAILED")
+
+        server.cqu_login.run_login = failed_login
+        response = await self.client.post(
+            "/run",
+            json={"studentId": "synthetic-student", "password": "synthetic-password",
+                  "service": "https://my.cqu.edu.cn/", "method": "mail",
+                  "session": "cleanup-failure", "operationTimeoutMs": 1000},
+            headers=self.boot_headers(),
+        )
+        payload = await response.json()
+        assert payload["error"] == payload["errorCode"] == "CONTAINER_UNAVAILABLE"
+        assert payload["phase"] == "launching_browser"
+
     async def test_raw_cdp_failures_produce_safe_structured_responses(self):
         for fixture in FIXTURES:
             with self.subTest(case=fixture["id"]):

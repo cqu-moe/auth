@@ -2,11 +2,13 @@
 
 import asyncio
 import base64
+import errno
 import glob
 import json
 import os
 import random
 import shutil
+import signal
 import socket
 import sys
 import tempfile
@@ -21,6 +23,7 @@ import browser_profile
 import cqu_login
 
 STORAGE_PAGE_TIMEOUT_S = 10.0
+PROFILE_CLEANUP_TIMEOUT_S = 2.0
 
 def build_chrome_args(
     executable: str, profile_dir: str, debug_port: int, proxy=None
@@ -282,6 +285,7 @@ class ChromiumSession:
         self.proxy = proxy
         self.cdp = None
         self.process = None
+        self._process_group = None
         self.http = None
         self.profile_dir = None
         self.url = "about:blank"
@@ -308,7 +312,9 @@ class ChromiumSession:
             self.process = await asyncio.create_subprocess_exec(
                 *build_chrome_args(find_chromium_executable(), self.profile_dir, port, self.proxy),
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                start_new_session=True,
             )
+            self._process_group = self.process.pid
             self.http = aiohttp.ClientSession()
             async with asyncio.timeout(browser_profile.BROWSER_LAUNCH_TIMEOUT_MS / 1000):
                 await _wait_devtools_http(self.http, port, browser_profile.BROWSER_LAUNCH_TIMEOUT_MS / 1000)
@@ -567,22 +573,60 @@ class ChromiumSession:
                         pass
             finally:
                 try:
-                    if self.process and self.process.returncode is None:
-                        try:
-                            self.process.terminate()
-                        except ProcessLookupError:
-                            pass
-                        try:
-                            await asyncio.wait_for(self.process.wait(), timeout=5)
-                        except asyncio.TimeoutError:
-                            try:
-                                self.process.kill()
-                            except ProcessLookupError:
-                                pass
-                            await asyncio.wait_for(self.process.wait(), timeout=5)
+                    await self._stop_process_tree()
                 finally:
-                    if self.profile_dir:
-                        shutil.rmtree(self.profile_dir, ignore_errors=True)
+                    await self._remove_profile()
+
+    async def _stop_process_tree(self):
+        if self.process is None:
+            return
+
+        def send(sig):
+            try:
+                if self._process_group is not None:
+                    os.killpg(self._process_group, sig)
+                elif self.process.returncode is None:
+                    (self.process.terminate if sig == signal.SIGTERM else self.process.kill)()
+            except ProcessLookupError:
+                pass
+
+        reaped = self.process.returncode is not None
+        try:
+            send(signal.SIGTERM)
+            if not reaped:
+                try:
+                    await asyncio.wait_for(self.process.wait(), timeout=5)
+                    reaped = True
+                except asyncio.TimeoutError:
+                    pass
+        finally:
+            # Browser.close may finish the parent while profile-writing children remain.
+            if self._process_group is not None or not reaped:
+                send(signal.SIGKILL)
+            if not reaped:
+                await asyncio.wait_for(self.process.wait(), timeout=5)
+            self._process_group = None
+
+    async def _remove_profile(self):
+        if self.profile_dir is None:
+            return
+        deadline = time.monotonic() + PROFILE_CLEANUP_TIMEOUT_S
+        while True:
+            try:
+                shutil.rmtree(self.profile_dir)
+                self.profile_dir = None
+                return
+            except FileNotFoundError:
+                if not os.path.lexists(self.profile_dir):
+                    self.profile_dir = None
+                    return
+            except OSError as error:
+                if error.errno not in (errno.ENOTEMPTY, errno.EEXIST):
+                    raise RuntimeError("BROWSER_CLEANUP_FAILED") from None
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("BROWSER_CLEANUP_FAILED") from None
+            await asyncio.sleep(min(0.05, remaining))
 
 
 def _free_loopback_port() -> int:

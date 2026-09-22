@@ -73,7 +73,7 @@ jobs:
         run: |
           docker build --platform linux/amd64 -t cqu-browser-tests ./container
           docker run --rm --platform linux/amd64 -v "$PWD:/workspace:ro" cqu-browser-tests \
-            sh -c 'python -m pip install --disable-pip-version-check pytest pytest-asyncio && PYTHONPATH=/app python -m pytest -q -o cache_dir=/tmp/pytest-cache /workspace/container'
+            sh -c 'python -m pip install --disable-pip-version-check pytest==9.1.1 pytest-asyncio==1.4.0 && PYTHONPATH=/app python -m pytest -q -o cache_dir=/tmp/pytest-cache /workspace/container'
 
       - name: Check API artifacts
         run: npm run check:api

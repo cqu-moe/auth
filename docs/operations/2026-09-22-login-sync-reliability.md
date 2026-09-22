@@ -50,11 +50,13 @@
 - 跨origin存储使用与Playwright相同的成熟模式：同一profile的辅助页面，在导航前拦截为空HTML读写本地存储，不发出额外学校请求。该辅助过程独立限时10秒，所有出口清理Target/CDP。
 - DO确认失效按会话身份与state快照提交；旧alive/expired不覆盖新会话。并发重登成功仍转active，失败不复活已失效登录；丢弃旧探针后保留有效会话的后续维护及更早alarm。
 - Python浏览器操作新增安全`browser_operation_completed`事件，只有operation、http_outcome、http_status、duration_ms；不读取请求/响应内容。http_outcome只表示HTTP结果，不作为业务成功率。取消和遥测失败不改变业务语义。
-- Linux amd64、1CPU/1GiB、Xvfb普通窗口完整测试：346通过、13子测试通过；同版本Python3.12本机全套也通过。实际镜像无Patchright，native UA/平台一致、webdriver=false；退出后临时profile为0，镜像runtime SHA256与工作区一致。
+- Linux amd64、1GiB、Xvfb普通窗口最终完整测试：351通过、13子测试通过；包含单核和较快CPU环境验证，另有本机Python3.12浏览器及生命周期验证。实际镜像无Patchright，native UA/平台一致、webdriver=false；退出后临时profile为0，镜像runtime SHA256与工作区一致。
 - Auth完整DO测试312通过，Node/前端858通过；typecheck、DO typecheck、API产物、API契约lint、模块边界、前端lint/build通过。前端仅有原有大chunk构建警告。
 - CI新增以生产同架构Chrome镜像运行全部Python/浏览器测试的门禁。
 - 独立复审覆盖Schedule、DO并发/续期、CDP生命周期/存储/票据以及Python遥测。修复均有先红后绿的回归证据。
 
 ## Auth 生产验收
 
-待签名发布并用本人授权账号验证。此处未完成前，不以本地测试替代生产登录证明。
+已签名提交`af32e26`并推送main；[首次CI 35702052192](https://github.com/cqu-moe/auth/actions/runs/35702052192)被真实浏览器profile清理断言阻止，尚未部署。已补独立进程组回收及限时严格目录删除，保留原失败断言；修复后的较快CPU Linux全套351通过、13子测试通过；原清理断言未放宽，等待修复后的CI。生产账号验收仍待部署稳定后进行。
+
+发布前实时日志补充：旧版本在15:19–15:32期间出现7小时主动重登后连续瞬态失败和BROWSER_DEADLINE。这与代码及回归测试揭示的有效seed等待登录表单缺陷一致；日志本身未记录每次完整页面状态，故不把所有历史超时归为同一根因。

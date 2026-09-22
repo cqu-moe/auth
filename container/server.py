@@ -62,7 +62,9 @@ LOGIN_FAILURES = {
 def normalize_login_failure(error: object) -> dict:
     raw = str(error).strip()
     code = raw if raw in LOGIN_FAILURES else "UNKNOWN_LOGIN_ERROR"
-    if raw.startswith("first-factor failed: credential_rejected:"):
+    if raw == "BROWSER_CLEANUP_FAILED":
+        code = "CONTAINER_UNAVAILABLE"
+    elif raw.startswith("first-factor failed: credential_rejected:"):
         code = "PASSWORD_REJECTED"
     elif raw.startswith("first-factor failed:"):
         code = "FIRST_FACTOR_UNRECOGNIZED"

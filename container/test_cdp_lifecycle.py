@@ -41,12 +41,14 @@ def browser(monkeypatch, tmp_path):
             return {"croypto": "", "execution": ""}
 
     cdp = Cdp(None)
-    process = SimpleNamespace(returncode=None, terminate=Mock(), kill=Mock(), wait=AsyncMock())
+    process = SimpleNamespace(pid=987654321, returncode=None, terminate=Mock(), kill=Mock(), wait=AsyncMock())
+    process.launch = AsyncMock(return_value=process)
+    monkeypatch.setattr(runtime.os, "killpg", lambda _group, sig: process.terminate() if sig == 15 else process.kill())
     http = SimpleNamespace(ws_connect=AsyncMock(), close=AsyncMock())
     monkeypatch.setenv("CQU_CDP_RUNTIME_DIR", str(tmp_path))
     monkeypatch.setattr(runtime, "find_chromium_executable", lambda: "/synthetic/chrome")
     monkeypatch.setattr(runtime, "_free_loopback_port", lambda: 43123)
-    monkeypatch.setattr(runtime.asyncio, "create_subprocess_exec", AsyncMock(return_value=process))
+    monkeypatch.setattr(runtime.asyncio, "create_subprocess_exec", process.launch)
     monkeypatch.setattr(runtime.aiohttp, "ClientSession", lambda: http)
     monkeypatch.setattr(runtime, "_wait_devtools_http", AsyncMock())
     monkeypatch.setattr(runtime, "_first_page_websocket", AsyncMock(return_value="ws://synthetic"))
@@ -69,6 +71,13 @@ async def test_initial_navigation_ticket_reuses_session_without_password_or_code
     assert result["state"]["cookies"][0]["name"] == "SOURCEID_TGC"
     assert not any(method == "Runtime.evaluate" for method, _ in cdp.calls)
     provider.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_chromium_launch_owns_an_independent_process_session(browser):
+    _, process, _, _ = browser
+    await m.run_login("synthetic", "synthetic", "https://my.cqu.edu.cn/cas", code_provider=AsyncMock())
+    assert process.launch.call_args.kwargs.get("start_new_session") is True
 
 
 @pytest.mark.asyncio
