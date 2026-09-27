@@ -407,7 +407,7 @@ class ChromiumSession:
         async with asyncio.timeout(timeout_s):
             result = await self.cdp.call("Page.navigate", {"url": url}, timeout=timeout_s)
             if result.get("errorText"):
-                raise RuntimeError("Browser navigation failed")
+                raise RuntimeError(f"Browser navigation failed: {result['errorText']}")
             if wait_until != "commit":
                 await wait_for_browser_event(self.cdp, self._navigation)
 

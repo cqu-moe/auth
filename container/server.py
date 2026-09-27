@@ -62,7 +62,7 @@ LOGIN_FAILURES = {
 def normalize_login_failure(error: object) -> dict:
     raw = str(error).strip()
     code = raw if raw in LOGIN_FAILURES else "UNKNOWN_LOGIN_ERROR"
-    if raw == "BROWSER_CLEANUP_FAILED":
+    if raw == "BROWSER_CLEANUP_FAILED" or raw.startswith("Browser navigation failed"):
         code = "CONTAINER_UNAVAILABLE"
     elif raw.startswith("first-factor failed: credential_rejected:"):
         code = "PASSWORD_REJECTED"
@@ -642,7 +642,8 @@ async def run_handler(request: web.Request) -> web.Response:
             e,
             {"operation": "login", "error_code": failure["errorCode"]},
         )
-        return login_failure_response(e, status=500)
+        status = 503 if failure["errorCode"] == "CONTAINER_UNAVAILABLE" else 500
+        return login_failure_response(e, status=status)
     finally:
         CODE_EVENTS.pop(session, None)
         CODE_VALUES.pop(session, None)

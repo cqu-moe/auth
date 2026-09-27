@@ -22,8 +22,26 @@ class LoginFailureContractTests(BrowserRuntimeTestCase):
             headers=self.boot_headers(),
         )
         payload = await response.json()
+        assert response.status == 503
         assert payload["error"] == payload["errorCode"] == "CONTAINER_UNAVAILABLE"
         assert payload["phase"] == "launching_browser"
+
+    async def test_navigation_failure_reports_retryable_unavailability(self):
+        async def failed_login(**_kwargs):
+            raise RuntimeError("Browser navigation failed: net::ERR_CONNECTION_REFUSED")
+
+        server.cqu_login.run_login = failed_login
+        response = await self.client.post(
+            "/run",
+            json={"studentId": "synthetic-student", "password": "synthetic-password",
+                  "service": "https://my.cqu.edu.cn/", "method": "mail",
+                  "session": "navigation-failure", "operationTimeoutMs": 1000},
+            headers=self.boot_headers(),
+        )
+        payload = await response.json()
+        assert response.status == 503
+        assert payload["errorCode"] == "CONTAINER_UNAVAILABLE"
+        assert "ERR_CONNECTION_REFUSED" not in json.dumps(payload)
 
     async def test_raw_cdp_failures_produce_safe_structured_responses(self):
         for fixture in FIXTURES:
