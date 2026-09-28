@@ -42,6 +42,18 @@
     "source": "custom-contract"
   },
   {
+    "method": "GET",
+    "path": "/api/v1/cqu/quicklogin/release",
+    "policy": "public",
+    "source": "custom-contract"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/cqu/quicklogin/download",
+    "policy": "session",
+    "source": "custom-contract"
+  },
+  {
     "method": "OPTIONS",
     "path": "/api/v1/cqu/quicklogin/capabilities",
     "policy": "public",

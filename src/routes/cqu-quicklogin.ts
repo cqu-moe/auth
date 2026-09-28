@@ -8,7 +8,7 @@ import { requireSession } from "../middleware/authentication";
 import { QuickloginAccountClient } from "../services/quicklogin/account-client";
 import { quickloginDeviceModeEnabled } from "../services/quicklogin/mode";
 import { parseEnabled, QuickloginHttpError, readJson } from "../services/quicklogin/http";
-import { hasQuickloginPolicy } from "../services/quicklogin/eligibility";
+import { hasQuickloginAccess } from "../services/quicklogin/eligibility";
 
 // 用户自助快捷登录开关 /api/cqu/quicklogin。
 //
@@ -32,7 +32,6 @@ const cquQuicklogin = new Hono<HonoEnv>();
 
 const SUBSYSTEM = "cqu";
 const CAPABILITY = "quicklogin";
-const ACCESS_CAPABILITY = "quicklogin_access";
 const VALUE_ON = "1";
 
 // session-only 鉴权中间件。无有效 Better Auth session → 401。
@@ -70,7 +69,7 @@ async function getOwnFlag(
 cquQuicklogin.get("/", async (c) => {
   const user = c.get("user") as { id: string };
   if (quickloginDeviceModeEnabled(c.env)) {
-    const eligible = await hasQuickloginPolicy(c.env.DATABASE, user.id);
+    const eligible = await hasQuickloginAccess(c.env, user.id);
     if (!eligible) return c.json({ eligible: false });
     const list = await new QuickloginAccountClient(c.env).listDevices(user.id, Date.now());
     return c.json({
@@ -82,11 +81,11 @@ cquQuicklogin.get("/", async (c) => {
   }
   const db = drizzle(c.env.DATABASE);
   const [access, consent] = await Promise.all([
-    getOwnFlag(db, user.id, ACCESS_CAPABILITY),
+    hasQuickloginAccess(c.env, user.id),
     getOwnFlag(db, user.id, CAPABILITY),
   ]);
   return c.json({
-    eligible: access?.value === VALUE_ON,
+    eligible: access,
     enabled: consent?.value === VALUE_ON,
   });
 });
@@ -104,7 +103,7 @@ cquQuicklogin.put("/", async (c) => {
 
   if (quickloginDeviceModeEnabled(c.env)) {
     try {
-      if (!(await hasQuickloginPolicy(c.env.DATABASE, user.id))) {
+      if (!(await hasQuickloginAccess(c.env, user.id))) {
         return errorResponse(c, "FORBIDDEN", "未开放浏览器插件快捷登录功能", 403);
       }
       const enabled = parseEnabled(await readJson(c.req.raw));
@@ -127,8 +126,8 @@ cquQuicklogin.put("/", async (c) => {
   const db = drizzle(c.env.DATABASE);
 
   // 功能开放闸:无 cqu.quicklogin_access 的用户连自助开关都不能碰(与设置页显隐同源)。
-  const access = await getOwnFlag(db, user.id, ACCESS_CAPABILITY);
-  if (access?.value !== VALUE_ON) {
+  const access = await hasQuickloginAccess(c.env, user.id);
+  if (!access) {
     return errorResponse(c, "FORBIDDEN", "未开放浏览器插件快捷登录功能", 403);
   }
 

@@ -70,6 +70,26 @@
     "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
   },
   {
+    "method": "GET",
+    "path": "/api/v1/cqu/quicklogin/release",
+    "kind": "canonical",
+    "requestValidation": "parameters-only",
+    "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/cqu/quicklogin/download",
+    "kind": "canonical",
+    "requestValidation": "parameters-only",
+    "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
     "method": "OPTIONS",
     "path": "/api/v1/cqu/quicklogin/capabilities",
     "kind": "canonical",

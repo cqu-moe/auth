@@ -50,6 +50,20 @@
   },
   {
     "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/cqu/quicklogin/release",
+    "operationId": "get_api_v1_cqu_quicklogin_release",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/cqu/quicklogin/download",
+    "operationId": "get_api_v1_cqu_quicklogin_download",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
     "method": "OPTIONS",
     "path": "/api/v1/cqu/quicklogin/capabilities",
     "operationId": "options_api_v1_cqu_quicklogin_capabilities",

@@ -57,7 +57,9 @@ describe("HTTP operation inventory", () => {
 
     expect(quicklogin).toEqual([
       "GET /api/v1/cqu/quicklogin/capabilities",
+      "GET /api/v1/cqu/quicklogin/download",
       "GET /api/v1/cqu/quicklogin/overview",
+      "GET /api/v1/cqu/quicklogin/release",
       "GET /api/v1/cqu/quicklogin/devices/:id/operations/:operationId",
       "POST /api/v1/cqu/quicklogin/registrations",
       "POST /api/v1/cqu/quicklogin/devices/:id/reconcile",

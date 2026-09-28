@@ -101,7 +101,7 @@ export function buildAuthPolicy(operations: readonly HttpOperation[]): AuthPolic
         policy = "bearer";
       } else if (path.includes("/cqu/binding")) {
         policy = "session-or-bearer";
-      } else if (path.endsWith("/cqu/quicklogin/capabilities")) {
+      } else if ((path.endsWith("/cqu/quicklogin/capabilities") || path.endsWith("/cqu/quicklogin/release"))) {
         policy = "public";
       } else if (path.endsWith("/cqu/quicklogin/registrations")) {
         policy = "bearer";
@@ -109,7 +109,7 @@ export function buildAuthPolicy(operations: readonly HttpOperation[]): AuthPolic
         policy = "session";
       } else if (/\/cqu\/quicklogin\/devices\/:id\/operations\/:operationId$/.test(path)) {
         policy = "bearer";
-      } else if (path.endsWith("/cqu/quicklogin")) {
+      } else if ((path.endsWith("/cqu/quicklogin") || path.endsWith("/cqu/quicklogin/download"))) {
         policy = "session";
       } else if (/\/cqu\/quicklogin\/devices(?:\/|$)/.test(path)) {
         policy = method === "GET" || method === "DELETE" ? "session" : "bearer";

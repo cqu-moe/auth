@@ -1,3 +1,4 @@
+import { createQuickloginDownloadsApi } from "./quicklogin-downloads";
 import { cquQuickloginV3 } from "../../routes/cqu-quicklogin-v3";
 import { createRoute, z } from "@hono/zod-openapi";
 import { createApiRouter } from "../validation";
@@ -42,6 +43,7 @@ export function createV1Api() {
   );
   api.route("/cqu/binding", createCquBindingApi());
   api.route("/cqu/service-tickets", createCquServiceTicketsApi());
+  api.route("/cqu/quicklogin", createQuickloginDownloadsApi());
   api.route("/cqu/quicklogin", cquQuickloginV3);
   api.route("/cqu/quicklogin/devices", cquQuickloginDevices);
   api.route("/cqu/quicklogin", createCquQuickloginApi());
