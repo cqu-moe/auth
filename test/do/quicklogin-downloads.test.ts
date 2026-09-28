@@ -5,14 +5,14 @@ import { createApiFixture } from './api-fixture';
 const base = '/api/v1/cqu/quicklogin';
 const bucket = () => (env as typeof env & { QUICKLOGIN_RELEASES: R2Bucket }).QUICKLOGIN_RELEASES;
 const payload = new Uint8Array([80, 75, 3, 4, 10, 20, 30, 40]);
-async function seed(version = '0.4.0') {
+async function seed(version = '0.4.0', content = payload) {
   const filename = `cqu-quicklogin-${version}-canary.zip`;
-  const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', payload)), b => b.toString(16).padStart(2, '0')).join('');
+  const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', content)), b => b.toString(16).padStart(2, '0')).join('');
   const record = { schemaVersion: 1, channel: 'canary', version, filename,
-    objectKey: `quicklogin/releases/${version}/${filename}`, size: payload.length,
+    objectKey: `quicklogin/releases/${version}/${filename}`, size: content.length,
     sha256, sourceCommit: 'a'.repeat(40), protocolVersion: 3, contractDigest: 'b'.repeat(64),
     publishedAt: '2026-09-28T00:00:00Z', notes: ['合成测试版本'] };
-  await bucket().put(record.objectKey, payload, { customMetadata: { sha256 } });
+  await bucket().put(record.objectKey, content, { customMetadata: { sha256 } });
   await bucket().put(`quicklogin/releases/${version}/release.json`, JSON.stringify(record));
   await bucket().put('quicklogin/channels/canary.json', JSON.stringify(record));
   return record;
@@ -47,10 +47,16 @@ describe('QuickLogin release downloads', () => {
     const record = await seed();
     expect((await fixture.request(`${base}/download`, { headers })).status).toBe(403);
     await grant(id);
-    await seed('0.4.1');
+    const nextPayload = new Uint8Array([80, 75, 3, 4, 50, 60, 70, 80]);
+    const nextRecord = await seed('0.4.1', nextPayload);
+    expect(nextRecord.sha256).not.toBe(record.sha256);
     const result = await fixture.request(`${base}/download?version=0.4.0`, { headers });
     expect(result.status).toBe(200);
-    expect(new Uint8Array(await result.arrayBuffer())).toEqual(payload);
+    const bytes = new Uint8Array(await result.arrayBuffer());
+    expect(bytes).toEqual(payload);
+    const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), b => b.toString(16).padStart(2, '0')).join('');
+    expect(digest).toBe(record.sha256);
+    expect(digest).not.toBe(nextRecord.sha256);
     expect(result.headers.get('content-disposition')).toBe(`attachment; filename="${record.filename}"`);
     expect(result.headers.get('cache-control')).toBe('private, no-store');
     const head = await fixture.request(`${base}/download?version=0.4.0`, { method: 'HEAD', headers });
