@@ -25,6 +25,8 @@
     "run_worker_first": true
   },
 
+  "r2_buckets": [{ "binding": "QUICKLOGIN_RELEASES", "bucket_name": "cqu-quicklogin-releases" }],
+
   "d1_databases": [{
     "binding": "DATABASE",
     "database_name": "auth-cqu-moe-db",

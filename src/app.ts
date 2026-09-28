@@ -36,11 +36,23 @@ export function createApp() {
       return next();
     }
     const origin = c.req.header("origin");
+    const websiteStatus = origin === "https://quicklogin.cqu.moe" &&
+      /^\/api\/v1\/cqu\/quicklogin\/?$/.test(path) &&
+      (["GET", "HEAD"].includes(c.req.method) || (c.req.method === "OPTIONS" && c.req.header("access-control-request-method") === "GET"));
     if (origin) {
-      c.header("Access-Control-Allow-Origin", "*");
+      c.header("Access-Control-Allow-Origin", websiteStatus ? origin : "*");
+      if (websiteStatus) c.header("Access-Control-Allow-Credentials", "true");
       c.header("Vary", "Origin");
     }
-    if (c.req.method !== "OPTIONS") return next();
+    if (c.req.method !== "OPTIONS") {
+      await next();
+      if (websiteStatus) {
+        c.header("Access-Control-Allow-Origin", origin!);
+        c.header("Access-Control-Allow-Credentials", "true");
+        c.header("Vary", "Origin", { append: true });
+      }
+      return;
+    }
     const methods = allowedMethods(runtimeOperations, path)
       .filter((method) => method !== "OPTIONS");
     const requested = c.req.header("access-control-request-method")?.toUpperCase();

@@ -33,6 +33,7 @@ export default defineConfig({
       // 二者均不来自测试体、不影响 exit 0 与全绿, 是已知背景噪音, 勿误判为真失败。
       remoteBindings: false,
       miniflare: {
+        r2Buckets: ["QUICKLOGIN_RELEASES"],
         // DO 内可能访问的 env 标量(relogin 解密用 ENCRYPTION_KEY 等)。这里给最小集合;
         // 本批用例都不走真解密/查库分支, 仅作兜底避免缺键。
         bindings: {
