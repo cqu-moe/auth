@@ -1,5 +1,6 @@
 export interface Env {
   DATABASE: D1Database;
+  QUICKLOGIN_RELEASES?: R2Bucket;
   KV: KVNamespace;
   RESEND_API_KEY: string;
   CQU_SESSION: DurableObjectNamespace;

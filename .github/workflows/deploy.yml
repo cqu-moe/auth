@@ -112,9 +112,9 @@ jobs:
 
       - name: Deploy to production (main)
         if: github.ref == 'refs/heads/main'
-        run: npx wrangler deploy --var QUICKLOGIN_SERVER_BUILD:${GITHUB_SHA} --var RELEASE:${GITHUB_SHA}
+        run: npx wrangler deploy --experimental-provision=false --var QUICKLOGIN_SERVER_BUILD:${GITHUB_SHA} --var RELEASE:${GITHUB_SHA}
 
       # ── 其他分支：上传 0 流量版本（验证容器构建+上传全链 + 可回滚；无预览 URL）──
       - name: Upload version, no traffic (non-main)
         if: github.ref != 'refs/heads/main'
-        run: npx wrangler versions upload --var QUICKLOGIN_SERVER_BUILD:${GITHUB_SHA} --var RELEASE:${GITHUB_SHA}
+        run: npx wrangler versions upload --experimental-provision=false --var QUICKLOGIN_SERVER_BUILD:${GITHUB_SHA} --var RELEASE:${GITHUB_SHA}

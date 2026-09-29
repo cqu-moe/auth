@@ -1,3 +1,4 @@
+import { PublicReleaseSchema } from "../../services/quicklogin/releases";
 import { QUICKLOGIN_V3_SCHEMAS } from "./quicklogin-v3.generated";
 import type { HttpOperation } from "../operations";
 import { z } from "@hono/zod-openapi";
@@ -329,6 +330,22 @@ export function quickloginOperationContract(
   operation: HttpOperation
 ): Record<string, unknown> | undefined {
   const { method, path } = operation;
+  if (method === "GET" && ["/api/v1/cqu/quicklogin/release", "/api/v1/cqu/quicklogin/download"].includes(path)) {
+    const download = path.endsWith("/download");
+    return {
+      security: download ? [{ cookieAuth: [] }] : [],
+      parameters: [{ name: "version", in: "query", required: false, schema: { type: "string", pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$" } }],
+      responses: {
+        "200": { description: download ? "Verified private extension ZIP" : "Public release metadata",
+          content: download ? { "application/zip": { schema: { type: "string", format: "binary" } } } : json(data(runtimeSchema(PublicReleaseSchema))).content },
+        ...Object.fromEntries((download ? [400,401,403,404,503] : [400,404,503]).map(status => [String(status), {
+          description: "Release unavailable or access denied", ...problem(),
+          ...(download ? { content: { ...problem().content, "text/html": { schema: { type: "string" } } } } : {}),
+        }])),
+      },
+    };
+  }
+
   const v3 = path.match(/^\/api\/v1\/cqu\/quicklogin\/(capabilities|registrations|overview|devices\/:id\/(reconcile|operations(?:\/:operationId)?|exports|receipts|resume-ticket))$/);
   if (v3) {
     const suffix = v3[1]!, kind = v3[2] ?? suffix;
