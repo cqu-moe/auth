@@ -167,10 +167,10 @@ export function UsersSection() {
         </Alert>
       )}
 
-      {/* 手机端：卡片列表，操作直达，无需横向滚动 */}
-      <div className="space-y-3 sm:hidden">
+      {/* 手机端：分组列表，操作直达，无需横向滚动 */}
+      <div className="divide-y divide-border sm:hidden">
         {users.map((user) => (
-          <div key={user.id} className="rounded-lg border border-border p-4">
+          <div key={user.id} className="py-4 first:pt-0 last:pb-0">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="font-medium text-foreground">{user.name}</div>
@@ -200,7 +200,8 @@ export function UsersSection() {
                 权益
               </Button>
               <Button
-                variant={user.banned ? "outline" : "destructive"}
+                variant="outline"
+                className={user.banned ? undefined : "text-destructive hover:text-destructive"}
                 onClick={() => updateUser(user.id, { action: user.banned ? "unban" : "ban" })}
                 disabled={actionLoading === user.id}
               >
@@ -261,7 +262,8 @@ export function UsersSection() {
                       权益
                     </Button>
                     <Button
-                      variant={user.banned ? "outline" : "destructive"}
+                      variant="outline"
+                      className={user.banned ? undefined : "text-destructive hover:text-destructive"}
                       size="sm"
                       onClick={() => updateUser(user.id, { action: user.banned ? "unban" : "ban" })}
                       disabled={actionLoading === user.id}

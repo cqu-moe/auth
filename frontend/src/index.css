@@ -83,6 +83,7 @@ code {
 .auth-brand svg {
   width: 24px;
   height: 24px;
+  color: var(--foreground);
 }
 .auth-header-actions {
   display: flex;
@@ -102,11 +103,15 @@ code {
   flex-direction: column;
   gap: var(--space-6);
 }
+.auth-intro {
+  text-align: center;
+}
 .auth-intro h1 {
   margin: var(--space-3) 0 0;
-  font-size: var(--text-xl);
+  font-size: var(--text-title);
   font-weight: 600;
   letter-spacing: -0.03em;
+  text-wrap: balance;
 }
 .auth-intro p {
   margin: var(--space-2) 0 0;
@@ -114,6 +119,7 @@ code {
   color: var(--muted-foreground);
 }
 .auth-card {
+  box-shadow: var(--shadow-card);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -185,19 +191,28 @@ code {
 
 /* ── 向导步骤指示器 ── */
 .step-indicator {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 .step-indicator li {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-1);
-  flex: 1;
+  gap: var(--space-2);
+  min-width: 0;
 }
-.step-indicator li:last-child {
-  flex: 0;
+.step-indicator li:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: var(--space-4);
+  left: calc(50% + var(--space-5));
+  right: calc(-50% + var(--space-5));
+  height: 1px;
+  background: var(--border);
+}
+.step-indicator li[data-step-state='done']::after {
+  background: var(--primary);
 }
 .step-dot {
   display: flex;
@@ -223,6 +238,7 @@ code {
   outline-offset: 2px;
 }
 .step-label {
+  white-space: nowrap;
   font-size: var(--text-xs);
   color: var(--muted-foreground);
 }
@@ -230,14 +246,65 @@ li[data-step-state='active'] .step-label {
   color: var(--foreground);
   font-weight: 500;
 }
-.step-connector {
-  align-self: center;
-  width: 100%;
-  height: 1px;
-  background: var(--border);
-  margin-top: 16px;
+/* Section titles sit on the canvas; only the editable content is elevated. */
+.settings-card-header {
+  padding-bottom: var(--space-3);
 }
-li[data-step-state='done'] + .step-connector,
-.step-connector[data-state='done'] {
-  background: var(--primary);
+.settings-card-header h3 {
+  font-size: var(--text-base);
+}
+.content-panel,
+.settings-card-body {
+  padding: var(--space-6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+.inline-editor {
+  background: var(--background);
+  border: 1px solid var(--border);
+  transition: opacity 150ms ease, transform 180ms var(--ease-out);
+}
+@starting-style {
+  :root:not([data-input='keyboard']) .inline-editor {
+    opacity: 0;
+    transform: translateY(var(--space-1));
+  }
+}
+:root[data-input='keyboard'] .inline-editor {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .inline-editor {
+    transition: none;
+  }
+  @starting-style {
+    :root:not([data-input='keyboard']) .inline-editor {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+@media (max-width: 767px) {
+  .auth-card,
+  .content-panel,
+  .settings-card-body {
+    padding: var(--space-5);
+  }
+}
+
+.disclosure-chevron {
+  transition: transform 180ms var(--ease-out);
+}
+:root[data-input='keyboard'] .disclosure-chevron {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .disclosure-chevron {
+    transition: none;
+  }
+  .animate-spin {
+    animation: none;
+  }
 }

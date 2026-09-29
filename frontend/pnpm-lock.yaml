@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  '@cqu-moe/theme': file:./.design/cqu-moe-theme-1.0.0.tgz
+  '@cqu-moe/theme': file:./.design/cqu-moe-theme-1.1.0.tgz
 
 importers:
 
@@ -15,11 +15,11 @@ importers:
         specifier: 1.6.11
         version: 1.6.11(@better-auth/core@1.7.6(@better-auth/utils@0.4.0)(@better-fetch/fetch@1.1.21)(better-call@1.3.5(zod@4.6.5))(jose@6.2.12)(kysely@0.28.17)(nanostores@1.5.4))(@better-auth/utils@0.4.0)(@better-fetch/fetch@1.1.21)(better-auth@1.6.11(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(better-call@1.3.5(zod@4.6.5))
       '@cqu-moe/theme':
-        specifier: file:.design/cqu-moe-theme-1.0.0.tgz
-        version: file:.design/cqu-moe-theme-1.0.0.tgz
+        specifier: file:.design/cqu-moe-theme-1.1.0.tgz
+        version: file:.design/cqu-moe-theme-1.1.0.tgz
       '@cqu-moe/ui':
-        specifier: file:./.design/cqu-moe-ui-1.0.0.tgz
-        version: file:.design/cqu-moe-ui-1.0.0.tgz(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.0)(react@19.3.0)(redux@5.0.1)(typescript@5.9.3)
+        specifier: file:.design/cqu-moe-ui-1.1.0.tgz
+        version: file:.design/cqu-moe-ui-1.1.0.tgz(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.0)(react@19.3.0)(redux@5.0.1)(typescript@5.9.3)
       '@posthog/react':
         specifier: ^1.11.0
         version: 1.11.2(@types/react@19.3.0)(posthog-js@1.434.15(@types/react@19.3.0)(react@19.3.0))(react@19.3.0)
@@ -290,13 +290,13 @@ packages:
   '@cacheable/utils@2.5.0':
     resolution: {integrity: sha512-buipgOVDkkPXNR5+xBpDw7Zk2n1EvU7qBJCNUcL7rhQ//kfpOXPAvQ511Os0vpLYJ1pZnvudNytkQt2hst3wqA==}
 
-  '@cqu-moe/theme@file:.design/cqu-moe-theme-1.0.0.tgz':
-    resolution: {integrity: sha512-jyOBgCXYQH+AxJzhgZYRJOln+BlJdcOziTtS/an0nvTaMdDQkoLwd370VvgIQM/QlBKR22kA+9RcGXb98Zvs9g==, tarball: file:.design/cqu-moe-theme-1.0.0.tgz}
-    version: 1.0.0
+  '@cqu-moe/theme@file:.design/cqu-moe-theme-1.1.0.tgz':
+    resolution: {integrity: sha512-czLO1k2PFJQ5nDJujh5B1jA3Oz3qGFwNHHLWxILund4K6/1x3PHXj8Mfanc9Qrk2VGLJD14OhN7IJYBdQHjLZg==, tarball: file:.design/cqu-moe-theme-1.1.0.tgz}
+    version: 1.1.0
 
-  '@cqu-moe/ui@file:.design/cqu-moe-ui-1.0.0.tgz':
-    resolution: {integrity: sha512-mzmhodu4AQnje0b18LyA9I/vdYfJWRoaiVOWTM6164B2cSxnQHagq5t3bLrJGcDZXVcloSGWxI1i5iEB0Aefwg==, tarball: file:.design/cqu-moe-ui-1.0.0.tgz}
-    version: 1.0.0
+  '@cqu-moe/ui@file:.design/cqu-moe-ui-1.1.0.tgz':
+    resolution: {integrity: sha512-h4/jihXCZp8vjB7qXXQj2i3CeDCP1VoqRJmFr4miHp7NteecACG1U49ywG5NpTjqBWwLSsYtVZydZJZjjZ2Wsw==, tarball: file:.design/cqu-moe-ui-1.1.0.tgz}
+    version: 1.1.0
     peerDependencies:
       react: ^19.0.0
       react-dom: ^19.0.0
@@ -2909,11 +2909,11 @@ snapshots:
       hashery: 1.5.1
       keyv: 5.6.0
 
-  '@cqu-moe/theme@file:.design/cqu-moe-theme-1.0.0.tgz': {}
+  '@cqu-moe/theme@file:.design/cqu-moe-theme-1.1.0.tgz': {}
 
-  '@cqu-moe/ui@file:.design/cqu-moe-ui-1.0.0.tgz(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.0)(react@19.3.0)(redux@5.0.1)(typescript@5.9.3)':
+  '@cqu-moe/ui@file:.design/cqu-moe-ui-1.1.0.tgz(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.0)(react@19.3.0)(redux@5.0.1)(typescript@5.9.3)':
     dependencies:
-      '@cqu-moe/theme': file:.design/cqu-moe-theme-1.0.0.tgz
+      '@cqu-moe/theme': file:.design/cqu-moe-theme-1.1.0.tgz
       class-variance-authority: 0.7.1
       clsx: 2.1.1
       lucide-react: 1.48.0(react@19.3.0)

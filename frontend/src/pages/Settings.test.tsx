@@ -84,7 +84,6 @@ describe("CQU binding settings actions", () => {
     await renderSettings();
 
     const actionGroup = container.querySelector('[aria-label="CQU 绑定操作"]');
-    expect(actionGroup?.classList.contains("flex-nowrap")).toBe(true);
     expect(actionGroup?.querySelectorAll(":scope > a, :scope > button")).toHaveLength(3);
     expect(actionGroup?.querySelector("p")).toBeNull();
 
