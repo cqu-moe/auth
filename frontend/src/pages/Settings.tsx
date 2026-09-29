@@ -1,4 +1,4 @@
-import { useState, ReactNode, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ChevronDown, Link2, Loader2, Mail } from "lucide-react";
 import { Alert, AlertDescription, Button, PageHeader, Skeleton } from "@cqu-moe/ui";
@@ -448,6 +448,34 @@ function CquBindingSection() {
 }
 
 export default function Settings() {
+  const { data: session, refetch: refetchSession } = authClient.useSession();
+  const user = session?.user as { email?: string; name?: string } | undefined;
+
+  return (
+    <Layout>
+      <PageHeader title="账户" description="登录账户和对外展示的基本信息。" />
+      <AccountProfileSection
+        name={user?.name ?? ""}
+        email={user?.email ?? ""}
+        onSessionRefresh={refetchSession}
+      />
+    </Layout>
+  );
+}
+
+export function SettingsSecurity() {
+  const { data: session } = authClient.useSession();
+  const user = session?.user as { twoFactorEnabled?: boolean } | undefined;
+
+  return (
+    <Layout>
+      <PageHeader title="安全" description="二次验证与登录密码。" />
+      <SecuritySection twoFactorEnabled={user?.twoFactorEnabled === true} />
+    </Layout>
+  );
+}
+
+export function SettingsCqu() {
   const location = useLocation();
   const search = new URLSearchParams(location.search);
   const cquAction = search.get("cqu");
@@ -456,14 +484,12 @@ export default function Settings() {
   const recovery = cquAction === "bind" ? { to: "/cqu/bind", label: "绑定学校账号" }
     : cquAction === "repair" ? { to: "/cqu/bind?repair=1", label: "更新学校密码" }
     : cquAction === "verify" ? { to: "/cqu/bind?repair=1", label: "完成学校验证" } : null;
-  const { data: session, refetch: refetchSession } = authClient.useSession();
-  const user = session?.user as { email?: string; name?: string; createdAt?: string; twoFactorEnabled?: boolean } | undefined;
 
   return (
     <Layout>
       <PageHeader
-        title="账户设置"
-        description="管理账户信息、安全设置与 CQU 服务集成。"
+        title="CQU 集成"
+        description="绑定学校账号、维护统一认证会话与快捷登录。"
         actions={recovery ? (
           <Button asChild data-cqu-action>
             <Link to={recovery.to}>{recovery.label}</Link>
@@ -471,39 +497,14 @@ export default function Settings() {
         ) : undefined}
       />
 
-      <div className="space-y-10">
-        <SettingsGroup label="账户">
-          <AccountProfileSection
-            name={user?.name ?? ""}
-            email={user?.email ?? ""}
-            onSessionRefresh={refetchSession}
-          />
-        </SettingsGroup>
+      <div className="space-y-4">
+        <CquBindingSection />
 
-        <SettingsGroup label="安全">
-          <SecuritySection twoFactorEnabled={user?.twoFactorEnabled === true} />
-        </SettingsGroup>
-
-        <SettingsGroup label="CQU 集成">
-          <CquBindingSection />
-
-          <QuickloginSettings
-            currentDeviceHint={currentDeviceHint}
-            reconnectDeviceHint={reconnectDeviceHint}
-          />
-        </SettingsGroup>
+        <QuickloginSettings
+          currentDeviceHint={currentDeviceHint}
+          reconnectDeviceHint={reconnectDeviceHint}
+        />
       </div>
     </Layout>
-  );
-}
-
-function SettingsGroup({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <section aria-label={label}>
-      <h2 className="mb-3 px-1 text-xs font-semibold tracking-widest text-muted-foreground">
-        {label}
-      </h2>
-      <div className="space-y-4">{children}</div>
-    </section>
   );
 }

@@ -4,7 +4,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import Settings from "./Settings";
+import { SettingsCqu } from "./Settings";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -46,12 +46,12 @@ function bindingResponse(bindStatus: "active" | "unbound" = "active") {
   });
 }
 
-async function renderSettings(path = "/settings") {
+async function renderSettings(path = "/settings/cqu") {
   await act(async () => {
     root.render(createElement(
       MemoryRouter,
       { initialEntries: [path] },
-      createElement(Settings),
+      createElement(SettingsCqu),
     ));
     await Promise.resolve();
   });

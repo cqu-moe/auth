@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { Link, NavLink as RouterNavLink, useNavigate } from "react-router-dom";
-import { KeyRound, LayoutDashboard, Mail, UserRound } from "lucide-react";
+import { LayoutDashboard, Link2, ShieldCheck, UserRound } from "lucide-react";
 import { AppShell, ContentContainer } from "@cqu-moe/ui";
 import { authClient } from "../lib/auth-client";
 import { canAccessAdmin } from "../../../shared/user-roles";
@@ -32,15 +32,15 @@ export default function Layout({ children, width = "reading" }: LayoutProps) {
           <span className="ds-nav-label">设置</span>
           <RouterNavLink to="/settings" end>
             <UserRound aria-hidden="true" />
-            账户设置
+            账户
           </RouterNavLink>
-          <RouterNavLink to="/settings/email">
-            <Mail aria-hidden="true" />
-            修改邮箱
+          <RouterNavLink to="/settings/security">
+            <ShieldCheck aria-hidden="true" />
+            安全
           </RouterNavLink>
-          <RouterNavLink to="/settings/two-factor">
-            <KeyRound aria-hidden="true" />
-            二次验证
+          <RouterNavLink to="/settings/cqu">
+            <Link2 aria-hidden="true" />
+            CQU 集成
           </RouterNavLink>
           {isAdmin && (
             <>

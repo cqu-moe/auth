@@ -162,7 +162,7 @@ function Step1Intro({
     {
       icon: <RefreshCw aria-hidden="true" size={16} />,
       title: "无人值守保活",
-      body: "系统每 15 分钟自动刷新 CQU 会话。当 CQU 要求 2FA 时，验证码将通过密保邮箱实时捕获并自动填入。",
+      body: "系统自动刷新 CQU 会话。当 CQU 要求 2FA 时，验证码将通过密保邮箱实时捕获并自动填入。",
     },
   ];
 
@@ -177,8 +177,8 @@ function Step1Intro({
 
       <div className="space-y-3">
         {introItems.map((item) => (
-          <div key={item.title} className="flex items-start gap-3 rounded-lg bg-muted p-4">
-            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-link/10 text-link">
+          <div key={item.title} className="flex items-center gap-3 rounded-lg bg-muted p-4">
+            <div className="icon-tile h-8 w-8 rounded-lg bg-link/10 text-link">
               {item.icon}
             </div>
             <div>

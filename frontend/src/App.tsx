@@ -6,7 +6,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import ResetPassword from "./pages/ResetPassword";
 import ResetPasswordConfirm from "./pages/ResetPasswordConfirm";
-import Settings from "./pages/Settings";
+import Settings, { SettingsCqu, SettingsSecurity } from "./pages/Settings";
 import ChangeEmail from "./pages/ChangeEmail";
 import OAuthAuthorize from "./pages/OAuthAuthorize";
 import CquBindWizard from "./pages/CquBindWizard";
@@ -77,6 +77,22 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <Settings />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings/security"
+            element={
+              <ProtectedRoute>
+                <SettingsSecurity />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings/cqu"
+            element={
+              <ProtectedRoute>
+                <SettingsCqu />
               </ProtectedRoute>
             }
           />

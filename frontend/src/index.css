@@ -44,6 +44,16 @@ code {
   font-family: var(--font-mono);
 }
 
+/* 图标色块：网格居中 + svg 块级化，杜绝行内基线造成的偏移 */
+.icon-tile {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.icon-tile svg {
+  display: block;
+}
+
 /* ── 认证入口（登录/注册/重置/验证）独立品牌页 ── */
 .auth-page {
   min-height: 100dvh;

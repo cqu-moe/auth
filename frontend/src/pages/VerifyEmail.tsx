@@ -102,7 +102,7 @@ export default function VerifyEmail() {
   return (
     <AuthLayout title="输入邮箱验证码" description="最后一步：验证你的邮箱地址。">
       <div className="mb-5 flex items-center gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
+        <div className="icon-tile h-10 w-10 rounded-lg bg-muted text-foreground">
           <Mail aria-hidden="true" size={20} />
         </div>
         <p className="text-sm leading-6 text-muted-foreground">

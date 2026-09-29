@@ -167,7 +167,56 @@ export function UsersSection() {
         </Alert>
       )}
 
-      <div className="overflow-x-auto">
+      {/* 手机端：卡片列表，操作直达，无需横向滚动 */}
+      <div className="space-y-3 sm:hidden">
+        {users.map((user) => (
+          <div key={user.id} className="rounded-lg border border-border p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-medium text-foreground">{user.name}</div>
+                <div className="truncate text-xs text-muted-foreground">{user.email}</div>
+              </div>
+              <span className={`badge ${user.banned ? "badge-destructive" : "badge-success"}`}>
+                <i aria-hidden="true" />
+                {user.banned ? "已封禁" : "正常"}
+              </span>
+            </div>
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <RoleSelect
+                value={user.role}
+                disabled={actionLoading === user.id}
+                onChange={(role) => updateUser(user.id, { role })}
+                ariaLabel={`${user.name} 的角色`}
+              />
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {new Date(user.createdAt).toLocaleDateString("zh-CN")}
+              </span>
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setEntitlementUser(user)}
+              >
+                权益
+              </Button>
+              <Button
+                variant={user.banned ? "outline" : "destructive"}
+                onClick={() => updateUser(user.id, { action: user.banned ? "unban" : "ban" })}
+                disabled={actionLoading === user.id}
+              >
+                {actionLoading === user.id ? (
+                  <Loader2 className="animate-spin" aria-hidden="true" size={16} />
+                ) : (
+                  user.banned ? "解封" : "封禁"
+                )}
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* 桌面端：表格 */}
+      <div className="hidden overflow-x-auto sm:block">
         <Table>
           <TableHeader>
             <TableRow>
