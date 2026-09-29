@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
-import { ActionButton, Alert, AlertDescription, Button, Input, Label } from "@cqu-moe/ui";
+import { ActionButton, Alert, AlertDescription, Button, Input, Label, PageHeader } from "@cqu-moe/ui";
 import { validateNewEmail } from "../lib/account-settings";
 import { nextEmailChangeStep, restartEmailChangeFlow, type EmailChangeStep } from "../lib/email-change-flow";
 import { authClient } from "../lib/auth-client";
@@ -41,9 +41,9 @@ function FlowProgress({ step }: { step: EmailChangeStep }) {
   const stages = ["验证当前邮箱", "输入新邮箱", "验证新邮箱"];
   const activeIndex = step === "current-email" ? 0 : step === "new-email" ? 1 : 2;
   return (
-    <ol className="mt-5 flex flex-col gap-2 rounded-lg border border-border bg-muted px-4 py-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:gap-3">
+    <ol className="mb-6 flex flex-col gap-3 border-b border-border pb-4 text-sm text-muted-foreground sm:flex-row sm:items-center sm:gap-4">
       {stages.map((label, index) => (
-        <li key={label} className="flex items-center gap-2">
+        <li key={label} className="flex items-center gap-2" aria-current={index === activeIndex ? "step" : undefined}>
           <span
             className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full font-semibold ${
               index <= activeIndex ? "bg-primary text-primary-foreground" : "border border-border bg-surface text-muted-foreground"
@@ -202,15 +202,14 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
   };
 
   return (
-    <div className="rounded-lg border border-border bg-surface p-6">
+    <div>
       <Button asChild variant="ghost" size="sm" className="mb-5 -ml-2 text-muted-foreground">
         <Link to="/settings">
           <ArrowLeft aria-hidden="true" />
           返回账户设置
         </Link>
       </Button>
-      <h1 className="text-xl font-semibold text-foreground">修改登录邮箱</h1>
-      <p className="mt-1 text-sm text-muted-foreground">当前邮箱：{currentEmail || "—"}</p>
+      <PageHeader title="修改登录邮箱" description={`当前邮箱：${currentEmail || "—"}`} />
       <FlowProgress step={step} />
       {error && (
         <Alert variant="destructive" className="mt-4">
@@ -219,7 +218,7 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
       )}
 
       {step === "current-email" && (
-        <section className="mt-5" aria-labelledby="verify-current-email-heading">
+        <section className="content-panel" aria-labelledby="verify-current-email-heading">
           <h2 id="verify-current-email-heading" className="text-base font-semibold text-foreground">验证当前邮箱</h2>
           <p className="mt-1 text-sm text-muted-foreground">先向当前登录邮箱发送 6 位验证码。</p>
           {!currentOtpSent ? (
@@ -258,7 +257,7 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
       )}
 
       {step === "new-email" && (
-        <form onSubmit={requestNewEmailOtp} className="mt-5 space-y-4" noValidate>
+        <form onSubmit={requestNewEmailOtp} className="content-panel space-y-4" noValidate>
           <div>
             <h2 className="text-base font-semibold text-foreground">输入新邮箱</h2>
             <p className="mt-1 text-sm text-muted-foreground">验证码会发送到新邮箱，完成验证后才会更新登录邮箱。</p>
@@ -288,7 +287,7 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
       )}
 
       {step === "new-email-otp" && (
-        <form onSubmit={changeEmail} className="mt-5 space-y-4" noValidate>
+        <form onSubmit={changeEmail} className="content-panel space-y-4" noValidate>
           <NewEmailOtpDeliveryNotice
             newEmail={newEmail}
             cooldown={cooldown}

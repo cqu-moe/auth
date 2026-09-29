@@ -162,11 +162,11 @@ function LiveCodeSection() {
           <Mail className="text-muted-foreground" aria-hidden="true" size={16} />
           <span className="text-sm font-semibold text-foreground">实时验证码</span>
           {open && wsState === "open" && (
-            <span className="h-2 w-2 animate-pulse rounded-full bg-success" aria-hidden="true" />
+            <span className="h-2 w-2 rounded-full bg-success" aria-hidden="true" />
           )}
         </span>
         <ChevronDown
-          className={`text-muted-foreground transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          className={`disclosure-chevron text-muted-foreground ${open ? "rotate-180" : ""}`}
           aria-hidden="true"
           size={16}
         />
@@ -186,7 +186,7 @@ function LiveCodeSection() {
               : "bg-muted text-muted-foreground"
           }`}>
             {wsState === "open" && (
-              <span className="h-2 w-2 animate-pulse rounded-full bg-success" aria-hidden="true" />
+              <span className="h-2 w-2 rounded-full bg-success" aria-hidden="true" />
             )}
             {wsState === "connecting" && (
               <Loader2 className="animate-spin" aria-hidden="true" size={14} />
@@ -360,13 +360,13 @@ function CquBindingSection() {
 
       {isBound ? (
         <div className="space-y-5">
-          <div className="flex flex-col divide-y divide-border rounded-lg border border-border">
-            <div className="flex items-center justify-between px-4 py-3">
+          <div className="flex flex-col divide-y divide-border">
+            <div className="flex flex-wrap items-center justify-between gap-2 py-3">
               <span className="text-sm text-muted-foreground">统一身份认证账号</span>
               <span className="text-sm font-medium tabular-nums text-foreground">{studentId ?? "—"}</span>
             </div>
 
-            <div className="flex items-center justify-between px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 py-3">
               <span className="text-sm text-muted-foreground">Auth 服务端会话</span>
               <span className={`badge badge-${sessionBadge.variant}`}>
                 <i aria-hidden="true" />
@@ -375,10 +375,10 @@ function CquBindingSection() {
             </div>
 
             {status?.address && (
-              <div className="bg-link/10 px-4 py-4">
+              <div className="py-4">
                 <div className="mb-2 flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-xs font-semibold tracking-wider text-link">专属密保邮箱</p>
+                    <p className="text-sm font-medium text-foreground">专属密保邮箱</p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       需将此地址设置为 CQU 自服务中心的密保邮箱，系统才能自动接收 2FA 验证码。
                     </p>
@@ -503,7 +503,7 @@ export function SettingsCqu() {
         ) : undefined}
       />
 
-      <div className="space-y-4">
+      <div className="space-y-8">
         <CquBindingSection />
 
         <QuickloginSettings

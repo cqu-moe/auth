@@ -248,7 +248,7 @@ export function EntitlementsSection() {
         </Alert>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-border bg-muted p-4">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-5">
         <div className="min-w-0">
           <p className="text-sm font-medium text-foreground">新用户默认权益</p>
           <p className="mt-0.5 text-xs text-muted-foreground">

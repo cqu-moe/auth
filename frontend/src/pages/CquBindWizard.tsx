@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useRef, useCallback, FormEvent } from "react";
+import { useState, useEffect, useRef, useCallback, FormEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ArrowLeft, Check, Loader2, Lock, Mail, RefreshCw } from "lucide-react";
 import { ActionButton, Alert, AlertDescription, Button, Input, Label, PageHeader } from "@cqu-moe/ui";
@@ -106,15 +106,12 @@ function StepIndicator({ current }: { current: Step }) {
         {steps.map((step) => {
           const state = step < current ? "done" : step === current ? "active" : "todo";
           return (
-            <Fragment key={step}>
-              <li data-step-state={state}>
-                <div className="step-dot" data-state={state} aria-current={state === "active" ? "step" : undefined}>
-                  {state === "done" ? <Check aria-hidden="true" size={16} /> : step}
-                </div>
-                <span className="step-label hidden sm:block">{STEP_LABELS[step]}</span>
-              </li>
-              {step < steps.length && <span className="step-connector" data-state={step < current ? "done" : "todo"} />}
-            </Fragment>
+            <li key={step} data-step-state={state} aria-current={state === "active" ? "step" : undefined}>
+              <div className="step-dot" data-state={state}>
+                {state === "done" ? <Check aria-hidden="true" size={16} /> : step}
+              </div>
+              <span className="step-label">{STEP_LABELS[step]}</span>
+            </li>
           );
         })}
       </ol>
@@ -175,15 +172,15 @@ function Step1Intro({
         </p>
       </div>
 
-      <div className="space-y-3">
+      <div className="divide-y divide-border">
         {introItems.map((item) => (
-          <div key={item.title} className="flex items-center gap-3 rounded-lg bg-muted p-4">
-            <div className="icon-tile h-8 w-8 rounded-lg bg-link/10 text-link">
+          <div key={item.title} className="flex items-start gap-3 py-4 first:pt-0">
+            <div className="mt-1 shrink-0 text-muted-foreground">
               {item.icon}
             </div>
             <div>
               <p className="text-sm font-medium text-foreground">{item.title}</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">{item.body}</p>
+              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{item.body}</p>
             </div>
           </div>
         ))}
@@ -195,7 +192,7 @@ function Step1Intro({
         <label
           className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors ${
             bindKind === "direct"
-              ? "border-primary bg-primary/10"
+              ? "border-primary bg-surface"
               : "border-border bg-surface hover:border-muted-foreground/40"
           }`}
         >
@@ -1038,7 +1035,7 @@ export default function CquBindWizard({ onReturn = replaceLocation }: CquBindWiz
         title={repair ? "重新设置 CQU 密码" : "绑定 CQU 账号"}
         description={repair ? "验证新密码并恢复统一认证会话。" : "按步骤完成统一认证账号绑定。"}
       />
-      <div className="rounded-lg border border-border bg-surface p-6 sm:p-8">
+      <div className="content-panel">
         {currentStep && !repair && <StepIndicator current={currentStep} />}
         <div>{content}</div>
       </div>

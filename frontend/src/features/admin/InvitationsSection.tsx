@@ -188,7 +188,7 @@ export function InvitationsSection() {
 
   return (
     <div className="space-y-5">
-      <div className="rounded-lg border border-border bg-muted p-4">
+      <div className="border-b border-border pb-5">
         <Toggle
           checked={invitationRequired}
           onChange={(v) => void togglePolicy(v)}

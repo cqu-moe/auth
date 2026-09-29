@@ -247,7 +247,7 @@ export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettin
         title="设置二次验证"
         description="使用身份验证器生成验证码，为账户增加一层保护。"
       />
-      <div className="rounded-lg border border-border bg-surface p-6">
+      <div className="content-panel">
         {error && (
           <Alert variant="destructive" className="mb-4">
             <AlertDescription>{error}</AlertDescription>
@@ -321,7 +321,7 @@ export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettin
               </Button>
             </div>
             {managementAction && (
-              <form onSubmit={submitManagement} className="mt-4 space-y-4 rounded-lg border border-border bg-muted p-4" noValidate>
+              <form onSubmit={submitManagement} className="inline-editor mt-4 space-y-4 rounded-lg p-4" noValidate>
                 <p className={managementAction === "disable" ? "text-sm text-destructive" : "text-sm text-foreground"}>
                   {managementAction === "disable" ? "关闭后，登录将不再要求身份验证器验证码。" : "重新生成后，旧恢复码将立即失效。"}
                 </p>

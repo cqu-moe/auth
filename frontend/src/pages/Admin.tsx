@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { Link, NavLink as RouterNavLink, Outlet, useNavigate } from "react-router-dom";
-import { KeyRound, Layers, Settings, Ticket, Users } from "lucide-react";
+import { Fingerprint, KeyRound, Layers, Settings, Ticket, Users } from "lucide-react";
 import { AppShell, ContentContainer, PageHeader } from "@cqu-moe/ui";
 import { authClient } from "../lib/auth-client";
 import ShellUtilities from "../components/ShellUtilities";
@@ -16,7 +16,7 @@ export default function AdminLayout() {
 
   return (
     <AppShell
-      brand={<Link to="/settings">CQU Auth</Link>}
+      brand={<Link to="/settings" className="auth-brand"><Fingerprint aria-hidden="true" />CQU Auth</Link>}
       navigation={
         <>
           <span className="ds-nav-label">管理</span>
@@ -65,7 +65,7 @@ export function AdminPage({
   return (
     <>
       <PageHeader title={title} description={description} />
-      <div className="rounded-lg border border-border bg-surface p-6">{children}</div>
+      <div className="content-panel">{children}</div>
     </>
   );
 }
