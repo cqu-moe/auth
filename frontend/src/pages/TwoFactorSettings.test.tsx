@@ -1,9 +1,22 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
+import { ThemeProvider } from "@cqu-moe/ui";
 import TwoFactorSettings, { BackupCodes } from "./TwoFactorSettings";
 import { completeTotpEnrollment, shouldShowEnrollmentBackupCodes } from "../lib/two-factor";
+
+// ThemeProvider 监听系统主题偏好，node/jsdom 测试环境没有 matchMedia。
+vi.stubGlobal("matchMedia", (query: string) => ({
+  matches: false,
+  media: query,
+  onchange: null,
+  addListener: () => undefined,
+  removeListener: () => undefined,
+  addEventListener: () => undefined,
+  removeEventListener: () => undefined,
+  dispatchEvent: () => false,
+}));
 
 describe("two-factor settings page", () => {
   it("reveals issued backup codes before a failed session refresh", async () => {
@@ -32,9 +45,13 @@ describe("two-factor settings page", () => {
   it("starts with a password gate and keeps recovery codes hidden", () => {
     const html = renderToStaticMarkup(
       createElement(
-        MemoryRouter,
-        { initialEntries: ["/settings/two-factor"] },
-        createElement(TwoFactorSettings)
+        ThemeProvider,
+        null,
+        createElement(
+          MemoryRouter,
+          { initialEntries: ["/settings/two-factor"] },
+          createElement(TwoFactorSettings)
+        )
       )
     );
 
@@ -46,14 +63,18 @@ describe("two-factor settings page", () => {
   it("exposes the local QR target and manual-key fallback after enrollment begins", () => {
     const html = renderToStaticMarkup(
       createElement(
-        MemoryRouter,
-        { initialEntries: ["/settings/two-factor"] },
-        createElement(TwoFactorSettings, {
-          initialEnrollment: {
-            totpURI: "otpauth://totp/CQU%20Auth:user@example.com?secret=ABCDEFGH&issuer=CQU%20Auth",
-            backupCodes: ["recovery-fallback-x"],
-          },
-        })
+        ThemeProvider,
+        null,
+        createElement(
+          MemoryRouter,
+          { initialEntries: ["/settings/two-factor"] },
+          createElement(TwoFactorSettings, {
+            initialEnrollment: {
+              totpURI: "otpauth://totp/CQU%20Auth:user@example.com?secret=ABCDEFGH&issuer=CQU%20Auth",
+              backupCodes: ["recovery-fallback-x"],
+            },
+          })
+        )
       )
     );
 

@@ -8,12 +8,10 @@ export default function ChangeEmail() {
 
   return (
     <Layout>
-      <div className="max-w-2xl">
-        <EmailChangeFlow
-          currentEmail={user?.email ?? ""}
-          onSessionRefresh={refetch}
-        />
-      </div>
+      <EmailChangeFlow
+        currentEmail={user?.email ?? ""}
+        onSessionRefresh={refetch}
+      />
     </Layout>
   );
 }

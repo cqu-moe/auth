@@ -10,6 +10,8 @@ import {
 } from "../../lib/api/quicklogin";
 import type { Overview } from "../../lib/api/quicklogin-protocol.generated";
 import { ApiError } from "../../lib/api/http";
+import { Alert, AlertDescription, Button, Switch } from "@cqu-moe/ui";
+import { Loader2 } from "lucide-react";
 import SettingsCard from "../SettingsCard";
 import DeviceList from "./DeviceList";
 
@@ -210,35 +212,25 @@ export default function QuickloginSettings({ currentDeviceHint, reconnectDeviceH
       title="浏览器快捷登录"
       description={description}
       action={preference?.eligible && (
-        <button
-          type="button"
-          role="switch"
-          aria-checked={enabled}
+        <Switch
           aria-label="浏览器快捷登录总开关"
           disabled={action !== null}
-          onClick={() => void toggleMaster()}
-          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed"
-        >
-          <span className={`relative inline-flex h-6 w-11 items-center rounded-full ${
-            enabled ? "bg-blue-600" : "bg-gray-300"
-          } ${action?.kind === "toggle" ? "opacity-60" : ""}`}>
-            <span className={`h-4 w-4 rounded-full bg-white shadow ${
-              enabled ? "translate-x-6" : "translate-x-1"
-            }`} />
-          </span>
-        </button>
+          checked={enabled}
+          onCheckedChange={() => void toggleMaster()}
+          className={action?.kind === "toggle" ? "opacity-60" : undefined}
+        />
       )}
     >
       {error && (
-        <p
-          role="alert"
-          className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700"
-        >
-          {error}
-        </p>
+        <Alert variant="destructive" className="mb-4">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
       {loading && !preference ? (
-        <p role="status" className="py-4 text-sm text-gray-500">正在检查快捷登录资格…</p>
+        <p role="status" className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+          <Loader2 className="animate-spin" aria-hidden="true" size={16} />
+          正在检查快捷登录资格…
+        </p>
       ) : data ? (
         <DeviceList
           data={data}
@@ -253,17 +245,17 @@ export default function QuickloginSettings({ currentDeviceHint, reconnectDeviceH
           onRevoke={remove}
         />
       ) : preference?.eligible && "enabled" in preference ? (
-        <p className="text-sm leading-relaxed text-gray-500">
+        <p className="text-sm leading-relaxed text-muted-foreground">
           开启后，浏览器插件可代你向学校系统取一次性登录票。可随时关闭。
         </p>
       ) : (
-        <button
+        <Button
           type="button"
+          variant="outline"
           onClick={() => void load()}
-          className="min-h-11 rounded-lg border border-gray-200 px-4 text-sm font-medium hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
         >
           重新加载
-        </button>
+        </Button>
       )}
     </SettingsCard>
   );

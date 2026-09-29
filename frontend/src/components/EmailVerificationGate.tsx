@@ -1,5 +1,6 @@
 import { ReactNode, useEffect } from "react";
 import { Navigate, useLocation } from "react-router-dom";
+import { PageState } from "@cqu-moe/ui";
 import { authClient } from "../lib/auth-client";
 import { getEmailVerificationRedirect } from "../lib/email-verification-routing";
 import {
@@ -19,8 +20,10 @@ function ExternalRedirect({ url }: { url: string }) {
   }, [url]);
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+    <div className="flex min-h-dvh items-center justify-center bg-background p-6">
+      <div className="w-full max-w-sm">
+        <PageState state="loading" title="正在跳转" description="即将返回发起登录的应用…" />
+      </div>
     </div>
   );
 }
@@ -31,8 +34,10 @@ export default function EmailVerificationGate({ children }: EmailVerificationGat
 
   if (isPending) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+      <div className="flex min-h-dvh items-center justify-center bg-background p-6">
+        <div className="w-full max-w-sm">
+          <PageState state="loading" title="正在检查邮箱验证状态" description="正在确认登录状态…" />
+        </div>
       </div>
     );
   }

@@ -3,6 +3,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
+import { ThemeProvider } from "@cqu-moe/ui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withRedirectParam } from "../lib/post-login-redirect";
 import Login from "./Login";
@@ -11,9 +12,22 @@ import ResetPassword from "./ResetPassword";
 import ResetPasswordConfirm from "./ResetPasswordConfirm";
 import VerifyEmail from "./VerifyEmail";
 
+// ThemeProvider 监听系统主题偏好，node/jsdom 测试环境没有 matchMedia。
+vi.stubGlobal("matchMedia", (query: string) => ({
+  matches: false,
+  media: query,
+  onchange: null,
+  addListener: () => undefined,
+  removeListener: () => undefined,
+  addEventListener: () => undefined,
+  removeEventListener: () => undefined,
+  dispatchEvent: () => false,
+}));
+
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const authMocks = vi.hoisted(() => ({
+  signUp: vi.fn(async () => ({ error: { message: "Test signup stopped" } })),
   refetch: vi.fn(async () => undefined),
   requestPasswordReset: vi.fn(async () => ({ error: null })),
   resetPassword: vi.fn(async () => ({ error: null })),
@@ -31,7 +45,7 @@ vi.mock("../lib/auth-client", () => ({
     signOut: authMocks.signOut,
     sendVerificationEmail: vi.fn(async () => ({ error: null })),
     signIn: { email: vi.fn() },
-    signUp: { email: vi.fn() },
+    signUp: { email: authMocks.signUp },
   },
 }));
 
@@ -49,10 +63,12 @@ function LocationProbe() {
 async function renderPage(element: React.ReactElement, entry: string) {
   await act(async () => {
     root.render(
-      <MemoryRouter initialEntries={[entry]}>
-        {element}
-        <LocationProbe />
-      </MemoryRouter>,
+      <ThemeProvider>
+        <MemoryRouter initialEntries={[entry]}>
+          {element}
+          <LocationProbe />
+        </MemoryRouter>
+      </ThemeProvider>,
     );
     await Promise.resolve();
   });
@@ -164,4 +180,19 @@ describe("VerifyEmail return handling", () => {
     });
     expect(container.querySelector("[data-location]")?.textContent).toBe(withRedirectParam("/login", binding));
   });
+});
+
+
+it("blocks registration with an empty nickname and submits after it is supplied", async () => {
+  await renderPage(createElement(Register), "/register?code=ABCDEFGH");
+  setInput("#email", "new@example.com");
+  setInput("#password", "password-123");
+  setInput("#confirmPassword", "password-123");
+  const submitButton = container.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+  await act(async () => submitButton.click());
+  expect(authMocks.signUp).not.toHaveBeenCalled();
+
+  setInput("#name", "New User");
+  await act(async () => submitButton.click());
+  expect(authMocks.signUp).toHaveBeenCalledWith(expect.objectContaining({ name: "New User" }));
 });

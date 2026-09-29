@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
+import { ThemeProvider } from "@cqu-moe/ui";
 import TwoFactorChallenge from "./TwoFactorChallenge";
 import {
   getLoginChallengeError,
@@ -10,13 +11,29 @@ import {
   verifyLoginChallenge,
 } from "../lib/two-factor-challenge";
 
+// ThemeProvider 监听系统主题偏好，node/jsdom 测试环境没有 matchMedia。
+vi.stubGlobal("matchMedia", (query: string) => ({
+  matches: false,
+  media: query,
+  onchange: null,
+  addListener: () => undefined,
+  removeListener: () => undefined,
+  addEventListener: () => undefined,
+  removeEventListener: () => undefined,
+  dispatchEvent: () => false,
+}));
+
 describe("two-factor login challenge", () => {
   it("renders the supported challenge controls without passkey", () => {
     const html = renderToStaticMarkup(
       createElement(
-        MemoryRouter,
-        { initialEntries: ["/two-factor"] },
-        createElement(TwoFactorChallenge)
+        ThemeProvider,
+        null,
+        createElement(
+          MemoryRouter,
+          { initialEntries: ["/two-factor"] },
+          createElement(TwoFactorChallenge)
+        )
       )
     );
 

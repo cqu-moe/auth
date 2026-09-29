@@ -3,6 +3,7 @@ import {
   type ActionCode,
   type Overview,
 } from "../../lib/api/quicklogin-protocol.generated";
+import { Button } from "@cqu-moe/ui";
 import { QUICKLOGIN_REVOKE_WARNING } from "./device-list";
 
 function contactTime(value: number | null): string {
@@ -17,7 +18,6 @@ const actionLabels: Partial<Record<ActionCode, string>> = {
   open_auth: "查看总开关",
   manage_devices: "管理设备",
 };
-const buttonClass = "min-h-11 shrink-0 rounded-lg border border-gray-200 px-3 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:text-gray-400";
 
 export default function DeviceList({
   data,
@@ -43,14 +43,14 @@ export default function DeviceList({
   onRefresh: () => Promise<void>;
 }) {
   if (data.devices.length === 0) return (
-    <div className="py-3 text-sm text-gray-500">
-      <p className="font-medium text-gray-800">还没有授权的浏览器</p>
+    <div className="py-3 text-sm text-muted-foreground">
+      <p className="font-medium text-foreground">还没有授权的浏览器</p>
       <p className="mt-1">安装插件并登录 Auth 后，设备会出现在这里。</p>
     </div>
   );
 
   return (
-    <ul className="divide-y divide-gray-100 rounded-xl border border-gray-950/[0.08]">
+    <ul className="divide-y divide-border rounded-lg border border-border">
       {data.devices.map((device) => {
         const presentation = derivePresentation(device, unreachable ? { observation: "unreachable" } : {});
         const id = device.identity.deviceId;
@@ -63,17 +63,17 @@ export default function DeviceList({
           <li key={id} className="flex flex-wrap items-center gap-3 px-4 py-3 sm:flex-nowrap">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                <span className="break-words text-sm font-medium text-gray-900">
+                <span className="break-words text-sm font-medium text-foreground">
                   {device.identity.deviceName ?? "未命名浏览器"}
                 </span>
                 {currentDeviceHint === id && (
-                  <span className="text-xs font-medium text-blue-700">当前插件</span>
+                  <span className="badge badge-info">当前插件</span>
                 )}
-                <span className={`text-xs ${presentation.statusCode === "ready" ? "text-green-700" : "text-gray-600"}`}>
+                <span className={`text-xs ${presentation.statusCode === "ready" ? "text-success" : "text-muted-foreground"}`}>
                   {title}
                 </span>
               </div>
-              <p className="mt-1 text-xs tabular-nums text-gray-500">
+              <p className="mt-1 text-xs tabular-nums text-muted-foreground">
                 {client && `插件 ${client.extensionVersion} · `}
                 最近联系：
                 <time dateTime={device.presence.lastSeenAt === null
@@ -84,29 +84,47 @@ export default function DeviceList({
             </div>
             <div className="flex shrink-0 flex-wrap gap-2 sm:max-w-40">
               {presentation.actionCode === "connect_auth" || reconnectDeviceHint === id ? (
-                <button type="button" className={buttonClass} disabled={busy} onClick={() => void onReconnect(id)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="min-h-11"
+                  disabled={busy}
+                  onClick={() => void onReconnect(id)}
+                >
                   {reconnectingDeviceId === id ? "正在连接…" : "重新连接"}
-                </button>
+                </Button>
               ) : presentation.actionTarget && actionLabels[presentation.actionCode] ? (
-                <a href={presentation.actionTarget} className={`${buttonClass} inline-flex items-center`}>
-                  {actionLabels[presentation.actionCode]}
-                </a>
+                <Button asChild variant="outline" size="sm" className="min-h-11">
+                  <a href={presentation.actionTarget}>
+                    {actionLabels[presentation.actionCode]}
+                  </a>
+                </Button>
               ) : presentation.actionCode === "reconcile" ? (
-                <button type="button" className={buttonClass} disabled={busy} onClick={() => void onRefresh()}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="min-h-11"
+                  disabled={busy}
+                  onClick={() => void onRefresh()}
+                >
                   重新检查
-                </button>
+                </Button>
               ) : null}
               {!revoked && (
-                <button
+                <Button
                   type="button"
+                  variant="destructive"
+                  size="sm"
+                  className="min-h-11"
                   disabled={busy}
                   onClick={() => {
                     if (window.confirm(QUICKLOGIN_REVOKE_WARNING)) void onRevoke(id);
                   }}
-                  className="min-h-11 shrink-0 rounded-lg border border-red-200 px-3 text-sm font-medium text-red-700 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:border-gray-200 disabled:text-gray-400"
                 >
                   {revokingDeviceId === id ? "正在退出…" : "退出设备"}
-                </button>
+                </Button>
               )}
             </div>
           </li>

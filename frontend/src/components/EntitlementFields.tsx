@@ -1,6 +1,7 @@
 // 按子系统分组的能力编辑矩阵:flag 渲染为勾选行,quota 渲染为数字输入(空=无限)。
 // per-user 权益面板与预设编辑器共用。
 // 表单态与纯函数在 ./entitlement-form(该文件无组件导出,满足 fast-refresh 约束)。
+import { Input } from "@cqu-moe/ui";
 import {
   CAPABILITIES,
   type CapDef,
@@ -32,9 +33,9 @@ export function EntitlementMatrix({
         const caps = CAPABILITIES[subsystem] as Record<string, CapDef>;
         return (
           <div key={subsystem}>
-            <p className="text-xs font-semibold text-gray-700 mb-2">
+            <p className="mb-2 text-xs font-semibold text-foreground">
               {SUBSYSTEM_LABELS[subsystem] ?? subsystem}
-              <span className="ml-2 font-mono font-normal text-gray-400">
+              <span className="ml-2 font-mono font-normal text-muted-foreground">
                 {subsystem}
               </span>
             </p>
@@ -54,15 +55,15 @@ export function EntitlementMatrix({
                     : "总开关由用户在账户设置中管理";
                   return (
                     <div key={key} className="flex flex-wrap items-center gap-2 p-2 text-sm">
-                      <span className="text-gray-700">{def.label}</span>
-                      <span className="font-mono text-xs text-gray-400">{capability}</span>
+                      <span className="text-foreground">{def.label}</span>
+                      <span className="font-mono text-xs text-muted-foreground">{capability}</span>
                       <output
                         aria-label={`${def.label}当前值`}
-                        className="ml-auto text-sm font-medium text-gray-700"
+                        className="ml-auto text-sm font-medium text-foreground"
                       >
                         {value}{def.type === "quota" && value !== "未初始化" ? ` ${def.unit ?? ""}` : ""}
                       </output>
-                      <p className="basis-full text-xs text-gray-400">{hint}</p>
+                      <p className="basis-full text-xs text-muted-foreground">{hint}</p>
                     </div>
                   );
                 }
@@ -70,16 +71,16 @@ export function EntitlementMatrix({
                   return (
                     <label
                       key={key}
-                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 cursor-pointer"
+                      className="flex cursor-pointer items-center gap-3 rounded-lg p-2 hover:bg-muted"
                     >
                       <input
                         type="checkbox"
                         checked={form[key]?.flag ?? false}
                         onChange={(e) => setFlag(key, e.target.checked)}
-                        className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                        className="size-4 accent-primary"
                       />
-                      <span className="text-sm text-gray-700">{def.label}</span>
-                      <span className="text-xs text-gray-400 font-mono ml-auto">
+                      <span className="text-sm text-foreground">{def.label}</span>
+                      <span className="ml-auto font-mono text-xs text-muted-foreground">
                         {capability}
                       </span>
                     </label>
@@ -87,24 +88,24 @@ export function EntitlementMatrix({
                 }
                 // quota:数字输入框,空=无限。
                 return (
-                  <div key={key} className="flex items-center gap-3 p-2 rounded-lg">
-                    <span className="text-sm text-gray-700">{def.label}</span>
-                    <span className="text-xs text-gray-400 font-mono">
+                  <div key={key} className="flex items-center gap-3 rounded-lg p-2">
+                    <span className="text-sm text-foreground">{def.label}</span>
+                    <span className="font-mono text-xs text-muted-foreground">
                       {capability}
                     </span>
-                    <div className="flex items-center gap-1.5 ml-auto">
-                      <input
+                    <div className="ml-auto flex items-center gap-1.5">
+                      <Input
                         type="number"
                         min={0}
                         inputMode="numeric"
                         value={form[key]?.quota ?? ""}
                         onChange={(e) => setQuota(key, e.target.value)}
                         placeholder="无限"
-                        className="w-28 text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-300"
+                        className="w-28"
                         aria-label={`${def.label}(${def.unit ?? "数量"};留空为无限)`}
                       />
                       {def.unit && (
-                        <span className="text-xs text-gray-400">{def.unit}</span>
+                        <span className="text-xs text-muted-foreground">{def.unit}</span>
                       )}
                     </div>
                   </div>

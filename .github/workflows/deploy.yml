@@ -39,20 +39,22 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+
       - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            frontend/package-lock.json
+          cache-dependency-path: package-lock.json
 
       # ── 质量门禁（任何分支都先过，门禁挂则不部署/不上传）──
       - name: Install (root)
         run: npm ci
 
       - name: Install (frontend)
-        run: npm ci
+        run: pnpm install --frozen-lockfile
         working-directory: frontend
 
       - name: Typecheck (backend)
@@ -89,11 +91,11 @@ jobs:
         working-directory: frontend
 
       - name: Lint (frontend)
-        run: npm run lint
+        run: pnpm run lint
         working-directory: frontend
 
       - name: Build (frontend)
-        run: npm run build
+        run: pnpm run build
         working-directory: frontend
         env:
           VITE_POSTHOG_PROJECT_TOKEN: ${{ vars.POSTHOG_PROJECT_TOKEN }}

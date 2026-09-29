@@ -1,5 +1,7 @@
 import { useState, useEffect, FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { ActionButton, Alert, AlertDescription, Input, Label } from "@cqu-moe/ui";
+import AuthLayout from "../components/AuthLayout";
 import { authClient } from "../lib/auth-client";
 import { getPostAuthNavigationDestination } from "../lib/login-routing";
 import {
@@ -10,8 +12,8 @@ import {
 import { isScheduleBindingContinuation } from "../lib/cqu-bind-continuation";
 import { getRegistrationSettings } from "../lib/api/registration";
 
-function getPasswordStrength(password: string): { level: number; label: string; color: string } {
-  if (!password) return { level: 0, label: "", color: "" };
+function getPasswordStrength(password: string): { level: number; label: string; bar: string } {
+  if (!password) return { level: 0, label: "", bar: "" };
 
   let score = 0;
   if (password.length >= 8) score++;
@@ -20,10 +22,10 @@ function getPasswordStrength(password: string): { level: number; label: string; 
   if (/[0-9]/.test(password)) score++;
   if (/[^A-Za-z0-9]/.test(password)) score++;
 
-  if (score <= 1) return { level: 1, label: "弱", color: "bg-red-500" };
-  if (score <= 2) return { level: 2, label: "一般", color: "bg-yellow-500" };
-  if (score <= 3) return { level: 3, label: "中等", color: "bg-blue-500" };
-  return { level: 4, label: "强", color: "bg-green-500" };
+  if (score <= 1) return { level: 1, label: "弱", bar: "bg-destructive" };
+  if (score <= 2) return { level: 2, label: "一般", bar: "bg-warning" };
+  if (score <= 3) return { level: 3, label: "中等", bar: "bg-link" };
+  return { level: 4, label: "强", bar: "bg-success" };
 }
 
 export default function Register() {
@@ -44,6 +46,7 @@ export default function Register() {
   // 邀请码是否必填由管理台「注册政策」控制;默认按必填渲染(与后端缺省一致),
   // 拉到设置后再放宽为选填。
   const [invitationRequired, setInvitationRequired] = useState(true);
+  const confirmInvalid = Boolean(confirmPassword) && confirmPassword !== password;
 
   useEffect(() => {
     getRegistrationSettings()
@@ -99,158 +102,139 @@ export default function Register() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">CQU Auth</h1>
-          <p className="mt-2 text-gray-500">创建新账户</p>
+    <AuthLayout
+      title="创建账号"
+      description={scheduleSource ? "继续使用重庆大学课表" : "一个账号，连接你的校园服务。"}
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        <div className="field">
+          <Label htmlFor="name">昵称</Label>
+          <Input
+            id="name"
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            autoComplete="name"
+            placeholder="您的昵称"
+          />
         </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-          <h2 className={`text-xl font-semibold text-gray-900 ${scheduleSource ? "mb-2" : "mb-6"}`}>注册</h2>
-          {scheduleSource && (
-            <p className="mb-6 text-sm text-gray-500">继续使用重庆大学课表</p>
-          )}
-
-          {error && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-              {error}
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
-                昵称
-              </label>
-              <input
-                id="name"
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                required
-                autoComplete="name"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="您的昵称"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-                邮箱
-              </label>
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                autoComplete="email"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="your@email.com"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-                密码
-              </label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                autoComplete="new-password"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="至少 8 个字符"
-              />
-              {password && (
-                <div className="mt-2">
-                  <div className="flex gap-1 mb-1">
-                    {[1, 2, 3, 4].map((i) => (
-                      <div
-                        key={i}
-                        className={`h-1 flex-1 rounded-full transition-colors ${
-                          i <= strength.level ? strength.color : "bg-gray-200"
-                        }`}
-                      />
-                    ))}
-                  </div>
-                  <p className="text-xs text-gray-500">密码强度：{strength.label}</p>
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
-                确认密码
-              </label>
-              <input
-                id="confirmPassword"
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                required
-                autoComplete="new-password"
-                className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                  confirmPassword && confirmPassword !== password
-                    ? "border-red-300 bg-red-50"
-                    : "border-gray-300"
-                }`}
-                placeholder="再次输入密码"
-              />
-              {confirmPassword && confirmPassword !== password && (
-                <p className="mt-1 text-xs text-red-600">两次密码不一致</p>
-              )}
-            </div>
-
-            <div>
-              <label htmlFor="invitationCode" className="block text-sm font-medium text-gray-700 mb-1">
-                邀请码
-                {!invitationRequired && (
-                  <span className="ml-2 text-xs font-normal text-gray-400">选填</span>
-                )}
-              </label>
-              <input
-                id="invitationCode"
-                type="text"
-                value={code}
-                onChange={(e) => setCode(e.target.value.trim().toUpperCase().slice(0, 8))}
-                required={invitationRequired}
-                minLength={invitationRequired ? 8 : 0}
-                maxLength={8}
-                pattern={invitationRequired ? "[A-HJ-NP-Z2-9]{8}" : "([A-HJ-NP-Z2-9]{8})?"}
-                autoComplete="one-time-code"
-                spellCheck={false}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono tracking-widest uppercase focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder={invitationRequired ? "请输入邀请码" : "请输入邀请码，可留空"}
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2 mt-2"
-            >
-              {loading && (
-                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              )}
-              {loading ? "注册中..." : "注册"}
-            </button>
-          </form>
-
-          <p className="mt-6 text-center text-sm text-gray-500">
-            已有账户？{" "}
-            <Link
-              to={withRedirectParam("/login", postLoginRedirect)}
-              className="text-blue-600 hover:text-blue-700 font-medium"
-            >
-              立即登录
-            </Link>
-          </p>
+        <div className="field">
+          <Label htmlFor="email">邮箱</Label>
+          <Input
+            id="email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            autoComplete="email"
+            autoCapitalize="none"
+            spellCheck={false}
+            inputMode="email"
+            placeholder="your@email.com"
+          />
         </div>
-      </div>
-    </div>
+
+        <div className="field">
+          <Label htmlFor="password">密码</Label>
+          <Input
+            id="password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            autoComplete="new-password"
+            placeholder="至少 8 个字符"
+          />
+          {password && (
+            <div>
+              <div className="flex gap-1" aria-hidden="true">
+                {[1, 2, 3, 4].map((i) => (
+                  <div
+                    key={i}
+                    className={`h-1 flex-1 rounded-full transition-colors ${
+                      i <= strength.level ? strength.bar : "bg-muted"
+                    }`}
+                  />
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">密码强度：{strength.label}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="field">
+          <Label htmlFor="confirmPassword">确认密码</Label>
+          <Input
+            id="confirmPassword"
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            required
+            autoComplete="new-password"
+            aria-invalid={confirmInvalid || undefined}
+            aria-describedby={confirmInvalid ? "confirm-password-error" : undefined}
+            placeholder="再次输入密码"
+          />
+          {confirmInvalid && (
+            <p id="confirm-password-error" className="field-error" role="alert">
+              两次密码不一致
+            </p>
+          )}
+        </div>
+
+        <div className="field">
+          <Label htmlFor="invitationCode">
+            邀请码
+            {!invitationRequired && (
+              <span className="ml-2 text-xs font-normal text-muted-foreground">选填</span>
+            )}
+          </Label>
+          <Input
+            id="invitationCode"
+            type="text"
+            value={code}
+            onChange={(e) => setCode(e.target.value.trim().toUpperCase().slice(0, 8))}
+            required={invitationRequired}
+            minLength={invitationRequired ? 8 : 0}
+            maxLength={8}
+            pattern={invitationRequired ? "[A-HJ-NP-Z2-9]{8}" : "([A-HJ-NP-Z2-9]{8})?"}
+            autoComplete="one-time-code"
+            spellCheck={false}
+            className="font-mono tracking-widest uppercase"
+            placeholder={invitationRequired ? "请输入邀请码" : "请输入邀请码，可留空"}
+          />
+        </div>
+
+        <ActionButton
+          type="submit"
+          className="w-full"
+          state={loading ? "loading" : error ? "error" : "idle"}
+          labels={{
+            idle: "注册",
+            loading: "注册中…",
+            success: "已注册",
+            error: "重试注册",
+          }}
+        />
+      </form>
+
+      <p className="mt-6 text-center text-sm text-muted-foreground">
+        已有账户？{" "}
+        <Link
+          to={withRedirectParam("/login", postLoginRedirect)}
+          className="font-medium text-link hover:underline"
+        >
+          立即登录
+        </Link>
+      </p>
+    </AuthLayout>
   );
 }

@@ -1,5 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
+import { ActionButton, Alert, AlertDescription, Button, Input, Label } from "@cqu-moe/ui";
 import { validateNewEmail } from "../lib/account-settings";
 import { nextEmailChangeStep, restartEmailChangeFlow, type EmailChangeStep } from "../lib/email-change-flow";
 import { authClient } from "../lib/auth-client";
@@ -20,7 +22,7 @@ function emailError(error: AuthError, fallback: string) {
 
 function OtpInput({ id, value, onChange }: { id: string; value: string; onChange: (value: string) => void }) {
   return (
-    <input
+    <Input
       id={id}
       value={value}
       onChange={(event) => onChange(normalizeOtp(event.target.value))}
@@ -29,7 +31,7 @@ function OtpInput({ id, value, onChange }: { id: string; value: string; onChange
       pattern="[0-9]*"
       maxLength={6}
       required
-      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm tracking-[0.25em] focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500"
+      className="font-mono tracking-widest"
       placeholder="000000"
     />
   );
@@ -39,10 +41,13 @@ function FlowProgress({ step }: { step: EmailChangeStep }) {
   const stages = ["验证当前邮箱", "输入新邮箱", "验证新邮箱"];
   const activeIndex = step === "current-email" ? 0 : step === "new-email" ? 1 : 2;
   return (
-    <ol className="mt-5 flex flex-col gap-2 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs text-blue-800 sm:flex-row sm:items-center sm:gap-3">
+    <ol className="mt-5 flex flex-col gap-2 rounded-lg border border-border bg-muted px-4 py-3 text-xs text-muted-foreground sm:flex-row sm:items-center sm:gap-3">
       {stages.map((label, index) => (
         <li key={label} className="flex items-center gap-2">
-          <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full font-semibold ${index <= activeIndex ? "bg-blue-600 text-white" : "border border-blue-300 bg-white text-blue-700"}`}>{index + 1}</span>
+          <span
+            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full font-semibold ${
+              index <= activeIndex ? "bg-primary text-primary-foreground" : "border border-border bg-surface text-muted-foreground"
+            }`}>{index + 1}</span>
           {label}
         </li>
       ))}
@@ -62,17 +67,17 @@ export function NewEmailOtpDeliveryNotice({
   return (
     <>
       <div>
-        <h2 className="text-base font-semibold text-gray-900">验证新邮箱</h2>
-        <p className="mt-1 text-sm text-gray-500">若该地址可用，验证码已发送至 {newEmail}。</p>
+        <h2 className="text-base font-semibold text-foreground">验证新邮箱</h2>
+        <p className="mt-1 text-sm text-muted-foreground">若该地址可用，验证码已发送至 {newEmail}。</p>
       </div>
       {cooldown > 0 ? (
-        <p className="text-xs text-gray-500">若该地址可用，验证码已发送；{cooldown} 秒内请勿重复请求。</p>
+        <p className="text-xs text-muted-foreground">若该地址可用，验证码已发送；{cooldown} 秒内请勿重复请求。</p>
       ) : (
-        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+        <div className="rounded-lg border border-border bg-muted p-3 text-sm text-foreground">
           <p>未收到新邮箱验证码？为保证安全，需要重新验证当前邮箱后才能再次发送。</p>
-          <button type="button" onClick={onRestart} className="mt-2 font-medium text-blue-700 hover:text-blue-800">
+          <Button type="button" variant="link" size="sm" className="mt-1" onClick={onRestart}>
             重新验证当前邮箱
-          </button>
+          </Button>
         </div>
       )}
     </>
@@ -197,30 +202,55 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
   };
 
   return (
-    <div className="rounded-2xl border border-gray-950/[0.08] bg-white p-6 shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-      <Link to="/settings" className="mb-5 inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 transition-colors hover:text-blue-600">
-        <span aria-hidden="true">←</span> 返回账户设置
-      </Link>
-      <h1 className="text-xl font-semibold text-gray-900">修改登录邮箱</h1>
-      <p className="mt-1 text-sm text-gray-500">当前邮箱：{currentEmail || "—"}</p>
+    <div className="rounded-lg border border-border bg-surface p-6">
+      <Button asChild variant="ghost" size="sm" className="mb-5 -ml-2 text-muted-foreground">
+        <Link to="/settings">
+          <ArrowLeft aria-hidden="true" />
+          返回账户设置
+        </Link>
+      </Button>
+      <h1 className="text-xl font-semibold text-foreground">修改登录邮箱</h1>
+      <p className="mt-1 text-sm text-muted-foreground">当前邮箱：{currentEmail || "—"}</p>
       <FlowProgress step={step} />
-      {error && <p className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">{error}</p>}
+      {error && (
+        <Alert variant="destructive" className="mt-4">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
 
       {step === "current-email" && (
         <section className="mt-5" aria-labelledby="verify-current-email-heading">
-          <h2 id="verify-current-email-heading" className="text-base font-semibold text-gray-900">验证当前邮箱</h2>
-          <p className="mt-1 text-sm text-gray-500">先向当前登录邮箱发送 6 位验证码。</p>
+          <h2 id="verify-current-email-heading" className="text-base font-semibold text-foreground">验证当前邮箱</h2>
+          <p className="mt-1 text-sm text-muted-foreground">先向当前登录邮箱发送 6 位验证码。</p>
           {!currentOtpSent ? (
-            <button type="button" onClick={() => void sendCurrentOtp()} disabled={loading} className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:bg-blue-400">{loading ? "发送中..." : "发送验证码"}</button>
+            <ActionButton
+              type="button"
+              className="mt-4"
+              state={loading ? "loading" : error ? "error" : "idle"}
+              onClick={() => void sendCurrentOtp()}
+              labels={{ idle: "发送验证码", loading: "发送中…", success: "已发送", error: "重试发送" }}
+            />
           ) : (
-            <form onSubmit={verifyCurrentOtp} className="mt-4 space-y-4">
-              <div>
-                <label htmlFor="current-email-otp" className="mb-1.5 block text-sm font-medium text-gray-700">当前邮箱验证码</label>
+            <form onSubmit={verifyCurrentOtp} className="mt-4 space-y-4" noValidate>
+              <div className="field">
+                <Label htmlFor="current-email-otp">当前邮箱验证码</Label>
                 <OtpInput id="current-email-otp" value={currentOtp} onChange={setCurrentOtp} />
               </div>
               <div className="flex flex-wrap items-center gap-3">
-                <button type="submit" disabled={loading} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:bg-blue-400">{loading ? "验证中..." : "验证并继续"}</button>
-                <button type="button" disabled={loading || cooldown > 0} onClick={() => void sendCurrentOtp()} className="rounded-lg px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:text-gray-400">{cooldown > 0 ? `${cooldown} 秒后可重新发送` : "重新发送验证码"}</button>
+                <ActionButton
+                  type="submit"
+                  disabled={loading}
+                  state={loading ? "loading" : "idle"}
+                  labels={{ idle: "验证并继续", loading: "验证中…", success: "已验证", error: "重试验证" }}
+                />
+                <Button
+                  type="button"
+                  variant="link"
+                  disabled={loading || cooldown > 0}
+                  onClick={() => void sendCurrentOtp()}
+                >
+                  {cooldown > 0 ? `${cooldown} 秒后可重新发送` : "重新发送验证码"}
+                </Button>
               </div>
             </form>
           )}
@@ -228,35 +258,58 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
       )}
 
       {step === "new-email" && (
-        <form onSubmit={requestNewEmailOtp} className="mt-5 space-y-4">
+        <form onSubmit={requestNewEmailOtp} className="mt-5 space-y-4" noValidate>
           <div>
-            <h2 className="text-base font-semibold text-gray-900">输入新邮箱</h2>
-            <p className="mt-1 text-sm text-gray-500">验证码会发送到新邮箱，完成验证后才会更新登录邮箱。</p>
+            <h2 className="text-base font-semibold text-foreground">输入新邮箱</h2>
+            <p className="mt-1 text-sm text-muted-foreground">验证码会发送到新邮箱，完成验证后才会更新登录邮箱。</p>
           </div>
-          <div>
-            <label htmlFor="new-email" className="mb-1.5 block text-sm font-medium text-gray-700">新邮箱</label>
-            <input id="new-email" type="email" value={newEmail} onChange={(event) => setNewEmail(event.target.value)} required autoComplete="email" className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-transparent focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="请输入新邮箱" />
+          <div className="field">
+            <Label htmlFor="new-email">新邮箱</Label>
+            <Input
+              id="new-email"
+              type="email"
+              value={newEmail}
+              onChange={(event) => setNewEmail(event.target.value)}
+              required
+              autoComplete="email"
+              autoCapitalize="none"
+              spellCheck={false}
+              inputMode="email"
+              placeholder="请输入新邮箱"
+            />
           </div>
-          <button type="submit" disabled={loading} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:bg-blue-400">{loading ? "发送中..." : "发送验证码"}</button>
+          <ActionButton
+            type="submit"
+            disabled={loading}
+            state={loading ? "loading" : "idle"}
+            labels={{ idle: "发送验证码", loading: "发送中…", success: "已发送", error: "重试发送" }}
+          />
         </form>
       )}
 
       {step === "new-email-otp" && (
-        <form onSubmit={changeEmail} className="mt-5 space-y-4">
+        <form onSubmit={changeEmail} className="mt-5 space-y-4" noValidate>
           <NewEmailOtpDeliveryNotice
             newEmail={newEmail}
             cooldown={cooldown}
             onRestart={restartCurrentEmailVerification}
           />
-          <div>
-            <label htmlFor="new-email-otp" className="mb-1.5 block text-sm font-medium text-gray-700">新邮箱验证码</label>
+          <div className="field">
+            <Label htmlFor="new-email-otp">新邮箱验证码</Label>
             <OtpInput id="new-email-otp" value={newEmailOtp} onChange={setNewEmailOtp} />
           </div>
-          <button type="submit" disabled={loading} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:bg-blue-400">{loading ? "验证中..." : "确认更换邮箱"}</button>
+          <ActionButton
+            type="submit"
+            disabled={loading}
+            state={loading ? "loading" : "idle"}
+            labels={{ idle: "确认更换邮箱", loading: "更换中…", success: "已更换", error: "重试更换" }}
+          />
         </form>
       )}
 
-      {step === "complete" && <p className="mt-5 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700" role="status">登录邮箱已更新。</p>}
+      {step === "complete" && (
+        <p className="mt-5 rounded-lg border border-success/30 bg-success/10 p-3 text-sm text-success" role="status">登录邮箱已更新。</p>
+      )}
     </div>
   );
 }
