@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link, Navigate, useLocation } from "react-router-dom";
 import { ChevronDown, Link2, Loader2, Mail } from "lucide-react";
 import { Alert, AlertDescription, Button, PageHeader, Skeleton } from "@cqu-moe/ui";
 import { authClient } from "../lib/auth-client";
@@ -450,6 +450,12 @@ function CquBindingSection() {
 export default function Settings() {
   const { data: session, refetch: refetchSession } = authClient.useSession();
   const user = session?.user as { email?: string; name?: string } | undefined;
+  const location = useLocation();
+  const search = new URLSearchParams(location.search);
+
+  if (["cqu", "quicklogin", "quickloginDevice", "quickloginReconnect"].some((key) => search.has(key))) {
+    return <Navigate to={`/settings/cqu${location.search}${location.hash}`} replace />;
+  }
 
   return (
     <Layout>

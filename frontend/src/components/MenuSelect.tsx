@@ -3,6 +3,7 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
+  SelectValue,
 } from "@cqu-moe/ui";
 
 export interface MenuSelectOption<T extends string> {
@@ -41,9 +42,9 @@ export default function MenuSelect<T extends string>({
       <SelectTrigger aria-label={ariaLabel} size={size} className={className}>
         {/* 触发器只显示当前项名称；hint 只在下拉菜单里展示，
             避免表格行内的选择框被说明文字撑宽。 */}
-        <span className="truncate">
+        <SelectValue className="truncate">
           {options.find((opt) => opt.value === value)?.label ?? "请选择"}
-        </span>
+        </SelectValue>
       </SelectTrigger>
       <SelectContent>
         {options.map((opt) => (

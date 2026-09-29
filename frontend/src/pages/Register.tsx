@@ -106,7 +106,7 @@ export default function Register() {
       title="创建账号"
       description={scheduleSource ? "继续使用重庆大学课表" : "一个账号，连接你的校园服务。"}
     >
-      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+      <form onSubmit={handleSubmit} className="space-y-4">
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
