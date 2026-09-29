@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { Link, NavLink as RouterNavLink, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Link2, ShieldCheck, UserRound } from "lucide-react";
+import { Fingerprint, LayoutDashboard, Link2, ShieldCheck, UserRound } from "lucide-react";
 import { AppShell, ContentContainer } from "@cqu-moe/ui";
 import { authClient } from "../lib/auth-client";
 import { canAccessAdmin } from "../../../shared/user-roles";
@@ -26,7 +26,7 @@ export default function Layout({ children, width = "reading" }: LayoutProps) {
 
   return (
     <AppShell
-      brand={<Link to="/settings">CQU Auth</Link>}
+      brand={<Link to="/settings" className="auth-brand"><Fingerprint aria-hidden="true" />CQU Auth</Link>}
       navigation={
         <>
           <span className="ds-nav-label">设置</span>

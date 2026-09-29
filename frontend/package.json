@@ -13,8 +13,8 @@
   "packageManager": "pnpm@11.19.0",
   "dependencies": {
     "@better-auth/oauth-provider": "1.6.11",
-    "@cqu-moe/theme": "file:./.design/cqu-moe-theme-1.0.0.tgz",
-    "@cqu-moe/ui": "file:./.design/cqu-moe-ui-1.0.0.tgz",
+    "@cqu-moe/theme": "file:.design/cqu-moe-theme-1.1.0.tgz",
+    "@cqu-moe/ui": "file:.design/cqu-moe-ui-1.1.0.tgz",
     "@posthog/react": "^1.11.0",
     "better-auth": "1.6.11",
     "lucide-react": "1.48.0",

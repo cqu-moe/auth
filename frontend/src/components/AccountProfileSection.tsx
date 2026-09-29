@@ -67,7 +67,7 @@ export default function AccountProfileSection({
   };
 
   return (
-    <SettingsCard title="个人信息" description="登录账户和对外展示的基本信息。">
+    <SettingsCard title="个人信息">
       <div className="divide-y divide-border">
         <div className="pb-4">
           <div className="flex items-center justify-between gap-4">
@@ -91,7 +91,7 @@ export default function AccountProfileSection({
             <form
               id="display-name-editor"
               onSubmit={handleNameSubmit}
-              className="mt-3 rounded-lg bg-muted p-4"
+              className="mt-3 inline-editor rounded-lg p-4"
               noValidate
             >
               <div className="field">

@@ -83,6 +83,7 @@ code {
 .auth-brand svg {
   width: 24px;
   height: 24px;
+  color: var(--foreground);
 }
 .auth-header-actions {
   display: flex;
@@ -102,11 +103,15 @@ code {
   flex-direction: column;
   gap: var(--space-6);
 }
+.auth-intro {
+  text-align: center;
+}
 .auth-intro h1 {
   margin: var(--space-3) 0 0;
-  font-size: var(--text-xl);
+  font-size: var(--text-title);
   font-weight: 600;
   letter-spacing: -0.03em;
+  text-wrap: balance;
 }
 .auth-intro p {
   margin: var(--space-2) 0 0;
@@ -114,6 +119,7 @@ code {
   color: var(--muted-foreground);
 }
 .auth-card {
+  box-shadow: var(--shadow-card);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -240,4 +246,50 @@ li[data-step-state='active'] .step-label {
 li[data-step-state='done'] + .step-connector,
 .step-connector[data-state='done'] {
   background: var(--primary);
+}
+
+/* Section titles sit on the canvas; only the editable content is elevated. */
+.settings-card-header {
+  padding-bottom: var(--space-3);
+}
+.settings-card-header h3 {
+  font-size: var(--text-base);
+}
+.settings-card-body {
+  padding: var(--space-6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+.inline-editor {
+  background: var(--background);
+  border: 1px solid var(--border);
+  transition: opacity 150ms ease, transform 180ms var(--ease-out);
+}
+@starting-style {
+  :root:not([data-input='keyboard']) .inline-editor {
+    opacity: 0;
+    transform: translateY(var(--space-1));
+  }
+}
+:root[data-input='keyboard'] .inline-editor {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .inline-editor {
+    transition: none;
+  }
+  @starting-style {
+    :root:not([data-input='keyboard']) .inline-editor {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+@media (max-width: 767px) {
+  .auth-card,
+  .settings-card-body {
+    padding: var(--space-5);
+  }
 }

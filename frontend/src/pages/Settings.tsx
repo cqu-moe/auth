@@ -397,7 +397,7 @@ function CquBindingSection() {
           {status?.bindStatus === "active" && <LiveCodeSection />}
 
           <div
-            className="flex flex-nowrap items-center gap-2 sm:gap-3"
+            className="flex flex-wrap items-center gap-2 sm:gap-3"
             role="group"
             aria-label="CQU 绑定操作"
           >

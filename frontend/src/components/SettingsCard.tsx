@@ -8,21 +8,17 @@ interface SettingsCardProps {
   children: ReactNode;
 }
 
-/**
- * 设置页统一的区块卡片外壳：alpha 边框 + 极轻投影，标题/描述在头部，
- * 与正文之间用细分隔线分开。所有设置区块共用，避免每张卡片各写各的样式。
- */
 export default function SettingsCard({ title, description, action, children }: SettingsCardProps) {
   return (
-    <section className="overflow-hidden rounded-lg border border-border bg-surface">
-      <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-4">
+    <section className="settings-card">
+      <div className="settings-card-header flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+          <h3 className="font-semibold text-foreground">{title}</h3>
           {description && <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>}
         </div>
         {action && <div className="shrink-0 pt-0.5">{action}</div>}
       </div>
-      <div className="px-6 py-5">{children}</div>
+      <div className="settings-card-body">{children}</div>
     </section>
   );
 }

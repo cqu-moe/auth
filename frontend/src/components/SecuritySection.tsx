@@ -47,7 +47,7 @@ function ChangePasswordEditor({ onCancel, onSuccess }: { onCancel: () => void; o
   };
 
   return (
-    <form id="change-password-form" onSubmit={handleSubmit} className="mt-3 space-y-4 rounded-lg bg-muted p-4" noValidate>
+    <form id="change-password-form" onSubmit={handleSubmit} className="mt-3 space-y-4 inline-editor rounded-lg p-4" noValidate>
       {formError && (
         <Alert variant="destructive">
           <AlertDescription>{formError}</AlertDescription>
@@ -128,7 +128,7 @@ export default function SecuritySection({ twoFactorEnabled }: SecuritySectionPro
   const [passwordSuccess, setPasswordSuccess] = useState(false);
 
   return (
-    <SettingsCard title="安全设置" description="二次验证与登录密码。">
+    <SettingsCard title="安全设置">
       <div className="divide-y divide-border">
         <div className="flex items-center justify-between gap-4 pb-4">
           <span className="w-16 shrink-0 text-sm text-muted-foreground">二次验证</span>
