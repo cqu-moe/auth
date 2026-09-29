@@ -1,10 +1,17 @@
 import { useState, useEffect, useCallback } from "react";
+import { Loader2, Plus } from "lucide-react";
+import {
+  Alert,
+  AlertDescription,
+  Button,
+  Input,
+  PageState,
+} from "@cqu-moe/ui";
 import MenuSelect from "../../components/MenuSelect";
 import { EntitlementMatrix } from "../../components/EntitlementFields";
 import { buildItems, formFromItems, summarizeItems, type EntitlementForm, type EntitlementItem } from "../../components/entitlement-form";
 import { adminFetch } from "../../lib/api/admin";
-import { FieldLabel, Modal, inputClass } from "./ui";
-
+import { FieldLabel, Modal } from "./ui";
 
 interface EntitlementPreset {
   name: string;
@@ -74,38 +81,39 @@ function PresetEditor({
   };
 
   return (
-    <Modal onClose={onClose} maxWidth="max-w-xl">
-      <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <h3 className="text-base font-semibold text-gray-900">
-          {isEdit ? `编辑预设「${name}」` : "新建预设"}
-        </h3>
-        <button
-          onClick={onClose}
-          className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors shrink-0"
-          aria-label="关闭"
-        >
-          ×
-        </button>
-      </div>
-
-      <div className="p-6 space-y-5">
+    <Modal
+      onClose={onClose}
+      title={isEdit ? `编辑预设「${name}」` : "新建预设"}
+      description="勾选/填值即授权;留空数量表示无限。"
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose} disabled={saving}>
+            取消
+          </Button>
+          <Button onClick={handleSave} disabled={saving}>
+            {saving && <Loader2 className="animate-spin" aria-hidden="true" size={16} />}
+            保存
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-5">
         {error && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-            {error}
-            <button onClick={() => setError("")} className="ml-2 underline">关闭</button>
-          </div>
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
 
         {!isEdit && (
           <div>
-            <FieldLabel hint="例如:学生、助教、特邀教师">预设名称</FieldLabel>
-            <input
+            <FieldLabel htmlFor="preset-name" hint="例如:学生、助教、特邀教师">预设名称</FieldLabel>
+            <Input
+              id="preset-name"
               type="text"
               value={presetName}
               onChange={(e) => setPresetName(e.target.value)}
               maxLength={50}
               placeholder="预设名称"
-              className={inputClass}
             />
           </div>
         )}
@@ -115,27 +123,6 @@ function PresetEditor({
           onChange={setForm}
           quickloginPolicyReadOnly
         />
-      </div>
-
-      <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex items-center justify-between gap-2">
-        <p className="text-xs text-gray-400">勾选/填值即授权;留空数量表示无限。</p>
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={onClose}
-            disabled={saving}
-            className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-          >
-            取消
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-400 flex items-center gap-1.5 transition-colors"
-          >
-            {saving && <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-            保存
-          </button>
-        </div>
       </div>
     </Modal>
   );
@@ -150,9 +137,7 @@ export function EntitlementsSection() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  // 默认权益下拉的保存状态:idle | saving | saved。
   const [defaultState, setDefaultState] = useState<"idle" | "saving" | "saved">("idle");
-  // 打开编辑器的预设:null = 关闭;{ name: null } = 新建。
   const [editing, setEditing] = useState<{
     name: string | null;
     form: EntitlementForm;
@@ -246,42 +231,36 @@ export function EntitlementsSection() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-gray-400 text-sm py-8">
-        <div className="w-5 h-5 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
-        加载中...
-      </div>
+      <PageState state="loading" title="正在加载预设" description="正在读取权益预设与默认配置…" />
     );
   }
 
   return (
     <div className="space-y-6">
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-          {error}
-          <button onClick={() => setError("")} className="ml-2 underline">关闭</button>
-        </div>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
       {notice && (
-        <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
-          {notice}
-          <button onClick={() => setNotice("")} className="ml-2 underline">关闭</button>
-        </div>
+        <Alert className="border-success/40 bg-success/10">
+          <AlertDescription className="text-success">{notice}</AlertDescription>
+        </Alert>
       )}
 
-      {/* --- 新用户默认权益 --- */}
-      <div className="flex items-center justify-between gap-4 border border-gray-100 bg-gray-50 rounded-xl p-4">
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-border bg-muted p-4">
         <div className="min-w-0">
-          <p className="text-sm font-medium text-gray-900">新用户默认权益</p>
-          <p className="text-xs text-gray-400 mt-0.5">
+          <p className="text-sm font-medium text-foreground">新用户默认权益</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
             注册成功后自动套用的预设;选「无」则新用户不带任何权益。
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex shrink-0 items-center gap-2">
           {defaultState === "saving" && (
-            <span className="w-3.5 h-3.5 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
+            <Loader2 className="animate-spin text-muted-foreground" aria-hidden="true" size={14} />
           )}
           {defaultState === "saved" && (
-            <span className="text-xs text-green-600">已保存</span>
+            <span className="text-xs text-success">已保存</span>
           )}
           <MenuSelect
             value={defaultPreset ?? ""}
@@ -296,74 +275,75 @@ export function EntitlementsSection() {
               })),
             ]}
             aria-label="新用户默认权益"
-            align="right"
-            buttonClassName="px-3 py-1.5 text-sm"
+            size="sm"
           />
         </div>
       </div>
 
-      {/* --- 预设列表 --- */}
       <div>
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-sm font-medium text-gray-900">全部预设</p>
-          <button
+        <div className="mb-3 flex items-center justify-between">
+          <p className="text-sm font-medium text-foreground">全部预设</p>
+          <Button
             type="button"
+            size="sm"
             onClick={() =>
               setEditing({ name: null, form: formFromItems([]) })
             }
-            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
           >
-            + 新建预设
-          </button>
+            <Plus aria-hidden="true" size={16} />
+            新建预设
+          </Button>
         </div>
 
         {presets.length === 0 ? (
-          <p className="text-sm text-gray-400 py-4">暂无预设</p>
+          <PageState state="empty" title="暂无预设" description="新建预设后，可为用户一键套用权益。" />
         ) : (
-          <div className="divide-y divide-gray-100 border border-gray-100 rounded-xl">
+          <div className="divide-y divide-border rounded-lg border border-border">
             {presets.map((p) => (
-              <div key={p.name} className="flex items-center gap-4 px-4 py-3">
+              <div key={p.name} className="flex flex-wrap items-center gap-4 px-4 py-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-gray-900">{p.name}</span>
+                    <span className="text-sm font-medium text-foreground">{p.name}</span>
                     {defaultPreset === p.name && (
-                      <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">
-                        默认
-                      </span>
+                      <span className="badge badge-success">默认</span>
                     )}
                   </div>
-                  <p className="text-xs text-gray-400 mt-0.5 truncate">
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
                     {summarizeItems(p.items)}
                     {p.updatedAt && ` · 更新于 ${new Date(p.updatedAt + "Z").toLocaleDateString("zh-CN")}`}
                   </p>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
+                <div className="flex shrink-0 items-center gap-2">
+                  <Button
                     type="button"
+                    variant="outline"
+                    size="sm"
                     onClick={() =>
                       setEditing({ name: p.name, form: formFromItems(p.items) })
                     }
-                    className="text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
                   >
                     编辑
-                  </button>
+                  </Button>
                   {confirmDelete === p.name ? (
-                    <button
+                    <Button
                       type="button"
+                      variant="destructive"
+                      size="sm"
                       onClick={() => void handleDelete(p.name)}
                       disabled={deleting === p.name}
-                      className="text-xs font-medium px-3 py-1.5 rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:bg-red-400 transition-colors"
                     >
-                      {deleting === p.name ? "删除中..." : "确认删除"}
-                    </button>
+                      {deleting === p.name ? "删除中…" : "确认删除"}
+                    </Button>
                   ) : (
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive"
                       onClick={() => setConfirmDelete(p.name)}
-                      className="text-xs font-medium px-3 py-1.5 rounded-lg text-red-600 hover:bg-red-50 transition-colors"
                     >
                       删除
-                    </button>
+                    </Button>
                   )}
                 </div>
               </div>

@@ -1,4 +1,21 @@
+// --- Entitlement panel (per-user 分级权益 / 能力授权) ---
+// 表单态/矩阵实现见 components/EntitlementFields。保存为整组替换(full replace):
+// 仅把勾选的 flag 与非空 quota 发给 PUT,未勾/空缺省即「false / 无限」。
+// 预设从 GET /admin/entitlement-presets 读(管理台「权益预设」页可编辑)。
 import { useState, useEffect, useCallback } from "react";
+import { Loader2 } from "lucide-react";
+import {
+  Alert,
+  AlertDescription,
+  Button,
+  PageState,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@cqu-moe/ui";
 import MenuSelect from "../../components/MenuSelect";
 import { EntitlementMatrix } from "../../components/EntitlementFields";
 import { buildItems, formFromItems, type EntitlementForm, type EntitlementItem } from "../../components/entitlement-form";
@@ -7,7 +24,6 @@ import { adminFetch } from "../../lib/api/admin";
 import { authClient } from "../../lib/auth-client";
 import QuotaEditor from "../../components/quicklogin/QuotaEditor";
 import { FieldLabel, Modal } from "./ui";
-
 
 interface User {
   id: string;
@@ -18,7 +34,6 @@ interface User {
   createdAt: string;
 }
 
-// 一个权益预设:GET /admin/entitlement-presets 的元素。
 interface EntitlementPreset {
   name: string;
   items: EntitlementItem[];
@@ -35,7 +50,6 @@ interface UsersResponse {
   };
 }
 
-
 // Read the message from a non-2xx response. The backend's errorResponse shape is
 // { detail: { error: { code, message } } }, so read that path (not body.error).
 async function readErrorMessage(res: Response, fallback: string): Promise<string> {
@@ -49,14 +63,14 @@ async function readErrorMessage(res: Response, fallback: string): Promise<string
   }
 }
 
-// 角色的展示元数据:色点与权限说明。值与 shared/user-roles.ts 的 USER_ROLE_OPTIONS 对齐。
-const ROLE_META: Record<string, { dotClass: string; hint: string }> = {
-  user: { dotClass: "bg-gray-400", hint: "普通使用,无管理入口" },
-  admin: { dotClass: "bg-blue-500", hint: "可管理用户与邀请" },
-  superAdmin: { dotClass: "bg-violet-500", hint: "含权益与客户端写权限" },
+// 角色的展示元数据:权限说明。值与 shared/user-roles.ts 的 USER_ROLE_OPTIONS 对齐。
+const ROLE_META: Record<string, { hint: string }> = {
+  user: { hint: "普通使用,无管理入口" },
+  admin: { hint: "可管理用户与邀请" },
+  superAdmin: { hint: "含权益与客户端写权限" },
 };
 
-// 角色选择:徽章式自定义下拉(原生 select 在表格里样式不可控)。
+// 角色选择:共享 Select(原生 select 在表格里样式不可控)。
 function RoleSelect({
   value,
   disabled,
@@ -71,7 +85,6 @@ function RoleSelect({
   const options = USER_ROLE_OPTIONS.map((opt) => ({
     value: opt.value as string,
     label: opt.label,
-    dotClass: ROLE_META[opt.value]?.dotClass ?? "bg-gray-400",
     hint: ROLE_META[opt.value]?.hint,
   }));
   return (
@@ -81,7 +94,7 @@ function RoleSelect({
       onChange={onChange}
       disabled={disabled}
       aria-label={ariaLabel}
-      buttonClassName="px-2.5 py-1 text-xs"
+      size="sm"
     />
   );
 }
@@ -96,7 +109,6 @@ export function UsersSection() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState("");
-  // 当前打开「分级权益」面板的用户(null = 关闭)。
   const [entitlementUser, setEntitlementUser] = useState<User | null>(null);
 
   const fetchUsers = useCallback(async (page = 1) => {
@@ -143,142 +155,111 @@ export function UsersSection() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-gray-400 text-sm py-8">
-        <div className="w-5 h-5 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
-        加载中...
-      </div>
+      <PageState state="loading" title="正在加载用户" description="正在读取用户列表…" />
     );
   }
 
   return (
     <div>
       {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-          {error}
-          <button onClick={() => setError("")} className="ml-2 underline">关闭</button>
-        </div>
+        <Alert variant="destructive" className="mb-4">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
-      <div className="space-y-3 sm:hidden">
-        {users.map((user) => (
-          <div key={user.id} className="rounded-xl border border-gray-200 p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="font-medium text-gray-900">{user.name}</div>
-                <div className="truncate text-xs text-gray-400">{user.email}</div>
-              </div>
-              <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${user.banned ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${user.banned ? "bg-red-500" : "bg-green-500"}`} />
-                {user.banned ? "已封禁" : "正常"}
-              </span>
-            </div>
-            <div className="mt-4 flex items-center justify-between gap-3">
-              <RoleSelect value={user.role} disabled={actionLoading === user.id} onChange={(role) => updateUser(user.id, { role })} ariaLabel={`${user.name} 的角色`} />
-              <span className="text-xs text-gray-500">{new Date(user.createdAt).toLocaleDateString("zh-CN")}</span>
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <button onClick={() => setEntitlementUser(user)} className="min-h-11 rounded-lg border border-gray-200 px-3 text-sm font-medium hover:bg-gray-50">权益</button>
-              <button onClick={() => updateUser(user.id, { action: user.banned ? "unban" : "ban" })} disabled={actionLoading === user.id} className={`min-h-11 rounded-lg px-3 text-sm font-medium disabled:opacity-50 ${user.banned ? "bg-green-100 text-green-700 hover:bg-green-200" : "bg-red-100 text-red-700 hover:bg-red-200"}`}>
-                {actionLoading === user.id ? <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" /> : user.banned ? "解封" : "封禁"}
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="hidden overflow-x-auto sm:block">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-200">
-              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wide">用户</th>
-              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wide">角色</th>
-              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wide">状态</th>
-              <th className="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wide">注册时间</th>
-              <th className="text-right py-3 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wide">操作</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="text-left">用户</TableHead>
+              <TableHead className="text-left">角色</TableHead>
+              <TableHead className="text-left">状态</TableHead>
+              <TableHead className="text-left">注册时间</TableHead>
+              <TableHead className="text-right">操作</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {users.map((user) => (
-              <tr key={user.id} className="hover:bg-gray-50 transition-colors">
-                <td className="py-3 px-4">
-                  <div className="font-medium text-gray-900">{user.name}</div>
-                  <div className="text-xs text-gray-400">{user.email}</div>
-                </td>
-                <td className="py-3 px-4">
+              <TableRow key={user.id}>
+                <TableCell>
+                  <div className="font-medium text-foreground">{user.name}</div>
+                  <div className="text-xs text-muted-foreground">{user.email}</div>
+                </TableCell>
+                <TableCell>
                   <RoleSelect
                     value={user.role}
                     disabled={actionLoading === user.id}
                     onChange={(role) => updateUser(user.id, { role })}
                     ariaLabel={`${user.name} 的角色`}
                   />
-                </td>
-                <td className="py-3 px-4">
-                  <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${
-                    user.banned
-                      ? "bg-red-100 text-red-700"
-                      : "bg-green-100 text-green-700"
-                  }`}>
-                    <span className={`w-1.5 h-1.5 rounded-full ${user.banned ? "bg-red-500" : "bg-green-500"}`} />
+                </TableCell>
+                <TableCell>
+                  <span className={`badge ${user.banned ? "badge-destructive" : "badge-success"}`}>
+                    <i aria-hidden="true" />
                     {user.banned ? "已封禁" : "正常"}
                   </span>
-                </td>
-                <td className="py-3 px-4 text-gray-500 text-xs">
+                </TableCell>
+                <TableCell className="text-xs text-muted-foreground">
                   {new Date(user.createdAt).toLocaleDateString("zh-CN")}
-                </td>
-                <td className="py-3 px-4 text-right">
+                </TableCell>
+                <TableCell className="text-right">
                   <div className="flex items-center justify-end gap-2">
-                    <button
+                    <Button
+                      variant="outline"
+                      size="sm"
                       onClick={() => setEntitlementUser(user)}
-                      className="text-xs font-medium px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
                     >
                       权益
-                    </button>
-                    <button
+                    </Button>
+                    <Button
+                      variant={user.banned ? "outline" : "destructive"}
+                      size="sm"
                       onClick={() => updateUser(user.id, { action: user.banned ? "unban" : "ban" })}
                       disabled={actionLoading === user.id}
-                      className={`text-xs font-medium px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 ${
-                        user.banned
-                          ? "bg-green-100 text-green-700 hover:bg-green-200"
-                          : "bg-red-100 text-red-700 hover:bg-red-200"
-                      }`}
                     >
                       {actionLoading === user.id ? (
-                        <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                        <Loader2 className="animate-spin" aria-hidden="true" size={16} />
                       ) : (
                         user.banned ? "解封" : "封禁"
                       )}
-                    </button>
+                    </Button>
                   </div>
-                </td>
-              </tr>
+                </TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
       </div>
 
+      {users.length === 0 && (
+        <PageState state="empty" title="还没有用户" description="用户注册后会显示在这里。" />
+      )}
+
       {pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-200">
-          <span className="text-xs text-gray-500">
+        <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
+          <span className="text-xs text-muted-foreground">
             共 {pagination.total} 个用户
           </span>
           <div className="flex items-center gap-2">
-            <button
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => fetchUsers(pagination.page - 1)}
               disabled={pagination.page <= 1}
-              className="px-3 py-1.5 text-xs border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-50"
             >
               上一页
-            </button>
-            <span className="text-xs text-gray-500">
+            </Button>
+            <span className="text-xs text-muted-foreground">
               {pagination.page} / {pagination.totalPages}
             </span>
-            <button
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => fetchUsers(pagination.page + 1)}
               disabled={pagination.page >= pagination.totalPages}
-              className="px-3 py-1.5 text-xs border border-gray-200 rounded-lg disabled:opacity-40 hover:bg-gray-50"
             >
               下一页
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -330,7 +311,6 @@ export function EntitlementPanel({
         const data = (await presetsRes.json()) as { data: EntitlementPreset[] };
         const list = data.data ?? [];
         setPresets(list);
-        // 首次载入或当前选中项已不存在时,回落到第一个预设。
         setPreset((prev) =>
           prev && list.some((p) => p.name === prev) ? prev : (list[0]?.name ?? "")
         );
@@ -407,45 +387,43 @@ export function EntitlementPanel({
   };
 
   return (
-    <Modal onClose={onClose} maxWidth="max-w-xl">
-      <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <div className="min-w-0">
-          <h3 className="text-base font-semibold text-gray-900">分级权益 / 能力授权</h3>
-          <p className="text-xs text-gray-400 truncate">{user.name} · {user.email}</p>
-        </div>
-        <button
-          onClick={onClose}
-          className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors shrink-0"
-          aria-label="关闭"
-        >
-          ×
-        </button>
-      </div>
-
-      <div className="p-6 space-y-5">
+    <Modal
+      onClose={onClose}
+      title="分级权益 / 能力授权"
+      description={`${user.name} · ${user.email}`}
+      footer={
+        !initLoading ? (
+          <>
+            <p className="mr-auto text-xs text-muted-foreground">勾选/填值即授权;留空数量表示无限。保存为整组替换。</p>
+            <Button variant="outline" onClick={onClose} disabled={saving}>
+              取消
+            </Button>
+            <Button onClick={handleSave} disabled={saving || applyingPreset}>
+              {saving && <Loader2 className="animate-spin" aria-hidden="true" size={16} />}
+              保存
+            </Button>
+          </>
+        ) : undefined
+      }
+    >
+      <div className="space-y-5">
         {error && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-            {error}
-            <button onClick={() => setError("")} className="ml-2 underline">关闭</button>
-          </div>
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
         {success && (
-          <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
-            {success}
-            <button onClick={() => setSuccess("")} className="ml-2 underline">关闭</button>
-          </div>
+          <Alert className="border-success/40 bg-success/10">
+            <AlertDescription className="text-success">{success}</AlertDescription>
+          </Alert>
         )}
 
         {initLoading ? (
-          <div className="flex items-center gap-2 text-gray-400 text-sm py-8">
-            <div className="w-5 h-5 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
-            加载中...
-          </div>
+          <PageState state="loading" title="正在加载权益" description="正在读取该用户的权益与预设…" />
         ) : (
           <>
-            {/* --- 预设套用 --- */}
             {presets.length > 0 && (
-              <div className="flex items-end gap-2 border border-gray-100 bg-gray-50 rounded-xl p-3">
+              <div className="flex items-end gap-2 rounded-lg border border-border bg-muted p-3">
                 <div className="flex-1">
                   <FieldLabel hint="一键写入预设权益,之后仍可逐项调整">套用预设</FieldLabel>
                   <MenuSelect
@@ -457,23 +435,22 @@ export function EntitlementPanel({
                       hint: `${p.items.length} 项能力`,
                     }))}
                     aria-label="选择要套用的预设"
-                    buttonClassName="w-full justify-between px-3 py-2"
+                    className="w-full"
                   />
                 </div>
-                <button
+                <Button
                   type="button"
+                  variant="outline"
                   onClick={handleApplyPreset}
                   disabled={applyingPreset || saving}
-                  className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
                 >
-                  {applyingPreset && <span className="w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />}
+                  {applyingPreset && <Loader2 className="animate-spin" aria-hidden="true" size={16} />}
                   套用
-                </button>
+                </Button>
               </div>
             )}
 
-            {/* --- 按子系统分组的能力 --- */}
-            <div className="border-t border-gray-100 pt-4">
+            <div className="border-t border-border pt-4">
               <EntitlementMatrix
                 form={form}
                 onChange={setForm}
@@ -492,29 +469,6 @@ export function EntitlementPanel({
           </>
         )}
       </div>
-
-      {!initLoading && (
-        <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex items-center justify-between gap-2">
-          <p className="text-xs text-gray-400">勾选/填值即授权;留空数量表示无限。保存为整组替换。</p>
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={onClose}
-              disabled={saving}
-              className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-            >
-              取消
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving || applyingPreset}
-              className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-400 flex items-center gap-1.5 transition-colors"
-            >
-              {saving && <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-              保存
-            </button>
-          </div>
-        </div>
-      )}
     </Modal>
   );
 }

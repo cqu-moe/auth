@@ -1,5 +1,7 @@
 import { useState, FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { ActionButton, Alert, AlertDescription, Input, Label } from "@cqu-moe/ui";
+import AuthLayout from "../components/AuthLayout";
 import { authClient } from "../lib/auth-client";
 import { getLoginNavigationDestination } from "../lib/login-routing";
 import {
@@ -42,90 +44,76 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">CQU Auth</h1>
-          <p className="mt-2 text-gray-500">登录到您的账户</p>
+    <AuthLayout
+      title="欢迎回来"
+      description={scheduleSource ? "继续使用重庆大学课表" : "登录你的账户，继续使用校园服务。"}
+    >
+      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        <div className="field">
+          <Label htmlFor="email">邮箱</Label>
+          <Input
+            id="email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            autoComplete="email"
+            placeholder="your@email.com"
+            autoCapitalize="none"
+            spellCheck={false}
+            inputMode="email"
+          />
         </div>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-          <h2 className={`text-xl font-semibold text-gray-900 ${scheduleSource ? "mb-2" : "mb-6"}`}>登录</h2>
-          {scheduleSource && (
-            <p className="mb-6 text-sm text-gray-500">继续使用重庆大学课表</p>
-          )}
-
-          {error && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-              {error}
-            </div>
-          )}
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
-                邮箱
-              </label>
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                autoComplete="email"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="your@email.com"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-                密码
-              </label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                autoComplete="current-password"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="输入密码"
-              />
-            </div>
-
-            <div className="flex justify-end">
-              <Link
-                to={withRedirectParam("/reset-password", postLoginRedirect)}
-                className="text-sm text-blue-600 hover:text-blue-700"
-              >
-                忘记密码？
-              </Link>
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
-            >
-              {loading && (
-                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              )}
-              {loading ? "登录中..." : "登录"}
-            </button>
-          </form>
-
-          <p className="mt-6 text-center text-sm text-gray-500">
-            还没有账户？{" "}
+        <div className="field">
+          <div className="flex items-center justify-between">
+            <Label htmlFor="password">密码</Label>
             <Link
-              to={withRedirectParam("/register", postLoginRedirect)}
-              className="text-blue-600 hover:text-blue-700 font-medium"
+              to={withRedirectParam("/reset-password", postLoginRedirect)}
+              className="text-sm text-link hover:underline"
             >
-              立即注册
+              忘记密码？
             </Link>
-          </p>
+          </div>
+          <Input
+            id="password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            autoComplete="current-password"
+            placeholder="输入密码"
+          />
         </div>
-      </div>
-    </div>
+
+        <ActionButton
+          type="submit"
+          className="w-full"
+          state={loading ? "loading" : error ? "error" : "idle"}
+          labels={{
+            idle: "登录",
+            loading: "登录中…",
+            success: "已登录",
+            error: "重试登录",
+          }}
+        />
+      </form>
+
+      <p className="mt-6 text-center text-sm text-muted-foreground">
+        还没有账户？{" "}
+        <Link
+          to={withRedirectParam("/register", postLoginRedirect)}
+          className="font-medium text-link hover:underline"
+        >
+          立即注册
+        </Link>
+      </p>
+    </AuthLayout>
   );
 }

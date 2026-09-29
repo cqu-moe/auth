@@ -14,11 +14,11 @@ interface SettingsCardProps {
  */
 export default function SettingsCard({ title, description, action, children }: SettingsCardProps) {
   return (
-    <section className="rounded-2xl border border-gray-950/[0.08] bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)]">
-      <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-6 py-4">
+    <section className="overflow-hidden rounded-lg border border-border bg-surface">
+      <div className="flex items-start justify-between gap-4 border-b border-border px-6 py-4">
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
-          {description && <p className="mt-0.5 text-sm text-gray-500">{description}</p>}
+          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+          {description && <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>}
         </div>
         {action && <div className="shrink-0 pt-0.5">{action}</div>}
       </div>

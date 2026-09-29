@@ -24,8 +24,8 @@ vi.mock("../../lib/api/quicklogin", () => ({
   previewFromApiError: () => null,
 }));
 
-function button(container: HTMLElement, name: string): HTMLButtonElement {
-  const found = [...container.querySelectorAll("button")]
+function button(root: ParentNode, name: string): HTMLButtonElement {
+  const found = [...root.querySelectorAll("button")]
     .find((element) => element.textContent?.includes(name));
   if (!(found instanceof HTMLButtonElement)) throw new Error(`missing button: ${name}`);
   return found;
@@ -39,8 +39,8 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-function checkbox(container: HTMLElement, label: string): HTMLInputElement {
-  const row = [...container.querySelectorAll("label")]
+function checkbox(root: ParentNode, label: string): HTMLInputElement {
+  const row = [...root.querySelectorAll("label")]
     .find((element) => element.textContent?.includes(label));
   const input = row?.querySelector('input[type="checkbox"]');
   if (!(input instanceof HTMLInputElement)) throw new Error(`missing checkbox: ${label}`);
@@ -94,7 +94,7 @@ describe("admin QuickLogin quota integration", () => {
       devices: never[];
     }>();
     mocks.applyQuickloginQuota.mockReturnValue(apply.promise);
-    const container = await renderUi(createElement(EntitlementPanel, {
+    await renderUi(createElement(EntitlementPanel, {
       user: {
         id: "user-a",
         name: "测试用户",
@@ -106,16 +106,17 @@ describe("admin QuickLogin quota integration", () => {
       canEditQuota: true,
       onClose: () => undefined,
     }));
-    const input = container.querySelector("#quicklogin-device-limit");
-    const form = container.querySelector("form");
+    // 权益面板渲染在共享 Dialog 的传送门里，内容挂载到 document.body。
+    const input = document.querySelector("#quicklogin-device-limit");
+    const form = document.querySelector("form");
     if (!(input instanceof HTMLInputElement) || !(form instanceof HTMLFormElement)) {
       throw new Error("missing quota form");
     }
 
     await setInputValue(input, "3");
     await submit(form);
-    await click(button(container, "确认保存额度"));
-    const calendarSync = checkbox(container, "日历同步");
+    await click(button(document, "确认保存额度"));
+    const calendarSync = checkbox(document, "日历同步");
     await click(calendarSync);
     expect(calendarSync.checked).toBe(true);
 
@@ -128,9 +129,9 @@ describe("admin QuickLogin quota integration", () => {
     });
     await settleUi();
 
-    expect(container.textContent).toContain("设备额度已保存");
+    expect(document.body.textContent).toContain("设备额度已保存");
     expect(calendarSync.checked).toBe(true);
-    expect(container.querySelector('[aria-label="快捷登录设备额度当前值"]')?.textContent)
+    expect(document.querySelector('[aria-label="快捷登录设备额度当前值"]')?.textContent)
       .toContain("3 台");
     expect(mocks.adminFetch).toHaveBeenCalledTimes(2);
   });

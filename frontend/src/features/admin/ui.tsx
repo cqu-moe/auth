@@ -1,17 +1,35 @@
 import type { ReactNode } from "react";
+import { Plus, X } from "lucide-react";
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Input,
+  Label,
+  Switch,
+} from "@cqu-moe/ui";
 import SharedCopyButton from "../../components/CopyButton";
 
-export function FieldLabel({ children, hint }: { children: ReactNode; hint?: string }) {
+export function FieldLabel({
+  children,
+  hint,
+  htmlFor,
+}: {
+  children: ReactNode;
+  hint?: string;
+  htmlFor?: string;
+}) {
   return (
     <div className="mb-1.5">
-      <label className="text-xs font-medium text-gray-700">{children}</label>
-      {hint && <span className="ml-2 text-xs text-gray-400">{hint}</span>}
+      <Label htmlFor={htmlFor} className="text-xs">{children}</Label>
+      {hint && <span className="ml-2 text-xs text-muted-foreground">{hint}</span>}
     </div>
   );
 }
-
-export const inputClass =
-  "w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-300";
 
 // Editable list of single-line strings (add / remove rows). Always renders at
 // least one row so the user has something to type into.
@@ -20,11 +38,13 @@ export function StringListInput({
   onChange,
   placeholder,
   addLabel,
+  idPrefix,
 }: {
   values: string[];
   onChange: (next: string[]) => void;
   placeholder?: string;
   addLabel: string;
+  idPrefix?: string;
 }) {
   const rows = values.length === 0 ? [""] : values;
 
@@ -34,8 +54,7 @@ export function StringListInput({
     onChange(next);
   };
   const removeAt = (i: number) => {
-    const next = rows.filter((_, idx) => idx !== i);
-    onChange(next);
+    onChange(rows.filter((_, idx) => idx !== i));
   };
   const add = () => onChange([...rows, ""]);
 
@@ -43,36 +62,42 @@ export function StringListInput({
     <div className="space-y-2">
       {rows.map((val, i) => (
         <div key={i} className="flex items-center gap-2">
-          <input
+          <Input
             type="text"
             value={val}
             onChange={(e) => setAt(i, e.target.value)}
             placeholder={placeholder}
-            className={inputClass}
+            aria-label={`${addLabel} 第 ${i + 1} 项`}
+            id={idPrefix ? `${idPrefix}-${i}` : undefined}
           />
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-sm"
             onClick={() => removeAt(i)}
             disabled={rows.length === 1}
-            className="shrink-0 w-8 h-8 flex items-center justify-center rounded-lg border border-gray-200 text-gray-400 hover:text-red-600 hover:border-red-200 disabled:opacity-30 disabled:hover:text-gray-400 disabled:hover:border-gray-200 transition-colors"
+            className="text-muted-foreground hover:text-destructive"
             aria-label="删除此项"
           >
-            ×
-          </button>
+            <X aria-hidden="true" />
+          </Button>
         </div>
       ))}
-      <button
+      <Button
         type="button"
+        variant="link"
+        size="sm"
         onClick={add}
-        className="text-xs font-medium text-blue-600 hover:text-blue-700"
+        className="px-0"
       >
-        + {addLabel}
-      </button>
+        <Plus aria-hidden="true" size={16} />
+        {addLabel}
+      </Button>
     </div>
   );
 }
 
-// Small accessible on/off toggle.
+// Accessible on/off toggle built on the shared Switch.
 export function Toggle({
   checked,
   onChange,
@@ -85,28 +110,13 @@ export function Toggle({
   hint?: string;
 }) {
   return (
-    <label className="flex items-center justify-between gap-3 cursor-pointer py-1">
+    <div className="flex items-center justify-between gap-3 py-1">
       <span>
-        <span className="text-sm text-gray-700">{label}</span>
-        {hint && <span className="block text-xs text-gray-400">{hint}</span>}
+        <span className="text-sm text-foreground">{label}</span>
+        {hint && <span className="block text-xs text-muted-foreground">{hint}</span>}
       </span>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        aria-label={label}
-        onClick={() => onChange(!checked)}
-        className={`relative shrink-0 w-10 h-6 rounded-full transition-colors ${
-          checked ? "bg-blue-600" : "bg-gray-200"
-        }`}
-      >
-        <span
-          className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-            checked ? "translate-x-4" : "translate-x-0"
-          }`}
-        />
-      </button>
-    </label>
+      <Switch checked={checked} onCheckedChange={onChange} aria-label={label} />
+    </div>
   );
 }
 
@@ -115,31 +125,34 @@ export function CopyButton({ value }: { value: string }) {
   return <SharedCopyButton value={value} compact />;
 }
 
-// Centered modal shell with backdrop.
+// Centered modal shell built on the shared Dialog primitives.
 export function Modal({
   onClose,
+  title,
+  description,
   children,
-  maxWidth = "max-w-2xl",
+  footer,
+  maxWidth = "max-w-xl",
 }: {
   onClose: () => void;
+  title: string;
+  description?: string;
   children: ReactNode;
+  footer?: ReactNode;
   maxWidth?: string;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div
-        className={`relative w-full ${maxWidth} max-h-[90vh] overflow-y-auto bg-white rounded-2xl border border-gray-200 shadow-xl`}
-        role="dialog"
-        aria-modal="true"
-      >
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className={maxWidth}>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          {description && <DialogDescription>{description}</DialogDescription>}
+        </DialogHeader>
         {children}
-      </div>
-    </div>
+        {footer && <DialogFooter>{footer}</DialogFooter>}
+      </DialogContent>
+    </Dialog>
   );
 }
 
-// --- Entitlement panel (per-user 分级权益 / 能力授权) ---
-// 表单态/矩阵实现见 components/EntitlementFields。保存为整组替换(full replace):
-// 仅把勾选的 flag 与非空 quota 发给 PUT,未勾/空缺省即「false / 无限」。
-// 预设从 GET /admin/entitlement-presets 读(管理台「权益预设」页可编辑)。
+export { DialogFooter };

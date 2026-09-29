@@ -1,5 +1,7 @@
 import { useState, ReactNode, useEffect, useRef, useCallback } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { ChevronDown, Link2, Loader2, Mail } from "lucide-react";
+import { Alert, AlertDescription, Button, PageHeader, Skeleton } from "@cqu-moe/ui";
 import { authClient } from "../lib/auth-client";
 import {
   deleteBinding,
@@ -13,15 +15,13 @@ import SettingsCard from "../components/SettingsCard";
 import QuickloginSettings from "../components/quicklogin/QuickloginSettings";
 
 import CopyButton from "../components/CopyButton";
-// DO /status 返回的会话状态对象（active/relogin_required/... + studentId）；
-// 后端在 DO 非 2xx 或解析失败时回传 { error: true } sentinel。
+
 interface CquSessionStatus {
   status?: string;
   studentId?: string;
   error?: boolean;
 }
 
-// GET /api/v1/cqu/binding 的响应形状。
 interface CquBindStatus {
   address?: string;
   bindStatus: "pending" | "active" | "revoked" | "unbound";
@@ -39,7 +39,6 @@ interface LiveCode {
   expired?: boolean;
 }
 
-
 function formatTime(ts: number): string {
   const d = new Date(ts);
   return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -50,7 +49,6 @@ function CodeCountdown({ deadline, onExpire }: { deadline: number; onExpire?: ()
     Math.max(0, Math.round((deadline - Date.now()) / 1000))
   );
   const expiredFiredRef = useRef(false);
-  // 用 ref 持有最新 onExpire，避免 callback identity 变化重置 expiredFiredRef
   const onExpireRef = useRef(onExpire);
   useEffect(() => { onExpireRef.current = onExpire; }, [onExpire]);
 
@@ -67,7 +65,7 @@ function CodeCountdown({ deadline, onExpire }: { deadline: number; onExpire?: ()
     update();
     const t = setInterval(update, 1000);
     return () => clearInterval(t);
-  }, [deadline]); // onExpire 通过 ref 访问，不需要列为 dep
+  }, [deadline]);
 
   const expired = secondsLeft <= 0;
   const m = Math.floor(secondsLeft / 60);
@@ -75,17 +73,11 @@ function CodeCountdown({ deadline, onExpire }: { deadline: number; onExpire?: ()
   const countdown = `${m}:${s.toString().padStart(2, "0")}`;
 
   if (expired) {
-    return (
-      <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-400">
-        可能已过期
-      </span>
-    );
+    return <span className="badge badge-muted">可能已过期</span>;
   }
 
   return (
-    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-      secondsLeft <= 60 ? "bg-red-100 text-red-600" : "bg-blue-100 text-blue-700"
-    }`}>
+    <span className={`badge ${secondsLeft <= 60 ? "badge-warning" : "badge-info"}`}>
       {countdown}
     </span>
   );
@@ -94,6 +86,15 @@ function CodeCountdown({ deadline, onExpire }: { deadline: number; onExpire?: ()
 let liveCodeIdCounter = 0;
 
 const MAX_RETRIES = 5;
+
+const wsStatusText: Record<WsState, string> = {
+  idle: "准备连接…",
+  connecting: "正在建立连接…",
+  open: "实时监听中，验证码到达将立即显示",
+  closed: "连接中断，正在重连…",
+  error: "连接出错，正在重连…",
+  failed: "连接多次失败，请检查网络或登录状态",
+};
 
 function LiveCodeSection() {
   const [open, setOpen] = useState(false);
@@ -104,7 +105,6 @@ function LiveCodeSection() {
   const connectionRef = useRef<{ close(): void } | null>(null);
   const openRef = useRef(false);
 
-  // Keep openRef in sync so WS close handler can check whether to reconnect
   openRef.current = open;
 
   useEffect(() => {
@@ -139,7 +139,6 @@ function LiveCodeSection() {
     };
   }, [open, connectionKey]);
 
-  // 稳定引用：避免 onExpire 每轮渲染变化导致 CodeCountdown 的 expiredFiredRef 被重置
   const markExpired = useCallback((id: number) => {
     setCodes((prev) =>
       prev.map((c) => (c.id === id ? { ...c, expired: true } : c))
@@ -151,93 +150,69 @@ function LiveCodeSection() {
     bind_code: "绑定码",
   };
 
-  const typeBadgeClass: Record<LiveCode["type"], string> = {
-    login_2fa: "bg-indigo-100 text-indigo-700",
-    bind_code: "bg-blue-100 text-blue-700",
-  };
-
   return (
-    <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-      {/* ── Collapsible header ─────────────────────────────────────────────── */}
+    <div className="overflow-hidden rounded-lg border border-border bg-surface">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-gray-50"
+        className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-muted"
         aria-expanded={open}
       >
-        <div className="flex items-center gap-2">
-          <svg className="h-4 w-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-          </svg>
-          <span className="text-sm font-semibold text-gray-900">实时验证码</span>
+        <span className="flex items-center gap-2">
+          <Mail className="text-muted-foreground" aria-hidden="true" size={16} />
+          <span className="text-sm font-semibold text-foreground">实时验证码</span>
           {open && wsState === "open" && (
-            <span className="h-2 w-2 animate-pulse rounded-full bg-green-500" aria-hidden="true" />
+            <span className="h-2 w-2 animate-pulse rounded-full bg-success" aria-hidden="true" />
           )}
-        </div>
-        <svg
-          className={`h-4 w-4 text-gray-400 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
+        </span>
+        <ChevronDown
+          className={`text-muted-foreground transition-transform duration-200 ${open ? "rotate-180" : ""}`}
           aria-hidden="true"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
+          size={16}
+        />
       </button>
 
-      {/* ── Collapsible body ───────────────────────────────────────────────── */}
       {open && (
-        <div className="space-y-4 border-t border-gray-100 px-4 pb-4 pt-3">
-          {/* WS connection status */}
-          <div className={`flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg ${
+        <div className="space-y-4 border-t border-border px-4 pb-4 pt-3">
+          <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${
             wsState === "open"
-              ? "bg-green-50 text-green-700"
+              ? "bg-success/10 text-success"
               : wsState === "connecting"
-              ? "bg-blue-50 text-blue-600"
+              ? "bg-link/10 text-link"
               : wsState === "error" || wsState === "closed"
-              ? "bg-yellow-50 text-yellow-700"
+              ? "bg-warning/10 text-warning"
               : wsState === "failed"
-              ? "bg-red-50 text-red-700"
-              : "bg-gray-50 text-gray-500"
+              ? "bg-destructive/10 text-destructive"
+              : "bg-muted text-muted-foreground"
           }`}>
             {wsState === "open" && (
-              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              <span className="h-2 w-2 animate-pulse rounded-full bg-success" aria-hidden="true" />
             )}
             {wsState === "connecting" && (
-              <span className="w-3.5 h-3.5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              <Loader2 className="animate-spin" aria-hidden="true" size={14} />
             )}
             {(wsState === "closed" || wsState === "error") && (
-              <span className="w-3.5 h-3.5 border-2 border-yellow-500 border-t-transparent rounded-full animate-spin" />
+              <Loader2 className="animate-spin" aria-hidden="true" size={14} />
             )}
+            {wsState === "failed" && <span aria-hidden="true">✕</span>}
+            <span>{wsStatusText[wsState]}</span>
             {wsState === "failed" && (
-              <span className="w-3.5 h-3.5 text-red-500" aria-hidden="true">✕</span>
-            )}
-            {wsState === "open" && "实时监听中，验证码到达将立即显示"}
-            {wsState === "connecting" && "正在建立连接…"}
-            {wsState === "closed" && "连接中断，正在重连…"}
-            {wsState === "error" && "连接出错，正在重连…"}
-            {wsState === "idle" && "准备连接…"}
-            {wsState === "failed" && (
-              <>
-                <span>连接多次失败，请检查网络或登录状态</span>
-                <button
-                  type="button"
-                  onClick={() => setConnectionKey((key) => key + 1)}
-                  className="ml-auto shrink-0 px-2 py-0.5 rounded border border-red-300 bg-white text-red-600 hover:bg-red-50 transition-colors"
-                >
-                  重试
-                </button>
-              </>
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                className="ml-auto shrink-0"
+                onClick={() => setConnectionKey((key) => key + 1)}
+              >
+                重试
+              </Button>
             )}
           </div>
 
-          {/* Code list or empty hint */}
           {codes.length === 0 ? (
-            <div className="p-6 border-2 border-dashed border-gray-200 rounded-xl text-center">
-              <svg className="w-8 h-8 text-gray-300 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
-              <p className="text-sm text-gray-400 leading-relaxed">
+            <div className="rounded-lg border border-dashed border-border p-6 text-center">
+              <Mail className="mx-auto mb-2 text-muted-foreground/60" aria-hidden="true" size={32} />
+              <p className="text-sm leading-relaxed text-muted-foreground">
                 去 CQU 登录页选「邮箱验证码」登录，<br />验证码会实时显示在这里。
               </p>
             </div>
@@ -248,25 +223,23 @@ function LiveCodeSection() {
                 return (
                   <li
                     key={item.id}
-                    className={`p-4 rounded-xl border-2 ${
-                      expired ? "border-gray-200 bg-gray-50" : "border-blue-200 bg-blue-50"
+                    className={`rounded-lg border p-4 ${
+                      expired ? "border-border bg-muted" : "border-link/40 bg-link/10"
                     }`}
                   >
-                    <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${typeBadgeClass[item.type]}`}>
-                          {typeLabelMap[item.type]}
-                        </span>
-                        <span className="text-xs text-gray-400">{formatTime(item.ts)}</span>
+                        <span className="badge badge-info">{typeLabelMap[item.type]}</span>
+                        <span className="text-xs text-muted-foreground">{formatTime(item.ts)}</span>
                       </div>
                       <CodeCountdown
                         deadline={item.deadline}
                         onExpire={() => markExpired(item.id)}
                       />
                     </div>
-                    <div className="flex items-center justify-between gap-4 flex-wrap">
-                      <span className={`font-mono text-3xl font-bold tracking-[0.25em] ${
-                        expired ? "text-gray-400" : "text-blue-900"
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                      <span className={`font-mono text-3xl font-bold tracking-widest ${
+                        expired ? "text-muted-foreground" : "text-foreground"
                       }`}>
                         {item.code}
                       </span>
@@ -278,7 +251,7 @@ function LiveCodeSection() {
             </ul>
           )}
 
-          <p className="text-xs text-gray-400">
+          <p className="text-xs text-muted-foreground">
             最多显示最近 3 条；验证码自到达起约 10 分钟内有效。
           </p>
         </div>
@@ -334,32 +307,28 @@ function CquBindingSection() {
     }
   };
 
-  // ── Loading skeleton ────────────────────────────────────────────────────────
   if (statusLoading) {
     return (
       <SettingsCard title="CQU 账户绑定">
-        <div className="flex items-center gap-2 text-sm text-gray-400">
-          <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-transparent" />
-          加载中...
+        <div className="space-y-3">
+          <Skeleton className="h-4 w-2/3" />
+          <Skeleton className="h-4 w-1/2" />
         </div>
       </SettingsCard>
     );
   }
 
-  // ── Status fetch error ──────────────────────────────────────────────────────
   if (statusError) {
     return (
       <SettingsCard title="CQU 账户绑定">
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">
-          获取绑定状态失败，请稍后重试。
+        <div className="space-y-4">
+          <Alert variant="destructive">
+            <AlertDescription>获取绑定状态失败，请稍后重试。</AlertDescription>
+          </Alert>
+          <Button type="button" variant="outline" onClick={() => void fetchStatus()}>
+            重新加载
+          </Button>
         </div>
-        <button
-          type="button"
-          onClick={() => void fetchStatus()}
-          className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
-        >
-          重新加载
-        </button>
       </SettingsCard>
     );
   }
@@ -369,72 +338,54 @@ function CquBindingSection() {
   const sessionActive = !hasSessionError && status?.sessionStatus?.status === "active";
   const studentId = status?.sessionStatus?.studentId;
 
-  // Session status badge
-  type BadgeVariant = "green" | "yellow" | "gray";
+  type BadgeVariant = "success" | "warning" | "muted";
   const sessionBadge: { label: string; variant: BadgeVariant } = hasSessionError
-    ? { label: "状态未知", variant: "gray" }
+    ? { label: "状态未知", variant: "muted" }
     : sessionActive
-    ? { label: "正常", variant: "green" }
-    : { label: "需要重新登录", variant: "yellow" };
-
-  const badgeClasses: Record<BadgeVariant, { pill: string; dot: string }> = {
-    green: { pill: "bg-green-100 text-green-700", dot: "bg-green-500" },
-    yellow: { pill: "bg-yellow-100 text-yellow-700", dot: "bg-yellow-500" },
-    gray: { pill: "bg-gray-100 text-gray-500", dot: "bg-gray-400" },
-  };
-
-  const maintenanceActionClass =
-    "inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-gray-300 px-2 py-2 text-xs font-medium text-gray-800 transition-colors hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 sm:px-4 sm:text-sm";
+    ? { label: "正常", variant: "success" }
+    : { label: "需要重新登录", variant: "warning" };
 
   return (
     <SettingsCard title="CQU 账户绑定" description="绑定后由系统代你维护与重庆大学统一认证的会话。">
-
-      {/* Action feedback */}
       {actionError && (
-        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">
-          {actionError}
-        </div>
+        <Alert variant="destructive" className="mb-4">
+          <AlertDescription>{actionError}</AlertDescription>
+        </Alert>
       )}
       {actionSuccess && (
-        <div className="mb-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700" role="status">
-          {actionSuccess}
-        </div>
+        <Alert className="mb-4 border-success/40 bg-success/10 text-success">
+          <AlertDescription className="text-success">{actionSuccess}</AlertDescription>
+        </Alert>
       )}
 
       {isBound ? (
         <div className="space-y-5">
-          {/* ── Bound info card ─────────────────────────────────────────────── */}
-          <div className="flex flex-col gap-0 divide-y divide-gray-100 rounded-xl border border-gray-200">
-            {/* Student ID row */}
+          <div className="flex flex-col divide-y divide-border rounded-lg border border-border">
             <div className="flex items-center justify-between px-4 py-3">
-              <span className="text-sm text-gray-500">统一身份认证账号</span>
-              <span className="text-sm font-medium tabular-nums text-gray-900">{studentId ?? "—"}</span>
+              <span className="text-sm text-muted-foreground">统一身份认证账号</span>
+              <span className="text-sm font-medium tabular-nums text-foreground">{studentId ?? "—"}</span>
             </div>
 
-            {/* Session status row */}
             <div className="flex items-center justify-between px-4 py-3">
-              <span className="text-sm text-gray-500">Auth 服务端会话</span>
-              <span
-                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${badgeClasses[sessionBadge.variant].pill}`}
-              >
-                <span className={`h-1.5 w-1.5 rounded-full ${badgeClasses[sessionBadge.variant].dot}`} />
+              <span className="text-sm text-muted-foreground">Auth 服务端会话</span>
+              <span className={`badge badge-${sessionBadge.variant}`}>
+                <i aria-hidden="true" />
                 {sessionBadge.label}
               </span>
             </div>
 
-            {/* Dedicated inbox address — given extra prominence */}
             {status?.address && (
-              <div className="bg-blue-50/70 px-4 py-4">
+              <div className="bg-link/10 px-4 py-4">
                 <div className="mb-2 flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-blue-700">专属密保邮箱</p>
-                    <p className="mt-0.5 text-xs text-blue-600">
+                    <p className="text-xs font-semibold tracking-wider text-link">专属密保邮箱</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
                       需将此地址设置为 CQU 自服务中心的密保邮箱，系统才能自动接收 2FA 验证码。
                     </p>
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
-                  <span className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-blue-900">
+                  <span className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-foreground">
                     {status.address}
                   </span>
                   <CopyButton text={status.address} />
@@ -443,61 +394,53 @@ function CquBindingSection() {
             )}
           </div>
 
-          {/* ── 实时验证码 — 仅 active 时显示 ─────────────────────────────────── */}
           {status?.bindStatus === "active" && <LiveCodeSection />}
 
-          {/* ── Maintenance actions ───────────────────────────────────────────── */}
           <div
             className="flex flex-nowrap items-center gap-2 sm:gap-3"
             role="group"
             aria-label="CQU 绑定操作"
           >
-            <a
-              href="https://self.cqu.edu.cn/cas-success/safe-center/email-bind-way/rebind"
-              target="_blank"
-              rel="noopener noreferrer"
-              className={maintenanceActionClass}
-            >
-              重新绑定邮箱
-              <span className="sr-only">（在新标签页打开）</span>
-            </a>
+            <Button asChild variant="outline" size="sm" className="min-h-11">
+              <a
+                href="https://self.cqu.edu.cn/cas-success/safe-center/email-bind-way/rebind"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                重新绑定邮箱
+                <span className="sr-only">（在新标签页打开）</span>
+              </a>
+            </Button>
 
-            <Link to="/cqu/bind?repair=1" className={maintenanceActionClass}>
-              重新设置密码
-            </Link>
+            <Button asChild variant="outline" size="sm" className="min-h-11">
+              <Link to="/cqu/bind?repair=1">重新设置密码</Link>
+            </Button>
 
-            <button
+            <Button
               type="button"
+              variant="destructive"
+              size="sm"
+              className="min-h-11"
               onClick={() => void handleUnbind()}
               disabled={unbindLoading}
               aria-busy={unbindLoading}
-              className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-red-300 px-2 py-2 text-xs font-medium text-red-700 transition-colors hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:cursor-not-allowed disabled:opacity-50 sm:px-4 sm:text-sm"
             >
-              {unbindLoading && (
-                <span
-                  className="h-4 w-4 animate-spin rounded-full border-2 border-red-400 border-t-transparent"
-                  aria-hidden="true"
-                />
-              )}
+              {unbindLoading && <Loader2 className="animate-spin" aria-hidden="true" />}
               {unbindLoading ? "正在解除…" : "解除绑定"}
-            </button>
+            </Button>
           </div>
         </div>
       ) : (
-        /* ── Unbound state ────────────────────────────────────────────────── */
         <div className="space-y-4">
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-muted-foreground">
             绑定 CQU 账户后，系统将代您持续维护与重庆大学统一认证（CAS）的会话，让第三方应用能以您的身份安全访问教务、图书馆等 CQU 系统。
           </p>
-          <Link
-            to="/cqu/bind"
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-            </svg>
-            绑定 CQU 账户
-          </Link>
+          <Button asChild>
+            <Link to="/cqu/bind">
+              <Link2 aria-hidden="true" />
+              绑定 CQU 账户
+            </Link>
+          </Button>
         </div>
       )}
     </SettingsCard>
@@ -518,34 +461,37 @@ export default function Settings() {
 
   return (
     <Layout>
-      <div className="max-w-3xl">
-        <h1 className="text-2xl font-bold text-gray-900">账户设置</h1>
-        <p className="mt-1 text-sm text-gray-500">管理账户信息、安全设置与 CQU 服务集成。</p>
+      <PageHeader
+        title="账户设置"
+        description="管理账户信息、安全设置与 CQU 服务集成。"
+        actions={recovery ? (
+          <Button asChild data-cqu-action>
+            <Link to={recovery.to}>{recovery.label}</Link>
+          </Button>
+        ) : undefined}
+      />
 
-        <div className="mt-8 space-y-10">
-          <SettingsGroup label="账户">
-            <AccountProfileSection
-              name={user?.name ?? ""}
-              email={user?.email ?? ""}
-              onSessionRefresh={refetchSession}
-            />
-          </SettingsGroup>
+      <div className="space-y-10">
+        <SettingsGroup label="账户">
+          <AccountProfileSection
+            name={user?.name ?? ""}
+            email={user?.email ?? ""}
+            onSessionRefresh={refetchSession}
+          />
+        </SettingsGroup>
 
-          <SettingsGroup label="安全">
-            <SecuritySection twoFactorEnabled={user?.twoFactorEnabled === true} />
-          </SettingsGroup>
+        <SettingsGroup label="安全">
+          <SecuritySection twoFactorEnabled={user?.twoFactorEnabled === true} />
+        </SettingsGroup>
 
-          <SettingsGroup label="CQU 集成">
-            {recovery && <Link data-cqu-action to={recovery.to} className="inline-flex min-h-11 items-center rounded-lg bg-blue-600 px-4 text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">{recovery.label}</Link>}
-            {/* CQU 绑定 */}
-            <CquBindingSection />
+        <SettingsGroup label="CQU 集成">
+          <CquBindingSection />
 
-            <QuickloginSettings
-              currentDeviceHint={currentDeviceHint}
-              reconnectDeviceHint={reconnectDeviceHint}
-            />
-          </SettingsGroup>
-        </div>
+          <QuickloginSettings
+            currentDeviceHint={currentDeviceHint}
+            reconnectDeviceHint={reconnectDeviceHint}
+          />
+        </SettingsGroup>
       </div>
     </Layout>
   );
@@ -554,7 +500,7 @@ export default function Settings() {
 function SettingsGroup({ label, children }: { label: string; children: ReactNode }) {
   return (
     <section aria-label={label}>
-      <h2 className="mb-3 px-1 text-xs font-semibold uppercase tracking-widest text-gray-400">
+      <h2 className="mb-3 px-1 text-xs font-semibold tracking-widest text-muted-foreground">
         {label}
       </h2>
       <div className="space-y-4">{children}</div>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { Button } from "@cqu-moe/ui";
 
 export interface CquBindSuccessProps {
   returnTo: string | null;
@@ -43,34 +44,32 @@ export default function CquBindSuccess({
   return (
     <div className="space-y-6 text-center">
       <div>
-        <h2 className="text-xl font-semibold text-gray-900">{title}</h2>
-        <p className="mt-2 text-sm text-gray-500">{description}</p>
+        <h2 className="text-xl font-semibold text-foreground">{title}</h2>
+        <p className="mt-2 text-sm text-muted-foreground">{description}</p>
       </div>
       {returnTo ? (
-        <a
-          href={returnTo}
-          onClick={() => setPaused(true)}
-          className="block w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
-        >
-          {schedule ? "返回课表" : "返回服务"}
-        </a>
+        <Button asChild className="w-full">
+          <a href={returnTo} onClick={() => setPaused(true)}>
+            {schedule ? "返回课表" : "返回服务"}
+          </a>
+        </Button>
       ) : (
-        <a href="https://schedule.cqu.moe/" className="block text-sm text-blue-600">
-          前往课表
-        </a>
+        <Button asChild variant="link">
+          <a href="https://schedule.cqu.moe/">前往课表</a>
+        </Button>
       )}
       {running && (
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-muted-foreground">
           {seconds} 秒后自动返回 ·{" "}
-          <button type="button" onClick={() => setPaused(true)} className="underline">
+          <Button type="button" variant="link" size="sm" onClick={() => setPaused(true)}>
             留在此页
-          </button>
+          </Button>
         </p>
       )}
       {!returnTo && (
-        <Link to="/settings" className="block text-sm text-gray-500">
-          返回账户设置
-        </Link>
+        <Button asChild variant="link">
+          <Link to="/settings">返回账户设置</Link>
+        </Button>
       )}
     </div>
   );

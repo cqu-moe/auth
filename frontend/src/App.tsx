@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { PageState } from "@cqu-moe/ui";
 import { authClient } from "./lib/auth-client";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -7,7 +8,6 @@ import ResetPassword from "./pages/ResetPassword";
 import ResetPasswordConfirm from "./pages/ResetPasswordConfirm";
 import Settings from "./pages/Settings";
 import ChangeEmail from "./pages/ChangeEmail";
-import Admin from "./pages/Admin";
 import OAuthAuthorize from "./pages/OAuthAuthorize";
 import CquBindWizard from "./pages/CquBindWizard";
 import VerifyEmail from "./pages/VerifyEmail";
@@ -16,6 +16,11 @@ import TwoFactorSettings from "./pages/TwoFactorSettings";
 import ProtectedRoute from "./components/ProtectedRoute";
 import EmailVerificationGate from "./components/EmailVerificationGate";
 import AuthError from "./pages/AuthError";
+import AdminLayout, { AdminPage } from "./pages/Admin";
+import { UsersSection } from "./features/admin/UsersSection";
+import { EntitlementsSection } from "./features/admin/EntitlementsSection";
+import { InvitationsSection } from "./features/admin/InvitationsSection";
+import { OAuthClientsSection } from "./features/admin/OAuthClientsSection";
 import { syncPostHogIdentity, syncPostHogReplay } from "./lib/posthog";
 
 function PostHogLifecycle() {
@@ -42,8 +47,10 @@ function RootRedirect() {
 
   if (isPending) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+      <div className="flex min-h-dvh items-center justify-center bg-background p-6">
+        <div className="w-full max-w-sm">
+          <PageState state="loading" title="正在进入" description="正在确认登录状态…" />
+        </div>
       </div>
     );
   }
@@ -93,10 +100,44 @@ export default function App() {
             path="/admin"
             element={
               <ProtectedRoute requireAdmin>
-                <Admin />
+                <AdminLayout />
               </ProtectedRoute>
             }
-          />
+          >
+            <Route index element={<Navigate to="/admin/users" replace />} />
+            <Route
+              path="users"
+              element={
+                <AdminPage title="用户管理" description="查看用户、调整角色与封禁状态。">
+                  <UsersSection />
+                </AdminPage>
+              }
+            />
+            <Route
+              path="presets"
+              element={
+                <AdminPage title="权益预设" description="维护能力预设与新用户默认权益。">
+                  <EntitlementsSection />
+                </AdminPage>
+              }
+            />
+            <Route
+              path="invitations"
+              element={
+                <AdminPage title="注册邀请" description="生成与管理注册邀请码。">
+                  <InvitationsSection />
+                </AdminPage>
+              }
+            />
+            <Route
+              path="oauth"
+              element={
+                <AdminPage title="OAuth 客户端" description="管理第三方应用的 OAuth 接入。">
+                  <OAuthClientsSection />
+                </AdminPage>
+              }
+            />
+          </Route>
           <Route
             path="/oauth/authorize"
             element={

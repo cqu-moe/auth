@@ -1,9 +1,22 @@
 import { useState, useEffect, useCallback } from "react";
+import { Plus } from "lucide-react";
+import {
+  Alert,
+  AlertDescription,
+  Button,
+  Input,
+  PageState,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@cqu-moe/ui";
 import MenuSelect from "../../components/MenuSelect";
 import type { EntitlementItem } from "../../components/entitlement-form";
 import { adminFetch } from "../../lib/api/admin";
 import { CopyButton, FieldLabel, Toggle } from "./ui";
-
 
 interface EntitlementPreset {
   name: string;
@@ -31,8 +44,6 @@ interface CreatedRegistrationInvitation extends RegistrationInvitation {
   registrationUrl: string;
 }
 
-// Full OAuth client config as returned by GET /admin/oauth-clients (snake_case).
-
 // Read the message from a non-2xx response. The backend's errorResponse shape is
 // { detail: { error: { code, message } } }, so read that path (not body.error).
 async function readErrorMessage(res: Response, fallback: string): Promise<string> {
@@ -45,6 +56,14 @@ async function readErrorMessage(res: Response, fallback: string): Promise<string
     return fallback;
   }
 }
+
+const statusBadge: Record<InvitationStatus, { label: string; variant: string }> = {
+  active: { label: "可使用", variant: "badge-success" },
+  in_use: { label: "注册中", variant: "badge-info" },
+  expired: { label: "已过期", variant: "badge-muted" },
+  used: { label: "已使用", variant: "badge-info" },
+  revoked: { label: "已撤销", variant: "badge-destructive" },
+};
 
 export function InvitationsSection() {
   const [invitations, setInvitations] = useState<RegistrationInvitation[]>([]);
@@ -161,30 +180,15 @@ export function InvitationsSection() {
     }
   };
 
-  const statusMeta: Record<
-    InvitationStatus,
-    { label: string; className: string }
-  > = {
-    active: { label: "可使用", className: "bg-green-100 text-green-700" },
-    in_use: { label: "注册中", className: "bg-blue-100 text-blue-700" },
-    expired: { label: "已过期", className: "bg-gray-100 text-gray-600" },
-    used: { label: "已使用", className: "bg-purple-100 text-purple-700" },
-    revoked: { label: "已撤销", className: "bg-red-100 text-red-700" },
-  };
-
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-gray-400 text-sm py-8">
-        <div className="w-5 h-5 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
-        加载中...
-      </div>
+      <PageState state="loading" title="正在加载注册邀请" description="正在读取邀请与注册政策…" />
     );
   }
 
   return (
     <div className="space-y-5">
-      {/* --- 注册政策开关 --- */}
-      <div className="border border-gray-100 bg-gray-50 rounded-xl p-4">
+      <div className="rounded-lg border border-border bg-muted p-4">
         <Toggle
           checked={invitationRequired}
           onChange={(v) => void togglePolicy(v)}
@@ -196,13 +200,12 @@ export function InvitationsSection() {
           }
         />
         {savingPolicy && (
-          <p className="mt-1 text-xs text-gray-400">保存中...</p>
+          <p className="mt-1 text-xs text-muted-foreground">保存中…</p>
         )}
       </div>
 
-      {/* --- 生成邀请 --- */}
-      <div className="flex items-end justify-between gap-4">
-        <div className="min-w-0 flex-1 max-w-xs">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="min-w-0 max-w-xs flex-1">
           <FieldLabel hint="使用该邀请码注册的用户获得对应权益">注册后权益</FieldLabel>
           <MenuSelect
             value={createPreset}
@@ -216,42 +219,41 @@ export function InvitationsSection() {
               })),
             ]}
             aria-label="新邀请的权益预设"
-            buttonClassName="w-full justify-between px-3 py-2"
+            className="w-full"
           />
         </div>
-        <button
+        <Button
           type="button"
           onClick={createInvitation}
           disabled={creating}
-          className="shrink-0 px-3 py-2 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white transition-colors"
         >
-          {creating ? "生成中..." : "+ 生成邀请"}
-        </button>
+          <Plus aria-hidden="true" size={16} />
+          {creating ? "生成中…" : "生成邀请"}
+        </Button>
       </div>
 
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-          {error}
-          <button onClick={() => setError("")} className="ml-2 underline">关闭</button>
-        </div>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       {created && (
-        <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
-          <div className="flex items-center justify-between gap-3">
+        <div className="rounded-lg border border-link/40 bg-link/10 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-medium text-blue-900">注册链接已生成</p>
-              <p className="mt-1 text-xl font-mono font-semibold tracking-widest text-blue-800">
+              <p className="text-sm font-medium text-foreground">注册链接已生成</p>
+              <p className="mt-1 font-mono text-xl font-semibold tracking-widest text-foreground">
                 {created.code}
               </p>
             </div>
             <CopyButton value={created.code} />
           </div>
           <div className="mt-3 flex items-center gap-2">
-            <input
+            <Input
               readOnly
               value={created.registrationUrl}
-              className="min-w-0 flex-1 px-3 py-2 text-xs border border-blue-200 rounded-lg bg-white text-gray-600"
+              className="flex-1"
               aria-label="注册链接"
             />
             <CopyButton value={created.registrationUrl} />
@@ -260,67 +262,66 @@ export function InvitationsSection() {
       )}
 
       {invitations.length === 0 ? (
-        <p className="text-sm text-gray-400 py-4">暂无注册邀请</p>
+        <PageState state="empty" title="暂无注册邀请" description="生成邀请码后，会显示在这里。" />
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-gray-200">
-                <th className="text-left py-3 px-3 text-xs font-semibold text-gray-500">邀请码</th>
-                <th className="text-left py-3 px-3 text-xs font-semibold text-gray-500">状态</th>
-                <th className="text-left py-3 px-3 text-xs font-semibold text-gray-500">权益</th>
-                <th className="text-left py-3 px-3 text-xs font-semibold text-gray-500">过期时间</th>
-                <th className="text-left py-3 px-3 text-xs font-semibold text-gray-500">使用情况</th>
-                <th className="text-right py-3 px-3 text-xs font-semibold text-gray-500">操作</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-left">邀请码</TableHead>
+                <TableHead className="text-left">状态</TableHead>
+                <TableHead className="text-left">权益</TableHead>
+                <TableHead className="text-left">过期时间</TableHead>
+                <TableHead className="text-left">使用情况</TableHead>
+                <TableHead className="text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {invitations.map((invitation) => {
-                const meta = statusMeta[invitation.status];
+                const meta = statusBadge[invitation.status];
                 const registrationUrl = `${window.location.origin}/register?code=${encodeURIComponent(invitation.code)}`;
                 return (
-                  <tr key={invitation.code} className="hover:bg-gray-50">
-                    <td className="py-3 px-3">
-                      <span className="font-mono font-semibold tracking-wider text-gray-900">
+                  <TableRow key={invitation.code}>
+                    <TableCell>
+                      <span className="font-mono font-semibold tracking-wider text-foreground">
                         {invitation.code}
                       </span>
-                    </td>
-                    <td className="py-3 px-3">
-                      <span className={`inline-flex text-xs font-medium px-2 py-0.5 rounded-full ${meta.className}`}>
-                        {meta.label}
-                      </span>
-                    </td>
-                    <td className="py-3 px-3 text-xs text-gray-500">
-                      {invitation.preset ?? <span className="text-gray-400">默认</span>}
-                    </td>
-                    <td className="py-3 px-3 text-xs text-gray-500 whitespace-nowrap">
+                    </TableCell>
+                    <TableCell>
+                      <span className={`badge ${meta.variant}`}>{meta.label}</span>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {invitation.preset ?? "默认"}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                       {new Date(invitation.expiresAt).toLocaleString("zh-CN")}
-                    </td>
-                    <td className="py-3 px-3 text-xs text-gray-500">
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
                       {invitation.usedByUserId
                         ? `用户 ${invitation.usedByUserId}`
                         : invitation.claimedByEmail ?? "—"}
-                    </td>
-                    <td className="py-3 px-3">
+                    </TableCell>
+                    <TableCell>
                       <div className="flex items-center justify-end gap-2">
                         <CopyButton value={registrationUrl} />
                         {(invitation.status === "active" || invitation.status === "expired") && (
-                          <button
+                          <Button
                             type="button"
+                            variant="destructive"
+                            size="sm"
                             onClick={() => revokeInvitation(invitation.code)}
                             disabled={revoking === invitation.code}
-                            className="px-2.5 py-1.5 text-xs font-medium rounded-lg text-red-600 hover:bg-red-50 disabled:opacity-50 transition-colors"
                           >
-                            {revoking === invitation.code ? "撤销中..." : "撤销"}
-                          </button>
+                            {revoking === invitation.code ? "撤销中…" : "撤销"}
+                          </Button>
                         )}
                       </div>
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 );
               })}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
     </div>

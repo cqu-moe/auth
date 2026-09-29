@@ -1,38 +1,71 @@
-import { useState } from "react";
-import Layout from "../components/Layout";
-import { UsersSection } from "../features/admin/UsersSection";
-import { EntitlementsSection } from "../features/admin/EntitlementsSection";
-import { InvitationsSection } from "../features/admin/InvitationsSection";
-import { OAuthClientsSection } from "../features/admin/OAuthClientsSection";
+import { ReactNode } from "react";
+import { Link, NavLink as RouterNavLink, Outlet, useNavigate } from "react-router-dom";
+import { KeyRound, Layers, Settings, Ticket, Users } from "lucide-react";
+import { AppShell, ContentContainer, PageHeader } from "@cqu-moe/ui";
+import { authClient } from "../lib/auth-client";
+import ShellUtilities from "../components/ShellUtilities";
 
-type Tab = "users" | "presets" | "invitations" | "oauth";
+/** 管理区外壳：独立侧栏列出管理分区，底部提供返回账户设置的入口。 */
+export default function AdminLayout() {
+  const navigate = useNavigate();
 
-export default function Admin() {
-  const [activeTab, setActiveTab] = useState<Tab>("users");
-  const tabs: { key: Tab; label: string }[] = [
-    { key: "users", label: "用户管理" },
-    { key: "presets", label: "权益预设" },
-    { key: "invitations", label: "注册邀请" },
-    { key: "oauth", label: "OAuth 客户端" },
-  ];
+  const handleSignOut = async () => {
+    await authClient.signOut();
+    navigate("/login");
+  };
+
   return (
-    <Layout>
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">管理控制台</h1>
-        <div className="flex gap-1 p-1 bg-gray-100 rounded-xl w-fit mb-6">
-          {tabs.map((tab) => (
-            <button key={tab.key} onClick={() => setActiveTab(tab.key)} className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${activeTab === tab.key ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        <div className="bg-white rounded-2xl border border-gray-200 p-6">
-          {activeTab === "users" && <UsersSection />}
-          {activeTab === "presets" && <EntitlementsSection />}
-          {activeTab === "invitations" && <InvitationsSection />}
-          {activeTab === "oauth" && <OAuthClientsSection />}
-        </div>
-      </div>
-    </Layout>
+    <AppShell
+      brand={<Link to="/settings">CQU Auth</Link>}
+      navigation={
+        <>
+          <span className="ds-nav-label">管理</span>
+          <RouterNavLink to="/admin/users">
+            <Users aria-hidden="true" />
+            用户管理
+          </RouterNavLink>
+          <RouterNavLink to="/admin/presets">
+            <Layers aria-hidden="true" />
+            权益预设
+          </RouterNavLink>
+          <RouterNavLink to="/admin/invitations">
+            <Ticket aria-hidden="true" />
+            注册邀请
+          </RouterNavLink>
+          <RouterNavLink to="/admin/oauth">
+            <KeyRound aria-hidden="true" />
+            OAuth 客户端
+          </RouterNavLink>
+          <span className="ds-nav-label">返回</span>
+          <RouterNavLink to="/settings">
+            <Settings aria-hidden="true" />
+            账户设置
+          </RouterNavLink>
+        </>
+      }
+      utilities={<ShellUtilities onSignOut={handleSignOut} />}
+    >
+      <ContentContainer width="compact">
+        <Outlet />
+      </ContentContainer>
+    </AppShell>
+  );
+}
+
+/** 管理分区页面：页头 + 内容卡片。 */
+export function AdminPage({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <PageHeader title={title} description={description} />
+      <div className="rounded-lg border border-border bg-surface p-6">{children}</div>
+    </>
   );
 }

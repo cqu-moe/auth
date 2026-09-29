@@ -13,7 +13,7 @@
     "check:boundaries": "tsx scripts/check-boundaries.ts",
     "lint:api": "redocly lint --config .redocly.yaml docs/api/openapi.json docs/api/cloudflare.openapi.json",
     "db:migrate:local": "wrangler d1 migrations apply auth-cqu-moe-db --local",
-    "build:frontend": "npm --prefix frontend run build"
+    "build:frontend": "pnpm --dir frontend run build"
   },
   "repository": {
     "type": "git",

@@ -203,7 +203,7 @@ describe("QuickLogin settings", () => {
     }
     expect(container.textContent).not.toContain("在线");
     expect(container.textContent).not.toContain("已就绪");
-    expect(container.querySelector(".text-green-700")).toBeNull();
+    expect(container.querySelector(".text-success")).toBeNull();
   });
 
   it("polls active devices every five seconds, pauses hidden and reloads on focus", async () => {
@@ -382,7 +382,7 @@ it("updates the reported plugin version live and withdraws ready when refresh fa
   await act(async () => vi.advanceTimersByTime(30_000));
   expect(container.textContent).toContain("暂时无法连接 Auth");
   expect(container.textContent).not.toContain("已就绪");
-  expect(container.querySelector(".text-green-700")).toBeNull();
+  expect(container.querySelector(".text-success")).toBeNull();
 });
 
 it("ignores an older overview arriving after a focus refresh", async () => {

@@ -1,7 +1,18 @@
 import { useState, useEffect, useCallback } from "react";
+import { ChevronDown, ChevronRight, Loader2, Plus } from "lucide-react";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+  Button,
+  Checkbox,
+  Input,
+  PageState,
+  Textarea,
+} from "@cqu-moe/ui";
 import { adminFetch } from "../../lib/api/admin";
-import { CopyButton, FieldLabel, Modal, StringListInput, Toggle, inputClass } from "./ui";
-
+import MenuSelect from "../../components/MenuSelect";
+import { CopyButton, FieldLabel, Modal, StringListInput, Toggle } from "./ui";
 
 interface ClientConfig {
   id: string;
@@ -78,7 +89,6 @@ const AUTH_METHOD_OPTIONS = [
   { value: "client_secret_post", label: "Post (client_secret_post)" },
 ];
 
-
 // Read the message from a non-2xx response. The backend's errorResponse shape is
 // { detail: { error: { code, message } } }, so read that path (not body.error).
 async function readErrorMessage(res: Response, fallback: string): Promise<string> {
@@ -104,18 +114,26 @@ function CredentialModal({
   onClose: () => void;
 }) {
   return (
-    <Modal onClose={onClose} maxWidth="max-w-lg">
-      <div className="p-6">
-        <h3 className="text-base font-semibold text-gray-900 mb-1">{title}</h3>
-        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
-          密钥仅显示一次，请立即妥善保存。关闭后将无法再次查看。
-        </div>
+    <Modal
+      onClose={onClose}
+      title={title}
+      description="密钥仅显示一次，请立即妥善保存。"
+      maxWidth="max-w-lg"
+      footer={
+        <Button onClick={onClose}>我已保存</Button>
+      }
+    >
+      <div className="space-y-4">
+        <Alert variant="destructive">
+          <AlertTitle>仅显示一次</AlertTitle>
+          <AlertDescription>密钥仅显示一次，请立即妥善保存。关闭后将无法再次查看。</AlertDescription>
+        </Alert>
 
         {clientId && (
-          <div className="mb-3">
+          <div>
             <FieldLabel>Client ID</FieldLabel>
             <div className="flex items-center gap-2">
-              <code className="flex-1 text-xs font-mono bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 break-all">
+              <code className="flex-1 break-all rounded-lg border border-border bg-muted px-3 py-2 font-mono text-xs text-foreground">
                 {clientId}
               </code>
               <CopyButton value={clientId} />
@@ -123,23 +141,14 @@ function CredentialModal({
           </div>
         )}
 
-        <div className="mb-5">
+        <div>
           <FieldLabel>Client Secret</FieldLabel>
           <div className="flex items-center gap-2">
-            <code className="flex-1 text-xs font-mono bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 break-all">
+            <code className="flex-1 break-all rounded-lg border border-border bg-muted px-3 py-2 font-mono text-xs text-foreground">
               {clientSecret}
             </code>
             <CopyButton value={clientSecret} />
           </div>
-        </div>
-
-        <div className="flex justify-end">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
-          >
-            我已保存
-          </button>
         </div>
       </div>
     </Modal>
@@ -159,30 +168,26 @@ function DeleteConfirmModal({
   onCancel: () => void;
 }) {
   return (
-    <Modal onClose={onCancel} maxWidth="max-w-md">
-      <div className="p-6">
-        <h3 className="text-base font-semibold text-gray-900 mb-2">删除 OAuth 客户端</h3>
-        <p className="text-sm text-gray-600 mb-5">
-          确定要删除客户端 <span className="font-medium text-gray-900">{clientName}</span> 吗？此操作不可撤销，相关的 CQU 服务权限也会一并清除。
-        </p>
-        <div className="flex justify-end gap-2">
-          <button
-            onClick={onCancel}
-            disabled={loading}
-            className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-          >
+    <Modal
+      onClose={onCancel}
+      title="删除 OAuth 客户端"
+      description="此操作不可撤销，相关的 CQU 服务权限也会一并清除。"
+      maxWidth="max-w-md"
+      footer={
+        <>
+          <Button variant="outline" onClick={onCancel} disabled={loading}>
             取消
-          </button>
-          <button
-            onClick={onConfirm}
-            disabled={loading}
-            className="px-4 py-2 text-sm font-medium rounded-lg bg-red-600 hover:bg-red-700 text-white disabled:bg-red-400 flex items-center gap-1.5 transition-colors"
-          >
-            {loading && <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+          </Button>
+          <Button variant="destructive" onClick={onConfirm} disabled={loading}>
+            {loading && <Loader2 className="animate-spin" aria-hidden="true" size={16} />}
             删除
-          </button>
-        </div>
-      </div>
+          </Button>
+        </>
+      }
+    >
+      <p className="text-sm text-muted-foreground">
+        确定要删除客户端 <span className="font-medium text-foreground">{clientName}</span> 吗？此操作不可撤销，相关的 CQU 服务权限也会一并清除。
+      </p>
     </Modal>
   );
 }
@@ -532,53 +537,52 @@ function OAuthClientEditor({
   };
 
   return (
-    <Modal onClose={onClose}>
-      <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <h3 className="text-base font-semibold text-gray-900">
-          {isEdit ? "编辑 OAuth 客户端" : "新建 OAuth 客户端"}
-        </h3>
-        <button
-          onClick={onClose}
-          className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
-          aria-label="关闭"
-        >
-          ×
-        </button>
-      </div>
-
-      <div className="p-6 space-y-5">
+    <Modal
+      onClose={onClose}
+      title={isEdit ? "编辑 OAuth 客户端" : "新建 OAuth 客户端"}
+      description={isEdit && client ? `Client ID：${client.client_id}` : "配置回调、授权类型与 CQU 服务权限。"}
+      footer={
+        !initLoading ? (
+          <>
+            <Button variant="outline" onClick={onClose} disabled={loading}>
+              取消
+            </Button>
+            <Button onClick={handleSave} disabled={loading}>
+              {loading && <Loader2 className="animate-spin" aria-hidden="true" size={16} />}
+              {isEdit ? "保存" : "创建"}
+            </Button>
+          </>
+        ) : undefined
+      }
+    >
+      <div className="space-y-5">
         {error && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-            {error}
-            <button onClick={() => setError("")} className="ml-2 underline">关闭</button>
-          </div>
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
 
         {initLoading ? (
-          <div className="flex items-center gap-2 text-gray-400 text-sm py-8">
-            <div className="w-5 h-5 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
-            加载中...
-          </div>
+          <PageState state="loading" title="正在加载客户端" description="正在读取客户端配置…" />
         ) : (
           <>
             {isEdit && client && (
               <div>
                 <FieldLabel>Client ID</FieldLabel>
-                <code className="block text-xs font-mono bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 break-all text-gray-600">
+                <code className="block break-all rounded-lg border border-border bg-muted px-3 py-2 font-mono text-xs text-muted-foreground">
                   {client.client_id}
                 </code>
               </div>
             )}
 
-            {/* --- Essentials --- */}
             <div>
-              <FieldLabel>名称</FieldLabel>
-              <input
+              <FieldLabel htmlFor="oauth-client-name">名称</FieldLabel>
+              <Input
+                id="oauth-client-name"
                 type="text"
                 value={state.client_name}
                 onChange={(e) => patch("client_name", e.target.value)}
                 placeholder="我的应用"
-                className={inputClass}
               />
             </div>
 
@@ -593,47 +597,43 @@ function OAuthClientEditor({
             </div>
 
             <div>
-              <FieldLabel hint="空格分隔">允许的 scope</FieldLabel>
-              <input
+              <FieldLabel htmlFor="oauth-client-scope" hint="空格分隔">允许的 scope</FieldLabel>
+              <Input
+                id="oauth-client-scope"
                 type="text"
                 value={state.scope}
                 onChange={(e) => patch("scope", e.target.value)}
                 placeholder="openid profile email"
-                className={`${inputClass} font-mono`}
+                className="font-mono"
               />
             </div>
 
-            <div>
-              <FieldLabel>授权类型 (grant_types)</FieldLabel>
+            <fieldset>
+              <legend className="mb-1.5 text-xs font-medium text-foreground">授权类型 (grant_types)</legend>
               <div className="space-y-1.5">
                 {GRANT_TYPE_OPTIONS.map((opt) => (
                   <label
                     key={opt.value}
-                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 cursor-pointer"
+                    className="flex cursor-pointer items-center gap-3 rounded-lg p-2 hover:bg-muted"
                   >
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={state.grant_types.includes(opt.value)}
-                      onChange={() => toggleGrant(opt.value)}
-                      className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                      onCheckedChange={() => toggleGrant(opt.value)}
                     />
-                    <span className="text-sm text-gray-700">{opt.label}</span>
+                    <span className="text-sm text-foreground">{opt.label}</span>
                   </label>
                 ))}
               </div>
-            </div>
+            </fieldset>
 
-            <div>
+            <div className="space-y-1.5">
               <FieldLabel>客户端类型 (type)</FieldLabel>
-              <select
+              <MenuSelect
                 value={state.type}
-                onChange={(e) => patch("type", e.target.value)}
-                className={inputClass}
-              >
-                {CLIENT_TYPE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
+                onChange={(v) => patch("type", v)}
+                options={CLIENT_TYPE_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))}
+                aria-label="客户端类型"
+              />
             </div>
 
             <Toggle
@@ -643,34 +643,36 @@ function OAuthClientEditor({
               hint="授权时不向用户展示同意页面"
             />
 
-            {/* --- Advanced --- */}
-            <div className="border-t border-gray-100 pt-4">
-              <button
+            <div className="border-t border-border pt-4">
+              <Button
                 type="button"
+                variant="ghost"
+                size="sm"
                 onClick={() => setShowAdvanced((v) => !v)}
-                className="text-sm font-medium text-blue-600 hover:text-blue-700"
+                aria-expanded={showAdvanced}
               >
-                {showAdvanced ? "▾ 收起完整配置" : "▸ 展开完整配置"}
-              </button>
+                {showAdvanced ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+                {showAdvanced ? "收起完整配置" : "展开完整配置"}
+              </Button>
             </div>
 
             {showAdvanced && (
               <div className="space-y-5">
                 <div>
-                  <FieldLabel>应用主页 (client_uri)</FieldLabel>
-                  <input type="text" value={state.client_uri} onChange={(e) => patch("client_uri", e.target.value)} placeholder="https://example.com" className={inputClass} />
+                  <FieldLabel htmlFor="oauth-client-uri">应用主页 (client_uri)</FieldLabel>
+                  <Input id="oauth-client-uri" type="text" value={state.client_uri} onChange={(e) => patch("client_uri", e.target.value)} placeholder="https://example.com" />
                 </div>
                 <div>
-                  <FieldLabel>Logo URL (logo_uri)</FieldLabel>
-                  <input type="text" value={state.logo_uri} onChange={(e) => patch("logo_uri", e.target.value)} placeholder="https://example.com/logo.png" className={inputClass} />
+                  <FieldLabel htmlFor="oauth-logo-uri">Logo URL (logo_uri)</FieldLabel>
+                  <Input id="oauth-logo-uri" type="text" value={state.logo_uri} onChange={(e) => patch("logo_uri", e.target.value)} placeholder="https://example.com/logo.png" />
                 </div>
                 <div>
-                  <FieldLabel>服务条款 (tos_uri)</FieldLabel>
-                  <input type="text" value={state.tos_uri} onChange={(e) => patch("tos_uri", e.target.value)} placeholder="https://example.com/tos" className={inputClass} />
+                  <FieldLabel htmlFor="oauth-tos-uri">服务条款 (tos_uri)</FieldLabel>
+                  <Input id="oauth-tos-uri" type="text" value={state.tos_uri} onChange={(e) => patch("tos_uri", e.target.value)} placeholder="https://example.com/tos" />
                 </div>
                 <div>
-                  <FieldLabel>隐私政策 (policy_uri)</FieldLabel>
-                  <input type="text" value={state.policy_uri} onChange={(e) => patch("policy_uri", e.target.value)} placeholder="https://example.com/privacy" className={inputClass} />
+                  <FieldLabel htmlFor="oauth-policy-uri">隐私政策 (policy_uri)</FieldLabel>
+                  <Input id="oauth-policy-uri" type="text" value={state.policy_uri} onChange={(e) => patch("policy_uri", e.target.value)} placeholder="https://example.com/privacy" />
                 </div>
                 <div>
                   <FieldLabel>联系人 (contacts)</FieldLabel>
@@ -696,25 +698,23 @@ function OAuthClientEditor({
                   label="要求 PKCE"
                   hint="授权码流程强制使用 PKCE"
                 />
-                <div>
+                <div className="space-y-1.5">
                   <FieldLabel>令牌端点认证方式 (token_endpoint_auth_method)</FieldLabel>
-                  <select
+                  <MenuSelect
                     value={state.token_endpoint_auth_method}
-                    onChange={(e) => patch("token_endpoint_auth_method", e.target.value)}
-                    className={inputClass}
-                  >
-                    {AUTH_METHOD_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
+                    onChange={(v) => patch("token_endpoint_auth_method", v)}
+                    options={AUTH_METHOD_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))}
+                    aria-label="令牌端点认证方式"
+                  />
                 </div>
                 <div>
-                  <FieldLabel hint="固定为 code">响应类型 (response_types)</FieldLabel>
-                  <input
+                  <FieldLabel htmlFor="oauth-response-types" hint="固定为 code">响应类型 (response_types)</FieldLabel>
+                  <Input
+                    id="oauth-response-types"
                     type="text"
                     value={state.response_types.join(" ")}
                     readOnly
-                    className={`${inputClass} font-mono bg-gray-50 text-gray-500`}
+                    className="bg-muted font-mono text-muted-foreground"
                   />
                 </div>
                 <Toggle
@@ -724,79 +724,57 @@ function OAuthClientEditor({
                   hint="允许通过 end_session 端点登出"
                 />
                 <div>
-                  <FieldLabel hint="提交前解析 JSON">metadata</FieldLabel>
-                  <textarea
+                  <FieldLabel htmlFor="oauth-metadata" hint="提交前解析 JSON">metadata</FieldLabel>
+                  <Textarea
+                    id="oauth-metadata"
                     value={state.metadata}
                     onChange={(e) => patch("metadata", e.target.value)}
                     placeholder='{"key": "value"}'
                     rows={4}
-                    className={`${inputClass} font-mono resize-y`}
+                    className="resize-y font-mono"
                   />
                 </div>
               </div>
             )}
 
-            {/* --- CQU service scopes --- */}
-            <div className="border-t border-gray-100 pt-4">
-              <p className="text-xs font-medium text-gray-700 mb-2">CQU 服务权限</p>
+            <fieldset className="border-t border-border pt-4">
+              <legend className="mb-2 text-xs font-medium text-foreground">CQU 服务权限</legend>
               <div className="space-y-1">
                 {ALL_CQU_SCOPES.map((scope) => (
                   <label
                     key={scope.key}
-                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 cursor-pointer"
+                    className="flex cursor-pointer items-center gap-3 rounded-lg p-2 hover:bg-muted"
                   >
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={state.cqu_scopes.includes(scope.key)}
-                      onChange={() => toggleCquScope(scope.key)}
-                      className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                      onCheckedChange={() => toggleCquScope(scope.key)}
                     />
-                    <span className="text-sm text-gray-700">{scope.label}</span>
-                    <span className="text-xs text-gray-400 font-mono ml-auto">{scope.key}</span>
+                    <span className="text-sm text-foreground">{scope.label}</span>
+                    <span className="ml-auto font-mono text-xs text-muted-foreground">{scope.key}</span>
                   </label>
                 ))}
               </div>
-            </div>
+            </fieldset>
 
-            {/* --- Secret (edit mode only) --- */}
             {isEdit && state.token_endpoint_auth_method !== "none" && (
-              <div className="border-t border-gray-100 pt-4">
-                <p className="text-xs font-medium text-gray-700 mb-2">客户端密钥</p>
-                <p className="text-xs text-gray-400 mb-3">出于安全考虑，现有密钥不会显示。重新生成后旧密钥立即失效。</p>
-                <button
+              <div className="border-t border-border pt-4">
+                <p className="mb-2 text-xs font-medium text-foreground">客户端密钥</p>
+                <p className="mb-3 text-xs text-muted-foreground">出于安全考虑，现有密钥不会显示。重新生成后旧密钥立即失效。</p>
+                <Button
                   type="button"
+                  variant="outline"
+                  size="sm"
                   onClick={handleRotate}
                   disabled={rotating}
-                  className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50 flex items-center gap-1.5 transition-colors"
                 >
-                  {rotating && <span className="w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />}
+                  {rotating && <Loader2 className="animate-spin" aria-hidden="true" size={16} />}
                   重新生成密钥
-                </button>
+                </Button>
               </div>
             )}
           </>
         )}
       </div>
-
-      {!initLoading && (
-        <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 flex items-center justify-end gap-2">
-          <button
-            onClick={onClose}
-            disabled={loading}
-            className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-          >
-            取消
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={loading}
-            className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:bg-blue-400 flex items-center gap-1.5 transition-colors"
-          >
-            {loading && <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-            {isEdit ? "保存" : "创建"}
-          </button>
-        </div>
-      )}
 
       {rotatedSecret && (
         <CredentialModal
@@ -869,64 +847,59 @@ export function OAuthClientsSection() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-gray-400 text-sm py-8">
-        <div className="w-5 h-5 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
-        加载中...
-      </div>
+      <PageState state="loading" title="正在加载客户端" description="正在读取 OAuth 客户端列表…" />
     );
   }
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-gray-500">共 {clients.length} 个客户端</p>
-        <button
-          onClick={() => setEditor(null)}
-          className="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
-        >
-          + 新建客户端
-        </button>
+        <p className="text-sm text-muted-foreground">共 {clients.length} 个客户端</p>
+        <Button size="sm" onClick={() => setEditor(null)}>
+          <Plus aria-hidden="true" size={16} />
+          新建客户端
+        </Button>
       </div>
 
       {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-          {error}
-          <button onClick={() => setError("")} className="ml-2 underline">关闭</button>
-        </div>
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
 
       {clients.length === 0 && (
-        <p className="text-sm text-gray-400 py-4">暂无 OAuth 客户端</p>
+        <PageState state="empty" title="暂无 OAuth 客户端" description="新建客户端后，第三方应用可通过 OAuth 接入。" />
       )}
 
       {clients.map((client) => (
-        <div key={client.id} className="border border-gray-200 rounded-xl p-5 flex items-start justify-between">
+        <div key={client.id} className="flex flex-wrap items-start justify-between gap-4 rounded-lg border border-border p-5">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h4 className="text-sm font-semibold text-gray-900 truncate">
+              <h4 className="truncate text-sm font-semibold text-foreground">
                 {client.client_name || client.client_id}
               </h4>
               {client.disabled && (
-                <span className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
-                  已停用
-                </span>
+                <span className="badge badge-muted">已停用</span>
               )}
             </div>
-            <p className="text-xs text-gray-400 mt-0.5 font-mono break-all">{client.client_id}</p>
+            <p className="mt-0.5 break-all font-mono text-xs text-muted-foreground">{client.client_id}</p>
           </div>
-          <div className="flex items-center gap-2 shrink-0 ml-4">
-            <button
+          <div className="ml-4 flex shrink-0 items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => setEditor(client)}
-              className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors"
             >
               编辑
-            </button>
-            <button
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive"
               onClick={() => setDeleteTarget(client)}
-              className="px-3 py-1.5 text-xs font-medium rounded-lg text-red-600 hover:bg-red-50 transition-colors"
             >
               删除
-            </button>
+            </Button>
           </div>
         </div>
       ))}

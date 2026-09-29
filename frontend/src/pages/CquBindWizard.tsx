@@ -1,5 +1,7 @@
-import { useState, useEffect, useRef, useCallback, FormEvent } from "react";
+import { Fragment, useState, useEffect, useRef, useCallback, FormEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
+import { ArrowLeft, Check, Loader2, Lock, Mail, RefreshCw } from "lucide-react";
+import { ActionButton, Alert, AlertDescription, Button, Input, Label, PageHeader } from "@cqu-moe/ui";
 import Layout from "../components/Layout";
 import CquBindSuccess from "../components/CquBindSuccess";
 import { authClient } from "../lib/auth-client";
@@ -19,6 +21,7 @@ import {
 } from "../lib/cqu-bind-progress";
 
 import CopyButton from "../components/CopyButton";
+
 // ────────────────────────────────────────────────────────────────────────────
 // Types
 // ────────────────────────────────────────────────────────────────────────────
@@ -70,72 +73,48 @@ function isValidEmail(s: string): boolean {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Shared UI atoms — matches existing app conventions exactly
+// Shared UI atoms
 // ────────────────────────────────────────────────────────────────────────────
 
-function Spinner({ size = "md", color = "blue" }: { size?: "sm" | "md" | "lg"; color?: "blue" | "white" | "gray" }) {
-  const sizeClass = size === "sm" ? "w-4 h-4 border-2" : size === "lg" ? "w-8 h-8 border-4" : "w-5 h-5 border-2";
-  const colorClass =
-    color === "white"
-      ? "border-white border-t-transparent"
-      : color === "gray"
-      ? "border-gray-300 border-t-transparent"
-      : "border-blue-600 border-t-transparent";
-  return <span className={`${sizeClass} ${colorClass} rounded-full animate-spin inline-block`} />;
+function Spinner({ size = 16, className = "" }: { size?: number; className?: string }) {
+  return <Loader2 aria-hidden="true" size={size} className={`animate-spin ${className}`} />;
 }
 
 function AlertBox({ variant, children }: { variant: "error" | "success" | "info" | "warning"; children: React.ReactNode }) {
+  if (variant === "error") {
+    return (
+      <Alert variant="destructive">
+        <AlertDescription>{children}</AlertDescription>
+      </Alert>
+    );
+  }
   const styles = {
-    error: "bg-red-50 border-red-200 text-red-700",
-    success: "bg-green-50 border-green-200 text-green-700",
-    info: "bg-blue-50 border-blue-200 text-blue-700",
-    warning: "bg-yellow-50 border-yellow-200 text-yellow-700",
-  };
+    success: "border-success/40 bg-success/10 text-success",
+    info: "border-link/40 bg-link/10 text-link",
+    warning: "border-warning/40 bg-warning/10 text-warning",
+  } as const;
   return (
-    <div className={`p-3 border rounded-lg text-sm ${styles[variant]}`}>
-      {children}
-    </div>
+    <div className={`rounded-lg border p-3 text-sm ${styles[variant]}`}>{children}</div>
   );
 }
-
 
 function StepIndicator({ current }: { current: Step }) {
   const steps: Step[] = [1, 2, 3, 4];
   return (
     <nav aria-label="绑定进度" className="mb-8">
-      <ol className="flex items-center gap-0">
-        {steps.map((step, idx) => {
-          const done = step < current;
-          const active = step === current;
+      <ol className="step-indicator">
+        {steps.map((step) => {
+          const state = step < current ? "done" : step === current ? "active" : "todo";
           return (
-            <li key={step} className="flex items-center flex-1 last:flex-none">
-              <div className="flex flex-col items-center">
-                <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold transition-colors ${
-                    done
-                      ? "bg-blue-600 text-white"
-                      : active
-                      ? "bg-blue-600 text-white ring-4 ring-blue-100"
-                      : "bg-gray-100 text-gray-400"
-                  }`}
-                  aria-current={active ? "step" : undefined}
-                >
-                  {done ? (
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : (
-                    step
-                  )}
+            <Fragment key={step}>
+              <li data-step-state={state}>
+                <div className="step-dot" data-state={state} aria-current={state === "active" ? "step" : undefined}>
+                  {state === "done" ? <Check aria-hidden="true" size={16} /> : step}
                 </div>
-                <span className={`mt-1 text-xs font-medium hidden sm:block ${active ? "text-blue-600" : done ? "text-gray-600" : "text-gray-400"}`}>
-                  {STEP_LABELS[step]}
-                </span>
-              </div>
-              {idx < steps.length - 1 && (
-                <div className={`flex-1 h-0.5 mx-1 transition-colors ${done ? "bg-blue-600" : "bg-gray-200"}`} />
-              )}
-            </li>
+                <span className="step-label hidden sm:block">{STEP_LABELS[step]}</span>
+              </li>
+              {step < steps.length && <span className="step-connector" data-state={step < current ? "done" : "todo"} />}
+            </Fragment>
           );
         })}
       </ol>
@@ -169,69 +148,55 @@ function Step1Intro({
     bindKind === "direct" ||
     (bindKind === "forward" && forwardAddrValid);
 
+  const introItems = [
+    {
+      icon: <Mail aria-hidden="true" size={16} />,
+      title: "专属密保邮箱",
+      body: "我们为您生成一个专属收信地址，用于接收 CQU 安全邮箱的验证码。您需要将 CQU 自服务中心的密保邮箱设置为该地址（或设置转发规则）。",
+    },
+    {
+      icon: <Lock aria-hidden="true" size={16} />,
+      title: "凭证加密存储",
+      body: "您的 CQU 密码将以 AES-256-GCM 加密存储，仅用于自动维护会话，不会明文记录或对外透露。",
+    },
+    {
+      icon: <RefreshCw aria-hidden="true" size={16} />,
+      title: "无人值守保活",
+      body: "系统每 15 分钟自动刷新 CQU 会话。当 CQU 要求 2FA 时，验证码将通过密保邮箱实时捕获并自动填入。",
+    },
+  ];
+
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-gray-900 mb-2">绑定重庆大学统一认证账号</h2>
-        <p className="text-sm text-gray-500">
+        <h2 className="mb-2 text-xl font-semibold text-foreground">绑定重庆大学统一认证账号</h2>
+        <p className="text-sm text-muted-foreground">
           绑定后，系统会安全维护统一认证会话，供已授权的校内服务使用。
         </p>
       </div>
 
       <div className="space-y-3">
-        <div className="flex items-start gap-3 p-4 bg-gray-50 rounded-xl">
-          <div className="mt-0.5 w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-            <svg className="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-            </svg>
+        {introItems.map((item) => (
+          <div key={item.title} className="flex items-start gap-3 rounded-lg bg-muted p-4">
+            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-link/10 text-link">
+              {item.icon}
+            </div>
+            <div>
+              <p className="text-sm font-medium text-foreground">{item.title}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{item.body}</p>
+            </div>
           </div>
-          <div>
-            <p className="text-sm font-medium text-gray-900">专属密保邮箱</p>
-            <p className="text-xs text-gray-500 mt-0.5">
-              我们为您生成一个专属收信地址，用于接收 CQU 安全邮箱的验证码。您需要将 CQU 自服务中心的密保邮箱设置为该地址（或设置转发规则）。
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-start gap-3 p-4 bg-gray-50 rounded-xl">
-          <div className="mt-0.5 w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-            <svg className="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-            </svg>
-          </div>
-          <div>
-            <p className="text-sm font-medium text-gray-900">凭证加密存储</p>
-            <p className="text-xs text-gray-500 mt-0.5">
-              您的 CQU 密码将以 AES-256-GCM 加密存储，仅用于自动维护会话，不会明文记录或对外透露。
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-start gap-3 p-4 bg-gray-50 rounded-xl">
-          <div className="mt-0.5 w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-            <svg className="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-          </div>
-          <div>
-            <p className="text-sm font-medium text-gray-900">无人值守保活</p>
-            <p className="text-xs text-gray-500 mt-0.5">
-              系统每 15 分钟自动刷新 CQU 会话。当 CQU 要求 2FA 时，验证码将通过密保邮箱实时捕获并自动填入。
-            </p>
-          </div>
-        </div>
+        ))}
       </div>
 
-      {/* ── Bind kind selection ─────────────────────────────────────────────── */}
       <div className="space-y-3">
-        <p className="text-sm font-medium text-gray-900">选择绑定方式</p>
+        <p className="text-sm font-medium text-foreground">选择绑定方式</p>
 
-        {/* Direct option */}
         <label
-          className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer transition-colors ${
+          className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors ${
             bindKind === "direct"
-              ? "border-blue-500 bg-blue-50"
-              : "border-gray-200 bg-white hover:border-gray-300"
+              ? "border-primary bg-primary/10"
+              : "border-border bg-surface hover:border-muted-foreground/40"
           }`}
         >
           <input
@@ -240,23 +205,21 @@ function Step1Intro({
             value="direct"
             checked={bindKind === "direct"}
             onChange={() => setBindKind("direct")}
-            className="mt-0.5 accent-blue-600"
+            className="mt-0.5 accent-primary"
           />
-          <div className="flex-1 min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-gray-900">直设模式</span>
-              <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">推荐</span>
+              <span className="text-sm font-medium text-foreground">直设模式</span>
+              <span className="badge badge-info">推荐</span>
             </div>
-            <p className="text-xs text-gray-500 mt-0.5">
+            <p className="mt-0.5 text-xs text-muted-foreground">
               将 CQU 密保邮箱直接改为我们为您生成的专属地址。安全性更高，验证码直达，无中间环节。
             </p>
           </div>
         </label>
 
-        {/* Forward option — 暂时禁用：可见但不可选。
-            代码保留（state/分支/Step2Forward 均未删），仅置灰禁用，待重新开放。 */}
         <label
-          className="flex items-start gap-3 p-4 rounded-xl border-2 border-gray-200 bg-gray-50 cursor-not-allowed opacity-60"
+          className="flex cursor-not-allowed items-start gap-3 rounded-lg border border-border bg-muted p-4 opacity-60"
           aria-disabled="true"
         >
           <input
@@ -268,43 +231,37 @@ function Step1Intro({
             onChange={() => {
               /* 暂时禁用：转发模式不可选 */
             }}
-            className="mt-0.5 accent-blue-600 cursor-not-allowed"
+            className="mt-0.5 cursor-not-allowed accent-primary"
           />
-          <div className="flex-1 min-w-0">
-            <span className="text-sm font-medium text-gray-500">转发（暂不可用）</span>
-            <p className="text-xs text-gray-400 mt-0.5">
+          <div className="min-w-0 flex-1">
+            <span className="text-sm font-medium text-muted-foreground">转发（暂不可用）</span>
+            <p className="mt-0.5 text-xs text-muted-foreground">
               保留您自己的邮箱作为 CQU 密保邮箱，在邮箱里添加转发规则，将 CQU 的邮件自动转发到我们的地址。
             </p>
-            <p className="text-xs text-gray-400 mt-1 font-medium">该模式暂未开放，请使用直设模式。</p>
+            <p className="mt-1 text-xs font-medium text-muted-foreground">该模式暂未开放，请使用直设模式。</p>
           </div>
         </label>
 
-        {/* Forward address input — shown only when forward is selected */}
         {bindKind === "forward" && (
           <div className="ml-0 space-y-3">
             <div>
-              <label htmlFor="forward-addr" className="block text-sm font-medium text-gray-700 mb-1">
-                您的转发邮箱（即当前 CQU 密保邮箱）
-              </label>
-              <input
+              <Label htmlFor="forward-addr" className="mb-1 block">您的转发邮箱（即当前 CQU 密保邮箱）</Label>
+              <Input
                 id="forward-addr"
                 type="email"
                 value={forwardAddress}
                 onChange={(e) => setForwardAddress(e.target.value)}
                 onBlur={() => setForwardAddrTouched(true)}
                 placeholder="example@gmail.com"
-                className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent ${
-                  showForwardError ? "border-red-400 bg-red-50" : "border-gray-300"
-                }`}
                 autoComplete="email"
+                aria-invalid={showForwardError || undefined}
               />
               {showForwardError && (
-                <p className="mt-1 text-xs text-red-600">请输入合法的邮箱地址</p>
+                <p className="field-error mt-1">请输入合法的邮箱地址</p>
               )}
             </div>
 
-            {/* Deliverability notice */}
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 space-y-1.5">
+            <div className="space-y-1.5 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs text-warning">
               <p className="font-semibold">转发器兼容性说明</p>
               <p>
                 由于 CQU 域名不配置 DKIM，转发器必须能对转发邮件做 <strong>SRS 地址改写</strong>或用自身 DKIM 重签，
@@ -316,8 +273,7 @@ function Step1Intro({
               </p>
             </div>
 
-            {/* Security notice */}
-            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-xl text-xs text-yellow-800 space-y-1">
+            <div className="space-y-1 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs text-warning">
               <p className="font-semibold">安全说明</p>
               <p>
                 转发模式依赖您邮箱的转发链，安全性略低于直设模式。
@@ -329,13 +285,14 @@ function Step1Intro({
         )}
       </div>
 
-      <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-xl text-xs text-yellow-800">
+      <div className="rounded-lg border border-warning/40 bg-warning/10 p-4 text-xs text-warning">
         <strong>信任须知：</strong>绑定完成后，您应改用短信或微信验证方式自行登录 CQU，
         不要再依赖密保邮箱人工登录——因为该邮箱已由本系统托管，验证码将被自动处理。
       </div>
 
-      <button
+      <Button
         type="button"
+        className="w-full"
         onClick={onNext}
         disabled={!canProceed}
         title={
@@ -343,22 +300,24 @@ function Step1Intro({
             ? "请填写合法的转发邮箱地址"
             : undefined
         }
-        className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-sm font-medium rounded-lg transition-colors"
       >
         开始绑定
-      </button>
+      </Button>
     </div>
   );
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // Step 2 (direct) — Get dedicated address AND await confirmation code via WS
-//
-// The WS opens the moment the address is fetched and displayed, so we are
-// already listening before the user navigates to CQU self-service. This
-// eliminates the race where the CQU code email arrives while the user is
-// still on this page but the socket has not been opened yet.
 // ────────────────────────────────────────────────────────────────────────────
+
+const step2WsStatusText: Record<WsState, string> = {
+  idle: "准备连接…",
+  connecting: "正在建立连接…",
+  open: "实时监听中，验证码到达将立即显示",
+  closed: "连接中断，正在重连…",
+  error: "连接出错，正在重连…",
+};
 
 function Step2Direct({
   onNext,
@@ -369,18 +328,14 @@ function Step2Direct({
   bindAddress: string;
   setBindAddress: (addr: string) => void;
 }) {
-  // ── Address fetch state ──────────────────────────────────────────────────
   const [addrLoading, setAddrLoading] = useState(false);
   const [addrError, setAddrError] = useState("");
-
-  // ── WebSocket state ──────────────────────────────────────────────────────
   const [wsState, setWsState] = useState<WsState>("idle");
   const [code, setCode] = useState<string>("");
   const [codeTs, setCodeTs] = useState<number | null>(null);
   const connectionRef = useRef<{ close(): void } | null>(null);
   const codeRef = useRef("");
 
-  // ── WS lifecycle ─────────────────────────────────────────────────────────
   useEffect(() => {
     connectionRef.current = openBindingEvents({
       onState: (state) => setWsState(state === "failed" ? "error" : state),
@@ -400,7 +355,6 @@ function Step2Direct({
     };
   }, []);
 
-  // ── Address fetch ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (bindAddress) return; // already fetched (e.g. user navigated back)
     setAddrLoading(true);
@@ -417,7 +371,6 @@ function Step2Direct({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Code expiry countdown (10-minute validity) ────────────────────────────
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   useEffect(() => {
     if (!codeTs) { setSecondsLeft(null); return; }
@@ -427,13 +380,12 @@ function Step2Direct({
       setSecondsLeft(remaining > 0 ? remaining : 0);
     };
     update();
-    const t = setInterval(update, 1000);
-    return () => clearInterval(t);
+    const timer = setInterval(update, 1000);
+    return () => clearInterval(timer);
   }, [codeTs]);
 
   const codeExpired = secondsLeft !== null && secondsLeft <= 0;
 
-  // Format seconds as m:ss for the countdown badge
   const formatCountdown = (s: number) => {
     const m = Math.floor(s / 60);
     const sec = s % 60;
@@ -443,25 +395,31 @@ function Step2Direct({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-gray-900 mb-2">设置密保邮箱</h2>
-        <p className="text-sm text-gray-500">
+        <h2 className="mb-2 text-xl font-semibold text-foreground">设置密保邮箱</h2>
+        <p className="text-sm text-muted-foreground">
           复制下方地址，在学校页面将密保邮箱改为该地址。
         </p>
       </div>
 
-      {addrError && <AlertBox variant="error">{addrError}</AlertBox>}
+      {addrError && (
+        <AlertBox variant="error">
+          {addrError}
+          {addrError.includes("刷新页面") && (
+            <span className="mt-1 block text-xs">如需修改邮箱地址，请刷新页面后重新填写。</span>
+          )}
+        </AlertBox>
+      )}
 
-      {/* ── Dedicated address ─────────────────────────────────────────────── */}
       {addrLoading ? (
-        <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-xl text-gray-400 text-sm">
-          <Spinner size="sm" color="gray" />
+        <div className="flex items-center gap-3 rounded-lg bg-muted p-4 text-sm text-muted-foreground">
+          <Spinner />
           正在生成专属地址…
         </div>
       ) : bindAddress ? (
-        <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
-          <p className="text-xs text-blue-600 font-medium mb-2">您的专属密保邮箱</p>
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <span className="font-mono text-sm font-semibold text-blue-900 break-all">
+        <div className="rounded-lg border border-link/40 bg-link/10 p-4">
+          <p className="mb-2 text-xs font-medium text-link">您的专属密保邮箱</p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="break-all font-mono text-sm font-semibold text-foreground">
               {bindAddress}
             </span>
             <CopyButton text={bindAddress} />
@@ -471,115 +429,97 @@ function Step2Direct({
 
       {bindAddress && (
         <div className="space-y-2">
-          <a
-            href="https://self.cqu.edu.cn/cas-success/safe-center/email-bind-way/rebind"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex min-h-11 items-center justify-center rounded-lg border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-900 hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-          >
-            前往修改密保邮箱
-            <span className="sr-only">（在新标签页打开）</span>
-          </a>
-          <p className="text-xs text-gray-500">发送验证邮件后，回到这里查看验证码。</p>
+          <Button asChild variant="outline">
+            <a
+              href="https://self.cqu.edu.cn/cas-success/safe-center/email-bind-way/rebind"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              前往修改密保邮箱
+              <span className="sr-only">（在新标签页打开）</span>
+            </a>
+          </Button>
+          <p className="text-xs text-muted-foreground">发送验证邮件后，回到这里查看验证码。</p>
         </div>
       )}
 
-      {/* ── WS connection status ──────────────────────────────────────────── */}
-      <div className={`flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg ${
+      <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${
         wsState === "open"
-          ? "bg-green-50 text-green-700"
+          ? "bg-success/10 text-success"
           : wsState === "connecting"
-          ? "bg-blue-50 text-blue-600"
+          ? "bg-link/10 text-link"
           : wsState === "error" || wsState === "closed"
-          ? "bg-yellow-50 text-yellow-700"
-          : "bg-gray-50 text-gray-500"
+          ? "bg-warning/10 text-warning"
+          : "bg-muted text-muted-foreground"
       }`}>
         {wsState === "open" && (
-          <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+          <span className="h-2 w-2 animate-pulse rounded-full bg-success" aria-hidden="true" />
         )}
-        {wsState === "connecting" && <Spinner size="sm" color="blue" />}
-        {(wsState === "closed" || wsState === "error") && (
-          <Spinner size="sm" color="gray" />
-        )}
-        {wsState === "open" && "实时监听中，验证码到达将立即显示"}
-        {wsState === "connecting" && "正在建立连接…"}
-        {wsState === "closed" && "连接中断，正在重连…"}
-        {wsState === "error" && "连接出错，正在重连…"}
-        {wsState === "idle" && "准备连接…"}
+        {wsState === "connecting" && <Spinner className="text-link" />}
+        {(wsState === "closed" || wsState === "error") && <Spinner className="text-warning" />}
+        <span>{step2WsStatusText[wsState]}</span>
       </div>
 
-      {/* ── Code display ──────────────────────────────────────────────────── */}
       {code ? (
-        <div className={`p-5 rounded-xl border-2 ${codeExpired ? "border-gray-200 bg-gray-50" : "border-blue-300 bg-blue-50"}`}>
-          <div className="flex items-center justify-between mb-3">
-            <p className={`text-xs font-semibold uppercase tracking-wide ${codeExpired ? "text-gray-400" : "text-blue-600"}`}>
+        <div className={`rounded-lg border p-5 ${codeExpired ? "border-border bg-muted" : "border-link/50 bg-link/10"}`}>
+          <div className="mb-3 flex items-center justify-between">
+            <p className={`text-xs font-semibold tracking-wide ${codeExpired ? "text-muted-foreground" : "text-link"}`}>
               密保邮箱验证码
             </p>
             {secondsLeft !== null && (
-              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+              <span className={`badge ${
                 codeExpired
-                  ? "bg-gray-200 text-gray-500"
+                  ? "badge-muted"
                   : secondsLeft <= 60
-                  ? "bg-red-100 text-red-600"
-                  : "bg-blue-100 text-blue-700"
+                  ? "badge-warning"
+                  : "badge-info"
               }`}>
                 {codeExpired ? "已过期" : formatCountdown(secondsLeft)}
               </span>
             )}
           </div>
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <span className={`font-mono text-4xl font-bold tracking-[0.25em] ${codeExpired ? "text-gray-400" : "text-blue-900"}`}>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <span className={`font-mono text-4xl font-bold tracking-widest ${codeExpired ? "text-muted-foreground" : "text-foreground"}`}>
               {code}
             </span>
             <CopyButton text={code} />
           </div>
           {codeExpired && (
-            <p className="mt-3 text-xs text-gray-500">
+            <p className="mt-3 text-xs text-muted-foreground">
               验证码已过期，请在 CQU 自服务中心重新发送验证邮件。
             </p>
           )}
         </div>
       ) : (
-        <div className="p-8 border-2 border-dashed border-gray-200 rounded-xl text-center">
-          <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
-            <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-            </svg>
+        <div className="rounded-lg border border-dashed border-border p-8 text-center">
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
+            <Mail aria-hidden="true" size={24} />
           </div>
-          <p className="text-sm text-gray-400">等待验证码到达…</p>
+          <p className="text-sm text-muted-foreground">等待验证码到达…</p>
         </div>
       )}
 
-      {/* ── Help tips ────────────────────────────────────────────────────── */}
-      <div className="p-3 bg-gray-50 rounded-xl text-xs text-gray-500 space-y-1">
-        <p className="font-medium text-gray-600">没有收到验证码？</p>
+      <div className="space-y-1 rounded-lg bg-muted p-3 text-xs text-muted-foreground">
+        <p className="font-medium text-foreground">没有收到验证码？</p>
         <p>· 确认您已在 CQU 自服务中心点击「发送验证邮件」</p>
         <p>· 邮件通常在 1 分钟内到达，验证码有效期约 10 分钟</p>
         <p>· 如超时可在 CQU 页面重新发送，新验证码到达后会自动更新</p>
       </div>
 
-      <div className="flex gap-3">
-        <button
-          type="button"
-          onClick={onNext}
-          disabled={!bindAddress || addrLoading}
-          className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-sm font-medium rounded-lg transition-colors"
-        >
-          已在 CQU 完成验证，继续
-        </button>
-      </div>
+      <Button
+        type="button"
+        className="w-full"
+        onClick={onNext}
+        disabled={!bindAddress || addrLoading}
+      >
+        已在 CQU 完成验证，继续
+      </Button>
     </div>
   );
 }
 
 // ────────────────────────────────────────────────────────────────────────────
 // Step 2 (forward) — Get dedicated forward-inbox address, show setup guide
-//
-// In forward mode there is no bind_confirm step from CQU (the user keeps
-// their own mailbox as the security email and just adds a forward rule).
-// Therefore we do NOT connect a WebSocket and do NOT wait for any code.
-// The user reads the instructions, sets up the forward rule, then clicks
-// "已设置转发，继续" to proceed to Step 3.
 // ────────────────────────────────────────────────────────────────────────────
 
 function Step2Forward({
@@ -615,8 +555,8 @@ function Step2Forward({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-gray-900 mb-2">设置邮件转发规则</h2>
-        <p className="text-sm text-gray-500">
+        <h2 className="mb-2 text-xl font-semibold text-foreground">设置邮件转发规则</h2>
+        <p className="text-sm text-muted-foreground">
           您选择了转发模式：CQU 密保邮箱保持不变，只需在您自己的邮箱里添加一条自动转发规则即可。
         </p>
       </div>
@@ -625,22 +565,21 @@ function Step2Forward({
         <AlertBox variant="error">
           {addrError}
           {addrError.includes("刷新页面") && (
-            <span className="block mt-1 text-xs">如需修改邮箱地址，请刷新页面后重新填写。</span>
+            <span className="mt-1 block text-xs">如需修改邮箱地址，请刷新页面后重新填写。</span>
           )}
         </AlertBox>
       )}
 
-      {/* ── Dedicated inbox address ───────────────────────────────────────── */}
       {addrLoading ? (
-        <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-xl text-gray-400 text-sm">
-          <Spinner size="sm" color="gray" />
+        <div className="flex items-center gap-3 rounded-lg bg-muted p-4 text-sm text-muted-foreground">
+          <Spinner />
           正在生成专属转发地址…
         </div>
       ) : bindAddress ? (
-        <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
-          <p className="text-xs text-blue-600 font-medium mb-2">转发目标地址（请将 CQU 邮件转发到此处）</p>
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <span className="font-mono text-sm font-semibold text-blue-900 break-all">
+        <div className="rounded-lg border border-link/40 bg-link/10 p-4">
+          <p className="mb-2 text-xs font-medium text-link">转发目标地址（请将 CQU 邮件转发到此处）</p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="break-all font-mono text-sm font-semibold text-foreground">
               {bindAddress}
             </span>
             <CopyButton text={bindAddress} />
@@ -648,25 +587,23 @@ function Step2Forward({
         </div>
       ) : null}
 
-      {/* ── Forward setup instructions ────────────────────────────────────── */}
       {bindAddress && (
-        <div className="space-y-2 text-sm text-gray-600">
-          <p className="font-medium text-gray-900">操作步骤：</p>
-          <ol className="space-y-2 list-decimal list-inside">
+        <div className="space-y-2 text-sm text-muted-foreground">
+          <p className="font-medium text-foreground">操作步骤：</p>
+          <ol className="list-inside list-decimal space-y-2 marker:text-muted-foreground">
             <li>
               登录您的邮箱{forwardAddress ? <strong>（{forwardAddress}）</strong> : ""}，进入「设置」→「过滤器」或「自动转发」
             </li>
             <li>
-              新建一条过滤/转发规则：<strong>发件人为 sso@cqu.edu.cn 的邮件</strong>，自动转发到上方地址
+              新建一条过滤/转发规则：<strong className="text-foreground">发件人为 sso@cqu.edu.cn 的邮件</strong>，自动转发到上方地址
             </li>
             <li>保存规则，完成后点击下方按钮继续</li>
           </ol>
         </div>
       )}
 
-      {/* ── Compatibility reminder ────────────────────────────────────────── */}
       {bindAddress && (
-        <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 space-y-1">
+        <div className="space-y-1 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs text-warning">
           <p className="font-semibold">重要提示</p>
           <p>
             请确保您的邮箱在转发时会对邮件做地址改写（SRS）或用自身 DKIM 重签，
@@ -676,22 +613,20 @@ function Step2Forward({
         </div>
       )}
 
-      <div className="flex gap-3">
-        <button
-          type="button"
-          onClick={onNext}
-          disabled={!bindAddress || addrLoading}
-          className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white text-sm font-medium rounded-lg transition-colors"
-        >
-          已设置转发，继续
-        </button>
-      </div>
+      <Button
+        type="button"
+        className="w-full"
+        onClick={onNext}
+        disabled={!bindAddress || addrLoading}
+      >
+        已设置转发，继续
+      </Button>
     </div>
   );
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Step 2 dispatcher — routes to direct or forward variant
+// Step 2 dispatcher
 // ────────────────────────────────────────────────────────────────────────────
 
 function Step2AddressAndCode({
@@ -743,7 +678,6 @@ function Step3Credentials({
   const [error, setError] = useState("");
   const abortRef = useRef<AbortController | null>(null);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => { abortRef.current?.abort(); };
   }, []);
@@ -779,10 +713,10 @@ function Step3Credentials({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-gray-900 mb-2">
+        <h2 className="mb-2 text-xl font-semibold text-foreground">
           {repair ? "重新设置 CQU 密码" : "登录重庆大学统一认证账号"}
         </h2>
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-muted-foreground">
           {repair
             ? "输入统一身份认证账号和新密码。系统会验证新密码，并重新建立 CQU 会话，过程可能需要几分钟。"
             : "输入您的 CQU 统一身份认证账号和密码。系统将立即发起首次登录。由于需要等待 2FA 邮件，此过程可能需要几分钟。"}
@@ -791,12 +725,10 @@ function Step3Credentials({
 
       {error && <AlertBox variant="error">{error}</AlertBox>}
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label htmlFor="bind-studentId" className="block text-sm font-medium text-gray-700 mb-1">
-            统一身份认证账号
-          </label>
-          <input
+      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+        <div className="field">
+          <Label htmlFor="bind-studentId">统一身份认证账号</Label>
+          <Input
             id="bind-studentId"
             type="text"
             value={studentId}
@@ -804,16 +736,13 @@ function Step3Credentials({
             required
             disabled={loading}
             autoComplete="username"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500"
             placeholder="输入您的统一身份认证账号"
           />
         </div>
 
-        <div>
-          <label htmlFor="bind-cquPassword" className="block text-sm font-medium text-gray-700 mb-1">
-            CQU 统一认证密码
-          </label>
-          <input
+        <div className="field">
+          <Label htmlFor="bind-cquPassword">CQU 统一认证密码</Label>
+          <Input
             id="bind-cquPassword"
             type="password"
             value={password}
@@ -821,20 +750,19 @@ function Step3Credentials({
             required
             disabled={loading}
             autoComplete="current-password"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500"
             placeholder="输入 CQU 统一认证密码"
           />
         </div>
 
         {loading && (
-          <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
-            <div className="flex items-center gap-3 mb-2">
-              <Spinner size="sm" color="blue" />
-              <p className="text-sm font-medium text-blue-800">
+          <div className="rounded-lg border border-link/40 bg-link/10 p-4">
+            <div className="mb-2 flex items-center gap-3">
+              <Spinner className="text-link" />
+              <p className="text-sm font-medium text-foreground">
                 {repair ? "正在验证新密码…" : "正在完成首次登录…"}
               </p>
             </div>
-            <p className="text-xs text-blue-600 pl-6">
+            <p className="pl-6 text-xs text-muted-foreground">
               {repair
                 ? "系统正在使用新密码重新登录 CQU，可能需要等待 2FA 验证码邮件。请保持页面打开。"
                 : "系统正在以您的身份登录 CQU，可能需要等待 2FA 验证码邮件，预计需要 1–5 分钟。请保持页面打开，不要刷新。"}
@@ -842,20 +770,22 @@ function Step3Credentials({
           </div>
         )}
 
-        <button
+        <ActionButton
           type="submit"
+          className="w-full"
           disabled={loading}
-          className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
-        >
-          {loading && <Spinner size="sm" color="white" />}
-          {loading
-            ? repair ? "正在保存，请稍候…" : "首次登录中，请稍候…"
-            : repair ? "保存并重新登录" : "确认绑定"}
-        </button>
+          state={loading ? "loading" : "idle"}
+          labels={{
+            idle: repair ? "保存并重新登录" : "确认绑定",
+            loading: repair ? "正在保存，请稍候…" : "首次登录中，请稍候…",
+            success: "已完成",
+            error: "重试",
+          }}
+        />
       </form>
 
-      <div className="p-3 bg-gray-50 rounded-xl text-xs text-gray-500">
-        <p className="font-medium text-gray-600 mb-1">安全提示</p>
+      <div className="rounded-lg bg-muted p-3 text-xs text-muted-foreground">
+        <p className="mb-1 font-medium text-foreground">安全提示</p>
         <p>您的密码将以 AES-256-GCM 加密存储，仅用于维护 CQU 会话，不会明文记录或对外共享。</p>
       </div>
     </div>
@@ -1014,20 +944,20 @@ export default function CquBindWizard({ onReturn = replaceLocation }: CquBindWiz
   const content = bootstrapError ? (
     <div className="space-y-4 text-center">
       <div>
-        <h2 className="text-xl font-semibold text-gray-900">暂时无法确认绑定状态</h2>
-        <p className="mt-2 text-sm text-gray-500">请检查网络连接后重试。</p>
+        <h2 className="text-xl font-semibold text-foreground">暂时无法确认绑定状态</h2>
+        <p className="mt-2 text-sm text-muted-foreground">请检查网络连接后重试。</p>
       </div>
-      <button
+      <Button
         type="button"
+        className="w-full"
         onClick={() => setBootstrapAttempt((value) => value + 1)}
-        className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
       >
         重试
-      </button>
+      </Button>
     </div>
   ) : screen === null ? (
-    <div className="flex min-h-24 items-center justify-center gap-3 text-sm text-gray-500">
-      <Spinner size="sm" color="blue" />
+    <div className="flex min-h-24 items-center justify-center gap-3 text-sm text-muted-foreground">
+      <Spinner className="text-link" />
       正在确认绑定状态…
     </div>
   ) : screen === "intro" ? (
@@ -1057,30 +987,30 @@ export default function CquBindWizard({ onReturn = replaceLocation }: CquBindWiz
     }} />
   ) : screen === "waiting" ? (
     <div className="space-y-4 text-center">
-      <div className="flex justify-center"><Spinner size="lg" color="blue" /></div>
+      <div className="flex justify-center"><Spinner size={32} className="text-link" /></div>
       <div>
-        <h2 className="text-xl font-semibold text-gray-900">
+        <h2 className="text-xl font-semibold text-foreground">
           {repair
             ? waitTimedOut ? "尚未确认密码更新" : "正在确认密码更新"
             : waitTimedOut ? "尚未确认绑定结果" : "正在确认绑定结果"}
         </h2>
-        <p className="mt-2 text-sm text-gray-500">
+        <p className="mt-2 text-sm text-muted-foreground">
           {repair
             ? waitTimedOut ? "新密码可能仍在验证，请重新检查。" : "系统正在使用新密码恢复 CQU 会话。"
             : waitTimedOut ? "首次登录可能仍在处理，请重新检查。" : "首次登录可能需要几分钟。"}
         </p>
       </div>
       {waitTimedOut && (
-        <button
+        <Button
           type="button"
+          className="w-full"
           onClick={() => {
             waitStartedAtRef.current = Date.now();
             void checkBindingConfirmation();
           }}
-          className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700"
         >
           重新检查
-        </button>
+        </Button>
       )}
     </div>
   ) : (
@@ -1098,21 +1028,19 @@ export default function CquBindWizard({ onReturn = replaceLocation }: CquBindWiz
 
   return (
     <Layout>
-      <div className="max-w-xl mx-auto">
-        {/* Page header */}
-        <div className="mb-6">
-          <Link to="/settings" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition-colors">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-            返回设置
-          </Link>
-        </div>
-
-        <div className="bg-white rounded-2xl border border-gray-200 p-6 sm:p-8">
-          {currentStep && !repair && <StepIndicator current={currentStep} />}
-          <div>{content}</div>
-        </div>
+      <Button asChild variant="ghost" size="sm" className="mb-4 -ml-2 text-muted-foreground">
+        <Link to="/settings">
+          <ArrowLeft aria-hidden="true" />
+          返回设置
+        </Link>
+      </Button>
+      <PageHeader
+        title={repair ? "重新设置 CQU 密码" : "绑定 CQU 账号"}
+        description={repair ? "验证新密码并恢复统一认证会话。" : "按步骤完成统一认证账号绑定。"}
+      />
+      <div className="rounded-lg border border-border bg-surface p-6 sm:p-8">
+        {currentStep && !repair && <StepIndicator current={currentStep} />}
+        <div>{content}</div>
       </div>
     </Layout>
   );

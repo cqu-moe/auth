@@ -3,6 +3,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, useLocation } from "react-router-dom";
+import { ThemeProvider } from "@cqu-moe/ui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withRedirectParam } from "../lib/post-login-redirect";
 import Login from "./Login";
@@ -10,6 +11,18 @@ import Register from "./Register";
 import ResetPassword from "./ResetPassword";
 import ResetPasswordConfirm from "./ResetPasswordConfirm";
 import VerifyEmail from "./VerifyEmail";
+
+// ThemeProvider 监听系统主题偏好，node/jsdom 测试环境没有 matchMedia。
+vi.stubGlobal("matchMedia", (query: string) => ({
+  matches: false,
+  media: query,
+  onchange: null,
+  addListener: () => undefined,
+  removeListener: () => undefined,
+  addEventListener: () => undefined,
+  removeEventListener: () => undefined,
+  dispatchEvent: () => false,
+}));
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -49,10 +62,12 @@ function LocationProbe() {
 async function renderPage(element: React.ReactElement, entry: string) {
   await act(async () => {
     root.render(
-      <MemoryRouter initialEntries={[entry]}>
-        {element}
-        <LocationProbe />
-      </MemoryRouter>,
+      <ThemeProvider>
+        <MemoryRouter initialEntries={[entry]}>
+          {element}
+          <LocationProbe />
+        </MemoryRouter>
+      </ThemeProvider>,
     );
     await Promise.resolve();
   });

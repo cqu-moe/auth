@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
+import { Check, ShieldAlert } from "lucide-react";
+import { ActionButton, Alert, AlertDescription, Button } from "@cqu-moe/ui";
+import AuthLayout from "../components/AuthLayout";
 import { authClient } from "../lib/auth-client";
-import Layout from "../components/Layout";
 
 interface ScopeInfo {
   label: string;
@@ -27,6 +29,7 @@ function getScopeInfo(scope: string): ScopeInfo {
 export default function OAuthAuthorize() {
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [clientInfo, setClientInfo] = useState<{ name: string; icon?: string | null } | null>(null);
 
   const clientId = searchParams.get("client_id") ?? "";
@@ -37,7 +40,11 @@ export default function OAuthAuthorize() {
     if (!clientId) return;
     authClient.oauth2.publicClient({ query: { client_id: clientId } }).then((res) => {
       if (res.data) {
-        setClientInfo({ name: (res.data.name as string) ?? clientId, icon: res.data.icon as string | null });
+        const meta = res.data as { name?: unknown; icon?: unknown };
+        setClientInfo({
+          name: typeof meta.name === "string" ? meta.name : clientId,
+          icon: typeof meta.icon === "string" ? meta.icon : null,
+        });
       }
     }).catch(() => {
       setClientInfo({ name: clientId });
@@ -48,6 +55,7 @@ export default function OAuthAuthorize() {
 
   const handleConsent = async (accept: boolean) => {
     setLoading(true);
+    setFailed(false);
     try {
       const res = await authClient.oauth2.consent({
         accept,
@@ -60,86 +68,88 @@ export default function OAuthAuthorize() {
     } catch {
       // fall through
     }
+    setFailed(true);
     setLoading(false);
   };
 
   return (
-    <Layout>
-      <div className="max-w-md mx-auto">
-        <div className="bg-white rounded-2xl border border-gray-200 p-8">
-          <div className="w-16 h-16 bg-blue-100 rounded-2xl flex items-center justify-center mx-auto mb-4 overflow-hidden">
-            {clientInfo?.icon ? (
-              <img src={clientInfo.icon} alt="" className="w-full h-full object-cover" />
-            ) : (
-              <svg className="w-8 h-8 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-              </svg>
-            )}
-          </div>
+    <AuthLayout title="授权请求" description={`${clientName} 请求访问您的账户。`}>
+      {clientInfo?.icon ? (
+        <img
+          src={clientInfo.icon}
+          alt=""
+          className="mx-auto mb-4 h-16 w-16 rounded-lg object-cover"
+        />
+      ) : null}
 
-          <h2 className="text-xl font-semibold text-gray-900 text-center mb-1">授权请求</h2>
-          <p className="text-sm text-gray-500 text-center mb-6">
-            <span className="font-medium text-gray-800">{clientName}</span> 请求以下权限
-          </p>
-
-          <div className="space-y-2 mb-6">
-            {scopes.map((scope) => {
-              const info = getScopeInfo(scope);
-              const isCquScope = scope.startsWith("cqu:");
-              return (
-                <div
-                  key={scope}
-                  className={`flex items-start gap-3 p-3 rounded-xl ${
-                    isCquScope ? "bg-orange-50 border border-orange-100" : "bg-gray-50"
-                  }`}
-                >
-                  <div className={`mt-0.5 w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${
-                    isCquScope ? "bg-orange-100" : "bg-blue-100"
-                  }`}>
-                    <svg className={`w-3 h-3 ${isCquScope ? "text-orange-600" : "text-blue-600"}`} fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                    </svg>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900">{info.label}</p>
-                    <p className="text-xs text-gray-500">{info.description}</p>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {scopes.some((s) => s.startsWith("cqu:")) && (
-            <div className="mb-6 p-3 bg-yellow-50 border border-yellow-200 rounded-xl text-xs text-yellow-700">
-              该应用请求访问您的 CQU 账户。授权后，该应用将可以以您的身份访问相关 CQU 系统。请确认您信任该应用。
+      <div className="space-y-2">
+        {scopes.map((scope) => {
+          const info = getScopeInfo(scope);
+          const isCquScope = scope.startsWith("cqu:");
+          return (
+            <div
+              key={scope}
+              className={`flex items-start gap-3 rounded-lg p-3 ${
+                isCquScope ? "border border-warning/40 bg-warning/10" : "bg-muted"
+              }`}
+            >
+              <span
+                className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
+                  isCquScope ? "bg-warning/20 text-warning" : "bg-link/10 text-link"
+                }`}
+              >
+                <Check aria-hidden="true" size={12} />
+              </span>
+              <div>
+                <p className="text-sm font-medium text-foreground">{info.label}</p>
+                <p className="text-xs text-muted-foreground">{info.description}</p>
+              </div>
             </div>
-          )}
-
-          <div className="flex gap-3">
-            <button
-              onClick={() => handleConsent(false)}
-              disabled={loading}
-              className="flex-1 py-2.5 px-4 border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-medium rounded-lg transition-colors"
-            >
-              拒绝
-            </button>
-            <button
-              onClick={() => handleConsent(true)}
-              disabled={loading}
-              className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
-            >
-              {loading && (
-                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              )}
-              {loading ? "处理中..." : "授权"}
-            </button>
-          </div>
-
-          <p className="mt-4 text-xs text-gray-400 text-center">
-            授权后，该应用将获得上述权限。您可以随时在设置中撤销授权。
-          </p>
-        </div>
+          );
+        })}
       </div>
-    </Layout>
+
+      {scopes.some((s) => s.startsWith("cqu:")) && (
+        <Alert className="mt-4 border-warning/40 bg-warning/10 text-warning">
+          <AlertDescription className="text-warning">
+            该应用请求访问您的 CQU 账户。授权后，该应用将可以以您的身份访问相关 CQU 系统。请确认您信任该应用。
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {failed && (
+        <Alert variant="destructive" className="mt-4">
+          <AlertDescription>授权处理失败，请重试。</AlertDescription>
+        </Alert>
+      )}
+
+      <div className="mt-6 flex gap-3">
+        <Button
+          variant="outline"
+          className="flex-1"
+          onClick={() => handleConsent(false)}
+          disabled={loading}
+        >
+          拒绝
+        </Button>
+        <ActionButton
+          type="button"
+          className="flex-1"
+          state={loading ? "loading" : failed ? "error" : "idle"}
+          onClick={() => handleConsent(true)}
+          labels={{
+            idle: "授权",
+            loading: "处理中…",
+            success: "已授权",
+            error: "重试授权",
+          }}
+        />
+      </div>
+
+      <p className="mt-4 text-center text-xs text-muted-foreground">
+        <ShieldAlert aria-hidden="true" size={12} className="mr-1 inline align-[-2px]" />
+        授权后，该应用将获得上述权限。您可以随时在设置中撤销授权。
+      </p>
+    </AuthLayout>
   );
 }
