@@ -1,5 +1,6 @@
-// 锁覆盖排队请求完整生命周期：最多 1620s queued permit phase，成为 owner 后
-// 再有 660s 登录预算，另留 60s VPC/清理余量。
+// 锁覆盖排队请求完整生命周期：接棒最坏在 owner 恢复围栏(1500s)后，再走
+// 780s permit phase + 660s 登录预算，另留恢复/清理余量(#27 对齐后无独立
+// queued 档；容器侧预算恒被 DO 的 13min 调用截止钳制)。
 // 改 server.py 的 PERMIT_PHASE_TIMEOUT/RUN_TOTAL_TIMEOUT 时必须同步本值。
 export const LOGIN_LOCK_TTL_MS = 2340 * 1000;
 
