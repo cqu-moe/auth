@@ -19,6 +19,11 @@ import {
   quickloginAccessTokenClaims,
   QuickloginOAuthError,
 } from "./services/quicklogin/oauth-grants";
+import {
+  assertRefreshTokenUserNotBanned,
+  revokeUserOAuthTokens,
+  type OAuthTokenAdapter,
+} from "./services/oauth-tokens";
 
 // Must spread the admin plugin's defaultStatements: its built-in endpoints
 // (listUsers/setRole/banUser/...) authorize against actions like
@@ -101,6 +106,22 @@ export function createAuth(env: Env, request: Request) {
             });
           },
         },
+        databaseHooks: {
+          user: {
+            update: {
+              // Every ban path (native /admin/ban-user, admin routes, v1 API)
+              // funnels through updateUser, so this is the single choke point
+              // to cascade OAuth token revocation on ban.
+              after: async (user, context) => {
+                if (!user.banned || !context) return;
+                await revokeUserOAuthTokens(
+                  context.context.adapter as OAuthTokenAdapter,
+                  user.id
+                );
+              },
+            },
+          },
+        },
         hooks: {
           before: createAuthMiddleware(async (ctx) => {
             if (ctx.path === "/oauth2/token") {
@@ -109,6 +130,12 @@ export function createAuth(env: Env, request: Request) {
                 client_id?: unknown;
                 refresh_token?: unknown;
               } | undefined;
+              if (body?.grant_type === "refresh_token") {
+                await assertRefreshTokenUserNotBanned(
+                  ctx.context.adapter,
+                  body?.refresh_token
+                );
+              }
               try {
                 await assertQuickloginRefreshAllowed(env, ctx.context.adapter, {
                   grantType: body?.grant_type,
