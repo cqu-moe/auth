@@ -15,6 +15,10 @@ describe("versioned auth URL configuration", () => {
       const oauthPlugin = fixture.auth.options.plugins?.find((plugin) => plugin.id === "oauth-provider");
 
       expect(ctx.baseURL).toBe("https://auth.cqu.moe/api/v1/auth");
+      expect(fixture.auth.options.emailAndPassword).toMatchObject({
+        enabled: true,
+        revokeSessionsOnPasswordReset: true,
+      });
       expect(jwtPlugin?.options).toMatchObject({
         jwt: {
           issuer: "https://auth.cqu.moe/api/auth",

@@ -35,7 +35,7 @@ function ChangePasswordEditor({ onCancel, onSuccess }: { onCancel: () => void; o
     const { error } = await authClient.changePassword({
       currentPassword,
       newPassword,
-      revokeOtherSessions: false,
+      revokeOtherSessions: true,
     });
     setLoading(false);
 

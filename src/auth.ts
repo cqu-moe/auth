@@ -92,6 +92,7 @@ export function createAuth(env: Env, request: Request) {
       {
         emailAndPassword: {
           enabled: true,
+          revokeSessionsOnPasswordReset: true,
           sendResetPassword: async ({ user, url }) => {
             void getResend().emails.send({
               from: "auth.cqu.moe <noreply@cqu.moe>",
