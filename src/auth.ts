@@ -21,6 +21,7 @@ import {
 } from "./services/quicklogin/oauth-grants";
 import {
   assertRefreshTokenUserNotBanned,
+  isBanned,
   revokeUserOAuthTokens,
   type OAuthTokenAdapter,
 } from "./services/oauth-tokens";
@@ -113,7 +114,11 @@ export function createAuth(env: Env, request: Request) {
               // funnels through updateUser, so this is the single choke point
               // to cascade OAuth token revocation on ban.
               after: async (user, context) => {
-                if (!user.banned || !context) return;
+                const banned = user as {
+                  banned?: boolean | null;
+                  banExpires?: Date | string | null;
+                };
+                if (!context || !isBanned(banned)) return;
                 await revokeUserOAuthTokens(
                   context.context.adapter as OAuthTokenAdapter,
                   user.id

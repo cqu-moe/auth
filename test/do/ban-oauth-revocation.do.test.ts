@@ -135,4 +135,27 @@ describe("ban revokes OAuth tokens (issue #22)", () => {
     expect(after.refresh?.live).toBe(0);
     await expect(live.refresh()).rejects.toMatchObject({ stage: "refresh", status: 400 });
   });
+
+  it("an expired ban neither cascades on later user updates nor blocks refresh", async () => {
+    const fixture = await createOAuthFixture(env);
+    const userId = fixture.websiteSession.userId;
+    const live = await authorizeInstall(fixture);
+
+    // Expired-but-lazily-not-unbanned state: banned stays true until the
+    // next session create, but must no longer count as banned anywhere.
+    const auth = createAuth(env, new Request(`${env.BETTER_AUTH_URL}/api/v1/auth/get-session`));
+    const ctx = await auth.$context;
+    await ctx.adapter.update({
+      model: "user",
+      where: [{ field: "id", value: userId }],
+      update: { banned: true, banExpires: new Date(Date.now() - 60_000) },
+    });
+    await ctx.internalAdapter.updateUser(userId, { name: "Edited" });
+
+    const rows = await tokenRows(userId);
+    // Access tokens are stateless JWTs (no rows); the live refresh row is
+    // what proves neither the cascade nor the gate treated it as banned.
+    expect(rows.refresh?.live).toBeGreaterThan(0);
+    await expect(live.refresh()).resolves.toBeDefined();
+  });
 });

@@ -18,6 +18,16 @@ interface RefreshTokenRow extends OAuthTokenRow {
   revoked?: Date | null;
 }
 
+// Shared ban semantics: mirrors the admin plugin, where an expired ban is
+// lazily lifted at session create and no longer counts as banned.
+export function isBanned(user: {
+  banned?: boolean | null;
+  banExpires?: Date | string | null;
+}): boolean {
+  if (!user.banned) return false;
+  return !user.banExpires || new Date(user.banExpires).getTime() > Date.now();
+}
+
 export interface OAuthTokenAdapter {
   findOne<T>(input: {
     model: string;
@@ -98,13 +108,7 @@ export async function assertRefreshTokenUserNotBanned(
     model: "user",
     where: [{ field: "id", value: row.userId }],
   });
-  if (!user?.banned) return;
-  if (
-    user.banExpires &&
-    new Date(user.banExpires).getTime() <= Date.now()
-  ) {
-    return;
-  }
+  if (!user || !isBanned(user)) return;
   throw new APIError("BAD_REQUEST", {
     code: "INVALID_GRANT",
     message: "invalid refresh token",
