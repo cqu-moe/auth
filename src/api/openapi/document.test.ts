@@ -223,6 +223,24 @@ describe("complete API document", () => {
     }
   });
 
+  it("memoizes the openapi document per isolate and sets cache headers", async () => {
+    const fixture = createHttpFixture();
+    try {
+      const app = createApp();
+      const first = await app.request("/api/v1/openapi.json", {}, fixture.env);
+      expect(first.status).toBe(200);
+      expect(first.headers.get("cache-control")).toBe("public, max-age=300");
+      expect(first.headers.get("content-type")).toBe("application/json");
+      const firstBody = await first.text();
+
+      const second = await app.request("/api/v1/openapi.json", {}, fixture.env);
+      expect(second.status).toBe(200);
+      expect(await second.text()).toBe(firstBody);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("documents QuickLogin native and enveloped contracts without internal state", () => {
     const document = buildOpenApiDocument(listHttpOperations(createApp()));
     const paths = document.paths as Record<string, Record<string, any>>;

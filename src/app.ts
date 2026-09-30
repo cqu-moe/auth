@@ -88,10 +88,19 @@ export function createApp() {
 
   app.route(AUTH_BASE_PATH, createAuthApi());
 
+  // ponytail: isolate 级按 BETTER_AUTH_URL memoize —— 文档只随部署（路由树 + baseURL）变化。
+  // 并发冷启动会重复构建（幂等，无锁）；若文档需按请求变化，改伺服静态产物。
+  let openApiCache: { url: string; body: string } | undefined;
   app.get("/api/v1/openapi.json", async (c) => {
-    const base = buildOpenApiDocument(listHttpOperations(app));
-    const authDocument = await getBetterAuthOpenApi(c.env, c.req.raw);
-    return c.json(mergeBetterAuthOpenApi(base, authDocument));
+    const url = c.env.BETTER_AUTH_URL;
+    if (openApiCache?.url !== url) {
+      const base = buildOpenApiDocument(listHttpOperations(app));
+      const authDocument = await getBetterAuthOpenApi(c.env, c.req.raw);
+      openApiCache = { url, body: JSON.stringify(mergeBetterAuthOpenApi(base, authDocument)) };
+    }
+    c.header("Cache-Control", "public, max-age=300");
+    c.header("Content-Type", "application/json");
+    return c.body(openApiCache.body);
   });
 
   const operations = listHttpOperations(app);
