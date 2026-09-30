@@ -6,8 +6,26 @@ import { createSqliteD1 } from "../test-utils/d1";
 
 vi.mock("../auth", () => ({
   createAuth: () => ({
-    api: { getSession: async () => ({ user: { id: "current-user" } }) },
+    // #21：带 Authorization 头的请求视为无 session cookie（浏览器不会在
+    // SPA fetch 里混用两种凭据），用于回归 bearer-only 访问被拒。
+    api: {
+      getSession: async ({ headers }: { headers: Headers }) =>
+        headers.get("Authorization") ? null : { user: { id: "current-user" } },
+    },
   }),
+}));
+
+vi.mock("better-auth/oauth2", () => ({
+  // #21：让「有效签名、任意 scope」的 token 在旧代码里能通过 bearer 分支，
+  // 从而证明路由层不再依赖 bearer 鉴权。
+  verifyAccessToken: async () => ({
+    sub: "current-user",
+    azp: "evil-client",
+    scope: "openid",
+  }),
+  verifyJwsAccessToken: async () => {
+    throw new Error("unused in this suite");
+  },
 }));
 
 const databases: DatabaseSync[] = [];
@@ -63,9 +81,36 @@ function bindingResponse(
       idFromName: (id: string) => id,
       get: () => ({ fetch: async () => Response.json({ status: "idle" }) }),
     },
+    BETTER_AUTH_URL: "https://auth.example.test",
   } as unknown as Env;
   return cquBinding.request("http://localhost/", {}, env);
 }
+
+describe("#21 bearer rejection", () => {
+  it.each(["GET", "POST", "DELETE"])("rejects an any-scope bearer token on %s /", async (method) => {
+    const response = await cquBinding.request("http://localhost/", {
+      method,
+      headers: { Authorization: "Bearer forged-but-valid.openid.scope" },
+    }, {
+      BETTER_AUTH_URL: "https://auth.example.test",
+    } as unknown as Env);
+    expect(response.status).toBe(401);
+  });
+
+  it("rejects an any-scope bearer token on PUT /credentials", async () => {
+    const response = await cquBinding.request("http://localhost/credentials", {
+      method: "PUT",
+      headers: {
+        Authorization: "Bearer forged-but-valid.openid.scope",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ studentId: "2023123456", password: "attacker-password" }),
+    }, {
+      BETTER_AUTH_URL: "https://auth.example.test",
+    } as unknown as Env);
+    expect(response.status).toBe(401);
+  });
+});
 
 describe("GET CQU binding status", () => {
   it.each([

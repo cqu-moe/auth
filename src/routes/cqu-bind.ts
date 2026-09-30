@@ -7,7 +7,7 @@ import { genAddressToken } from "../services/cqu-2fa/token";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, sql } from "drizzle-orm";
 import { getCquBinding } from "../services/cqu-binding";
-import { requireSessionOrBearer } from "../middleware/authentication";
+import { requireSession } from "../middleware/authentication";
 import { JsonBodyError, parseJsonBody } from "../api/validation";
 import { CquCredentialsBody, CreateCquBindingBody } from "../api/v1/cqu-binding.schema";
 import { captureHonoEvent, captureHonoException } from "../lib/posthog";
@@ -21,12 +21,14 @@ import { captureHonoEvent, captureHonoException } from "../lib/posthog";
 //   GET    /api/cqu/binding/events       升级 WS，转发到本用户 DO（bind_confirm 码秒推）
 //   DELETE /api/cqu/binding              彻底解绑（删两表 + DO destroy），成功 204
 //
-// 安全契约（关键）：每条路由的 DO/用户身份 **只** 从已认证的 session/JWT 推导
-// （`c.get("user").id`），**绝不** 取自客户端请求体/查询参数。鉴权中间件与
-// `cqu.ts` 完全一致（Bearer JWT 优先，回退 Better Auth session）。
+// 安全契约（关键）：每条路由的 DO/用户身份 **只** 从已认证的 session 推导
+// （`c.get("user").id`），**绝不** 取自客户端请求体/查询参数。
+// #21：绑定管理收敛为 session-only —— Bearer 分支不检查 scope 内容，任意
+// scope 的 token 都能读地址/换凭据/销毁绑定；SPA 本就全程 cookie，无合法
+// Bearer 调用方。程序化取票走 /api/cqu/service-ticket（scope+D1 双检）。
 const cquBinding = new Hono<HonoEnv>();
 
-cquBinding.use("/*", requireSessionOrBearer);
+cquBinding.use("/*", requireSession);
 
 // POST /api/cqu/binding （← 原 POST /address）
 // 创建绑定、签发专属地址。

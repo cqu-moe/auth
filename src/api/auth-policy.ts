@@ -6,7 +6,6 @@ export type AuthPolicyKind =
   | "session"
   | "admin-session"
   | "bearer"
-  | "session-or-bearer"
   | "oauth-client"
   | "two-factor-cookie"
   | "session-or-two-factor-cookie";
@@ -100,7 +99,7 @@ export function buildAuthPolicy(operations: readonly HttpOperation[]): AuthPolic
       } else if (path.includes("/cqu/service-ticket")) {
         policy = "bearer";
       } else if (path.includes("/cqu/binding")) {
-        policy = "session-or-bearer";
+        policy = "session";
       } else if ((path.endsWith("/cqu/quicklogin/capabilities") || path.endsWith("/cqu/quicklogin/release"))) {
         policy = "public";
       } else if (path.endsWith("/cqu/quicklogin/registrations")) {
@@ -136,8 +135,6 @@ export function securityForPolicy(policy: AuthPolicyKind): Array<Record<string, 
       return [{ cookieAuth: [] }];
     case "bearer":
       return [{ bearerAuth: [] }];
-    case "session-or-bearer":
-      return [{ cookieAuth: [] }, { bearerAuth: [] }];
     case "oauth-client":
       return [{ oauthClientAuth: [] }];
     case "two-factor-cookie":
