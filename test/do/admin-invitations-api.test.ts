@@ -69,4 +69,40 @@ describe("registration resources v1", () => {
       await fixture.close();
     }
   });
+
+  it("gates invitation presets behind entitlement assign while keeping plain invites admin-creatable", async () => {
+    const fixture = await createApiFixture();
+    try {
+      const adminHeaders = await fixture.signIn("admin");
+      adminHeaders.set("content-type", "application/json");
+      const before = await fixture.database.prepare("SELECT COUNT(*) AS count FROM registration_invitation").first<{ count: number }>();
+      const denied = await fixture.request("/api/v1/admin/registration-invitations", {
+        method: "POST",
+        headers: adminHeaders,
+        body: JSON.stringify({ preset: "助教" }),
+      });
+      expect(denied.status).toBe(403);
+      const after = await fixture.database.prepare("SELECT COUNT(*) AS count FROM registration_invitation").first<{ count: number }>();
+      expect(after?.count).toBe(before?.count);
+
+      const plain = await fixture.request("/api/v1/admin/registration-invitations", {
+        method: "POST",
+        headers: adminHeaders,
+      });
+      expect(plain.status).toBe(201);
+
+      const superHeaders = await fixture.signIn("superAdmin");
+      superHeaders.set("content-type", "application/json");
+      const created = await fixture.request("/api/v1/admin/registration-invitations", {
+        method: "POST",
+        headers: superHeaders,
+        body: JSON.stringify({ preset: "助教" }),
+      });
+      expect(created.status).toBe(201);
+      const invitation = await created.json() as { data: { preset: string } };
+      expect(invitation.data.preset).toBe("助教");
+    } finally {
+      await fixture.close();
+    }
+  });
 });

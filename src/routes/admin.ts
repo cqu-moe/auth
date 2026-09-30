@@ -334,7 +334,8 @@ admin.patch("/users/:id", async (c) => {
 });
 
 // ── Registration invitations ────────────────────────────────────────────────
-// 管理员和超级管理员都可邀请新用户；邀请仅开放注册，不附带任何 entitlement。
+// 管理员和超级管理员都可邀请新用户；空预设邀请仅开放注册，
+// 附带权益预设的邀请等价于授予 entitlement，仅 superAdmin 可创建。
 
 // GET /api/admin/registration-invitations - 最近 100 条邀请及实时状态。
 admin.get("/registration-invitations", async (c) => {
@@ -344,13 +345,20 @@ admin.get("/registration-invitations", async (c) => {
 
 // POST /api/admin/registration-invitations - 生成 8 位明文 code，默认 7 天有效。
 // body 可选 { preset: string | null }:注册使用该邀请码时套用的权益预设;
-// null/省略 = 回落全局默认预设。指定的预设必须已存在。
+// null/省略 = 回落全局默认预设。指定的预设必须已存在，且需要
+// entitlement:assign 权限(与直接写 user_entitlement 同档)。
 admin.post("/registration-invitations", async (c) => {
   const user = c.get("user");
   const body = await c.req
     .json<{ preset?: string | null }>()
     .catch(() => ({}) as { preset?: string | null });
   const preset = body.preset ?? null;
+  if (preset !== null) {
+    const auth = createAuth(c.env, c.req.raw);
+    if (!(await hasEntitlementPermission(c, auth, "assign"))) {
+      return errorResponse(c, "FORBIDDEN", "需要权益写权限", 403);
+    }
+  }
   if (preset !== null && !(await getPresetItems(c.env.DATABASE, preset))) {
     return errorResponse(c, "UNKNOWN_PRESET", "未知预设", 400);
   }
