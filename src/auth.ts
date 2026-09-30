@@ -125,6 +125,23 @@ export function createAuth(env: Env, request: Request) {
                 throw error;
               }
             }
+            if (ctx.path === "/admin/ban-user") {
+              const session = await getSessionFromCtx(ctx);
+              const targetId = (ctx.body as { userId?: unknown } | undefined)?.userId;
+              if (session && typeof targetId === "string" && targetId !== session.user.id) {
+                const target = await ctx.context.internalAdapter.findUserById(targetId);
+                const targetRole = (target as { role?: string | null } | null)?.role ?? "user";
+                const targetRoles = targetRole.split(",").map((role) => role.trim());
+                const callerRole = (session.user as { role?: string | null }).role ?? "user";
+                const callerIsSuperAdmin = callerRole.split(",").map((role) => role.trim()).includes("superAdmin");
+                if (targetRoles.some((role) => role === "admin" || role === "superAdmin") && !callerIsSuperAdmin) {
+                  throw new APIError("FORBIDDEN", {
+                    code: "CANNOT_BAN_ADMINS",
+                    message: "只有 superAdmin 可以封禁 admin 或 superAdmin",
+                  });
+                }
+              }
+            }
             if (!currentEmailOtpPaths.has(ctx.path)) return;
             const session = await getSessionFromCtx(ctx);
             const body = ctx.body as { email?: string; type?: string } | undefined;
