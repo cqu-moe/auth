@@ -156,6 +156,19 @@
     "workerReason": "SCHOOL_UNREACHABLE"
   },
   {
+    "id": "navigation_failed",
+    "raw": "Browser navigation failed: net::ERR_NAME_NOT_RESOLVED",
+    "response": {
+      "ok": false,
+      "error": "CONTAINER_UNAVAILABLE",
+      "errorCode": "CONTAINER_UNAVAILABLE",
+      "phase": "launching_browser",
+      "detail": "The browser service is unavailable."
+    },
+    "workerKind": "temporary_unavailable",
+    "workerReason": "CONTAINER_UNAVAILABLE"
+  },
+  {
     "id": "generic_400",
     "raw": "HTTP 400 from upstream",
     "response": {

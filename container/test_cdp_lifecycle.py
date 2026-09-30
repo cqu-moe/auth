@@ -16,6 +16,7 @@ def browser(monkeypatch, tmp_path):
             self.calls = []
             self.close = AsyncMock()
             self.navigation_error = None
+            self.navigation_ticket = True
 
         def on(self, method, handler):
             self.handlers[method] = handler
@@ -25,9 +26,10 @@ def browser(monkeypatch, tmp_path):
             if method == "Browser.getVersion":
                 return {"product": "Chrome/146.0.0.0"}
             if method == "Page.navigate":
-                self.handlers["Network.requestWillBeSent"]({
-                    "request": {"url": "https://my.cqu.edu.cn/cas?ticket=ST-synthetic"},
-                })
+                if self.navigation_ticket:
+                    self.handlers["Network.requestWillBeSent"]({
+                        "request": {"url": "https://my.cqu.edu.cn/cas?ticket=ST-synthetic"},
+                    })
                 if self.navigation_error:
                     return {"errorText": self.navigation_error}
             if method == "Network.getAllCookies":
@@ -71,6 +73,16 @@ async def test_initial_navigation_ticket_reuses_session_without_password_or_code
     assert result["state"]["cookies"][0]["name"] == "SOURCEID_TGC"
     assert not any(method == "Runtime.evaluate" for method, _ in cdp.calls)
     provider.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_initial_navigation_failure_without_ticket_keeps_net_error(browser):
+    cdp, _, _, _ = browser
+    cdp.navigation_error = "net::ERR_NAME_NOT_RESOLVED"
+    cdp.navigation_ticket = False
+    with pytest.raises(RuntimeError, match=r"^Browser navigation failed: net::ERR_NAME_NOT_RESOLVED$"):
+        await m.run_login("synthetic", "synthetic", "https://my.cqu.edu.cn/cas",
+                          code_provider=AsyncMock())
 
 
 @pytest.mark.asyncio
