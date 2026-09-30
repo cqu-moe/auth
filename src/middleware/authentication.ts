@@ -71,10 +71,6 @@ async function bearerPrincipal(c: Context<HonoEnv>): Promise<Principal | null> {
   return cache.bearer;
 }
 
-export async function getRequestAuth(c: Context<HonoEnv>): Promise<Principal | null> {
-  return c.req.header("Authorization") ? bearerPrincipal(c) : sessionPrincipal(c);
-}
-
 function requirePrincipal(
   resolve: (c: Context<HonoEnv>) => Promise<Principal | null>,
   detail: string
@@ -89,7 +85,6 @@ function requirePrincipal(
 
 export const requireSession = requirePrincipal(sessionPrincipal, "未登录");
 export const requireBearer = requirePrincipal(bearerPrincipal, "无效的访问令牌");
-export const requireSessionOrBearer = requirePrincipal(getRequestAuth, "未登录或访问令牌无效");
 
 export const requireAdmin: MiddlewareHandler<HonoEnv> = async (c, next) => {
   const principal = await sessionPrincipal(c);

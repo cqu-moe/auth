@@ -8,31 +8,31 @@
   {
     "method": "POST",
     "path": "/api/v1/cqu/binding",
-    "policy": "session-or-bearer",
+    "policy": "session",
     "source": "custom-contract"
   },
   {
     "method": "GET",
     "path": "/api/v1/cqu/binding",
-    "policy": "session-or-bearer",
+    "policy": "session",
     "source": "custom-contract"
   },
   {
     "method": "PUT",
     "path": "/api/v1/cqu/binding/credentials",
-    "policy": "session-or-bearer",
+    "policy": "session",
     "source": "custom-contract"
   },
   {
     "method": "GET",
     "path": "/api/v1/cqu/binding/events",
-    "policy": "session-or-bearer",
+    "policy": "session",
     "source": "custom-contract"
   },
   {
     "method": "DELETE",
     "path": "/api/v1/cqu/binding",
-    "policy": "session-or-bearer",
+    "policy": "session",
     "source": "custom-contract"
   },
   {
