@@ -1427,6 +1427,51 @@ describe("persistent browser route records", () => {
     });
   });
 
+  it("quicklogin rejects another device while a live same-account login pins the shared pool (#27)", async () => {
+    const stub = freshStub("quicklogin-account-single-flight");
+    await seedSession(stub, {
+      status: "active",
+      extra: {
+        quickloginBindingEpoch: 7,
+        "quickloginLogin:device-a": {
+          token: "quicklogin-device-a",
+          deviceId: "device-a",
+          generation: 3,
+          bindingEpoch: 7,
+          startedAt: Date.now(),
+          deadlineAt: Date.now() + 13 * 60_000,
+          browserRouteVersion: 1,
+        },
+      },
+    });
+    await seedCredentials(stub);
+    const fetchSpy = spyCfLogin({
+      "/run": () => {
+        throw new Error("second device must not start another /run");
+      },
+    });
+
+    const result = await runInDurableObject(stub, async (instance) =>
+      (instance as unknown as {
+        quickloginLogin: (input: {
+          ownerUserId: string;
+          deviceId: string;
+          generation: number;
+        }) => Promise<{ kind: string; reasonCode?: string; retryAfterMs?: number }>;
+      }).quickloginLogin({ ownerUserId: "u1", deviceId: "device-b", generation: 1 })
+    );
+
+    expect(result).toMatchObject({
+      kind: "temporary_unavailable",
+      reasonCode: "RATE_LIMITED",
+    });
+    expect(result?.retryAfterMs ?? 0).toBeGreaterThan(0);
+    expect(result?.retryAfterMs ?? 0).toBeLessThanOrEqual(13 * 60_000);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await readStorage(stub, "quickloginLogin:device-a")).toBeDefined();
+    expect(await readStorage(stub, "quickloginLogin:device-b")).toBeUndefined();
+  });
+
   it("lock and route land atomically and exactly one permit is sent for the routed token", async () => {
     const stub = freshStub("route-atomic");
     const encrypted = await encrypt("test-password", env.ENCRYPTION_KEY);

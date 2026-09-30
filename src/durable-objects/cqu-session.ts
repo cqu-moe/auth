@@ -1659,12 +1659,24 @@ export class CquSessionDO extends DurableObject<Env> {
     const now = Date.now();
     let acquired = false;
     let staleGeneration = false;
+    let accountBusyRetryAfterMs = 0;
     await this.ctx.storage.transaction(async (tx) => {
       const current =
         (await tx.get<QuickloginLoginInFlight>(lockKey)) ?? null;
       if (current) {
         if (current.generation > input.generation) staleGeneration = true;
         return;
+      }
+      // 账户级单飞(#27): quicklogin 容器按 `<user>:<device>` 寻址, 同账号多设备
+      // 并发 /run 会在共享容器池里各钉一个实例, 挤占无关 CAS/取票容量。其他
+      // 设备活锁在途时受控拒绝, 不再为排队者预热/点火第二个容器; 存活口径与
+      // captureInterruptedLogins 一致(deadlineAt ?? startedAt + LOGIN_LOCK_TTL_MS)。
+      for (const [key, lock] of await tx.list<QuickloginLoginInFlight>({ prefix: "quickloginLogin:" })) {
+        const liveUntil = lock.deadlineAt ?? lock.startedAt + LOGIN_LOCK_TTL_MS;
+        if (key !== lockKey && now < liveUntil) {
+          accountBusyRetryAfterMs = Math.max(1_000, liveUntil - now);
+          return;
+        }
       }
       const lock: QuickloginLoginInFlight = {
         token,
@@ -1691,6 +1703,9 @@ export class CquSessionDO extends DurableObject<Env> {
     await this.ctx.storage.sync();
     if (acquired) await this.enqueueRecoveryWorkflow(input.ownerUserId);
     if (!acquired) {
+      if (accountBusyRetryAfterMs > 0) {
+        return { kind: "temporary_unavailable", reasonCode: "RATE_LIMITED", retryAfterMs: accountBusyRetryAfterMs };
+      }
       return staleGeneration
         ? { kind: "cancelled" }
         : { kind: "temporary_unavailable", retryAfterMs: 1_000 };
@@ -1736,10 +1751,7 @@ export class CquSessionDO extends DurableObject<Env> {
         credentials.iv,
         this.env.ENCRYPTION_KEY
       );
-      const permitRole = await this.acquireVerificationCodeLease(
-        token,
-        "quicklogin"
-      );
+      await this.acquireVerificationCodeLease(token, "quicklogin");
       const deadline = resolveBrowserDeadline(undefined, now);
       const remainingMs = remainingBrowserBudget(deadline, Date.now());
       runAbort = new AbortController();
@@ -1749,7 +1761,6 @@ export class CquSessionDO extends DurableObject<Env> {
         service: DUMMY_SERVICE,
         method: "mail",
         session: token,
-        queuedPermit: permitRole === "queued",
       };
       if (input.seedState) {
         runBody.seedState = JSON.parse(input.seedState);
@@ -3086,12 +3097,7 @@ export class CquSessionDO extends DurableObject<Env> {
       // 先点火 /run，让 CAS 与 QuickLogin 可以并行完成密码一因子；节点会在
       // 真正请求验证码前等待 /code-permit。租约未授予时用 AbortSignal 中止在途请求，
       // 避免留下无人 await 的悬空 Promise。
-      let permitRole: "owner" | "queued";
-      try {
-        permitRole = await this.acquireVerificationCodeLease(token, "cas");
-      } catch (error) {
-        throw error;
-      }
+      await this.acquireVerificationCodeLease(token, "cas");
       runAbort = new AbortController();
       // CF 预算:剩余 invocation 时间(登录含等码,受 13min 预算裁剪),减 20s 清理余量;
       // AbortSignal 同时覆盖外层 fetch,防止容器/传输悬挂拖住 DO。
@@ -3107,7 +3113,6 @@ export class CquSessionDO extends DurableObject<Env> {
         service: DUMMY_SERVICE,
         method: "mail",
         session: token,
-        queuedPermit: permitRole === "queued",
       };
       if (state.storageState) {
         runBody.seedState = freshCasLoginSeed(state.storageState);

@@ -177,7 +177,8 @@ def is_allowed_service_url(url: str) -> str | None:
 #   · RUN_TOTAL_TIMEOUT(660s): 单次 /run 整体上限, 含第一因素 + 570s 等码 + 提交/开销。
 #     须 > CODE_WAIT(570s) + 第一因素/发码开销, 故取 660s。
 # 不变式(必须成立):
-#   LOGIN_LOCK_TTL_MS(1500s) > PERMIT_PHASE_TIMEOUT(780s) + RUN_TOTAL_TIMEOUT(660s),
+#   DO 侧 LOGIN_LOCK_TTL_MS(2340s) 覆盖排队后继最坏链路(owner 恢复围栏 1500s
+#   接棒后 780s permit phase + 660s 登录预算, 另留恢复余量),
 #   RUN_TOTAL_TIMEOUT(660s) > CODE_WAIT_TIMEOUT(570s),
 #   且 CODE_WAIT_TIMEOUT(570s) < 码有效期(600s)并留提交余量。
 # 改这两值须同步上调 src/services/cqu-2fa/single-flight.ts 的 LOGIN_LOCK_TTL_MS(须 > RUN_TOTAL_TIMEOUT)。
@@ -188,12 +189,9 @@ RUN_TOTAL_TIMEOUT = 660
 # 当前 owner 并行，PERMIT_PHASE_TIMEOUT 再留 60s 给第一因素/页面渲染开销。
 PERMIT_WAIT_TIMEOUT = 720
 PERMIT_PHASE_TIMEOUT = 780
-# A queued CAS/QuickLogin run performs its first factor in parallel while a previous
-# ambiguous owner remains fenced for at most 1500s. Give that one successor the
-# predecessor fence plus 60s transport slack; per-kind single-flight means the
-# queue contains at most the other login track.
-QUEUED_PERMIT_WAIT_TIMEOUT = 1560
-QUEUED_PERMIT_PHASE_TIMEOUT = 1620
+# 排队者与 owner 同用这两档预算(#27): DO 侧把每次 /run 的 operationTimeoutMs
+# 钳在 13min 调用预算内并带 AbortSignal, 更大的容器侧排队预算永远不可达,
+# 只会掩盖真实生效的 DO 截止时间。排队者等 permit 仍由 /code-permit FIFO 控制。
 
 # keepalive 的硬编码探测 URL(my.cqu.edu.cn)必须自身在白名单内 —— 防未来把它改坏后
 # /keepalive 仍 navigate 一个不该放行的 host。keepalive 不收外部 serviceUrl, 故无需对入参
@@ -445,14 +443,6 @@ async def run_handler(request: web.Request) -> web.Response:
     service = body.get("service")
     method = body.get("method", "mail")
     session = body.get("session") or "default"
-    queued_permit = body.get("queuedPermit") is True
-    permit_wait_timeout = (
-        QUEUED_PERMIT_WAIT_TIMEOUT if queued_permit else PERMIT_WAIT_TIMEOUT
-    )
-    permit_phase_timeout = (
-        QUEUED_PERMIT_PHASE_TIMEOUT if queued_permit else PERMIT_PHASE_TIMEOUT
-    )
-
     if not (student_id and password and service):
         return web.json_response(
             {"ok": False, "error": "missing required field: studentId/password/service"},
@@ -579,11 +569,11 @@ async def run_handler(request: web.Request) -> web.Response:
     async def permit_waiter() -> None:
         try:
             await asyncio.wait_for(
-                permit_ev.wait(), timeout=permit_wait_timeout
+                permit_ev.wait(), timeout=PERMIT_WAIT_TIMEOUT
             )
         except asyncio.TimeoutError as e:
             raise PermitWaitTimeout(
-                f"code permit timed out (>{permit_wait_timeout}s)"
+                f"code permit timed out (>{PERMIT_WAIT_TIMEOUT}s)"
             ) from e
         control = LOGIN_RUNS.get(session)
         if control is not None and control["task"] is run_task:
@@ -609,7 +599,6 @@ async def run_handler(request: web.Request) -> web.Response:
                     seed_state=seed_state,
                 ),
                 permit_claimed,
-                permit_phase_timeout,
             ),
             operation_timeout_ms,
         )
