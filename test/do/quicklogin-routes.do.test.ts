@@ -1,4 +1,4 @@
-import { applyD1Migrations, env, SELF } from "cloudflare:test";
+import { applyD1Migrations, env, runInDurableObject, SELF } from "cloudflare:test";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuickloginAccountClient } from "../../src/services/quicklogin/account-client";
 import {
@@ -21,6 +21,15 @@ function extensionHeaders(authorization: string): Headers {
     authorization,
     origin: env.QUICKLOGIN_EXTENSION_ORIGIN,
     "content-type": "application/json",
+  });
+}
+
+async function flushProjection(userId: string) {
+  const stub = env.CQU_QUICKLOGIN_ACCOUNT.get(
+    env.CQU_QUICKLOGIN_ACCOUNT.idFromName(userId)
+  );
+  await runInDurableObject(stub, async (instance) => {
+    await (instance as unknown as { alarm(): Promise<void> }).alarm();
   });
 }
 
@@ -51,6 +60,21 @@ describe("quicklogin device HTTP", () => {
 
     const websiteHeaders = new Headers(fixture.websiteSession.headers);
     websiteHeaders.set("origin", new URL(env.BETTER_AUTH_URL).origin);
+    await flushProjection(fixture.websiteSession.userId);
+    // 自助注册只落 0/0 投影行:正信号缺失,准入门保持关闭。
+    const bootstrapped = await SELF.fetch(
+      "http://localhost:8787/api/v1/cqu/quicklogin/devices",
+      { headers: websiteHeaders }
+    );
+    expect(bootstrapped.status).toBe(403);
+
+    const accounts = new QuickloginAccountClient(env);
+    const preview = await accounts.previewQuota(fixture.websiteSession.userId, 1, Date.now());
+    await accounts.applyQuota(fixture.websiteSession.userId,
+      { token: preview.token, newLimit: 1 }, Date.now());
+    await accounts.setMasterEnabled(fixture.websiteSession.userId, true);
+    await flushProjection(fixture.websiteSession.userId);
+
     const canonicalList = await SELF.fetch(
       "http://localhost:8787/api/v1/cqu/quicklogin/devices",
       { headers: websiteHeaders }
@@ -60,12 +84,6 @@ describe("quicklogin device HTTP", () => {
       used: 0,
       devices: [expect.objectContaining({ deviceId: device.deviceId })],
     });
-
-    const accounts = new QuickloginAccountClient(env);
-    const preview = await accounts.previewQuota(fixture.websiteSession.userId, 1, Date.now());
-    await accounts.applyQuota(fixture.websiteSession.userId,
-      { token: preview.token, newLimit: 1 }, Date.now());
-    await accounts.setMasterEnabled(fixture.websiteSession.userId, true);
 
     const root = await SELF.fetch("http://localhost:8787/api/v1/cqu/quicklogin", {
       headers: fixture.websiteSession.headers,
@@ -155,6 +173,62 @@ describe("quicklogin device HTTP", () => {
       { method: "DELETE", headers: websiteHeaders }
     );
     expect(deleted.status).toBe(204);
+  });
+
+  it("does not let self-service registration bootstrap the device-mode admission gate", async () => {
+    const fixture = await createOAuthFixture(env);
+    const install = await authorizeOfficialInstall(fixture, {
+      websiteSession: fixture.websiteSession,
+    });
+    const authorization = install.request().headers.get("authorization")!;
+    const registered = await SELF.fetch(
+      "http://localhost:8787/api/v1/cqu/quicklogin/devices",
+      {
+        method: "POST",
+        headers: extensionHeaders(authorization),
+        body: JSON.stringify({
+          deviceName: "Self Bootstrap Chrome",
+          browserFamily: "chrome",
+          browserVersion: "140",
+        }),
+      }
+    );
+    expect(registered.status).toBe(200);
+
+    await flushProjection(fixture.websiteSession.userId);
+    const row = await env.DATABASE.prepare(
+      "SELECT device_limit, master_enabled FROM quicklogin_account_projection WHERE user_id = ?"
+    )
+      .bind(fixture.websiteSession.userId)
+      .first<{ device_limit: number; master_enabled: number }>();
+    expect(row).toEqual({ device_limit: 0, master_enabled: 0 });
+
+    const root = await SELF.fetch("http://localhost:8787/api/v1/cqu/quicklogin", {
+      headers: fixture.websiteSession.headers,
+    });
+    expect(root.status).toBe(200);
+    await expect(root.json()).resolves.toEqual({ data: { eligible: false } });
+
+    const websiteHeaders = new Headers(fixture.websiteSession.headers);
+    websiteHeaders.set("origin", new URL(env.BETTER_AUTH_URL).origin);
+    const list = await SELF.fetch(
+      "http://localhost:8787/api/v1/cqu/quicklogin/devices",
+      { headers: websiteHeaders }
+    );
+    expect(list.status).toBe(403);
+
+    const accounts = new QuickloginAccountClient(env);
+    const preview = await accounts.previewQuota(fixture.websiteSession.userId, 1, Date.now());
+    await accounts.applyQuota(fixture.websiteSession.userId,
+      { token: preview.token, newLimit: 1 }, Date.now());
+    await flushProjection(fixture.websiteSession.userId);
+    const opened = await SELF.fetch("http://localhost:8787/api/v1/cqu/quicklogin", {
+      headers: fixture.websiteSession.headers,
+    });
+    expect(opened.status).toBe(200);
+    await expect(opened.json()).resolves.toEqual({
+      data: { eligible: true, masterEnabled: false, deviceLimit: 1, used: 0 },
+    });
   });
 
   it("keeps session and device principals separate without bearer fallback", async () => {

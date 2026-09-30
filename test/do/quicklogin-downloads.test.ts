@@ -24,6 +24,9 @@ async function identity(fixture: Awaited<ReturnType<typeof createApiFixture>>) {
   return { headers, id: user.id };
 }
 async function grant(id: string) {
+  await env.DATABASE.prepare('INSERT INTO quicklogin_account_projection (user_id, revision, device_limit, master_enabled, updated_at) VALUES (?, 1, 1, 1, 0) ON CONFLICT(user_id) DO UPDATE SET device_limit = 1, master_enabled = 1').bind(id).run();
+}
+async function bootstrap(id: string) {
   await env.DATABASE.prepare('INSERT INTO quicklogin_account_projection (user_id, revision, device_limit, master_enabled, updated_at) VALUES (?, 1, 0, 0, 0)').bind(id).run();
 }
 
@@ -45,6 +48,8 @@ describe('QuickLogin release downloads', () => {
     const fixture = await createApiFixture();
     const { headers, id } = await identity(fixture);
     const record = await seed();
+    expect((await fixture.request(`${base}/download`, { headers })).status).toBe(403);
+    await bootstrap(id);
     expect((await fixture.request(`${base}/download`, { headers })).status).toBe(403);
     await grant(id);
     const nextPayload = new Uint8Array([80, 75, 3, 4, 50, 60, 70, 80]);
