@@ -9,11 +9,16 @@ export async function hasQuickloginPolicy(
   userId: string
 ): Promise<boolean> {
   const row = await drizzle(database)
-    .select({ userId: quickloginAccountProjection.userId })
+    .select({
+      deviceLimit: quickloginAccountProjection.deviceLimit,
+      masterEnabled: quickloginAccountProjection.masterEnabled,
+    })
     .from(quickloginAccountProjection)
     .where(eq(quickloginAccountProjection.userId, userId))
     .get();
-  return row !== undefined;
+  // 安全契约:投影行可由自助设备注册无条件落库(0/0),裸行存在不能当准入信号;
+  // 只有 admin 初始化出的正信号(额度>0 或 master 开)才开门,与 cqu-session 取票闸同源。
+  return row !== undefined && (row.deviceLimit > 0 || row.masterEnabled);
 }
 
 export async function hasQuickloginAccess(env: Env, userId: string): Promise<boolean> {
