@@ -1,8 +1,20 @@
-import { describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
+import {
+  click,
+  cleanupUi,
+  renderUi,
+  setInputValue,
+  submit,
+} from "../lib/api/quicklogin.testbots";
 import SecuritySection from "./SecuritySection";
+
+const authClient = vi.hoisted(() => ({ changePassword: vi.fn() }));
+
+vi.mock("../lib/auth-client", () => ({ authClient }));
 
 function render(enabled: boolean) {
   return renderToStaticMarkup(
@@ -15,6 +27,11 @@ function render(enabled: boolean) {
 }
 
 describe("security settings section", () => {
+  afterEach(async () => {
+    await cleanupUi();
+    authClient.changePassword.mockReset();
+  });
+
   it("shows an unconfigured account and points to the dedicated settings page", () => {
     const html = render(false);
 
@@ -36,5 +53,28 @@ describe("security settings section", () => {
     expect(html).toContain('aria-label="修改密码"');
     expect(html).toContain('aria-expanded="false"');
     expect(html).not.toContain('id="change-password-form"');
+  });
+
+  it("revokes other sessions when changing the password", async () => {
+    authClient.changePassword.mockResolvedValue({});
+    const container = await renderUi(
+      createElement(
+        MemoryRouter,
+        { initialEntries: ["/settings"] },
+        createElement(SecuritySection, { twoFactorEnabled: false })
+      )
+    );
+
+    await click(container.querySelector('[aria-label="修改密码"]')!);
+    await setInputValue(container.querySelector<HTMLInputElement>("#currentPassword")!, "old-password");
+    await setInputValue(container.querySelector<HTMLInputElement>("#newPassword")!, "new-password-123");
+    await setInputValue(container.querySelector<HTMLInputElement>("#confirmNewPassword")!, "new-password-123");
+    await submit(container.querySelector<HTMLFormElement>("#change-password-form")!);
+
+    expect(authClient.changePassword).toHaveBeenCalledWith({
+      currentPassword: "old-password",
+      newPassword: "new-password-123",
+      revokeOtherSessions: true,
+    });
   });
 });
