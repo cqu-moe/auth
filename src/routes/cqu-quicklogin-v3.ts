@@ -14,7 +14,7 @@ import { parseRegistrationRequest, parseReconcileRequest, parseOperationRequest,
 const router = new Hono<HonoEnv>();
 const BUILD = 'development';
 const paths = ['/capabilities', '/registrations', '/overview', '/devices/:id/reconcile', '/devices/:id/operations', '/devices/:id/operations/:operationId', '/devices/:id/exports', '/devices/:id/receipts', '/devices/:id/resume-ticket'];
-const meta = (c: Context<HonoEnv>, requestId = crypto.randomUUID()) => ({ protocolVersion: 3 as const, requestId, serverTime: Date.now(), serverBuild: c.env.QUICKLOGIN_SERVER_BUILD ?? BUILD });
+const meta = (c: Context<HonoEnv>, requestId = crypto.randomUUID()) => ({ protocolVersion: 3 as const, requestId, serverTime: Date.now(), serverBuild: c.env.QUICKLOGIN_SERVER_BUILD || BUILD });
 const actionFor = (code: ReasonCode): ActionCode => code === 'BINDING_UNBOUND' ? 'bind_school' : code === 'CREDENTIALS_REJECTED' ? 'update_password' : code === 'INTERACTION_REQUIRED' ? 'complete_verification' : code === 'AUTH_RECONNECT_REQUIRED' || code === 'DEVICE_REVOKED' ? 'connect_auth' : code === 'PROTOCOL_UNSUPPORTED' ? 'update_extension' : 'reconcile';
 function fail(c: Context<HonoEnv>, error: unknown, requestId?: string) {
  let code = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' ? error.code : 'INTERNAL_STATE_UNAVAILABLE';
@@ -58,7 +58,7 @@ for (const path of paths) {
   c.header('Access-Control-Allow-Methods', methods); c.header('Access-Control-Allow-Headers', 'Authorization, Content-Type'); return c.body(null, 204);
  });
 }
-router.get('/capabilities', c => c.json({ data: { protocolVersion: 3, supportedProtocolVersions: [2,3], minExtensionVersion: '0.2.0', serverBuild: c.env.QUICKLOGIN_SERVER_BUILD ?? BUILD, features: { reconcile: true, operations: true, receipts: true, overview: true } }, meta: meta(c) }));
+router.get('/capabilities', c => c.json({ data: { protocolVersion: 3, supportedProtocolVersions: [2,3], minExtensionVersion: '0.2.0', serverBuild: c.env.QUICKLOGIN_SERVER_BUILD || BUILD, features: { reconcile: true, operations: true, receipts: true, overview: true } }, meta: meta(c) }));
 router.post('/registrations', async c => {
  let requestId: string | undefined;
  try { const p = await principal(c), input = parseRegistrationRequest(await readJson(c.req.raw)); requestId = input.requestId;
