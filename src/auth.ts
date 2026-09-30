@@ -128,8 +128,10 @@ export function createAuth(env: Env, request: Request) {
             if (ctx.path === "/admin/ban-user") {
               const session = await getSessionFromCtx(ctx);
               const targetId = (ctx.body as { userId?: unknown } | undefined)?.userId;
-              if (session && typeof targetId === "string" && targetId !== session.user.id) {
-                const target = await ctx.context.internalAdapter.findUserById(targetId);
+              // z.coerce.string() downstream accepts non-string ids; normalize the same way so the gate cannot be skipped by type juggling.
+              const normalizedId = targetId == null ? null : String(targetId);
+              if (session && normalizedId !== null && normalizedId !== session.user.id) {
+                const target = await ctx.context.internalAdapter.findUserById(normalizedId);
                 const targetRole = (target as { role?: string | null } | null)?.role ?? "user";
                 const targetRoles = targetRole.split(",").map((role) => role.trim());
                 const callerRole = (session.user as { role?: string | null }).role ?? "user";
