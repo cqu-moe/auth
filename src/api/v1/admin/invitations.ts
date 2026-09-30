@@ -33,6 +33,14 @@ export function createAdminInvitationsApi() {
       throw error;
     }
     const preset = body.preset ?? null;
+    if (preset !== null) {
+      const auth = createAuth(c.env, c.req.raw);
+      const permission = await auth.api.userHasPermission({
+        headers: c.req.raw.headers,
+        body: { permissions: { entitlement: ["assign"] } },
+      });
+      if (!permission.success) return problem(c, "FORBIDDEN", "需要权益写权限", 403);
+    }
     if (preset !== null && !(await getPresetItems(c.env.DATABASE, preset))) {
       return problem(c, "UNKNOWN_PRESET", "未知预设", 400);
     }
