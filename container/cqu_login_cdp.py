@@ -76,6 +76,7 @@ async def _submit_form(cdp: CdpSession, fields: dict) -> None:
 
 async def _wait_first_factor(cdp: CdpSession, tickets: list[str]) -> str:
     deadline = time.monotonic() + browser_profile.FORMNAV_TIMEOUT_MS / 1000
+    last_poll_error = ""
     while time.monotonic() < deadline:
         if cqu_login.extract_ticket(tickets):
             return "success"
@@ -99,9 +100,16 @@ async def _wait_first_factor(cdp: CdpSession, tickets: list[str]) -> str:
                 return f"{prefix}:{error[:80]}"
         except ConnectionError:
             raise RuntimeError("CONTAINER_UNAVAILABLE") from None
-        except Exception:
-            pass
+        except Exception as poll_error:
+            # A dead target raises ConnectionError above; keep any other fault so a
+            # page that never becomes recognizable names its cause instead of timing
+            # out blank.
+            last_poll_error = f"{type(poll_error).__name__}: {poll_error}"
         await asyncio.sleep(0.1)
+    if last_poll_error:
+        return "transient:unrecognized_page " + json.dumps(
+            {"lastPollError": last_poll_error}, ensure_ascii=False, separators=(",", ":")
+        )
     return "transient:unrecognized_page"
 
 
