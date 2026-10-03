@@ -130,6 +130,19 @@
     "workerReason": "OPERATION_TIMEOUT"
   },
   {
+    "id": "control_not_actionable",
+    "raw": "login control not actionable: selector=.ant-tabs-tab text='邮件验证码' state={\"matched\":2,\"withText\":1,\"hidden\":1,\"disabled\":0,\"readyState\":\"complete\"}",
+    "response": {
+      "ok": false,
+      "error": "CONTROL_NOT_ACTIONABLE",
+      "errorCode": "CONTROL_NOT_ACTIONABLE",
+      "phase": "operation",
+      "detail": "A school login control did not become clickable."
+    },
+    "workerKind": "temporary_unavailable",
+    "workerReason": "OPERATION_TIMEOUT"
+  },
+  {
     "id": "busy",
     "raw": "BROWSER_BUSY",
     "response": {
