@@ -1,5 +1,5 @@
 import type { Env } from "../types";
-import { verifyAuthAccessToken } from "../services/auth-access-token";
+import { verifyAuthAccessTokenRequest } from "../services/auth-access-token";
 import {
   QuickloginAccountClient,
   QuickloginAccountClientError,
@@ -25,14 +25,9 @@ export async function verifyQuickloginBearer(request: Request, env: Env): Promis
   grantId: string;
   deviceId: string | null;
 }> {
-  const authorization = request.headers.get("authorization");
-  if (!authorization?.startsWith("Bearer ")) fail("UNAUTHORIZED");
-  const token = authorization.slice("Bearer ".length);
-  if (!token) fail("UNAUTHORIZED");
-
   let payload: Record<string, unknown>;
   try {
-    payload = await verifyAuthAccessToken(token, env) as Record<string, unknown>;
+    payload = await verifyAuthAccessTokenRequest(request, env) as Record<string, unknown>;
   } catch {
     fail("UNAUTHORIZED");
   }

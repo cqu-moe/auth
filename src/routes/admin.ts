@@ -98,7 +98,7 @@ function oauthClientUpdateToSchema(update: Record<string, unknown>): Record<stri
     redirect_uris: "redirectUris", post_logout_redirect_uris: "postLogoutRedirectUris",
     grant_types: "grantTypes", response_types: "responseTypes",
     skip_consent: "skipConsent", enable_end_session: "enableEndSession",
-    require_pkce: "requirePKCE", disabled: "disabled", metadata: "metadata",
+    require_pkce: "requirePKCE", dpop_bound_access_tokens: "dpopBoundAccessTokens", disabled: "disabled", metadata: "metadata",
   };
   for (const [snake, camel] of Object.entries(map)) {
     if (update[snake] !== undefined) out[camel] = update[snake];
@@ -714,6 +714,7 @@ interface OAuthClientRow {
   scopes?: unknown;
   applicationType?: string | null;
   requirePKCE?: boolean | null;
+  dpopBoundAccessTokens?: boolean | null;
   skipConsent?: boolean | null;
   enableEndSession?: boolean | null;
   subjectType?: string | null;
@@ -783,6 +784,7 @@ admin.get("/oauth-clients", async (c) => {
       // is parsed too, not joined as the literal "[\"openid\",...]" token.
       scope: asArray(client.scopes).join(" "),
       type: client.applicationType === "native" ? "native" : client.tokenEndpointAuthMethod === "none" ? "user-agent-based" : "web",
+      dpop_bound_access_tokens: client.dpopBoundAccessTokens ?? false,
       require_pkce: client.requirePKCE ?? false,
       skip_consent: client.skipConsent ?? false,
       enable_end_session: client.enableEndSession ?? false,

@@ -12,7 +12,6 @@ import { Resend } from "resend";
 import type { Env } from "./types";
 import { resolveCaps, subsystemForAccessToken } from "./services/entitlements";
 import { isCquMoeHost } from "./utils/cookie-domain";
-import { verifyAuthAccessToken } from "./services/auth-access-token";
 import { currentDeviceAuthority } from "./services/device-authority";
 import { getCquBinding } from "./services/cqu-binding";
 import { authUrls } from "./auth-config";
@@ -185,12 +184,6 @@ export function createAuth(env: Env, request: Request) {
               throw new APIError("FORBIDDEN", { message: "邮箱验证码不能作为第二因子" });
             }
             if (ctx.path === "/change-password") ctx.body = { ...ctx.body, revokeOtherSessions: false };
-            if (ctx.path === "/oauth2/userinfo") {
-              const authorization = ctx.headers?.get("authorization");
-              if (!authorization?.startsWith("Bearer ")) throw new APIError("UNAUTHORIZED", { code: "INVALID_TOKEN", message: "Invalid access token" });
-              try { await verifyAuthAccessToken(authorization.slice(7), env); }
-              catch { throw new APIError("UNAUTHORIZED", { code: "INVALID_TOKEN", message: "Invalid access token" }); }
-            }
             // Our authorization-code policy has no confidential OIDC exception.
             const authorizationQuery = { ...ctx.query, ...ctx.body };
             if (ctx.path === "/oauth2/authorize" &&
@@ -289,6 +282,15 @@ export function createAuth(env: Env, request: Request) {
             },
           }),
           oauthProvider({
+            // Native userinfo has already verified token, DPoP and replay here.
+            // Check current authority without consuming the same proof twice.
+            customUserInfoClaims: async ({ jwt }) => {
+              const { adapter } = await createAuth(env, request).$context;
+              if (!(await currentDeviceAuthority(adapter, jwt))) {
+                throw new APIError("UNAUTHORIZED", { code: "INVALID_TOKEN", message: "Invalid access token" });
+              }
+              return {};
+            },
             loginPage: "/login",
             consentPage: "/oauth/authorize",
             scopes: OAUTH_SCOPES,
