@@ -1,3 +1,5 @@
+import { passkeyAccountOperations } from "./services/passkey-account-operations";
+import { verifiedPasskey, passkeyStepUp, enforcePasskeyRegistration } from "./services/passkey";
 import { authenticationStrength, enforceAuthenticationStrength, recordAuthenticationProof } from "./services/auth-strength";
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
@@ -146,10 +148,11 @@ export function createAuth(env: Env, request: Request) {
         },
         hooks: {
           after: createAuthMiddleware(async (ctx) => {
-            if (["/two-factor/verify-totp", "/two-factor/verify-backup-code"].includes(ctx.path) && ctx.context.newSession && !(ctx.context.returned instanceof APIError)) {
-              await recordAuthenticationProof(ctx.context, ctx.context.newSession, "mfa", true);
+            if (ctx.path === "/passkey/generate-authenticate-options" && !(ctx.context.returned instanceof APIError)) return ctx.json({ ...(ctx.context.returned as Record<string, unknown>), userVerification: "required" });
+            if (["/two-factor/verify-totp", "/two-factor/verify-backup-code", "/passkey/verify-authentication"].includes(ctx.path) && ctx.context.newSession && !(ctx.context.returned instanceof APIError)) {
+              await recordAuthenticationProof(ctx.context, ctx.context.newSession, "mfa", true, ctx.path === "/passkey/verify-authentication" ? "passkey" : "password");
             }
-            if (ctx.path === "/change-password" && !(ctx.context.returned instanceof APIError) && ctx.context.session) {
+            if (["/change-password", "/security/passkey/change-password"].includes(ctx.path) && !(ctx.context.returned instanceof APIError) && ctx.context.session) {
               const current = ctx.context.session.session;
               const sessions = await ctx.context.internalAdapter.listSessions(current.userId);
               await ctx.context.internalAdapter.deleteSessions(sessions.filter(session => session.id !== current.id).map(session => session.token));
@@ -180,6 +183,8 @@ export function createAuth(env: Env, request: Request) {
           }),
           before: createAuthMiddleware(async (ctx) => {
             await enforceAuthenticationStrength(ctx);
+            await enforcePasskeyRegistration(ctx);
+            if (ctx.path === "/passkey/generate-register-options") return { context: { query: ctx.query } };
             if (ctx.path === "/two-factor/enable" && ctx.body?.method === "otp") {
               throw new APIError("FORBIDDEN", { message: "邮箱验证码不能作为第二因子" });
             }
@@ -268,6 +273,9 @@ export function createAuth(env: Env, request: Request) {
           "/verify-email",
         ],
         plugins: [
+          verifiedPasskey(env.BETTER_AUTH_URL),
+          passkeyStepUp(env.BETTER_AUTH_URL),
+          passkeyAccountOperations(),
           authenticationStrength((headers, method, code) => verifyCurrentFactor(env, request, headers, method, code)),
           admin({
             ac,

@@ -246,6 +246,34 @@ export const AUTH_OPERATIONS = [
   },
   {
     "method": "POST",
+    "path": "/passkey/delete-passkey"
+  },
+  {
+    "method": "GET",
+    "path": "/passkey/generate-authenticate-options"
+  },
+  {
+    "method": "GET",
+    "path": "/passkey/generate-register-options"
+  },
+  {
+    "method": "GET",
+    "path": "/passkey/list-user-passkeys"
+  },
+  {
+    "method": "POST",
+    "path": "/passkey/update-passkey"
+  },
+  {
+    "method": "POST",
+    "path": "/passkey/verify-authentication"
+  },
+  {
+    "method": "POST",
+    "path": "/passkey/verify-registration"
+  },
+  {
+    "method": "POST",
     "path": "/refresh-token"
   },
   {
@@ -279,6 +307,30 @@ export const AUTH_OPERATIONS = [
   {
     "method": "POST",
     "path": "/security/complete"
+  },
+  {
+    "method": "POST",
+    "path": "/security/passkey/change-password"
+  },
+  {
+    "method": "POST",
+    "path": "/security/passkey/complete"
+  },
+  {
+    "method": "POST",
+    "path": "/security/passkey/options"
+  },
+  {
+    "method": "POST",
+    "path": "/security/passkey/two-factor/disable"
+  },
+  {
+    "method": "POST",
+    "path": "/security/passkey/two-factor/enable"
+  },
+  {
+    "method": "POST",
+    "path": "/security/passkey/two-factor/generate-backup-codes"
   },
   {
     "method": "GET",

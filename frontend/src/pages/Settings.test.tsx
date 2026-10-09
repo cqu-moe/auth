@@ -12,6 +12,7 @@ vi.mock("../components/Layout", () => ({
 }));
 
 vi.mock("../components/AccountProfileSection", () => ({ default: () => <span>账户信息</span> }));
+vi.mock("../components/PasskeySettings", () => ({ default: () => null }));
 vi.mock("../components/SecuritySection", () => ({ default: () => null }));
 const quickloginProps = vi.hoisted(() => vi.fn());
 vi.mock("../components/quicklogin/QuickloginSettings", () => ({

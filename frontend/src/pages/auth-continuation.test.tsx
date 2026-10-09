@@ -28,6 +28,7 @@ vi.stubGlobal("matchMedia", (query: string) => ({
 
 const authMocks = vi.hoisted(() => ({
   signIn: vi.fn(async () => ({ data: { token: "session", user: { emailVerified: true } }, error: null })),
+  passkey: vi.fn(async () => ({ data: { user: { emailVerified: true } }, error: null })),
   signUp: vi.fn(async () => ({ error: { message: "Test signup stopped" } })),
   refetch: vi.fn(async (): Promise<void> => undefined),
   requestPasswordReset: vi.fn(async () => ({ error: null })),
@@ -45,7 +46,7 @@ vi.mock("../lib/auth-client", () => ({
     resetPassword: authMocks.resetPassword,
     signOut: authMocks.signOut,
     sendVerificationEmail: vi.fn(async () => ({ error: null })),
-    signIn: { email: authMocks.signIn },
+    signIn: { email: authMocks.signIn, passkey: authMocks.passkey },
     signUp: { email: authMocks.signUp },
   },
 }));
@@ -103,13 +104,16 @@ afterEach(() => {
 });
 
 describe("authentication continuation links", () => {
-  it("waits for the authenticated session before navigating after password login", async () => {
+  it.each(["password", "Passkey"])("waits for the authenticated session before navigating after %s login", async method => {
     let finish!: () => void;
     authMocks.refetch.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
     await renderPage(createElement(Login), "/login");
     setInput("#email", "user@example.com");
     setInput("#password", "password123");
-    await act(async () => { container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+    await act(async () => {
+      if (method === "password") container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      else Array.from(container.querySelectorAll("button")).find(button => button.textContent === "使用 Passkey 登录")?.click();
+    });
     expect(container.querySelector("[data-location]")?.textContent).toBe("/login");
     await act(async () => { finish(); });
     expect(container.querySelector("[data-location]")?.textContent).toBe("/settings");

@@ -823,6 +823,48 @@
   },
   {
     "method": "POST",
+    "path": "/api/v1/auth/passkey/delete-passkey",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/passkey/generate-authenticate-options",
+    "policy": "public",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/passkey/generate-register-options",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/passkey/list-user-passkeys",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/passkey/update-passkey",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/passkey/verify-authentication",
+    "policy": "public",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/passkey/verify-registration",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
     "path": "/api/v1/auth/refresh-token",
     "policy": "public",
     "source": "better-auth-1.7.7"
@@ -872,6 +914,42 @@
   {
     "method": "POST",
     "path": "/api/v1/auth/security/complete",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/change-password",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/complete",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/options",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/two-factor/disable",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/two-factor/enable",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/two-factor/generate-backup-codes",
     "policy": "session",
     "source": "better-auth-1.7.7"
   },
