@@ -15,7 +15,8 @@ import { oauthProvider } from "@better-auth/oauth-provider";
 import { Resend } from "resend";
 import type { Env } from "./types";
 import { resolveCaps, subsystemForAccessToken } from "./services/entitlements";
-import { isCquMoeHost } from "./utils/cookie-domain";
+import { isolatedAuthCookies } from "./services/auth-cookies";
+import { enforceFirstPartyConsent } from "./services/first-party-consent";
 import { currentDeviceAuthority } from "./services/device-authority";
 import { getCquBinding } from "./services/cqu-binding";
 import { authUrls } from "./auth-config";
@@ -191,6 +192,7 @@ export function createAuth(env: Env, request: Request) {
             });
           }),
           before: createAuthMiddleware(async (ctx) => {
+            await enforceFirstPartyConsent(ctx);
             await enforceAuthenticationStrength(ctx);
             await enforcePasskeyRegistration(ctx);
             if (ctx.path === "/email-otp/change-email") {
@@ -263,7 +265,7 @@ export function createAuth(env: Env, request: Request) {
                 }
               }
             }
-            if (!currentEmailOtpPaths.has(ctx.path)) return;
+            if (!currentEmailOtpPaths.has(ctx.path)) return { context: { body: ctx.body, query: ctx.query } };
             const session = await getSessionFromCtx(ctx);
             const body = ctx.body as { email?: string; type?: string } | undefined;
             const matchesCurrentEmail =
@@ -406,26 +408,10 @@ export function createAuth(env: Env, request: Request) {
             return { user, session, caps };
           }),
         ],
-        // 一次登录 auth.cqu.moe → cookie 覆盖所有 *.cqu.moe 子域(第一方一体化 SSO)。
-        // trustedOrigins 是顶层选项,通配符匹配整个 origin(含 :// 与 *);baseURL 已自动可信。
-        // dev(localhost)下保留无害 —— baseURL 已自动可信,不靠它。
-        trustedOrigins: ["https://*.cqu.moe"],
-        // 注册权益不落在这里的 databaseHooks:公开注册唯一入口是
-        // handleInvitationSignup(src/index.ts 拦截 /api/auth/sign-up/email),
-        // 它按「邀请码自带预设 → 全局默认预设」显式写入,语义比全局钩子精确
-        // (钩子分不清用户是凭哪个邀请码/无码注册的)。admin 后台建号不带权益
-        // (fail-closed),需要时由管理台单独授权。
-        // 跨子域 cookie 的 Domain 只在 auth host 真为 cqu.moe(生产)时才设。
-        // 必须显式写 domain: "cqu.moe":省略时 better-auth 默认取
-        // new URL(baseURL).hostname = "auth.cqu.moe",cookie 仅作用于该单一子域,
-        // 跨子域 SSO 会静默失败;写 "cqu.moe" 浏览器才会按 ".cqu.moe" 全子域生效。
-        // 但在 localhost(.dev.vars BETTER_AUTH_URL=http://localhost:8787)上若仍写
-        // Domain=cqu.moe,浏览器会因 Domain 与响应 host 不匹配而【拒收】该 cookie →
-        // npm run dev 的登录/会话直接坏掉。故 isCquMoeHost 为假(dev/非 cqu.moe)时
-        // 整个省略 crossSubDomainCookies,让 better-auth 回落到 host-only cookie。
-        advanced: isCquMoeHost(env.BETTER_AUTH_URL)
-          ? { crossSubDomainCookies: { enabled: true, domain: "cqu.moe" } }
-          : {},
+        // OAuth redirects do not grant sibling websites account-mutation trust.
+        // The configured Auth origin is already included by Better Auth.
+        trustedOrigins: [],
+        advanced: isolatedAuthCookies(env.BETTER_AUTH_URL),
         rateLimit: {
           enabled: true,
           window: 60,

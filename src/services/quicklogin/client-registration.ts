@@ -16,7 +16,7 @@ export interface QuickloginOAuthClientRecord {
   clientId: string;
   clientSecret: null;
   disabled: false;
-  skipConsent: false;
+  skipConsent: true;
   enableEndSession: false;
   subjectType: "public";
   scopes: string[];
@@ -68,7 +68,7 @@ function matches(
   const meta = metadata(value.metadata);
   const metadataKeys = meta ? Object.keys(meta).sort() : [];
   return value.clientId === expected.clientId && value.clientSecret === null &&
-    value.disabled === false && value.skipConsent === false &&
+    value.disabled === false && value.skipConsent === true &&
     value.enableEndSession === false && value.subjectType === "public" &&
     sameArray(value.scopes, expected.scopes) &&
     value.userId === null && value.name === expected.name &&
@@ -99,7 +99,7 @@ export async function ensureQuickloginOAuthClient(
     clientId: env.QUICKLOGIN_CLIENT_ID,
     clientSecret: null,
     disabled: false,
-    skipConsent: false,
+    skipConsent: true,
     enableEndSession: false,
     subjectType: "public",
     scopes: ["openid", "offline_access", DEVICE_SCOPE],

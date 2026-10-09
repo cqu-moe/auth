@@ -22799,7 +22799,7 @@
       "cookieAuth": {
         "type": "apiKey",
         "in": "cookie",
-        "name": "__Secure-better-auth.session_token"
+        "name": "__Host-auth-v2.session_token"
       },
       "bearerAuth": {
         "type": "http",
@@ -22813,7 +22813,7 @@
       "twoFactorCookie": {
         "type": "apiKey",
         "in": "cookie",
-        "name": "__Secure-better-auth.two_factor"
+        "name": "__Host-auth-v2.two_factor"
       }
     },
     "schemas": {

@@ -365,10 +365,10 @@ export function buildOpenApiDocument(operations: readonly HttpOperation[]) {
     paths,
     components: {
       securitySchemes: {
-        cookieAuth: { type: "apiKey", in: "cookie", name: "__Secure-better-auth.session_token" },
+        cookieAuth: { type: "apiKey", in: "cookie", name: "__Host-auth-v2.session_token" },
         bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" },
         oauthClientAuth: { type: "http", scheme: "basic" },
-        twoFactorCookie: { type: "apiKey", in: "cookie", name: "__Secure-better-auth.two_factor" },
+        twoFactorCookie: { type: "apiKey", in: "cookie", name: "__Host-auth-v2.two_factor" },
       },
       schemas: {
         ApiProblem: {
