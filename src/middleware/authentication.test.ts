@@ -11,6 +11,7 @@ describe("request authentication", () => {
 
   it("verifies one bearer exactly once before scope and ticket handling", async () => {
     const fixture = createHttpFixture();
+    fixture.seedBearerIdentity("user-a", "client-a");
     try {
       verifyAccessToken.mockResolvedValue({
         sub: "user-a",
