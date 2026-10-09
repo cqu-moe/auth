@@ -1,3 +1,4 @@
+import { inheritAuthResetRevision } from "../../services/auth-reset-revision";
 import { Hono } from "hono";
 import { createAuth } from "../../auth";
 import { handleInvitationSignup } from "../../services/registration-invitations";
@@ -18,6 +19,7 @@ export function createAuthApi() {
       publicUrl.protocol = origin.protocol;
       publicUrl.host = origin.host;
       const request = new Request(publicUrl, c.req.raw);
+      inheritAuthResetRevision(c.env.DATABASE, c.req.raw, request);
       const auth = createAuth(c.env, request);
       if (operation.path === "/sign-up/email") {
         return handleInvitationSignup(
