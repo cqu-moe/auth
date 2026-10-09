@@ -17289,8 +17289,7 @@
                       "id",
                       "userId",
                       "publicKey",
-                      "createdAt",
-                      "updatedAt"
+                      "createdAt"
                     ]
                   },
                   "description": "Array of passkey objects associated with the user"

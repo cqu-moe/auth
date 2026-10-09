@@ -127,6 +127,14 @@ export function mergeBetterAuthOpenApi(
         if (Array.isArray(schema.required) && !schema.required.includes("caps")) schema.required.push("caps");
       }
     }
+    if (suffix === "/passkey/list-user-passkeys" && rewritten.get) {
+      // @better-auth/passkey 1.7.7 lists updatedAt as required, but neither
+      // its model nor the returned adapter records contain that field.
+      const items = rewritten.get.responses?.["200"]?.content?.["application/json"]?.schema?.items;
+      if (Array.isArray(items?.required)) {
+        items.required = items.required.filter((field: string) => field !== "updatedAt");
+      }
+    }
     if (suffix === "/sign-up/email" && rewritten.post) {
       rewritten.post.security = [];
       const schema = rewritten.post.requestBody?.content?.["application/json"]?.schema;
