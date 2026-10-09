@@ -10,6 +10,7 @@ describe("service ticket API v1", () => {
 
   it("issues through one bearer verification and one DO call", async () => {
     const fixture = createHttpFixture();
+    fixture.seedBearerIdentity("ticket-user", "ticket-client");
     try {
       verifyAccessToken.mockResolvedValue({
         sub: "ticket-user",
@@ -39,6 +40,7 @@ describe("service ticket API v1", () => {
 
   it("rejects GET before routing and ambiguous targets after authentication but before DO work", async () => {
     const fixture = createHttpFixture();
+    fixture.seedBearerIdentity("ticket-user", "ticket-client");
     try {
       const app = createApp();
       const get = await app.request("/api/v1/cqu/service-tickets", {}, fixture.env);

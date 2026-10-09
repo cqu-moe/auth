@@ -4,6 +4,7 @@ import { createAuth } from "../auth";
 import { problem } from "../api/problem";
 import type { HonoEnv, Principal, RequestAuthCache } from "../types";
 import { authUrls } from "../auth-config";
+import { isBanned } from "../services/oauth-tokens";
 
 function getCache(c: Context<HonoEnv>): RequestAuthCache {
   let cache = c.get("requestAuthCache");
@@ -63,6 +64,18 @@ async function bearerPrincipal(c: Context<HonoEnv>): Promise<Principal | null> {
       const clientId = claimString(payload.azp ?? payload.client_id);
       const scopes = claimScopes(payload.scope);
       if (!userId || !clientId || !scopes) return null;
+      // JWT access tokens are stateless: an oauthAccessToken row is not a
+      // prerequisite. Check authoritative identities on every request instead.
+      const { adapter } = await createAuth(c.env, c.req.raw).$context;
+      const [user, client] = await Promise.all([
+        adapter.findOne<{ banned?: boolean | null; banExpires?: Date | null }>({
+          model: "user", where: [{ field: "id", value: userId }],
+        }),
+        adapter.findOne<{ disabled?: boolean | null }>({
+          model: "oauthClient", where: [{ field: "clientId", value: clientId }],
+        }),
+      ]);
+      if (!user || isBanned(user) || !client || client.disabled) return null;
       return { kind: "bearer", userId, clientId, scopes } satisfies Principal;
     } catch {
       return null;
