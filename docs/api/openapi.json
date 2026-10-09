@@ -19885,7 +19885,8 @@
               "unbound",
               "pending",
               "active",
-              "revoked"
+              "revoked",
+              "deleting"
             ]
           },
           "kind": {

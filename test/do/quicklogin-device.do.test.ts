@@ -252,7 +252,7 @@ describe("CquQuickloginDeviceDO", () => {
     vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
     const { userId, authority } = await setupDevice();
     const sessionStub = env.CQU_SESSION.get(env.CQU_SESSION.idFromName(userId));
-    await seedSession(sessionStub, { status: "active" });
+    await seedSession(sessionStub, { status: "active", userId });
     await seedCredentials(sessionStub);
     await runInDurableObject(sessionStub, async (_instance, state) => {
       const current = await state.storage.get<Record<string, unknown>>("state");
@@ -323,7 +323,7 @@ describe("CquQuickloginDeviceDO", () => {
   it("reuses a pending keepalive mint operation after the broker response is lost", async () => {
     const { userId, authority } = await setupDevice();
     const sessionStub = env.CQU_SESSION.get(env.CQU_SESSION.idFromName(userId));
-    await seedSession(sessionStub, { status: "active" });
+    await seedSession(sessionStub, { status: "active", userId });
     await seedCredentials(sessionStub);
     await runInDurableObject(sessionStub, async (_instance, state) => {
       const current = await state.storage.get<Record<string, unknown>>("state");
@@ -548,7 +548,7 @@ describe("CquQuickloginDeviceDO", () => {
     vi.spyOn(Date, "now").mockImplementation(() => currentTime);
     const { userId, authority } = await setupDevice();
     const sessionStub = env.CQU_SESSION.get(env.CQU_SESSION.idFromName(userId));
-    await seedSession(sessionStub, { status: "active" });
+    await seedSession(sessionStub, { status: "active", userId });
     await seedCredentials(sessionStub);
     await runInDurableObject(sessionStub, async (_instance, state) => {
       const current = await state.storage.get<Record<string, unknown>>("state");
@@ -638,7 +638,7 @@ describe("CquQuickloginDeviceDO", () => {
     vi.spyOn(Date, "now").mockImplementation(() => currentTime);
     const { userId, authority } = await setupDevice();
     const sessionStub = env.CQU_SESSION.get(env.CQU_SESSION.idFromName(userId));
-    await seedSession(sessionStub, { status: "active" });
+    await seedSession(sessionStub, { status: "active", userId });
     await seedCredentials(sessionStub);
     await runInDurableObject(sessionStub, async (_instance, state) => {
       const current = await state.storage.get<Record<string, unknown>>("state");
@@ -759,7 +759,7 @@ describe("CquQuickloginDeviceDO", () => {
   it("drops a successful login result that arrives after revocation", async () => {
     const { accounts, userId, device, authority } = await setupDevice();
     const sessionStub = env.CQU_SESSION.get(env.CQU_SESSION.idFromName(userId));
-    await seedSession(sessionStub, { status: "active" });
+    await seedSession(sessionStub, { status: "active", userId });
     await seedCredentials(sessionStub);
     await runInDurableObject(sessionStub, async (_instance, state) => {
       const current = await state.storage.get<Record<string, unknown>>("state");

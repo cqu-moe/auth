@@ -399,7 +399,7 @@ export function buildOpenApiDocument(operations: readonly HttpOperation[]) {
           type: "object", additionalProperties: false,
           required: ["bindStatus", "sessionStatus"],
           properties: {
-            address: { type: "string" }, bindStatus: { type: "string", enum: ["unbound", "pending", "active", "revoked"] },
+            address: { type: "string" }, bindStatus: { type: "string", enum: ["unbound", "pending", "active", "revoked", "deleting"] },
             kind: { type: "string", enum: ["direct", "forward"] }, forwardAddress: { type: "string" },
             sessionStatus: { anyOf: [{ $ref: "#/components/schemas/CquSessionStatus" }, { type: "object", required: ["error"], properties: { error: { type: "boolean", const: true } } }] },
           },

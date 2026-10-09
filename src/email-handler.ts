@@ -97,7 +97,7 @@ export async function handleEmail(
   // 未验证的绑定收码，但它没考虑 onboarding 首登 2FA 的时序依赖——已被本次排序结论取代。
   // 真正的安全门是「不可枚举的随机收件地址」+「SPF/ARC 发件人校验」（下方步骤 2/3），
   // 绑定 status 只是生命周期开关（revoked = 关），不是安全门。请勿"修回"成 active-only。
-  if (!bind || bind.status === "revoked") {
+  if (!bind || bind.status === "revoked" || bind.status === "deleting") {
     console.warn("[email] rejected", {
       token,
       reason: "unknown_or_revoked_binding",

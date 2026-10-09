@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { env } from "cloudflare:test";
 import { createApiFixture } from "./api-fixture";
 
 describe("CQU binding API v1", () => {
@@ -87,6 +88,28 @@ describe("CQU binding API v1", () => {
     } finally {
       await fixture.close();
     }
+  });
+
+  it("reports failed DO cleanup and keeps unbind retryable", async () => {
+    const fixture = await createApiFixture();
+    const headers = await fixture.signIn("user");
+    await fixture.request("/api/v1/cqu/binding", { method: "POST", headers });
+    const transport = vi.spyOn(env.CQU_SESSION, "get").mockReturnValue({
+      fetch: async () => new Response("unavailable", { status: 503 }),
+    } as unknown as DurableObjectStub);
+    try {
+      const failed = await fixture.request("/api/v1/cqu/binding", { method: "DELETE", headers });
+      expect(failed.status).toBe(503);
+      expect(await failed.json()).toMatchObject({ code: "UNBIND_FAILED" });
+    } finally {
+      transport.mockRestore();
+    }
+    const pending = await fixture.request("/api/v1/cqu/binding", { headers });
+    expect(await pending.json()).toMatchObject({ data: { bindStatus: "deleting" } });
+    const retry = await fixture.request("/api/v1/cqu/binding", { method: "DELETE", headers });
+    expect(retry.status).toBe(204);
+    const complete = await fixture.request("/api/v1/cqu/binding", { headers });
+    expect(await complete.json()).toMatchObject({ data: { bindStatus: "unbound" } });
   });
 
   it("preserves the canonical WebSocket upgrade and retires the legacy path", async () => {

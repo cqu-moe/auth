@@ -18,7 +18,7 @@ async function setup() {
  const devices = new QuickloginDeviceClient(env); await devices.notifyDevice(authority);
  const stub = env.CQU_QUICKLOGIN_DEVICE.get(env.CQU_QUICKLOGIN_DEVICE.idFromName(`${userId}:${device.deviceId}`));
  const bindingStub = env.CQU_SESSION.get(env.CQU_SESSION.idFromName(userId));
- await seedSession(bindingStub); await seedCredentials(bindingStub);
+ await seedSession(bindingStub, { userId }); await seedCredentials(bindingStub);
  await runInDurableObject(bindingStub, async (_, state) => { const value: any = await state.storage.get('state'); await state.storage.put('state', { ...value, userId }); });
  await accounts.heartbeat(userId, device.deviceId, { protocolVersion: 2, appliedVersion: null, observedGeneration: authority.generation, browserVersion: '152' }, null, Date.now());
  await runInDurableObject(stub, async (_, state) => state.storage.deleteAlarm());

@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { cquBindAddresses, cquCredentials } from "../db/schema";
 
-export type CquBindStatus = "pending" | "active" | "revoked" | "unbound";
+export type CquBindStatus = "pending" | "active" | "revoked" | "deleting" | "unbound";
 export type CquBindKind = "direct" | "forward";
 
 function parseForwardAddress(kind: string | null | undefined, value: string | null | undefined) {
