@@ -102,3 +102,37 @@ it("does not treat remembered-device password login as strong authentication", a
   const headers = new Headers({ cookie: cookie(remembered.headers) });
   expect((await api.request("/api/v1/auth/admin/list-users", { headers })).status).toBe(403);
 });
+
+it("keeps the administrator's current session after the UI password change and real TOTP step-up", async () => {
+  const api = await createApiFixture();
+  const headers = await api.signIn("admin");
+  headers.set("origin", "http://localhost:8787");
+  headers.set("content-type", "application/json");
+  const post = (path: string, body: unknown) => api.request(`/api/v1/auth${path}`, { method: "POST", headers, body: JSON.stringify(body) });
+  const readSession = async () => (await api.request("/api/v1/auth/get-session", { headers })).json<{ session: { id: string }; user: { id: string; email: string } }>();
+  const before = await readSession();
+  const { env } = await import("cloudflare:test");
+  const { createAuth } = await import("../../src/auth");
+  const { symmetricDecrypt } = await import("better-auth/crypto");
+  const { createOTP } = await import("@better-auth/utils/otp");
+  const context = await createAuth(env, new Request(env.BETTER_AUTH_URL)).$context;
+  const factor = await context.adapter.findOne<{ secret: string }>({ model: "twoFactor", where: [{ field: "userId", value: before.user.id }] });
+  const secret = await symmetricDecrypt({ key: context.secretConfig, data: factor!.secret });
+  const challenge = await (await post("/security/challenge", { password: "local-test-password", purpose: "password" })).json<{ challenge: string; verified: boolean }>();
+  expect(challenge.verified).toBe(false);
+  expect((await post("/security/complete", { challenge: challenge.challenge, method: "totp", code: await createOTP(secret).totp() })).status).toBe(200);
+  const changed = await post("/change-password", { currentPassword: "local-test-password", newPassword: "next-test-password", revokeOtherSessions: true });
+  expect(changed.status).toBe(200);
+  // Consume response cookies as a browser would, if the endpoint emits any.
+  const cookies = new Map(headers.get("cookie")!.split("; ").map(pair => [pair.slice(0, pair.indexOf("=")), pair.slice(pair.indexOf("=") + 1)]));
+  for (const cookie of (changed.headers as Headers & { getSetCookie(): string[] }).getSetCookie()) {
+    const pair = cookie.split(";")[0];
+    cookies.set(pair.slice(0, pair.indexOf("=")), pair.slice(pair.indexOf("=") + 1));
+  }
+  headers.set("cookie", [...cookies].map(([key, value]) => `${key}=${value}`).join("; "));
+  expect(await readSession()).toMatchObject({ session: { id: before.session.id }, user: { id: before.user.id } });
+  expect((await api.request("/api/v1/admin/users", { headers })).status).toBe(200);
+  const login = (password: string) => api.request("/api/v1/auth/sign-in/email", { method: "POST", headers: { origin: "http://localhost:8787", "content-type": "application/json" }, body: JSON.stringify({ email: before.user.email, password }) });
+  expect((await login("local-test-password")).status).toBe(401);
+  expect(await (await login("next-test-password")).json()).toMatchObject({ twoFactorRedirect: true });
+});

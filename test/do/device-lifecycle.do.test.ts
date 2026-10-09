@@ -94,7 +94,7 @@ describe("interactive device lifetime", () => {
     expect(await introspect()).toEqual({ active: false });
   });
 
-  it("changing a password preserves the verified current session and ends other sessions even if requested otherwise", async () => {
+  it.each([false, true])("changing a password preserves the verified current session and ends other sessions (revokeOtherSessions=%s)", async (revokeOtherSessions) => {
     const fixture = await createOAuthFixture(env);
     const auth = createAuth(env, new Request(env.BETTER_AUTH_URL));
     const ctx = await auth.$context;
@@ -109,7 +109,7 @@ describe("interactive device lifetime", () => {
     }));
     expect(proof.status).toBe(200);
     const response = await fixture.authHandler(new Request(`${env.BETTER_AUTH_URL}/api/v1/auth/change-password`, {
-      method: "POST", headers, body: JSON.stringify({ currentPassword: "old-test-password", newPassword: "new-test-password", revokeOtherSessions: false }),
+      method: "POST", headers, body: JSON.stringify({ currentPassword: "old-test-password", newPassword: "new-test-password", revokeOtherSessions }),
     }));
     expect(response.status, await response.clone().text()).toBe(200);
     const read = (headers: Headers) => fixture.authHandler(new Request(`${env.BETTER_AUTH_URL}/api/v1/auth/get-session`, { headers })).then(r => r.json());
