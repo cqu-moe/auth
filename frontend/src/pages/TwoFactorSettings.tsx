@@ -1,3 +1,4 @@
+import { requestAuthentication } from "../lib/recent-authentication";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Download } from "lucide-react";
@@ -167,6 +168,7 @@ export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettin
     event.preventDefault();
     setError("");
     setLoading(true);
+    if (!await requestAuthentication("mfa")) { setLoading(false); return; }
     const { data, error: authError } = await authClient.twoFactor.enable({ password });
     setLoading(false);
     if (authError || !data) {
@@ -211,6 +213,7 @@ export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettin
     event.preventDefault();
     setError("");
     setLoading(true);
+    if (!await requestAuthentication("mfa")) { setLoading(false); return; }
     if (managementAction === "regenerate") {
       const { data, error: authError } = await authClient.twoFactor.generateBackupCodes({ password: managementPassword });
       setLoading(false);

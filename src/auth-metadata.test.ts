@@ -76,6 +76,9 @@ POST /reset-password
 POST /revoke-other-sessions
 POST /revoke-session
 POST /revoke-sessions
+POST /security/challenge
+POST /security/complete
+GET /security/status
 POST /send-verification-email
 POST /sign-in/email
 POST /sign-in/social
@@ -85,9 +88,7 @@ POST /two-factor/disable
 POST /two-factor/enable
 POST /two-factor/generate-backup-codes
 POST /two-factor/get-totp-uri
-POST /two-factor/send-otp
 POST /two-factor/verify-backup-code
-POST /two-factor/verify-otp
 POST /two-factor/verify-totp
 POST /unlink-account
 POST /update-session
@@ -111,11 +112,11 @@ describe("Better Auth migration baseline", () => {
         return methods.map((method) => `${method} ${endpoint.path}`);
       }).sort();
 
-      expect(endpoints).toHaveLength(81);
+      expect(endpoints).toHaveLength(82);
       expect(operations).toEqual(EXPECTED_OPERATIONS);
       expect(AUTH_OPERATIONS.map(({ method, path }) => `${method} ${path}`).sort())
         .toEqual(operations);
-      expect(operations).toHaveLength(85);
+      expect(operations).toHaveLength(86);
       expect(operations.filter((operation) => operation.endsWith(" /get-session")))
         .toEqual(["GET /get-session"]);
     } finally {
@@ -135,6 +136,8 @@ describe("Better Auth migration baseline", () => {
 
       expect(ctx.baseURL).toBe("https://auth.cqu.moe/api/v1/auth");
       expect(fixture.auth.options.disabledPaths).toEqual([
+        "/two-factor/send-otp",
+        "/two-factor/verify-otp",
         "/token",
         "/sign-in/email-otp",
         "/email-otp/request-password-reset",

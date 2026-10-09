@@ -88,6 +88,8 @@ it("completes password plus TOTP login and invalidates the signed-out session", 
   const session = await fixture.request("/api/v1/auth/get-session", { headers }).then(r => r.json() as Promise<{ user: { email: string } }>);
   headers.set("origin", env.BETTER_AUTH_URL);
   headers.set("content-type", "application/json");
+  const proof = await fixture.request("/api/v1/auth/security/challenge", { method: "POST", headers, body: JSON.stringify({ password: "local-test-password", purpose: "mfa" }) });
+  expect(proof.status).toBe(200);
   const enable = await fixture.request("/api/v1/auth/two-factor/enable", { method: "POST", headers, body: JSON.stringify({ password: "local-test-password" }) });
   expect(enable.status).toBe(200);
   const { totpURI } = await enable.json() as { totpURI: string };

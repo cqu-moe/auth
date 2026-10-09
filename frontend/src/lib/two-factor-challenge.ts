@@ -1,13 +1,12 @@
 import { mapAuthError } from "./two-factor";
 
-export type LoginChallengeMethod = "totp" | "email-otp" | "backup-code";
+export type LoginChallengeMethod = "totp" | "backup-code";
 
 export const loginChallengeMethods: ReadonlyArray<{
   value: LoginChallengeMethod;
   label: string;
 }> = [
   { value: "totp", label: "身份验证器" },
-  { value: "email-otp", label: "邮箱验证码" },
   { value: "backup-code", label: "备用恢复码" },
 ];
 
@@ -16,11 +15,8 @@ export type LoginChallengeResult = { data: unknown; error: LoginChallengeError }
 
 export interface LoginChallengeActions {
   verifyTotp(input: { code: string; trustDevice: boolean }): Promise<LoginChallengeResult>;
-  verifyOtp(input: { code: string; trustDevice: boolean }): Promise<LoginChallengeResult>;
   verifyBackupCode(input: { code: string; trustDevice: boolean }): Promise<LoginChallengeResult>;
-  sendOtp(input: {
-    fetchOptions: { body: { trustDevice: boolean } };
-  }): Promise<LoginChallengeResult>;
+
 }
 
 export async function verifyLoginChallenge(
@@ -32,22 +28,13 @@ export async function verifyLoginChallenge(
 ): Promise<LoginChallengeResult> {
   const result = method === "totp"
     ? await actions.verifyTotp({ code, trustDevice })
-    : method === "email-otp"
-      ? await actions.verifyOtp({ code, trustDevice })
-      : await actions.verifyBackupCode({ code, trustDevice });
+    : await actions.verifyBackupCode({ code, trustDevice });
 
   if (!result.error && refreshSession) {
     await refreshSession();
   }
 
   return result;
-}
-
-export function sendLoginChallengeOtp(
-  actions: LoginChallengeActions,
-  trustDevice: boolean
-): Promise<LoginChallengeResult> {
-  return actions.sendOtp({ fetchOptions: { body: { trustDevice } } });
 }
 
 export function getLoginChallengeError(
