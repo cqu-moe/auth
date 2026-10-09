@@ -7,7 +7,7 @@ describe("Worker PostHog privacy boundary", () => {
       service: "auth-worker",
       password: "secret-password",
       DPoP: "secret-proof",
-      detail: "DPoP secret-dpop-token dpop=secret-proof-log",
+      detail: "authorization: DPoP secret-dpop-token dpop=secret-proof-log",
       cookie: "secret-cookie",
       authorization: "Bearer secret-token",
       studentId: "2026000000",

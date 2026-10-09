@@ -40,8 +40,8 @@ function isSensitiveKey(key: string): boolean {
 function redactText(value: string): string {
   return value
     .replace(EMAIL, REDACTED)
-    .replace(LABELED_SECRET, (_match, label: string) => `${label}=${REDACTED}`)
-    .replace(BEARER, `Bearer ${REDACTED}`);
+    .replace(BEARER, `Bearer ${REDACTED}`)
+    .replace(LABELED_SECRET, (_match, label: string) => `${label}=${REDACTED}`);
 }
 
 function normalizedPath(pathname: string): string {
