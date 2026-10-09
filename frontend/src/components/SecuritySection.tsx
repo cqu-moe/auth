@@ -3,6 +3,7 @@ import { FormEvent, useState } from "react";
 import { Link } from "react-router-dom";
 import { ActionButton, Alert, AlertDescription, Button, Input, Label } from "@cqu-moe/ui";
 import { authClient } from "../lib/auth-client";
+import DeviceSessions from "./DeviceSessions";
 import SettingsCard from "./SettingsCard";
 
 interface SecuritySectionProps {
@@ -183,6 +184,7 @@ export default function SecuritySection({ twoFactorEnabled }: SecuritySectionPro
             </p>
           )}
         </div>
+        <DeviceSessions />
       </div>
     </SettingsCard>
   );

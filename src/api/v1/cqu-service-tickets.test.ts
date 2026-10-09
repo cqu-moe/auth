@@ -13,7 +13,7 @@ describe("service ticket API v1", () => {
     fixture.seedBearerIdentity("ticket-user", "ticket-client");
     try {
       verifyAuthAccessTokenRequest.mockResolvedValue({
-        sub: "ticket-user",
+        sub: "ticket-user", sid: "session-ticket-user",
         azp: "ticket-client",
         scope: "cqu:ticket:jwxt",
       });
@@ -48,7 +48,7 @@ describe("service ticket API v1", () => {
       expect(get.headers.get("allow")).toBe("POST, OPTIONS");
 
       verifyAuthAccessTokenRequest.mockResolvedValue({
-        sub: "ticket-user",
+        sub: "ticket-user", sid: "session-ticket-user",
         azp: "ticket-client",
         scope: "cqu:ticket:jwxt",
       });

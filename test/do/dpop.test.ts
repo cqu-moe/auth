@@ -37,6 +37,16 @@ it("issues opt-in DPoP, rejects bare-token downgrade and accepts proof on QuickL
   request.headers.set("authorization", `DPoP ${token}`);
   request.headers.set("DPoP", await proof(k, request, token));
   await expect(verifyQuickloginBearer(request, env)).resolves.toMatchObject({ userId: fixture.websiteSession.userId });
+  const { createApp } = await import("../../src/app");
+  const userinfo = new Request(`${env.BETTER_AUTH_URL}/api/v1/auth/oauth2/userinfo`, { headers: { authorization: `DPoP ${token}` } });
+  userinfo.headers.set("dpop", await proof(k, userinfo, token));
+  expect((await createApp().fetch(userinfo.clone(), env)).status).toBe(200);
+  expect((await createApp().fetch(userinfo.clone(), env)).status).toBe(401);
+  await env.DATABASE.prepare("DELETE FROM session WHERE userId = ?").bind(fixture.websiteSession.userId).run();
+  userinfo.headers.set("dpop", await proof(k, userinfo, token));
+  expect((await createApp().fetch(userinfo, env)).status).toBe(401);
+  request.headers.set("dpop", await proof(k, request, token));
+  await expect(verifyQuickloginBearer(request, env)).rejects.toMatchObject({ code: "UNAUTHORIZED" });
 });
 
 it("atomically rejects duplicate proofs across fresh verifier contexts and rejects request/key/hash tampering", async () => {
@@ -129,8 +139,15 @@ it("interoperates with oauth4webapi code exchange, same-key refresh and HTTP res
 it("enforces opt-in client policy, atomically reserves AS proofs and cleans expired reservations", async () => {
   const { createAuth } = await import("../../src/auth");
   const fixture = await createOAuthFixture(env);
-  const { adapter, internalAdapter } = await createAuth(env, new Request(env.BETTER_AUTH_URL)).$context;
-  await adapter.update({ model: "oauthClient", where: [{ field: "clientId", value: "quicklogin-test-client" }], update: { dpopBoundAccessTokens: true } });
+  const { internalAdapter } = await createAuth(env, new Request(env.BETTER_AUTH_URL)).$context;
+  const { createApiFixture } = await import("./api-fixture");
+  const api = await createApiFixture();
+  const admin = await api.signIn("superAdmin");
+  admin.set("content-type", "application/json");
+  const configured = await api.request("/api/v1/admin/oauth-clients/quicklogin-test-client", {
+    method: "PATCH", headers: admin, body: JSON.stringify({ dpop_bound_access_tokens: true }),
+  });
+  expect(configured.status).toBe(200);
   await expect(authorizeOfficialInstall(fixture, { websiteSession: fixture.websiteSession })).rejects.toMatchObject({ stage: "token" });
   const k = await key();
   const handler = fixture.authHandler;
