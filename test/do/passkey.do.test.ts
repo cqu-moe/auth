@@ -16,7 +16,7 @@ it("requires recent authentication before binding a Passkey and requests verifie
 
 it("registers multiple keys, requires UV for login, and reauthenticates the same session for a purpose", async () => {
   const { authenticator } = await import("./passkey-authenticator");
-  const { api, headers, get, post } = await passkeyFixture("admin");
+  const { api, headers, get, post } = await passkeyFixture("admin", true);
   await post("/security/challenge", { password: "local-test-password", purpose: "mfa" });
   const first = await authenticator(); const second = await authenticator();
   for (const device of [first, second]) {
@@ -46,9 +46,9 @@ it("registers multiple keys, requires UV for login, and reauthenticates the same
   expect(await (await get("/passkey/list-user-passkeys")).json()).toHaveLength(1);
 });
 
-async function passkeyFixture(role: "admin" | "user" = "user") {
+async function passkeyFixture(role: "admin" | "user" = "user", strong = false) {
   const api = await createApiFixture();
-  const headers = await api.signIn(role, false);
+  const headers = await api.signIn(role, strong);
   headers.set("origin", "http://localhost:8787"); headers.set("content-type", "application/json");
   const absorb = (response: Response) => {
     const cookies = new Map((headers.get("cookie") ?? "").split("; ").map(c => c.split(/=(.*)/s).slice(0, 2) as [string, string]));
@@ -73,6 +73,9 @@ it.each([
   expect(await (await get("/passkey/list-user-passkeys")).json()).toEqual([]);
   const options = await (await get("/passkey/generate-register-options")).json<{ challenge: string }>();
   expect((await post("/passkey/verify-registration", { response: await device.register(options.challenge) })).status).toBe(200);
+  const stepUp = await (await post("/security/passkey/options", { purpose: "email" })).json<{ challengeId: string; options: { challenge: string } }>();
+  expect((await post("/security/passkey/complete", { challengeId: stepUp.challengeId, response: await device.authenticate(stepUp.options.challenge, invalid) })).status).toBe(401);
+  expect(await (await get("/security/status?purpose=email")).json()).toMatchObject({ verified: false });
   await post("/sign-out", {});
   const login = await (await get("/passkey/generate-authenticate-options")).json<{ challenge: string; userVerification: string }>();
   expect(login.userVerification).toBe("required");
