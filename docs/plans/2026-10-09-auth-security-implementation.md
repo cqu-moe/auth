@@ -19,7 +19,11 @@ Auth 本轮完整自动验证为 97 个单元/界面测试文件、877 项，以
 
 父任务实际本地浏览器在 Auth localhost、Schedule 127.0.0.1、UC [::1] 三个不同主机完成登录、单站退出、显式重新登录和中央全设备退出；Schedule 随后返回 401，UC 受保护成员入口跳回登录。密码管理员强认证准入、TOTP 设置、人工随机密码恢复与关闭结果、正常改密保留当前会话也已实测。正式检查路径为 `/api/v1/auth/get-session`；旧 `/api/auth/get-session` 在本应用为 404，不能拿它判断会话是否丢失。
 
-以上浏览器操作先于最终 Cookie 名称切换，切换后的浏览器复验仍须另记。Passkey 的密码学 HTTP/D1 测试通过，但实际浏览器虚拟认证器持续返回 NotAllowedError，未完成浏览器绑定。未安装或操作用户真实扩展，也未用真实密码管理器保存凭据。QuickLogin 0.4.1 干净隔离构建通过 96 项测试、类型/构建/包契约与 8 项发布脚本测试，只生成本地 canary，不代表原生 Chrome identity 或学校 Cookie 操作验收。下载站另有类型、构建、检查及六页导航资源验证。
+最终 Auth `d0e6b1d` 已在本地 fixture D1 应用 0013 后完成三主机浏览器复验：Auth 密码加 TOTP 登录、Schedule/UC 无需重复输入凭据的 OAuth 登录、新 `auth-v2.session_token` 与旧 Cookie 清除、两个站点分别退出并主动接回、中央全设备退出后 Schedule 401 和 UC 回登录均通过。Auth/UC 的本地 HTTP Cookie 不带 Secure；Schedule 的本地 `__Host-schedule_session` 带 Secure。生产 HTTPS `__Host-auth-v2` 属性有真实 HTTP/D1 测试依据，不把本地 HTTP 浏览器结果写成生产 HTTPS 验收。
+
+四份独立只读静态审查（Auth Standards/Spec、消费者 Standards/Spec）均为 0 项可行动发现。固定范围为 Auth `4ea1cf055fd25ee877160f7683d3b24eb69e718a...d0e6b1d9d600a5fdeb44b1d6aacaacee44a163e2`、Schedule `e2114ae2abcd461ebab20fb72694d3f2ed8a46b2...9d6cd7f3ba4f47af2a523e2f315eb767692f1476`、UC `faa7fa373b3c0bd1caedf6efc5b0a77723515e6c...23b1c1f93421c5cd215adef0df29a151a7186664`。审查涵盖仓库规范/Fowler 基线与规格、认证/会话/权限、迁移、界面及运行文档；没有重跑测试或执行生产操作，不能代替部署验收。
+
+Passkey 的密码学 HTTP/D1 测试通过，但实际浏览器虚拟认证器持续返回 NotAllowedError，未完成浏览器绑定。未安装或操作用户真实扩展，也未用真实密码管理器保存凭据。QuickLogin 0.4.1 干净隔离构建通过 96 项测试、类型/构建/包契约与 8 项发布脚本测试，只生成本地 canary，不代表原生 Chrome identity 或学校 Cookie 操作验收。下载站另有类型、构建、检查及六页导航资源验证。
 
 ## 生产仍需执行
 
