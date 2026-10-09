@@ -1,3 +1,4 @@
+import { enrollStrongSession } from "./test-utils/auth-strength";
 import { describe, expect, it, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { getMigrations } from "better-auth/db/migration";
@@ -41,7 +42,7 @@ async function signIn(auth: ReturnType<typeof createAuth>, email: string) {
     body: { email, password: "password123" },
     returnHeaders: true,
   });
-  return new Headers({ cookie: cookieFromHeaders(result.headers) });
+  return enrollStrongSession(auth, new Headers({ cookie: cookieFromHeaders(result.headers) }), "password123");
 }
 
 async function post(auth: ReturnType<typeof createAuth>, path: string, headers: Headers, body: Record<string, unknown>) {

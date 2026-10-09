@@ -1,3 +1,4 @@
+import { provePassword } from "./test-utils/auth-strength";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { getMigrations } from "better-auth/db/migration";
@@ -43,7 +44,9 @@ async function signUp(auth: ReturnType<typeof createAuth>, email: string) {
     body: { email, password: "password123", name: "Test User" },
     returnHeaders: true,
   });
-  return new Headers({ cookie: cookieFromHeaders(signup.headers) });
+  const headers = new Headers({ cookie: cookieFromHeaders(signup.headers) });
+  await provePassword(auth, headers, "password123", "email");
+  return headers;
 }
 
 async function nativePost(

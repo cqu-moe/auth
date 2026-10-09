@@ -27,8 +27,9 @@ vi.stubGlobal("matchMedia", (query: string) => ({
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const authMocks = vi.hoisted(() => ({
+  signIn: vi.fn(async () => ({ data: { token: "session", user: { emailVerified: true } }, error: null })),
   signUp: vi.fn(async () => ({ error: { message: "Test signup stopped" } })),
-  refetch: vi.fn(async () => undefined),
+  refetch: vi.fn(async (): Promise<void> => undefined),
   requestPasswordReset: vi.fn(async () => ({ error: null })),
   resetPassword: vi.fn(async () => ({ error: null })),
   signOut: vi.fn(async () => ({ error: null })),
@@ -44,7 +45,7 @@ vi.mock("../lib/auth-client", () => ({
     resetPassword: authMocks.resetPassword,
     signOut: authMocks.signOut,
     sendVerificationEmail: vi.fn(async () => ({ error: null })),
-    signIn: { email: vi.fn() },
+    signIn: { email: authMocks.signIn },
     signUp: { email: authMocks.signUp },
   },
 }));
@@ -102,6 +103,18 @@ afterEach(() => {
 });
 
 describe("authentication continuation links", () => {
+  it("waits for the authenticated session before navigating after password login", async () => {
+    let finish!: () => void;
+    authMocks.refetch.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    await renderPage(createElement(Login), "/login");
+    setInput("#email", "user@example.com");
+    setInput("#password", "password123");
+    await act(async () => { container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+    expect(container.querySelector("[data-location]")?.textContent).toBe("/login");
+    await act(async () => { finish(); });
+    expect(container.querySelector("[data-location]")?.textContent).toBe("/settings");
+  });
+
   it("keeps the nested binding target through login, register, and password recovery", async () => {
     const loginEntry = withRedirectParam("/login", binding);
     await renderPage(createElement(Login), loginEntry);

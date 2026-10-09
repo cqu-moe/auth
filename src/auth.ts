@@ -1,3 +1,4 @@
+import { authenticationStrength, enforceAuthenticationStrength, recordAuthenticationProof } from "./services/auth-strength";
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { withCloudflare, type CloudflareGeolocation } from "better-auth-cloudflare";
@@ -129,7 +130,16 @@ export function createAuth(env: Env, request: Request) {
           },
         },
         hooks: {
+          after: createAuthMiddleware(async (ctx) => {
+            if (["/two-factor/verify-totp", "/two-factor/verify-backup-code"].includes(ctx.path) && ctx.context.newSession && !(ctx.context.returned instanceof APIError)) {
+              await recordAuthenticationProof(ctx.context, ctx.context.newSession, "mfa", true);
+            }
+          }),
           before: createAuthMiddleware(async (ctx) => {
+            await enforceAuthenticationStrength(ctx);
+            if (ctx.path === "/two-factor/enable" && ctx.body?.method === "otp") {
+              throw new APIError("FORBIDDEN", { message: "邮箱验证码不能作为第二因子" });
+            }
             // Our authorization-code policy has no confidential OIDC exception.
             const authorizationQuery = { ...ctx.query, ...ctx.body };
             if (ctx.path === "/oauth2/authorize" &&
@@ -201,9 +211,11 @@ export function createAuth(env: Env, request: Request) {
         },
         emailVerification: {
           sendOnSignUp: true,
-          autoSignInAfterVerification: true,
+          autoSignInAfterVerification: false,
         },
         disabledPaths: [
+          "/two-factor/send-otp",
+          "/two-factor/verify-otp",
           "/token",
           "/sign-in/email-otp",
           "/email-otp/request-password-reset",
@@ -212,6 +224,7 @@ export function createAuth(env: Env, request: Request) {
           "/verify-email",
         ],
         plugins: [
+          authenticationStrength((headers, method, code) => verifyCurrentFactor(env, request, headers, method, code)),
           admin({
             ac,
             roles,
@@ -295,20 +308,6 @@ export function createAuth(env: Env, request: Request) {
             twoFactorCookieMaxAge: 600,
             trustDeviceMaxAge: 60 * 60 * 24 * 30,
             totpOptions: { digits: 6, period: 30 },
-            otpOptions: {
-              digits: 6,
-              period: 5,
-              allowedAttempts: 3,
-              storeOTP: "hashed",
-              async sendOTP({ user, otp }) {
-                await getResend().emails.send({
-                  from: "auth.cqu.moe <noreply@cqu.moe>",
-                  to: user.email,
-                  subject: "登录二次验证码 - auth.cqu.moe",
-                  html: `<p>请输入以下验证码完成登录：</p><p style="font-size:24px;font-weight:700;letter-spacing:6px">${otp}</p><p>验证码 5 分钟内有效，请勿转发。</p>`,
-                });
-              },
-            },
             backupCodeOptions: {
               amount: 10,
               length: 10,
@@ -364,4 +363,10 @@ export function createAuth(env: Env, request: Request) {
       }
     ),
   });
+}
+
+async function verifyCurrentFactor(env: Env, request: Request, headers: Headers, method: "totp" | "backup-code", code: string): Promise<void> {
+  const auth = createAuth(env, request);
+  if (method === "totp") await auth.api.verifyTOTP({ headers, body: { code, trustDevice: false } });
+  else await auth.api.verifyBackupCode({ headers, body: { code, trustDevice: false, disableSession: true } });
 }
