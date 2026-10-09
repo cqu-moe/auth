@@ -89,7 +89,7 @@ export async function createApiFixture() {
         body: { email, password: "local-test-password" },
         returnHeaders: true,
       });
-      const headers = new Headers({ cookie: cookieHeader(signedIn.headers) });
+      const headers = new Headers({ cookie: cookieHeader(signedIn.headers), "cf-connecting-ip": `198.51.100.${id % 250 + 1}` });
       return strong ? enrollStrongSession(auth, headers, "local-test-password") : headers;
     }
     return new Headers({ cookie: cookieHeader(signup.headers) });

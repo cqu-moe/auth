@@ -1,3 +1,4 @@
+import { createSqliteD1 } from "./d1";
 import { readdirSync, readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath, URL as NodeURL } from "node:url";
@@ -15,7 +16,7 @@ export function createTestAuth(options: { origin?: string } = {}) {
     database.exec(readFileSync(new NodeURL(name, migrations), "utf8"));
   }
   const env = {
-    DATABASE: database,
+    DATABASE: createSqliteD1(database),
     BETTER_AUTH_URL: origin,
     BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
     RESEND_API_KEY: "re_test_placeholder",
