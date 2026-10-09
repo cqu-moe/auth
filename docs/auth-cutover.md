@@ -50,7 +50,29 @@ Administrator-owned `skipConsent` is the first-party approval marker. For an ena
 
 2. Before compatibility Auth starts enforcing RPC method/subsystem policy, prepare Schedule’s approved `subsystem:"calendar"`, `rpcMethods:["getCaps","cquHarvest"]` metadata through the existing authorized administration interface. Current Schedule business calls do not require `getCquTicket`; grant it only if a separately approved caller is evidenced. If the old interface cannot set metadata, use a controlled maintenance window and configure it immediately after compatibility deployment, verifying RPC before reopening traffic. Do not bypass RPC checks during transition.
 
-   Build a compatibility release from Auth `3f132a3538a92c71ac20a0ee2cd48640cbe476c5` in an isolated checkout. This includes native 1.7 D1 storage, current-token/RPC authority, Passkey/recovery and the normal-password current-session fix, while retaining the pre-cutover Cookie policy. Its migration directory ends at 0012. Apply its pending additive migrations with `npx wrangler d1 migrations apply auth-cqu-moe-db --remote`, then deploy its reviewed build using the existing release procedure. Do not use the final checkout for this stage: it includes the credential-retiring 0013.
+   Build the compatibility release from Auth `3f132a3538a92c71ac20a0ee2cd48640cbe476c5` **plus the two-file introspection capacity patch from `f12261675f2786beba080d36e343694eaad96fb6`**. The unpatched base retains the native 100/minute introspection limit and is not the intended consumer-migration release. The patch raises only that endpoint to 6,000 requests/60 seconds and includes the regression for 101 legitimate no-IP requests plus rejection of unauthenticated introspection. The D1-backed budget remains bounded; missing-IP traffic shares a bucket.
+
+   Prepare an isolated checkout from a repository containing both commits (choose another unused worktree/branch name if needed):
+
+   ```sh
+   git worktree add -b codex/auth-security-compat ../auth-security-compat 3f132a3538a92c71ac20a0ee2cd48640cbe476c5
+   git diff f12261675f2786beba080d36e343694eaad96fb6^ f12261675f2786beba080d36e343694eaad96fb6 -- src/auth.ts test/do/device-lifecycle.do.test.ts | git -C ../auth-security-compat apply --check
+   git diff f12261675f2786beba080d36e343694eaad96fb6^ f12261675f2786beba080d36e343694eaad96fb6 -- src/auth.ts test/do/device-lifecycle.do.test.ts | git -C ../auth-security-compat apply
+   cd ../auth-security-compat
+   npm ci
+   npm exec --yes --package=pnpm@11.19.0 -- pnpm --dir frontend install --frozen-lockfile
+   npm run typecheck
+   npm run test:do -- test/do/device-lifecycle.do.test.ts test/do/auth-d1-baseline.test.ts
+   npm --prefix frontend run build
+   git diff --check
+   git diff --stat
+   ```
+
+   Local reconstruction on 2026-10-09 verified that this exact two-file patch applies cleanly: typecheck, both Workers/D1 suites (11 tests), frontend build and diff checks passed. The migration directory ended at 0012 and the pre-cutover Cookie policy was unchanged. This was isolated local validation, not a production release.
+
+   Before committing this compatibility release, verify that only `src/auth.ts` and `test/do/device-lifecycle.do.test.ts` changed, migrations still end at **0012**, and the base's shared Cookie policy remains. Check the effective Git identity, commit the two-file patch, and record the resulting compatibility commit as the release artifact; do not describe the unpatched base as the deployed revision. Do not cherry-pick the whole final branch or replace this base with final HEAD: that would introduce the credential-retiring 0013 too early.
+
+   This compatibility release includes native 1.7 D1 storage, current-token/RPC authority, Passkey/recovery and the normal-password current-session fix. Apply its pending additive migrations with `npx wrangler d1 migrations apply auth-cqu-moe-db --remote`, then deploy that exact reviewed compatibility artifact using the existing release procedure. Only after that artifact is serving should step 3 migrate consumers.
 
 3. Configure approved clients through the existing strong-authenticated administration API, including Schedule refresh grants/scopes and the new UC client (RPC metadata must already be prepared at stage 2). Keep secrets on the servers. Deploy Schedule and UC using their own migration/runbooks (`docs/application-session-migration.md` and `docs/operations/uc-oauth.md`). Preserve Schedule CACHE and UC SESSION KV. Verify intended production/staging hosts, login, explicit local logout, central revocation and background authorization before proceeding. No shared-cookie fallback may remain in a deployed consumer.
 
