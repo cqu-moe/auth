@@ -1,3 +1,4 @@
+import PasskeySettings from "../components/PasskeySettings";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
 import { ChevronDown, Link2, Loader2, Mail } from "lucide-react";
@@ -24,7 +25,7 @@ interface CquSessionStatus {
 
 interface CquBindStatus {
   address?: string;
-  bindStatus: "pending" | "active" | "revoked" | "unbound";
+  bindStatus: "pending" | "active" | "revoked" | "deleting" | "unbound";
   sessionStatus: CquSessionStatus;
 }
 
@@ -360,6 +361,9 @@ function CquBindingSection() {
 
       {isBound ? (
         <div className="space-y-5">
+          {status?.bindStatus === "deleting" && (
+            <Alert><AlertDescription>解绑尚未完成，学校访问已停用。请重试解绑。</AlertDescription></Alert>
+          )}
           <div className="flex flex-col divide-y divide-border">
             <div className="flex flex-wrap items-center justify-between gap-2 py-3">
               <span className="text-sm text-muted-foreground">统一身份认证账号</span>
@@ -477,6 +481,7 @@ export function SettingsSecurity() {
     <Layout>
       <PageHeader title="安全" description="二次验证与登录密码。" />
       <SecuritySection twoFactorEnabled={user?.twoFactorEnabled === true} />
+      <PasskeySettings />
     </Layout>
   );
 }

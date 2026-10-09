@@ -12,7 +12,7 @@ export type AuthPolicyKind =
 
 export interface AuthPolicyEntry extends HttpOperation {
   policy: AuthPolicyKind;
-  source: "better-auth-1.6.11" | "application-override" | "custom-contract";
+  source: "better-auth-1.7.7" | "application-override" | "custom-contract";
 }
 
 const entries = (policy: AuthPolicyKind, values: readonly string[]) =>
@@ -20,17 +20,18 @@ const entries = (policy: AuthPolicyKind, values: readonly string[]) =>
 
 const AUTH_POLICIES = new Map<string, AuthPolicyKind>([
   ...entries("public", [
+    "GET /passkey/generate-authenticate-options", "POST /passkey/verify-authentication",
     "GET /callback/:id", "POST /callback/:id", "GET /cloudflare/geolocation",
     "GET /delete-user/callback", "POST /email-otp/verify-email",
     "GET /error", "POST /get-access-token", "GET /jwks",
-    "GET /oauth2/authorize", "GET /oauth2/end-session", "GET /oauth2/public-client",
+    "GET /oauth2/authorize", "POST /oauth2/authorize", "GET /oauth2/end-session", "POST /oauth2/end-session", "GET /oauth2/public-client",
     "POST /oauth2/public-client-prelogin", "POST /oauth2/register", "GET /ok",
     "POST /refresh-token", "POST /request-password-reset", "POST /reset-password",
     "GET /reset-password/:token", "POST /send-verification-email",
     "POST /sign-in/email", "POST /sign-in/social", "POST /sign-up/email",
   ]),
-  ...entries("optional-session", ["GET /get-session"]),
-  ...entries("bearer", ["GET /oauth2/userinfo"]),
+  ...entries("optional-session", ["GET /get-session", "POST /oauth2/end-session/confirm"]),
+  ...entries("bearer", ["GET /oauth2/userinfo", "POST /oauth2/userinfo"]),
   ...entries("oauth-client", [
     "POST /oauth2/introspect", "POST /oauth2/revoke", "POST /oauth2/token",
   ]),
@@ -44,10 +45,13 @@ const AUTH_POLICIES = new Map<string, AuthPolicyKind>([
     "POST /admin/list-user-sessions", "GET /admin/list-users",
     "POST /admin/remove-user", "POST /admin/revoke-user-session",
     "POST /admin/revoke-user-sessions", "POST /admin/set-role",
-    "POST /admin/set-user-password", "POST /admin/stop-impersonating",
+    "POST /admin/reset-authentication", "POST /admin/set-user-password", "POST /admin/stop-impersonating",
     "POST /admin/unban-user", "POST /admin/update-user",
   ]),
   ...entries("session", [
+    "GET /passkey/generate-register-options", "POST /passkey/verify-registration", "GET /passkey/list-user-passkeys", "POST /passkey/delete-passkey", "POST /passkey/update-passkey",
+    "POST /security/passkey/change-password", "POST /security/passkey/two-factor/enable", "POST /security/passkey/two-factor/disable", "POST /security/passkey/two-factor/generate-backup-codes",
+    "POST /security/passkey/options", "POST /security/passkey/complete", "POST /security/challenge", "POST /security/complete", "GET /security/status",
     "GET /account-info", "POST /change-email", "POST /change-password",
     "POST /delete-user", "POST /email-otp/change-email",
     "POST /email-otp/request-email-change", "POST /email-otp/send-verification-otp",
@@ -123,7 +127,7 @@ export function buildAuthPolicy(operations: readonly HttpOperation[]): AuthPolic
         operation.path.endsWith("/email-otp/send-verification-otp") ||
         operation.path.endsWith("/email-otp/check-verification-otp")
         ? "application-override"
-        : "better-auth-1.6.11",
+        : "better-auth-1.7.7",
     };
   });
 }

@@ -1,7 +1,7 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 type BoundStatement = {
-  run<T = Record<string, unknown>>(): Promise<D1Result<T>>;
+  all<T = Record<string, unknown>>(): Promise<D1Result<T>>;
 };
 
 function result<T>(results: T[], changes = 0): D1Result<T> {
@@ -21,11 +21,18 @@ function result<T>(results: T[], changes = 0): D1Result<T> {
 }
 
 export function createSqliteD1(database: DatabaseSync): D1Database {
+  const executeAll = new WeakMap<object, () => D1Result>();
   const prepare = (query: string, values: SQLInputValue[] = []) => {
     const statement = database.prepare(query);
     const execute = <T = Record<string, unknown>>() => statement.run(...values);
 
-    return {
+    const all = <T = Record<string, unknown>>() => {
+      const before = Number(database.prepare("SELECT total_changes() AS count").get()!.count);
+      const rows = statement.all(...values) as T[];
+      const after = Number(database.prepare("SELECT total_changes() AS count").get()!.count);
+      return result(rows, after - before);
+    };
+    const prepared = {
       bind(...next: SQLInputValue[]) {
         return prepare(query, next);
       },
@@ -40,9 +47,7 @@ export function createSqliteD1(database: DatabaseSync): D1Database {
         const execution = execute();
         return result<T>([], Number(execution.changes));
       },
-      async all<T = Record<string, unknown>>() {
-        return result(statement.all(...values) as T[]);
-      },
+      async all<T = Record<string, unknown>>() { return all<T>(); },
       async raw<T = unknown[]>(options?: { columnNames?: boolean }) {
         statement.setReturnArrays(true);
         const rows = statement.all(...values) as T[];
@@ -53,6 +58,8 @@ export function createSqliteD1(database: DatabaseSync): D1Database {
         return rows;
       },
     };
+    executeAll.set(prepared, all);
+    return prepared;
   };
 
   return {
@@ -64,7 +71,11 @@ export function createSqliteD1(database: DatabaseSync): D1Database {
     async batch(statements: BoundStatement[]) {
       database.exec("BEGIN");
       try {
-        const results = await Promise.all(statements.map((statement) => statement.run()));
+        const results = statements.map(statement => {
+          const execute = executeAll.get(statement);
+          if (!execute) throw new Error("Statement belongs to another D1 database");
+          return execute();
+        });
         database.exec("COMMIT");
         return results;
       } catch (error) {

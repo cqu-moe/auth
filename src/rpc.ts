@@ -1,3 +1,4 @@
+import { isBanned } from "./services/oauth-tokens";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
@@ -27,6 +28,7 @@ interface OAuthClientSecretRow {
   clientId: string;
   clientSecret?: string | null;
   disabled?: boolean | null;
+  metadata?: { subsystem?: unknown; rpcMethods?: unknown } | null;
 }
 
 export type { CquBindStatus } from "./services/cqu-binding";
@@ -82,71 +84,57 @@ export class AuthService extends WorkerEntrypoint<Env> {
     return { user: s.user as Record<string, unknown>, caps, cquBindStatus };
   }
 
-  /**
-   * M-6 客户端认证闸(getCquTicket / getCaps 共用,单点可审计)。RPC 进程内调用方
-   * 自报 clientId 不可信,必须验 client_secret。返回 true 仅当全部满足,否则 false:
-   *  - client 存在且有 clientSecret;
-   *  - client 未被禁用(disabled);此检查【先于】secret 比对 —— disabled client 永不
-   *    触达后续闸,且对外回 opaque(由调用方统一映射成 INVALID_CLIENT / null),
-   *    不泄露「存在但被禁」状态;
-   *  - 呈递 secret 的哈希(hashOAuthClientSecret)与存储哈希定长比较(constantTimeEquals)相等。
-   */
-  private async authenticateClient(
-    clientId: string,
-    clientSecret: string
-  ): Promise<boolean> {
-    // dummy Request 仅用于构造 auth 上下文。
-    const auth = createAuth(this.env, new Request("https://auth.cqu.moe"));
-    const ctx = await auth.$context;
-    const client = await ctx.adapter.findOne<OAuthClientSecretRow>({
-      model: "oauthClient",
-      where: [{ field: "clientId", value: clientId }],
+  /** Service identity is only valid inside private Worker RPC. No user sessions
+   * or per-user OAuth tokens are minted by these methods. */
+  private async authorizeService(
+    args: { clientId: string; clientSecret: string; userId: string },
+    method: "getCaps" | "getCquTicket" | "cquHarvest"
+  ): Promise<{ subsystem: string } | { error: string }> {
+    const finish = (result: { subsystem: string } | { error: string }) => {
+      console.info(JSON.stringify({ event: "auth.rpc.request", clientId: args.clientId,
+        userId: args.userId, method, identityStatus: "error" in result ? result.error : "verified" }));
+      return result;
+    };
+    const { adapter } = await createAuth(this.env, new Request(this.env.BETTER_AUTH_URL)).$context;
+    const client = await adapter.findOne<OAuthClientSecretRow>({ model: "oauthClient", where: [{ field: "clientId", value: args.clientId }] });
+    if (!client?.clientSecret || client.disabled ||
+        !constantTimeEquals(await hashOAuthClientSecret(args.clientSecret), client.clientSecret)) {
+      return finish({ error: "INVALID_CLIENT" });
+    }
+    const methods = client.metadata?.rpcMethods;
+    const subsystem = client.metadata?.subsystem;
+    if (!Array.isArray(methods) || !methods.every(value => typeof value === "string") ||
+        !methods.includes(method) || typeof subsystem !== "string") return finish({ error: "FORBIDDEN" });
+    const user = args.userId && await adapter.findOne<{ banned?: boolean | null; banExpires?: Date | null }>({
+      model: "user", where: [{ field: "id", value: args.userId }],
     });
-    if (!client || !client.clientSecret) return false;
-    if (client.disabled) return false;
-    const presentedHash = await hashOAuthClientSecret(clientSecret);
-    return constantTimeEquals(presentedHash, client.clientSecret);
+    if (!user || isBanned(user)) return finish({ error: "FORBIDDEN" });
+    return finish({ subsystem });
   }
 
-  /**
-   * 取用户当前、权威的 calendar caps(离线读取,SECURITY-SENSITIVE)。供 schedule 的
-   * 离线同步 cron 做权益门禁 / 硬撤销(见 issue #7)。锁死顺序:
-   *   ① 认证调用方 client(M-6,见 authenticateClient):验 clientId+client_secret。
-   *      getCaps 是【按任意 userId 枚举】的原语 —— 无 per-user 凭证(不同于 verifySession
-   *      以用户 cookie 为凭证,只能查持有者),不验则任一被绑定 Worker 都能扫全体用户的
-   *      权益画像。认证失败 → null(opaque)。
-   *   ② 直查 user_entitlement(无 cookie/session)→ 只盖 calendar 片(最小披露,
-   *      schedule 仅消费 calendar)。零行 → null(用户不存在/无权益,schedule fail-closed)。
-   */
+  private async hasSchoolBinding(userId: string): Promise<boolean> {
+    // #37's DO reconciliation remains the final gate. This early check also
+    // accepts older credentials-only accounts, but never a deleting address.
+    const row = await this.env.DATABASE.prepare(`SELECT 1 AS allowed FROM cqu_credentials c
+      WHERE c.user_id = ? AND c.status = 'active' AND NOT EXISTS (
+        SELECT 1 FROM cqu_bind_addresses a WHERE a.user_id = c.user_id AND a.status != 'active'
+      )`).bind(userId).first();
+    return !!row;
+  }
+
+  /** Current calendar rights, including false flags; no school binding needed. */
   async getCaps(args: {
     clientId: string;
     clientSecret: string;
     userId: string;
   }): Promise<{ calendar: CalendarCaps } | null> {
-    if (!args.userId) return null;
-    if (!(await this.authenticateClient(args.clientId, args.clientSecret))) {
-      return null;
-    }
+    const authorization = await this.authorizeService(args, "getCaps");
+    if ("error" in authorization || authorization.subsystem !== "calendar") return null;
     return resolveCapsForRpc(this.env.DATABASE, args.userId);
   }
 
-  /**
-   * 取 CQU CAS Service Ticket(取票第二入口,SECURITY-CRITICAL)。锁死顺序:
-   *   ① 认证 clientId(M-6 红线,见 authenticateClient):验呈递的 client_secret 与存储哈希
-   *      一致(定长比较)。RPC 调用方自报 clientId,不验 secret 则任意绑定 Worker 都能冒充
-   *      任意 client —— 故所有调用都强制验证。
-   *   ② 定所需 scope + 模式:serviceUrl → "cqu:ticket:any";service → "cqu:ticket:"+key;
-   *      皆缺 → MISSING_TARGET。
-   *   ③ client-scope 授权:读 oauth_client_cqu_scopes,scopeSatisfies 不过 → FORBIDDEN
-   *      (镜像 route 的 per-client 检查;route 的 JWT 检查在此无对应物,由 ① 的 secret 认证替代)。
-   *   ④ 经 DO chokepoint 出票:绝不直连 ssoClient。寻址 idFromName(userId),构造
-   *      service-ticket 请求(clientId + source="rpc"),由 DO 做 host 再校验 / opt-in /
-   *      限频 / 审计。DO 非 ok → 回传其 error code;否则回传 { ticket }。
-   *
-   * ⚠️ 绝不在此调用 ssoClient.getServiceTicket 或任何 SSO 直铸路径。所有安全闸都活在
-   * DO.getServiceTicket 里,绕过它(直连 SSO 铸票)会跳过 opt-in/限频/审计/host 校验。
-   * 一律经 DO,不留例外。
-   */
+  /** Client target scopes, current business rights and school binding all apply.
+   * The DO retains host validation, QuickLogin consent, rate limits and audit. */
   async getCquTicket(args: {
     clientId: string;
     clientSecret: string;
@@ -154,11 +142,16 @@ export class AuthService extends WorkerEntrypoint<Env> {
     serviceUrl?: string;
     userId: string;
   }): Promise<{ ticket: string } | { error: string }> {
-    // ① 认证 clientId + client_secret(M-6)。disabled client 在闸内即被拒,且回同一
-    // opaque INVALID_CLIENT(不泄露「存在但被禁」),确保其永不触达 scope/DO。
-    if (!(await this.authenticateClient(args.clientId, args.clientSecret))) {
-      return { error: "INVALID_CLIENT" };
-    }
+    const authorization = await this.authorizeService(args, "getCquTicket");
+    if ("error" in authorization) return authorization;
+    const caps = await resolveCaps(this.env.DATABASE, args.userId);
+    const permitted = authorization.subsystem === "calendar"
+      ? args.service === "jwxt" && !args.serviceUrl && caps.calendar.sync === true
+      : authorization.subsystem === "eval"
+        ? args.service === "jxpj" && !args.serviceUrl && caps.eval.submit === true
+        : authorization.subsystem === "cqu" && caps.cqu.quicklogin_access === true;
+    if (!permitted) return { error: "FORBIDDEN" };
+    if (!(await this.hasSchoolBinding(args.userId))) return { error: "NO_CQU_BINDING" };
 
     // ② 定所需 scope + 模式(serviceUrl 优先)。
     const scope = requiredScopeForTarget({
@@ -202,24 +195,8 @@ export class AuthService extends WorkerEntrypoint<Env> {
     return { ticket: body.ticket };
   }
 
-  /**
-   * organic harvest 取数(取数第二入口,SECURITY-CRITICAL)。auth 提供的**业务无关批量取数原语**:
-   * 在用户已登录 + 已过瑞数的临时浏览器里导航 navUrl(页面有机 fire 课表/学期)+ 截获 capture
-   * 模式响应 + 跑 fetch[] in-page GET,一把返回。schedule 等子系统填自己的 navUrl/配方。
-   *
-   * 锁死顺序(对齐 getCquTicket):
-   *   ① authenticateClient(M-6 client_secret constant-time):RPC 调用方自报 clientId 不可信,
-   *      失败 → { error: "INVALID_CLIENT" }(opaque)。
-   *   ② 经 DO data-harvest chokepoint 出数(绝不在此直起浏览器):寻址 idFromName(userId),
-   *      DO 做精确 host 白名单(只允许 my.cqu.edu.cn) / 限流 / 审计 /
-   *      needs_reauth 熔断。
-   *   ③ DO 非 ok → 回传其 code(NEEDS_REAUTH | SESSION_INACTIVE | RATE_LIMITED |
-   *      INVALID_HARVEST_URL | WAF_CHALLENGE | TGT_EXPIRED);成功 → { captures, fetches }。
-   *
-   * ⚠️ host 红线只允许代码内固定的 Direct 主机，
-   *    防 auth 变开放代理(SSRF)。不做 client-scope 检查(通用原语, 取数授权 = M-6 机器信任 +
-   *    用户 CQU 会话 active + host 白名单;业务级权益门禁在调用方 schedule 侧)。
-   */
+  /** Calendar harvesting is centrally authorized, then dispatched through the
+   * existing DO target-host, binding, rate-limit and audit controls. */
   async cquHarvest(args: {
     clientId: string;
     clientSecret: string;
@@ -233,10 +210,11 @@ export class AuthService extends WorkerEntrypoint<Env> {
     | { captures: HarvestCapture[]; fetches: HarvestFetch[] }
     | { error: string }
   > {
-    if (!args.userId) return { error: "INVALID_CLIENT" };
-    if (!(await this.authenticateClient(args.clientId, args.clientSecret))) {
-      return { error: "INVALID_CLIENT" };
-    }
+    const authorization = await this.authorizeService(args, "cquHarvest");
+    if ("error" in authorization) return authorization;
+    const caps = await resolveCapsForRpc(this.env.DATABASE, args.userId);
+    if (authorization.subsystem !== "calendar" || caps?.calendar.sync !== true) return { error: "FORBIDDEN" };
+    if (!(await this.hasSchoolBinding(args.userId))) return { error: "NO_CQU_BINDING" };
     let deadlineAt: number;
     try {
       deadlineAt = resolveBrowserDeadline(args.deadlineAt, Date.now());

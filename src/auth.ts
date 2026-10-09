@@ -1,3 +1,8 @@
+import { administratorRecovery } from "./services/admin-recovery";
+import { authDatabase } from "./services/auth-reset-revision";
+import { passkeyAccountOperations } from "./services/passkey-account-operations";
+import { verifiedPasskey, passkeyStepUp, enforcePasskeyRegistration } from "./services/passkey";
+import { authenticationStrength, enforceAuthenticationStrength, recordAuthenticationProof } from "./services/auth-strength";
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { withCloudflare, type CloudflareGeolocation } from "better-auth-cloudflare";
@@ -10,7 +15,10 @@ import { oauthProvider } from "@better-auth/oauth-provider";
 import { Resend } from "resend";
 import type { Env } from "./types";
 import { resolveCaps, subsystemForAccessToken } from "./services/entitlements";
-import { isCquMoeHost } from "./utils/cookie-domain";
+import { isolatedAuthCookies } from "./services/auth-cookies";
+import { enforceFirstPartyConsent } from "./services/first-party-consent";
+import { currentDeviceAuthority } from "./services/device-authority";
+import { getCquBinding } from "./services/cqu-binding";
 import { authUrls } from "./auth-config";
 import { DEVICE_SCOPE } from "./services/quicklogin/contracts";
 import {
@@ -21,6 +29,8 @@ import {
 } from "./services/quicklogin/oauth-grants";
 import {
   assertRefreshTokenUserNotBanned,
+  revokeSessionOAuthTokens,
+  clearDeviceTrust,
   isBanned,
   revokeUserOAuthTokens,
   type OAuthTokenAdapter,
@@ -90,15 +100,18 @@ export function createAuth(env: Env, request: Request) {
     secret: env.BETTER_AUTH_SECRET,
     ...withCloudflare(
       {
-        d1Native: env.DATABASE,
-        kv: env.KV,
+        d1Native: authDatabase(env.DATABASE, request),
         cf: (request.cf ?? {}) as CloudflareGeolocation,
         autoDetectIpAddress: true,
       },
       {
+        session: { cookieCache: { enabled: false } },
         emailAndPassword: {
           enabled: true,
           revokeSessionsOnPasswordReset: true,
+          onPasswordReset: async ({ user }) => {
+            await clearDeviceTrust((await createAuth(env, request).$context).adapter, user.id);
+          },
           sendResetPassword: async ({ user, url }) => {
             void getResend().emails.send({
               from: "auth.cqu.moe <noreply@cqu.moe>",
@@ -108,7 +121,22 @@ export function createAuth(env: Env, request: Request) {
             });
           },
         },
+        verification: { additionalFields: { authUserId: { type: "string", required: false, input: false } } },
         databaseHooks: {
+          verification: {
+            create: { before: async (verification, context) => {
+              const owner = context?.context.session?.user.id ?? context?.context.newSession?.user.id;
+              return { data: { ...verification, ...(owner ? { authUserId: owner } : {}) } };
+            } },
+          },
+          session: {
+            delete: {
+              before: async (session, context) => {
+                const adapter = context?.context.adapter ?? (await createAuth(env, request).$context).adapter;
+                await revokeSessionOAuthTokens(adapter, session.id);
+              },
+            },
+          },
           user: {
             update: {
               // Every ban path (native /admin/ban-user, admin routes, v1 API)
@@ -129,7 +157,67 @@ export function createAuth(env: Env, request: Request) {
           },
         },
         hooks: {
+          after: createAuthMiddleware(async (ctx) => {
+            if (ctx.path === "/passkey/generate-authenticate-options" && !(ctx.context.returned instanceof APIError)) return ctx.json({ ...(ctx.context.returned as Record<string, unknown>), userVerification: "required" });
+            if (["/two-factor/verify-totp", "/two-factor/verify-backup-code", "/passkey/verify-authentication"].includes(ctx.path) && ctx.context.newSession && !(ctx.context.returned instanceof APIError)) {
+              await recordAuthenticationProof(ctx.context, ctx.context.newSession, "mfa", true, ctx.path === "/passkey/verify-authentication" ? "passkey" : "password");
+            }
+            if (["/change-password", "/security/passkey/change-password"].includes(ctx.path) && !(ctx.context.returned instanceof APIError) && ctx.context.session) {
+              const current = ctx.context.session.session;
+              const sessions = await ctx.context.internalAdapter.listSessions(current.userId);
+              await ctx.context.internalAdapter.deleteSessions(sessions.filter(session => session.id !== current.id).map(session => session.token));
+              await clearDeviceTrust(ctx.context.adapter, current.userId);
+            }
+            if (["/revoke-sessions", "/revoke-other-sessions", "/revoke-session"].includes(ctx.path) &&
+                !(ctx.context.returned instanceof APIError) && ctx.context.session) {
+              await clearDeviceTrust(ctx.context.adapter, ctx.context.session.user.id);
+            }
+            if (ctx.path !== "/oauth2/introspect") return;
+            const result = ctx.context.returned as Record<string, unknown> | undefined;
+            if (!result || result.active !== true) return;
+            const authority = await currentDeviceAuthority(ctx.context.adapter, result);
+            if (!authority) return ctx.json({ active: false });
+            const { user, client } = authority;
+            const sub = subsystemForAccessToken({ user, metadata: client.metadata });
+            // skipConsent and subsystem are administrator-controlled client approval.
+            // Profile/email remain exclusively in native scope-filtered userinfo.
+            const response = { ...result };
+            delete response.user;
+            delete response.caps;
+            delete response.cquBindStatus;
+            if (!client.skipConsent || !sub) return ctx.json(response);
+            const { bindStatus } = await getCquBinding(env.DATABASE, user.id);
+            return ctx.json({ ...response,
+              caps: await resolveCaps(env.DATABASE, user.id, sub), cquBindStatus: bindStatus,
+            });
+          }),
           before: createAuthMiddleware(async (ctx) => {
+            await enforceFirstPartyConsent(ctx);
+            await enforceAuthenticationStrength(ctx);
+            await enforcePasskeyRegistration(ctx);
+            if (ctx.path === "/email-otp/change-email") {
+              const session = await getSessionFromCtx(ctx);
+              if (session) {
+                const newEmail = String(ctx.body?.newEmail ?? "").trim().toLowerCase();
+                const challenge = await ctx.context.internalAdapter.findVerificationValue(`change-email-otp-${session.user.email.toLowerCase()}-${newEmail}`);
+                if ((challenge as { authUserId?: string } | null)?.authUserId !== session.user.id) {
+                  throw new APIError("BAD_REQUEST", { message: "请重新请求邮箱验证码" });
+                }
+              }
+            }
+            if (ctx.path === "/passkey/generate-register-options") return { context: { query: ctx.query } };
+            if (ctx.path === "/two-factor/enable" && ctx.body?.method === "otp") {
+              throw new APIError("FORBIDDEN", { message: "邮箱验证码不能作为第二因子" });
+            }
+            // Return the override: assigning ctx.body alone does not update the native endpoint context.
+            // Our after hook revokes other sessions while keeping this session and its proof intact.
+            if (ctx.path === "/change-password") return { context: { body: { ...ctx.body, revokeOtherSessions: false } } };
+            // Our authorization-code policy has no confidential OIDC exception.
+            const authorizationQuery = { ...ctx.query, ...ctx.body };
+            if (ctx.path === "/oauth2/authorize" &&
+                (!authorizationQuery?.code_challenge || authorizationQuery?.code_challenge_method !== "S256")) {
+              throw new APIError("BAD_REQUEST", { code: "INVALID_REQUEST", message: "S256 PKCE is required" });
+            }
             if (ctx.path === "/oauth2/token") {
               const body = ctx.body as {
                 grant_type?: unknown;
@@ -177,7 +265,7 @@ export function createAuth(env: Env, request: Request) {
                 }
               }
             }
-            if (!currentEmailOtpPaths.has(ctx.path)) return;
+            if (!currentEmailOtpPaths.has(ctx.path)) return { context: { body: ctx.body, query: ctx.query } };
             const session = await getSessionFromCtx(ctx);
             const body = ctx.body as { email?: string; type?: string } | undefined;
             const matchesCurrentEmail =
@@ -195,9 +283,11 @@ export function createAuth(env: Env, request: Request) {
         },
         emailVerification: {
           sendOnSignUp: true,
-          autoSignInAfterVerification: true,
+          autoSignInAfterVerification: false,
         },
         disabledPaths: [
+          "/two-factor/send-otp",
+          "/two-factor/verify-otp",
           "/token",
           "/sign-in/email-otp",
           "/email-otp/request-password-reset",
@@ -206,6 +296,11 @@ export function createAuth(env: Env, request: Request) {
           "/verify-email",
         ],
         plugins: [
+          administratorRecovery(env.DATABASE, request),
+          verifiedPasskey(env.BETTER_AUTH_URL),
+          passkeyStepUp(env.BETTER_AUTH_URL),
+          passkeyAccountOperations(),
+          authenticationStrength((headers, method, code) => verifyCurrentFactor(env, request, headers, method, code)),
           admin({
             ac,
             roles,
@@ -219,10 +314,26 @@ export function createAuth(env: Env, request: Request) {
             },
           }),
           oauthProvider({
+            // Consumers introspect on every protected request, including private
+            // Service Binding calls without an IP. Keep a bounded shared budget
+            // sized for backend traffic instead of the native 100/min default.
+            rateLimit: { introspect: { window: 60, max: 6000 } },
+            // Native userinfo has already verified token, DPoP and replay here.
+            // Check current authority without consuming the same proof twice.
+            customUserInfoClaims: async ({ jwt }) => {
+              const { adapter } = await createAuth(env, request).$context;
+              if (!(await currentDeviceAuthority(adapter, jwt))) {
+                throw new APIError("UNAUTHORIZED", { code: "INVALID_TOKEN", message: "Invalid access token" });
+              }
+              return {};
+            },
             loginPage: "/login",
             consentPage: "/oauth/authorize",
             scopes: OAUTH_SCOPES,
-            validAudiences: [urls.issuer],
+            resources: [urls.issuer],
+            // Existing clients share this sole legacy resource. Future API/MCP
+            // resources must enable per-client links before adding audiences.
+            enforcePerClientResources: false,
             postLogin: {
               page: "/oauth/authorize",
               shouldRedirect: async () => false,
@@ -251,10 +362,6 @@ export function createAuth(env: Env, request: Request) {
                 }
                 throw error;
               }
-            },
-            silenceWarnings: {
-              oauthAuthServerConfig: true,
-              openidConfig: true,
             },
           }),
           emailOTP({
@@ -290,20 +397,6 @@ export function createAuth(env: Env, request: Request) {
             twoFactorCookieMaxAge: 600,
             trustDeviceMaxAge: 60 * 60 * 24 * 30,
             totpOptions: { digits: 6, period: 30 },
-            otpOptions: {
-              digits: 6,
-              period: 5,
-              allowedAttempts: 3,
-              storeOTP: "hashed",
-              async sendOTP({ user, otp }) {
-                await getResend().emails.send({
-                  from: "auth.cqu.moe <noreply@cqu.moe>",
-                  to: user.email,
-                  subject: "登录二次验证码 - auth.cqu.moe",
-                  html: `<p>请输入以下验证码完成登录：</p><p style="font-size:24px;font-weight:700;letter-spacing:6px">${otp}</p><p>验证码 5 分钟内有效，请勿转发。</p>`,
-                });
-              },
-            },
             backupCodeOptions: {
               amount: 10,
               length: 10,
@@ -319,31 +412,15 @@ export function createAuth(env: Env, request: Request) {
             return { user, session, caps };
           }),
         ],
-        // 一次登录 auth.cqu.moe → cookie 覆盖所有 *.cqu.moe 子域(第一方一体化 SSO)。
-        // trustedOrigins 是顶层选项,通配符匹配整个 origin(含 :// 与 *);baseURL 已自动可信。
-        // dev(localhost)下保留无害 —— baseURL 已自动可信,不靠它。
-        trustedOrigins: ["https://*.cqu.moe"],
-        // 注册权益不落在这里的 databaseHooks:公开注册唯一入口是
-        // handleInvitationSignup(src/index.ts 拦截 /api/auth/sign-up/email),
-        // 它按「邀请码自带预设 → 全局默认预设」显式写入,语义比全局钩子精确
-        // (钩子分不清用户是凭哪个邀请码/无码注册的)。admin 后台建号不带权益
-        // (fail-closed),需要时由管理台单独授权。
-        // 跨子域 cookie 的 Domain 只在 auth host 真为 cqu.moe(生产)时才设。
-        // 必须显式写 domain: "cqu.moe":省略时 better-auth 默认取
-        // new URL(baseURL).hostname = "auth.cqu.moe",cookie 仅作用于该单一子域,
-        // 跨子域 SSO 会静默失败;写 "cqu.moe" 浏览器才会按 ".cqu.moe" 全子域生效。
-        // 但在 localhost(.dev.vars BETTER_AUTH_URL=http://localhost:8787)上若仍写
-        // Domain=cqu.moe,浏览器会因 Domain 与响应 host 不匹配而【拒收】该 cookie →
-        // npm run dev 的登录/会话直接坏掉。故 isCquMoeHost 为假(dev/非 cqu.moe)时
-        // 整个省略 crossSubDomainCookies,让 better-auth 回落到 host-only cookie。
-        advanced: isCquMoeHost(env.BETTER_AUTH_URL)
-          ? { crossSubDomainCookies: { enabled: true, domain: "cqu.moe" } }
-          : {},
+        // OAuth redirects do not grant sibling websites account-mutation trust.
+        // The configured Auth origin is already included by Better Auth.
+        trustedOrigins: [],
+        advanced: isolatedAuthCookies(env.BETTER_AUTH_URL),
         rateLimit: {
           enabled: true,
           window: 60,
           max: 30,
-          storage: "secondary-storage",
+          storage: "database",
           customRules: {
             "/two-factor/send-otp": { window: 60, max: 3 },
             "/two-factor/verify-totp": { window: 60, max: 5 },
@@ -359,4 +436,10 @@ export function createAuth(env: Env, request: Request) {
       }
     ),
   });
+}
+
+async function verifyCurrentFactor(env: Env, request: Request, headers: Headers, method: "totp" | "backup-code", code: string): Promise<void> {
+  const auth = createAuth(env, request);
+  if (method === "totp") await auth.api.verifyTOTP({ headers, body: { code, trustDevice: false } });
+  else await auth.api.verifyBackupCode({ headers, body: { code, trustDevice: false, disableSession: true } });
 }

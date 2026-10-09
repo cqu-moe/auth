@@ -28,7 +28,7 @@ describe("versioned auth URL configuration", () => {
       });
       expect(jwtPlugin?.options.jwks).not.toHaveProperty("remoteUrl");
       expect(oauthPlugin?.options).toMatchObject({
-        validAudiences: ["https://auth.cqu.moe/api/auth"],
+        resources: ["https://auth.cqu.moe/api/auth"],
         scopes: expect.arrayContaining([DEVICE_SCOPE]),
         postLogin: {
           page: "/oauth/authorize",

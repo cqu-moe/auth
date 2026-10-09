@@ -5,9 +5,7 @@
  * dot boundary, so "evil-cqu.moe.attacker.com" → hostname "attacker.com" → false,
  * and "cqu.moe.attacker.com" → false).
  *
- * Gates the cross-subdomain cookie Domain attribute: setting Domain=cqu.moe on a
- * non-cqu.moe response (e.g. the localhost dev server BETTER_AUTH_URL=
- * http://localhost:8787) makes the browser REJECT the cookie, breaking dev login.
+ * Used only to expire legacy root-domain cookies on the matching domain.
  */
 export function isCquMoeHost(baseURL: string): boolean {
   let hostname: string;

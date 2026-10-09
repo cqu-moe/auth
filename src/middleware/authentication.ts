@@ -1,9 +1,9 @@
+import { hasAuthenticationProof } from "../services/auth-strength";
 import type { Context, MiddlewareHandler } from "hono";
-import { verifyAccessToken } from "better-auth/oauth2";
+import { verifyAuthAccessTokenRequest } from "../services/auth-access-token";
 import { createAuth } from "../auth";
 import { problem } from "../api/problem";
 import type { HonoEnv, Principal, RequestAuthCache } from "../types";
-import { authUrls } from "../auth-config";
 
 function getCache(c: Context<HonoEnv>): RequestAuthCache {
   let cache = c.get("requestAuthCache");
@@ -48,17 +48,8 @@ function claimScopes(value: unknown): string[] | null {
 async function bearerPrincipal(c: Context<HonoEnv>): Promise<Principal | null> {
   const cache = getCache(c);
   cache.bearer ??= (async () => {
-    const authorization = c.req.header("Authorization");
-    if (!authorization?.startsWith("Bearer ")) return null;
-    const token = authorization.slice(7);
-    if (!token) return null;
-
     try {
-      const { issuer, jwksUrl } = authUrls(c.env.BETTER_AUTH_URL);
-      const payload = await verifyAccessToken(token, {
-        verifyOptions: { issuer, audience: issuer },
-        jwksUrl,
-      });
+      const payload = await verifyAuthAccessTokenRequest(c.req.raw, c.env);
       const userId = claimString(payload.sub);
       const clientId = claimString(payload.azp ?? payload.client_id);
       const scopes = claimScopes(payload.scope);
@@ -94,6 +85,11 @@ export const requireAdmin: MiddlewareHandler<HonoEnv> = async (c, next) => {
   const role = principal.user.role;
   if (role !== "admin" && role !== "superAdmin") {
     return problem(c, "FORBIDDEN", "需要管理员权限", 403);
+  }
+  const auth = createAuth(c.env, c.req.raw);
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  if (!session || !await hasAuthenticationProof(await auth.$context, session, "strong")) {
+    return problem(c, "STRONG_AUTH_REQUIRED", "管理功能需要强认证", 403);
   }
   exposePrincipal(c, principal);
   return next();

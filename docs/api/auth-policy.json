@@ -459,145 +459,151 @@
     "method": "GET",
     "path": "/api/v1/auth/account-info",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/admin/ban-user",
     "policy": "admin-session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/admin/create-user",
     "policy": "admin-session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "GET",
     "path": "/api/v1/auth/admin/get-user",
     "policy": "admin-session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/admin/has-permission",
     "policy": "admin-session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/admin/impersonate-user",
     "policy": "admin-session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/admin/list-user-sessions",
     "policy": "admin-session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "GET",
     "path": "/api/v1/auth/admin/list-users",
     "policy": "admin-session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/admin/remove-user",
     "policy": "admin-session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/admin/reset-authentication",
+    "policy": "admin-session",
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/admin/revoke-user-session",
     "policy": "admin-session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/admin/revoke-user-sessions",
     "policy": "admin-session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/admin/set-role",
     "policy": "admin-session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/admin/set-user-password",
     "policy": "admin-session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/admin/stop-impersonating",
     "policy": "admin-session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/admin/unban-user",
     "policy": "admin-session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/admin/update-user",
     "policy": "admin-session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "GET",
     "path": "/api/v1/auth/callback/:id",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/callback/:id",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/change-email",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/change-password",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "GET",
     "path": "/api/v1/auth/cloudflare/geolocation",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/delete-user",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "GET",
     "path": "/api/v1/auth/delete-user/callback",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/email-otp/change-email",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
@@ -609,7 +615,7 @@
     "method": "POST",
     "path": "/api/v1/auth/email-otp/request-email-change",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
@@ -621,19 +627,19 @@
     "method": "POST",
     "path": "/api/v1/auth/email-otp/verify-email",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "GET",
     "path": "/api/v1/auth/error",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/get-access-token",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "GET",
@@ -645,223 +651,343 @@
     "method": "GET",
     "path": "/api/v1/auth/jwks",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/link-social",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "GET",
     "path": "/api/v1/auth/list-accounts",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "GET",
     "path": "/api/v1/auth/list-sessions",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "GET",
     "path": "/api/v1/auth/oauth2/authorize",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/authorize",
+    "policy": "public",
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/oauth2/client/rotate-secret",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/oauth2/consent",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/oauth2/continue",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/oauth2/create-client",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/oauth2/delete-client",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/oauth2/delete-consent",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "GET",
     "path": "/api/v1/auth/oauth2/end-session",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/end-session",
+    "policy": "public",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/end-session/confirm",
+    "policy": "optional-session",
+    "source": "application-override"
   },
   {
     "method": "GET",
     "path": "/api/v1/auth/oauth2/get-client",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "GET",
     "path": "/api/v1/auth/oauth2/get-clients",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "GET",
     "path": "/api/v1/auth/oauth2/get-consent",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "GET",
     "path": "/api/v1/auth/oauth2/get-consents",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/oauth2/introspect",
     "policy": "oauth-client",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "GET",
     "path": "/api/v1/auth/oauth2/public-client",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/oauth2/public-client-prelogin",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/oauth2/register",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/oauth2/revoke",
     "policy": "oauth-client",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/oauth2/token",
     "policy": "oauth-client",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/oauth2/update-client",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/oauth2/update-consent",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "GET",
     "path": "/api/v1/auth/oauth2/userinfo",
     "policy": "bearer",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/userinfo",
+    "policy": "bearer",
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "GET",
     "path": "/api/v1/auth/ok",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/passkey/delete-passkey",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/passkey/generate-authenticate-options",
+    "policy": "public",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/passkey/generate-register-options",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/passkey/list-user-passkeys",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/passkey/update-passkey",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/passkey/verify-authentication",
+    "policy": "public",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/passkey/verify-registration",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/refresh-token",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/request-password-reset",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/reset-password",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "GET",
     "path": "/api/v1/auth/reset-password/:token",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/revoke-other-sessions",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/revoke-session",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/revoke-sessions",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/challenge",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/complete",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/change-password",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/complete",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/options",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/two-factor/disable",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/two-factor/enable",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/two-factor/generate-backup-codes",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/security/status",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/send-verification-email",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/sign-in/email",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/sign-in/social",
     "policy": "public",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/sign-out",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
@@ -873,73 +999,61 @@
     "method": "POST",
     "path": "/api/v1/auth/two-factor/disable",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/two-factor/enable",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/two-factor/generate-backup-codes",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/two-factor/get-totp-uri",
     "policy": "session",
-    "source": "better-auth-1.6.11"
-  },
-  {
-    "method": "POST",
-    "path": "/api/v1/auth/two-factor/send-otp",
-    "policy": "session-or-two-factor-cookie",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/two-factor/verify-backup-code",
     "policy": "session-or-two-factor-cookie",
-    "source": "better-auth-1.6.11"
-  },
-  {
-    "method": "POST",
-    "path": "/api/v1/auth/two-factor/verify-otp",
-    "policy": "session-or-two-factor-cookie",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/two-factor/verify-totp",
     "policy": "session-or-two-factor-cookie",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/unlink-account",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/update-session",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/update-user",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "POST",
     "path": "/api/v1/auth/verify-password",
     "policy": "session",
-    "source": "better-auth-1.6.11"
+    "source": "better-auth-1.7.7"
   },
   {
     "method": "GET",

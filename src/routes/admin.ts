@@ -94,11 +94,11 @@ function oauthClientUpdateToSchema(update: Record<string, unknown>): Record<stri
   const map: Record<string, string> = {
     client_name: "name", client_uri: "uri", logo_uri: "icon", tos_uri: "tos",
     policy_uri: "policy", token_endpoint_auth_method: "tokenEndpointAuthMethod",
-    type: "type", subject_type: "subjectType", contacts: "contacts",
+    type: "applicationType", subject_type: "subjectType", contacts: "contacts",
     redirect_uris: "redirectUris", post_logout_redirect_uris: "postLogoutRedirectUris",
     grant_types: "grantTypes", response_types: "responseTypes",
     skip_consent: "skipConsent", enable_end_session: "enableEndSession",
-    require_pkce: "requirePKCE", disabled: "disabled", metadata: "metadata",
+    require_pkce: "requirePKCE", dpop_bound_access_tokens: "dpopBoundAccessTokens", disabled: "disabled", metadata: "metadata",
   };
   for (const [snake, camel] of Object.entries(map)) {
     if (update[snake] !== undefined) out[camel] = update[snake];
@@ -107,13 +107,7 @@ function oauthClientUpdateToSchema(update: Record<string, unknown>): Record<stri
   if (typeof update.scope === "string") {
     out.scopes = update.scope.split(" ").filter(Boolean);
   }
-  // Keep the public flag in sync with the auth method: the plugin derives
-  // isPublic = (token_endpoint_auth_method === "none") on create, and token
-  // validation reads client.public — so an auth-method edit must update it too,
-  // or a client switched to/from "none" gets stuck with the wrong credential mode.
-  if (typeof update.token_endpoint_auth_method === "string") {
-    out.public = update.token_endpoint_auth_method === "none";
-  }
+  if (update.type === "user-agent-based") out.applicationType = "web";
   return out;
 }
 
@@ -155,7 +149,7 @@ function validateOAuthClientUpdate(
     (update.token_endpoint_auth_method as string | undefined) ??
     existing.tokenEndpointAuthMethod ??
     undefined;
-  const type = (update.type as string | undefined) ?? existing.type ?? undefined;
+  const type = (update.type as string | undefined) ?? (existing.applicationType === "native" ? "native" : existing.tokenEndpointAuthMethod === "none" ? "user-agent-based" : "web");
   const isPublic = authMethod === "none";
   if (type) {
     if (isPublic && type !== "native" && type !== "user-agent-based") {
@@ -452,13 +446,14 @@ admin.patch("/users/:id/cqu-binding", async (c) => {
   }
 
   try {
-    const db = drizzle(c.env.DATABASE);
-    // D1: 翻转该用户所有绑定地址行的状态。幂等 — 0 行匹配（无绑定）是安全 no-op。
-    // 凭证 NOT 删除。
-    await db
-      .update(cquBindAddresses)
-      .set({ status })
-      .where(eq(cquBindAddresses.userId, userId));
+    const pending = await c.env.DATABASE.prepare("SELECT 1 AS pending FROM cqu_bind_addresses WHERE user_id = ? AND status = 'deleting' UNION ALL SELECT 1 FROM cqu_credentials WHERE user_id = ? AND status = 'deleting'").bind(userId, userId).first();
+    if (pending) return errorResponse(c, "CQU_BINDING_UPDATE_FAILED", "解绑尚未完成，请先重试解绑", 409);
+    // Include legacy credentials-only accounts. Preserve a concurrently started
+    // deletion: administrative reactivation must never erase that intent.
+    await c.env.DATABASE.batch([
+      c.env.DATABASE.prepare("UPDATE cqu_bind_addresses SET status = ? WHERE user_id = ? AND status != 'deleting'").bind(status, userId),
+      c.env.DATABASE.prepare("UPDATE cqu_credentials SET status = ? WHERE user_id = ? AND status != 'deleting'").bind(status, userId),
+    ]);
 
     // DO：revoked → /revoke（status → revoked，deleteAlarm，清 loginInFlight）；
     // active → /unrevoke（status → expired，setAlarm now → keepalive/relogin）。
@@ -717,8 +712,9 @@ interface OAuthClientRow {
   grantTypes?: unknown;
   responseTypes?: unknown;
   scopes?: unknown;
-  type?: string | null;
+  applicationType?: string | null;
   requirePKCE?: boolean | null;
+  dpopBoundAccessTokens?: boolean | null;
   skipConsent?: boolean | null;
   enableEndSession?: boolean | null;
   subjectType?: string | null;
@@ -787,7 +783,8 @@ admin.get("/oauth-clients", async (c) => {
       // string. Use asArray so a raw JSON-string value (sqlite serialization)
       // is parsed too, not joined as the literal "[\"openid\",...]" token.
       scope: asArray(client.scopes).join(" "),
-      type: client.type ?? null,
+      type: client.applicationType === "native" ? "native" : client.tokenEndpointAuthMethod === "none" ? "user-agent-based" : "web",
+      dpop_bound_access_tokens: client.dpopBoundAccessTokens ?? false,
       require_pkce: client.requirePKCE ?? false,
       skip_consent: client.skipConsent ?? false,
       enable_end_session: client.enableEndSession ?? false,
@@ -865,7 +862,11 @@ admin.post("/oauth-clients", async (c) => {
   try {
     const result = await auth.api.adminCreateOAuthClient({
       headers: c.req.raw.headers,
-      body: parsed.data as never,
+      body: {
+        ...parsed.data,
+        application_type: parsed.data.type === "native" ? "native" : "web",
+        require_pkce: true,
+      } as never,
     });
     return c.json({ data: result });
   } catch (e) {

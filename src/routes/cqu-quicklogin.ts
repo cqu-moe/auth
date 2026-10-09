@@ -12,18 +12,18 @@ import { hasQuickloginAccess } from "../services/quicklogin/eligibility";
 
 // 用户自助快捷登录开关 /api/cqu/quicklogin。
 //
-// `cqu.quicklogin` 是 per-user 同意开关:用户必须在设置里主动开启,DO 取票万能闸才允许
+// `cqu.quicklogin` 是 用户的产品启用开关:用户必须在设置里主动开启,DO 取票万能闸才允许
 // 浏览器插件凭广域 scope 代他取一次性登录票(见 capabilities.ts 与 cqu-session.ts)。
 // superAdmin 也能经 admin 路由写这条 entitlement,但日常应由用户自己掌控,故提供本自助端点。
 //
 // 功能开放闸 `cqu.quicklogin_access`(admin 授予,灰度/准入):无此权益的用户
-// GET 拿到 eligible=false(设置页据此隐藏整张卡片),PUT 直接 403 —— 准入与同意分离,
+// GET 拿到 eligible=false(设置页据此隐藏整张卡片),PUT 直接 403 —— 功能准入与产品启用分离,
 // 未开放用户不能经任何路径自助打开快捷登录。
 //
 // 安全契约(关键):
 //   - **鉴权只认 Better Auth session**(浏览器登录态),**绝不接受 Bearer/OAuth access token**。
 //     若接受 Bearer,任一持有用户 access token 的 OAuth client 就能替用户翻这个开关
-//     —— 等于 client 自助授权自己的快捷登录,破坏「用户须亲自 opt-in」红线。
+//     —— 等于 client 自助开启用户设备行为；第一方默认授权不自动启用产品或设备。
 //     故本路由**不**复用 cqu.ts/cqu-bind.ts 的「Bearer 优先,回退 session」中间件,
 //     也**不**挂在 cqu.ts 的 `/api/cqu/*` 子树下,而是独立挂载 `/api/cqu/quicklogin`。
 //   - userId **只**取自 session.user.id(绝不取客户端入参);只读写调用者自己的
@@ -65,7 +65,7 @@ async function getOwnFlag(
 
 // GET /api/cqu/quicklogin → { eligible: boolean, enabled: boolean }
 // eligible = 有 cqu.quicklogin_access(功能对该用户开放;设置页据此决定显隐);
-// enabled = cqu.quicklogin === "1"(用户本人的同意开关,行缺失视为关)。
+// enabled = cqu.quicklogin === "1"(用户本人的产品启用开关,行缺失视为关)。
 cquQuicklogin.get("/", async (c) => {
   const user = c.get("user") as { id: string };
   if (quickloginDeviceModeEnabled(c.env)) {

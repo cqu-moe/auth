@@ -1,6 +1,6 @@
 import { useState, FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { ActionButton, Alert, AlertDescription, Input, Label } from "@cqu-moe/ui";
+import { ActionButton, Button, Alert, AlertDescription, Input, Label } from "@cqu-moe/ui";
 import AuthLayout from "../components/AuthLayout";
 import { authClient } from "../lib/auth-client";
 import { getLoginNavigationDestination } from "../lib/login-routing";
@@ -13,6 +13,7 @@ import { isScheduleBindingContinuation } from "../lib/cqu-bind-continuation";
 
 export default function Login() {
   const navigate = useNavigate();
+  const { refetch: refetchSession } = authClient.useSession();
   const [searchParams] = useSearchParams();
   const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
   const scheduleSource = isScheduleBindingContinuation(postLoginRedirect, window.location.origin);
@@ -35,12 +36,27 @@ export default function Login() {
     } else {
       const destination = getLoginNavigationDestination(data, postLoginRedirect);
       if (!destination) return;
+      await refetchSession();
       if (isExternalHttpTarget(destination)) {
         window.location.assign(destination);
         return;
       }
       navigate(destination, { replace: true });
     }
+  };
+
+  const loginWithPasskey = async () => {
+    setLoading(true); setError("");
+    try {
+      const { data, error } = await authClient.signIn.passkey();
+      if (error) { setError("Passkey 登录未完成，请重试或使用密码登录"); return; }
+      await refetchSession();
+      const destination = getLoginNavigationDestination(data, postLoginRedirect);
+      if (!destination) return;
+      if (isExternalHttpTarget(destination)) window.location.assign(destination);
+      else navigate(destination, { replace: true });
+    } catch { setError("Passkey 登录未完成，请重试"); }
+    finally { setLoading(false); }
   };
 
   return (
@@ -104,6 +120,7 @@ export default function Login() {
           }}
         />
       </form>
+      <Button type="button" variant="outline" className="mt-3 w-full" disabled={loading} onClick={() => void loginWithPasskey()}>使用 Passkey 登录</Button>
 
       <p className="mt-6 text-center text-sm text-muted-foreground">
         还没有账户？{" "}

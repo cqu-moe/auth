@@ -12,7 +12,6 @@ export function createHttpFixture() {
     database.exec(readFileSync(fileURLToPath(new NodeURL(name, migrations)), "utf8"));
   }
 
-  const kvValues = new Map<string, string>();
   const assetsFetch = vi.fn(async () =>
     new Response("<!doctype html><title>test asset</title>", {
       headers: { "content-type": "text/html; charset=utf-8" },
@@ -28,15 +27,6 @@ export function createHttpFixture() {
 
   const env = {
     DATABASE: createSqliteD1(database),
-    KV: {
-      get: async (key: string) => kvValues.get(key) ?? null,
-      put: async (key: string, value: string) => {
-        kvValues.set(key, value);
-      },
-      delete: async (key: string) => {
-        kvValues.delete(key);
-      },
-    },
     RESEND_API_KEY: "re_test_placeholder",
     CQU_SESSION: namespace,
     CQU_LOGIN: namespace,
@@ -49,6 +39,14 @@ export function createHttpFixture() {
 
   return {
     env,
+    seedBearerIdentity(userId: string, clientId: string) {
+      database.prepare("INSERT INTO user (id, name, email, createdAt, updatedAt) VALUES (?, ?, ?, datetime('now'), datetime('now'))")
+        .run(userId, userId, `${userId}@example.com`);
+      database.prepare("INSERT INTO oauthClient (id, clientId, redirectUris) VALUES (?, ?, '[]')")
+        .run(clientId, clientId);
+      database.prepare("INSERT INTO session (id,token,userId,expiresAt,createdAt,updatedAt) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(`session-${userId}`, `token-${userId}`, userId, new Date(Date.now() + 3600000).toISOString(), new Date().toISOString(), new Date().toISOString());
+    },
     assetsFetch,
     doFetch,
     close: async () => database.close(),

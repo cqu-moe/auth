@@ -5,14 +5,8 @@ import { createAuth } from "../src/auth";
 import type { Env } from "../src/types";
 
 const database = new DatabaseSync(":memory:");
-const values = new Map<string, string>();
 const env = {
   DATABASE: database,
-  KV: {
-    get: async (key: string) => values.get(key) ?? null,
-    put: async (key: string, value: string) => values.set(key, value),
-    delete: async (key: string) => values.delete(key),
-  },
   BETTER_AUTH_URL: "https://auth.cqu.moe",
   BETTER_AUTH_SECRET: "local-generation-secret-not-for-production",
   RESEND_API_KEY: "re_local_generation",

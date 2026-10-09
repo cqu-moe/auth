@@ -1,4 +1,3 @@
-import { makeSignature } from "better-auth/crypto";
 import { applyD1Migrations, env } from "cloudflare:test";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createAuth } from "../../src/auth";
@@ -30,37 +29,8 @@ async function authorizeInstall(fixture: OAuthFixture) {
   });
 }
 
-// The fixture user has no password account, so grant it superAdmin and mint a
-// fresh session cookie to call admin endpoints (same trick the fixture uses).
 async function superAdminHeaders(): Promise<Headers> {
-  const auth = createAuth(env, new Request(`${env.BETTER_AUTH_URL}/api/v1/auth/get-session`));
-  const ctx = await auth.$context;
-  const now = new Date();
-  const adminId = crypto.randomUUID();
-  await ctx.adapter.create({
-    model: "user",
-    forceAllowId: true,
-    data: {
-      id: adminId,
-      name: "Ban Admin",
-      email: `${adminId}@example.com`,
-      emailVerified: true,
-      image: null,
-      createdAt: now,
-      updatedAt: now,
-      role: "superAdmin",
-      banned: false,
-      banReason: null,
-      banExpires: null,
-      twoFactorEnabled: false,
-    },
-  });
-  const session = await ctx.internalAdapter.createSession(adminId);
-  if (!session) throw new Error("failed to create admin session");
-  const signature = await makeSignature(session.token, env.BETTER_AUTH_SECRET);
-  return new Headers({
-    cookie: `${ctx.authCookies.sessionToken.name}=${session.token}.${signature}`,
-  });
+  return (await createApiFixture()).signIn("superAdmin");
 }
 
 async function tokenRows(userId: string) {

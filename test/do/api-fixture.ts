@@ -1,3 +1,4 @@
+import { enrollStrongSession } from "../../src/test-utils/auth-strength";
 import { applyD1Migrations, env } from "cloudflare:test";
 import { vi } from "vitest";
 import { createAuth } from "../../src/auth";
@@ -69,7 +70,7 @@ export async function createApiFixture() {
     });
   }
 
-  async function signIn(role: TestRole): Promise<Headers> {
+  async function signIn(role: TestRole, strong = true): Promise<Headers> {
     const id = sequence++;
     const email = `fixture-${role}-${id}@example.com`;
     const auth = createAuth(env, new Request(`${origin}/login`));
@@ -88,7 +89,8 @@ export async function createApiFixture() {
         body: { email, password: "local-test-password" },
         returnHeaders: true,
       });
-      return new Headers({ cookie: cookieHeader(signedIn.headers) });
+      const headers = new Headers({ cookie: cookieHeader(signedIn.headers), "cf-connecting-ip": `198.51.100.${id % 250 + 1}` });
+      return strong ? enrollStrongSession(auth, headers, "local-test-password") : headers;
     }
     return new Headers({ cookie: cookieHeader(signup.headers) });
   }

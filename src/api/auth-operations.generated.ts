@@ -38,6 +38,10 @@ export const AUTH_OPERATIONS = [
   },
   {
     "method": "POST",
+    "path": "/admin/reset-authentication"
+  },
+  {
+    "method": "POST",
     "path": "/admin/revoke-user-session"
   },
   {
@@ -146,6 +150,10 @@ export const AUTH_OPERATIONS = [
   },
   {
     "method": "POST",
+    "path": "/oauth2/authorize"
+  },
+  {
+    "method": "POST",
     "path": "/oauth2/client/rotate-secret"
   },
   {
@@ -171,6 +179,14 @@ export const AUTH_OPERATIONS = [
   {
     "method": "GET",
     "path": "/oauth2/end-session"
+  },
+  {
+    "method": "POST",
+    "path": "/oauth2/end-session"
+  },
+  {
+    "method": "POST",
+    "path": "/oauth2/end-session/confirm"
   },
   {
     "method": "GET",
@@ -225,8 +241,40 @@ export const AUTH_OPERATIONS = [
     "path": "/oauth2/userinfo"
   },
   {
+    "method": "POST",
+    "path": "/oauth2/userinfo"
+  },
+  {
     "method": "GET",
     "path": "/ok"
+  },
+  {
+    "method": "POST",
+    "path": "/passkey/delete-passkey"
+  },
+  {
+    "method": "GET",
+    "path": "/passkey/generate-authenticate-options"
+  },
+  {
+    "method": "GET",
+    "path": "/passkey/generate-register-options"
+  },
+  {
+    "method": "GET",
+    "path": "/passkey/list-user-passkeys"
+  },
+  {
+    "method": "POST",
+    "path": "/passkey/update-passkey"
+  },
+  {
+    "method": "POST",
+    "path": "/passkey/verify-authentication"
+  },
+  {
+    "method": "POST",
+    "path": "/passkey/verify-registration"
   },
   {
     "method": "POST",
@@ -255,6 +303,42 @@ export const AUTH_OPERATIONS = [
   {
     "method": "POST",
     "path": "/revoke-sessions"
+  },
+  {
+    "method": "POST",
+    "path": "/security/challenge"
+  },
+  {
+    "method": "POST",
+    "path": "/security/complete"
+  },
+  {
+    "method": "POST",
+    "path": "/security/passkey/change-password"
+  },
+  {
+    "method": "POST",
+    "path": "/security/passkey/complete"
+  },
+  {
+    "method": "POST",
+    "path": "/security/passkey/options"
+  },
+  {
+    "method": "POST",
+    "path": "/security/passkey/two-factor/disable"
+  },
+  {
+    "method": "POST",
+    "path": "/security/passkey/two-factor/enable"
+  },
+  {
+    "method": "POST",
+    "path": "/security/passkey/two-factor/generate-backup-codes"
+  },
+  {
+    "method": "GET",
+    "path": "/security/status"
   },
   {
     "method": "POST",
@@ -294,15 +378,7 @@ export const AUTH_OPERATIONS = [
   },
   {
     "method": "POST",
-    "path": "/two-factor/send-otp"
-  },
-  {
-    "method": "POST",
     "path": "/two-factor/verify-backup-code"
-  },
-  {
-    "method": "POST",
-    "path": "/two-factor/verify-otp"
   },
   {
     "method": "POST",

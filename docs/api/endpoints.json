@@ -597,6 +597,13 @@
   {
     "host": "auth.cqu.moe",
     "method": "POST",
+    "path": "/api/v1/auth/admin/reset-authentication",
+    "operationId": "post_api_v1_auth_admin_reset_authentication",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
     "path": "/api/v1/auth/admin/revoke-user-session",
     "operationId": "post_api_v1_auth_admin_revoke_user_session",
     "kind": "canonical"
@@ -786,6 +793,13 @@
   {
     "host": "auth.cqu.moe",
     "method": "POST",
+    "path": "/api/v1/auth/oauth2/authorize",
+    "operationId": "post_api_v1_auth_oauth2_authorize",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
     "path": "/api/v1/auth/oauth2/client/rotate-secret",
     "operationId": "post_api_v1_auth_oauth2_client_rotate_secret",
     "kind": "canonical"
@@ -830,6 +844,20 @@
     "method": "GET",
     "path": "/api/v1/auth/oauth2/end-session",
     "operationId": "get_api_v1_auth_oauth2_end_session",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/end-session",
+    "operationId": "post_api_v1_auth_oauth2_end_session",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/end-session/confirm",
+    "operationId": "post_api_v1_auth_oauth2_end_session_confirm",
     "kind": "canonical"
   },
   {
@@ -925,9 +953,65 @@
   },
   {
     "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/userinfo",
+    "operationId": "post_api_v1_auth_oauth2_userinfo",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
     "method": "GET",
     "path": "/api/v1/auth/ok",
     "operationId": "get_api_v1_auth_ok",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/passkey/delete-passkey",
+    "operationId": "post_api_v1_auth_passkey_delete_passkey",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/passkey/generate-authenticate-options",
+    "operationId": "get_api_v1_auth_passkey_generate_authenticate_options",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/passkey/generate-register-options",
+    "operationId": "get_api_v1_auth_passkey_generate_register_options",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/passkey/list-user-passkeys",
+    "operationId": "get_api_v1_auth_passkey_list_user_passkeys",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/passkey/update-passkey",
+    "operationId": "post_api_v1_auth_passkey_update_passkey",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/passkey/verify-authentication",
+    "operationId": "post_api_v1_auth_passkey_verify_authentication",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/passkey/verify-registration",
+    "operationId": "post_api_v1_auth_passkey_verify_registration",
     "kind": "canonical"
   },
   {
@@ -977,6 +1061,69 @@
     "method": "POST",
     "path": "/api/v1/auth/revoke-sessions",
     "operationId": "post_api_v1_auth_revoke_sessions",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/security/challenge",
+    "operationId": "post_api_v1_auth_security_challenge",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/security/complete",
+    "operationId": "post_api_v1_auth_security_complete",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/change-password",
+    "operationId": "post_api_v1_auth_security_passkey_change_password",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/complete",
+    "operationId": "post_api_v1_auth_security_passkey_complete",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/options",
+    "operationId": "post_api_v1_auth_security_passkey_options",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/two-factor/disable",
+    "operationId": "post_api_v1_auth_security_passkey_two_factor_disable",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/two-factor/enable",
+    "operationId": "post_api_v1_auth_security_passkey_two_factor_enable",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/two-factor/generate-backup-codes",
+    "operationId": "post_api_v1_auth_security_passkey_two_factor_generate_backup_codes",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "GET",
+    "path": "/api/v1/auth/security/status",
+    "operationId": "get_api_v1_auth_security_status",
     "kind": "canonical"
   },
   {
@@ -1045,22 +1192,8 @@
   {
     "host": "auth.cqu.moe",
     "method": "POST",
-    "path": "/api/v1/auth/two-factor/send-otp",
-    "operationId": "post_api_v1_auth_two_factor_send_otp",
-    "kind": "canonical"
-  },
-  {
-    "host": "auth.cqu.moe",
-    "method": "POST",
     "path": "/api/v1/auth/two-factor/verify-backup-code",
     "operationId": "post_api_v1_auth_two_factor_verify_backup_code",
-    "kind": "canonical"
-  },
-  {
-    "host": "auth.cqu.moe",
-    "method": "POST",
-    "path": "/api/v1/auth/two-factor/verify-otp",
-    "operationId": "post_api_v1_auth_two_factor_verify_otp",
     "kind": "canonical"
   },
   {

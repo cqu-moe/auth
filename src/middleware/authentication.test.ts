@@ -2,18 +2,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { cqu } from "../routes/cqu";
 import { createHttpFixture } from "../test-utils/http";
 
-const verifyAccessToken = vi.hoisted(() => vi.fn());
+const verifyAuthAccessTokenRequest = vi.hoisted(() => vi.fn());
 
-vi.mock("better-auth/oauth2", () => ({ verifyAccessToken }));
+vi.mock("../services/auth-access-token", () => ({ verifyAuthAccessTokenRequest }));
 
 describe("request authentication", () => {
-  beforeEach(() => verifyAccessToken.mockReset());
+  beforeEach(() => verifyAuthAccessTokenRequest.mockReset());
 
   it("verifies one bearer exactly once before scope and ticket handling", async () => {
     const fixture = createHttpFixture();
+    fixture.seedBearerIdentity("user-a", "client-a");
     try {
-      verifyAccessToken.mockResolvedValue({
-        sub: "user-a",
+      verifyAuthAccessTokenRequest.mockResolvedValue({
+        sub: "user-a", sid: "session-user-a",
         azp: "client-a",
         scope: "cqu:ticket:jwxt",
       });
@@ -27,7 +28,7 @@ describe("request authentication", () => {
       }, fixture.env);
 
       expect(response.status).toBe(200);
-      expect(verifyAccessToken).toHaveBeenCalledTimes(1);
+      expect(verifyAuthAccessTokenRequest).toHaveBeenCalledTimes(1);
       expect(fixture.doFetch).toHaveBeenCalledTimes(1);
     } finally {
       await fixture.close();
@@ -37,8 +38,8 @@ describe("request authentication", () => {
   it("rejects a verified payload without a client identity before database or DO access", async () => {
     const fixture = createHttpFixture();
     try {
-      verifyAccessToken.mockResolvedValue({
-        sub: "user-a",
+      verifyAuthAccessTokenRequest.mockResolvedValue({
+        sub: "user-a", sid: "session-user-a",
         scope: "cqu:ticket:jwxt",
       });
 

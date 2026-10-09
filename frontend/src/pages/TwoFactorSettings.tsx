@@ -1,3 +1,6 @@
+import AuthenticationMethodChoice, { type AuthenticationMethod } from "../components/AuthenticationMethodChoice";
+import { passkeyAccountOperation } from "../lib/passkey-operations";
+import { requestAuthentication } from "../lib/recent-authentication";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Download } from "lucide-react";
@@ -125,6 +128,7 @@ export function BackupCodes({ codes, onComplete }: { codes: string[]; onComplete
 }
 
 export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettingsProps) {
+  const [method, setMethod] = useState<AuthenticationMethod>("password");
   const { data: session, refetch: refetchSession } = authClient.useSession();
   const sessionUser = session?.user as { twoFactorEnabled?: boolean } | undefined;
   const enabled = sessionUser?.twoFactorEnabled === true;
@@ -167,7 +171,8 @@ export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettin
     event.preventDefault();
     setError("");
     setLoading(true);
-    const { data, error: authError } = await authClient.twoFactor.enable({ password });
+    if (method === "password" && !await requestAuthentication("mfa", password)) { setLoading(false); return; }
+    const { data, error: authError } = method === "passkey" ? await passkeyAccountOperation<{ method: "totp"; totpURI: string; backupCodes: string[] }>("two-factor/enable") : await authClient.twoFactor.enable({ password });
     setLoading(false);
     if (authError || !data) {
       setError(errorMessage(authError, "无法开启二次验证，请检查当前密码"));
@@ -211,8 +216,9 @@ export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettin
     event.preventDefault();
     setError("");
     setLoading(true);
+    if (method === "password" && !await requestAuthentication("mfa", managementPassword)) { setLoading(false); return; }
     if (managementAction === "regenerate") {
-      const { data, error: authError } = await authClient.twoFactor.generateBackupCodes({ password: managementPassword });
+      const { data, error: authError } = method === "passkey" ? await passkeyAccountOperation<{ backupCodes: string[] }>("two-factor/generate-backup-codes") : await authClient.twoFactor.generateBackupCodes({ password: managementPassword });
       setLoading(false);
       if (authError || !data) {
         setError(errorMessage(authError, "恢复码生成失败，请检查当前密码"));
@@ -223,7 +229,7 @@ export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettin
       return;
     }
 
-    const { error: authError } = await authClient.twoFactor.disable({ password: managementPassword });
+    const { error: authError } = method === "passkey" ? await passkeyAccountOperation("two-factor/disable") : await authClient.twoFactor.disable({ password: managementPassword });
     setLoading(false);
     if (authError) {
       setError(errorMessage(authError, "关闭失败，请检查当前密码"));
@@ -256,7 +262,8 @@ export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettin
 
         {!enabled && step === "password" && (
           <form onSubmit={beginEnrollment} className="space-y-4" noValidate>
-            <PasswordField id="two-factor-enrollment-password" value={password} onChange={setPassword} />
+            <AuthenticationMethodChoice value={method} onChange={setMethod} disabled={loading} />
+            {method === "password" && <PasswordField id="two-factor-enrollment-password" value={password} onChange={setPassword} />}
             <ActionButton
               type="submit"
               disabled={loading}
@@ -325,7 +332,8 @@ export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettin
                 <p className={managementAction === "disable" ? "text-sm text-destructive" : "text-sm text-foreground"}>
                   {managementAction === "disable" ? "关闭后，登录将不再要求身份验证器验证码。" : "重新生成后，旧恢复码将立即失效。"}
                 </p>
-                <PasswordField id="two-factor-management-password" value={managementPassword} onChange={setManagementPassword} />
+                <AuthenticationMethodChoice value={method} onChange={setMethod} disabled={loading} />
+                {method === "password" && <PasswordField id="two-factor-management-password" value={managementPassword} onChange={setManagementPassword} />}
                 <div className="flex gap-3">
                   <Button type="button" variant="outline" onClick={() => setManagementAction("")} disabled={loading}>
                     取消

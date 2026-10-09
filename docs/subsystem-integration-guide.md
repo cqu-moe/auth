@@ -351,3 +351,84 @@ GET  /api/v1/auth/oauth2/end-session  ?id_token_hint=…&post_logout_redirect_ur
 
 **标准 scope**:`openid` · `profile` · `email` · `offline_access`
 **CQU scope**:`cqu:ticket:jwxt` · `cqu:ticket:jxpj` · `cqu:ticket:library` · `cqu:ticket:card` · `cqu:ticket:any`(广域,需 admin 授权 + 用户 opt-in)
+
+## Better Auth 1.7 升级基线
+
+Auth 的前后端 Better Auth / OAuth provider 固定为 1.7.7，Cloudflare 适配器为
+0.3.1（peer 范围支持 Better Auth 1.5+）。会话、verification 和原生数据库限流均使用
+D1；不再需要 KV binding，关闭 session cookie cache。CQU Durable Objects 保持原职责。
+
+部署顺序为先备份 D1、应用手写 `0010_auth_17_d1.sql`，再发布匹配的前后端。
+迁移保留账号、密码哈希、学校凭据、权益和 JWK 原文；从每把 JWK 派生算法元数据。
+旧 `type` / `public` 列仅留作回滚资料，新版本使用 `applicationType` 与
+`tokenEndpointAuthMethod`。公开浏览器客户端映射为 `web` + `none`，原 `native`
+保持 `native`；上线前核对已有特殊回调客户端。后台服务未自动授予新的机器 scope。
+旧 KV 中的短期验证码不会迁移，升级期间可能需要重新请求验证码、登录或连接。
+不得删除生产 KV namespace 作为本次配置变更的一部分。
+
+所有授权码调用必须提供 S256 challenge 和对应 verifier，机密客户端同样如此；管理台
+不能关闭 PKCE。现有管理 API 的 `type` 字段仍兼容，后端映射到新模型。
+issuer 仍为 `https://auth.cqu.moe/api/auth`，HTTP 端点仍位于 `/api/v1/auth`。
+
+现阶段只有 issuer 对应的一个资源，显式保留已有客户端对该资源的可请求性
+（`enforcePerClientResources: false`），仍受客户端 scope 和业务权限约束。
+未来增加 API/MCP 资源前必须启用逐客户端资源关联并迁移已有客户端；不得直接在这个
+兼容配置下增加新 audience。本次没有创建 API/MCP 业务端点，跨站 Cookie 收口待消费者迁移。
+
+本地回归使用真实 workerd/D1：`npm run test:do`，其中
+`auth-d1-baseline.test.ts` 覆盖并发限流、授权码单次消费、PKCE/回调/事务校验、
+TOTP 登录与退出、OTP 过期和 verification 清理；`auth-upgrade-migration.test.ts`
+从带数据的旧 schema 升级后验证登录、学校数据、权益和客户端保留。
+
+## 私有 RPC 的方法授权与上线预检
+
+`AuthService` 保留服务密钥 + 用户 ID；不签发后台逐用户 refresh token。每次调用都验
+真实 secret 哈希、应用未禁用、用户存在且未封禁，并读取管理员配置的
+`oauthClient.metadata.rpcMethods`。没有该配置的客户端不能调用后台 RPC。
+
+| 方法 | 必须获批的 rpcMethods 项 | 业务边界 |
+| --- | --- | --- |
+| getCaps | getCaps | subsystem=calendar；只返回 calendar 权益，不要求学校绑定 |
+| cquHarvest | cquHarvest | subsystem=calendar；用户 calendar.sync=true；有效学校绑定 |
+| getCquTicket | getCquTicket | calendar 仅 jwxt + calendar.sync；eval 仅 jxpj + eval.submit；cqu 要 quicklogin_access；另验管理员授予的 CQU scope 与学校绑定 |
+
+取票、采集仍走原 DO 的目标主机、限流、QuickLogin opt-in 和审计控制点。
+历史只有 cqu_credentials 的绑定仍有效；缺失、revoked、deleting 或 pending 绑定不放行。
+getCaps 仍可返回 false 权益，让后台停止相应业务。退出浏览器和更换密码不撤销服务身份。
+
+**现有 Schedule 必须先配置再发布新 Auth；不能把缺配置当成可忽略告警。**
+部署人员从当前 Schedule 配置中确认 CALENDAR_CLIENT_ID（不要输出或传递 client secret），
+用已有管理员 API `GET /api/v1/admin/oauth-clients` 找到同一 client_id 并备份其 metadata。
+以有 OAuth 客户端写权限的管理员执行
+`PATCH /api/v1/admin/oauth-clients/{client_id}`，body 的 metadata 保留原有所有其他键，增加：
+
+```json
+{
+  "metadata": {
+    "subsystem": "calendar",
+    "rpcMethods": ["getCaps", "cquHarvest"]
+  }
+}
+```
+
+若已确认这个客户端仍使用旧 getCquTicket(jwxt) 路径，再单独加入 getCquTicket，
+并保留管理员配置的 cqu:ticket:jwxt scope。不要因为客户端名称含 calendar 就批量授权。
+读回上述 GET 结果核对精确 client_id、subsystem、rpcMethods 和启用状态；保留当前密钥。
+先改 metadata 与旧 Auth 兼容，再部署；若预检未完成则停止发布。回滚代码不必删除 metadata。
+本任务没有修改生产 metadata 或发布流量。
+
+Better Auth 1.7.7 的普通 create-client / update-client 不接受 metadata，DCR 当前关闭；
+HTTP 回归测试证明普通所有者提交 rpcMethods 不会获得 RPC 权限，现有管理员 PATCH 可以授予。
+未来开放 DCR/CIMD 或变更插件时必须保留此边界，不得允许客户端自行填写 RPC 批准信息。
+
+审计日志 `auth.rpc.request` 只记 clientId、userId、方法与身份验证结果，不记服务密钥、
+学校凭据或采集结果；实际学校操作继续由 DO 记录结果。
+
+调用链核查（Schedule 当前源码）：订阅创建/手动刷新使用认证后的 `c.get('user').id`，
+订阅查询同时约束 userId，后台队列使用该 ID 或数据库记录；未增加接受外部任意 userId 的公网
+代理。Schedule 的旧权益/采集缓存仍需在 #49/#51 接入迁移时收紧至撤销目标，RPC 本身每次读权威状态。
+
+
+### 后端权威查询限流
+
+OAuth introspection 每个来源 IP（无法取得 IP 时为共享桶）采用 D1 原生限流，预算为每 60 秒 6,000 次。该预算服务于 Schedule/UC 每次受保护请求的权威查询；其他登录、令牌和 MFA 端点保留各自原有限额。它不是每用户配额，也不绕过客户端认证。超过预算或 Auth 不可用时仍失败关闭；上线后应按共享流量与 429 指标调整容量，不能靠延长旧授权结果的使用时间绕过撤销时限。

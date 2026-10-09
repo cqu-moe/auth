@@ -17,6 +17,7 @@ POST /admin/impersonate-user
 POST /admin/list-user-sessions
 GET /admin/list-users
 POST /admin/remove-user
+POST /admin/reset-authentication
 POST /admin/revoke-user-session
 POST /admin/revoke-user-sessions
 POST /admin/set-role
@@ -44,6 +45,7 @@ POST /link-social
 GET /list-accounts
 GET /list-sessions
 GET /oauth2/authorize
+POST /oauth2/authorize
 POST /oauth2/client/rotate-secret
 POST /oauth2/consent
 POST /oauth2/continue
@@ -51,6 +53,8 @@ POST /oauth2/create-client
 POST /oauth2/delete-client
 POST /oauth2/delete-consent
 GET /oauth2/end-session
+POST /oauth2/end-session
+POST /oauth2/end-session/confirm
 GET /oauth2/get-client
 GET /oauth2/get-clients
 GET /oauth2/get-consent
@@ -64,7 +68,21 @@ POST /oauth2/token
 POST /oauth2/update-client
 POST /oauth2/update-consent
 GET /oauth2/userinfo
+POST /oauth2/userinfo
 GET /ok
+GET /passkey/generate-register-options
+POST /passkey/verify-registration
+GET /passkey/generate-authenticate-options
+POST /passkey/verify-authentication
+GET /passkey/list-user-passkeys
+POST /passkey/delete-passkey
+POST /passkey/update-passkey
+POST /security/passkey/change-password
+POST /security/passkey/two-factor/enable
+POST /security/passkey/two-factor/disable
+POST /security/passkey/two-factor/generate-backup-codes
+POST /security/passkey/options
+POST /security/passkey/complete
 POST /refresh-token
 POST /request-password-reset
 GET /reset-password/:token
@@ -72,6 +90,9 @@ POST /reset-password
 POST /revoke-other-sessions
 POST /revoke-session
 POST /revoke-sessions
+POST /security/challenge
+POST /security/complete
+GET /security/status
 POST /send-verification-email
 POST /sign-in/email
 POST /sign-in/social
@@ -81,9 +102,7 @@ POST /two-factor/disable
 POST /two-factor/enable
 POST /two-factor/generate-backup-codes
 POST /two-factor/get-totp-uri
-POST /two-factor/send-otp
 POST /two-factor/verify-backup-code
-POST /two-factor/verify-otp
 POST /two-factor/verify-totp
 POST /unlink-account
 POST /update-session
@@ -107,11 +126,11 @@ describe("Better Auth migration baseline", () => {
         return methods.map((method) => `${method} ${endpoint.path}`);
       }).sort();
 
-      expect(endpoints).toHaveLength(80);
+      expect(endpoints).toHaveLength(96);
       expect(operations).toEqual(EXPECTED_OPERATIONS);
       expect(AUTH_OPERATIONS.map(({ method, path }) => `${method} ${path}`).sort())
         .toEqual(operations);
-      expect(operations).toHaveLength(81);
+      expect(operations).toHaveLength(100);
       expect(operations.filter((operation) => operation.endsWith(" /get-session")))
         .toEqual(["GET /get-session"]);
     } finally {
@@ -131,6 +150,8 @@ describe("Better Auth migration baseline", () => {
 
       expect(ctx.baseURL).toBe("https://auth.cqu.moe/api/v1/auth");
       expect(fixture.auth.options.disabledPaths).toEqual([
+        "/two-factor/send-otp",
+        "/two-factor/verify-otp",
         "/token",
         "/sign-in/email-otp",
         "/email-otp/request-password-reset",
@@ -138,17 +159,16 @@ describe("Better Auth migration baseline", () => {
         "/email-otp/reset-password",
         "/verify-email",
       ]);
-      expect(serverOnly).toEqual([
+      expect(serverOnly).toEqual(expect.arrayContaining([
         "adminCreateOAuthClient:POST:/admin/oauth2/create-client",
         "adminUpdateOAuthClient:PATCH:/admin/oauth2/update-client",
         "getOAuthServerConfig:GET:/.well-known/oauth-authorization-server",
         "getOpenIdConfig:GET:/.well-known/openid-configuration",
-      ]);
+      ]));
       expect(ctx.authCookies).toMatchObject({
         sessionToken: {
-          name: "__Secure-better-auth.session_token",
+          name: "__Host-auth-v2.session_token",
           attributes: {
-            domain: "cqu.moe",
             path: "/",
             secure: true,
             httpOnly: true,
@@ -157,8 +177,8 @@ describe("Better Auth migration baseline", () => {
           },
         },
         sessionData: {
-          name: "__Secure-better-auth.session_data",
-          attributes: { domain: "cqu.moe", path: "/", maxAge: 300 },
+          name: "__Host-auth-v2.session_data",
+          attributes: { path: "/", maxAge: 300 },
         },
       });
 

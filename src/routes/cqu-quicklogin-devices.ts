@@ -77,7 +77,7 @@ const devicePreflight = (c: Context<HonoEnv>) => {
     return apiError(c, "FORBIDDEN", 403);
   }
   c.header("Access-Control-Allow-Methods", methods.join(", "));
-  c.header("Access-Control-Allow-Headers", "Authorization, Content-Type");
+  c.header("Access-Control-Allow-Headers", "Authorization, Content-Type, DPoP");
   return c.body(null, 204);
 };
 

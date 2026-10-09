@@ -365,10 +365,10 @@ export function buildOpenApiDocument(operations: readonly HttpOperation[]) {
     paths,
     components: {
       securitySchemes: {
-        cookieAuth: { type: "apiKey", in: "cookie", name: "__Secure-better-auth.session_token" },
+        cookieAuth: { type: "apiKey", in: "cookie", name: "__Host-auth-v2.session_token" },
         bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "JWT" },
         oauthClientAuth: { type: "http", scheme: "basic" },
-        twoFactorCookie: { type: "apiKey", in: "cookie", name: "__Secure-better-auth.two_factor" },
+        twoFactorCookie: { type: "apiKey", in: "cookie", name: "__Host-auth-v2.two_factor" },
       },
       schemas: {
         ApiProblem: {
@@ -399,7 +399,7 @@ export function buildOpenApiDocument(operations: readonly HttpOperation[]) {
           type: "object", additionalProperties: false,
           required: ["bindStatus", "sessionStatus"],
           properties: {
-            address: { type: "string" }, bindStatus: { type: "string", enum: ["unbound", "pending", "active", "revoked"] },
+            address: { type: "string" }, bindStatus: { type: "string", enum: ["unbound", "pending", "active", "revoked", "deleting"] },
             kind: { type: "string", enum: ["direct", "forward"] }, forwardAddress: { type: "string" },
             sessionStatus: { anyOf: [{ $ref: "#/components/schemas/CquSessionStatus" }, { type: "object", required: ["error"], properties: { error: { type: "boolean", const: true } } }] },
           },
