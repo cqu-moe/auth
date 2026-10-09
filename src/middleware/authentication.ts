@@ -1,3 +1,4 @@
+import { hasAuthenticationProof } from "../services/auth-strength";
 import type { Context, MiddlewareHandler } from "hono";
 import { verifyAuthAccessTokenRequest } from "../services/auth-access-token";
 import { createAuth } from "../auth";
@@ -97,6 +98,11 @@ export const requireAdmin: MiddlewareHandler<HonoEnv> = async (c, next) => {
   const role = principal.user.role;
   if (role !== "admin" && role !== "superAdmin") {
     return problem(c, "FORBIDDEN", "需要管理员权限", 403);
+  }
+  const auth = createAuth(c.env, c.req.raw);
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  if (!session || !await hasAuthenticationProof(await auth.$context, session, "strong")) {
+    return problem(c, "STRONG_AUTH_REQUIRED", "管理功能需要强认证", 403);
   }
   exposePrincipal(c, principal);
   return next();

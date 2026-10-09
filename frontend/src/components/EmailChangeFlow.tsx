@@ -1,3 +1,4 @@
+import { requestAuthentication } from "../lib/recent-authentication";
 import { FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
@@ -153,6 +154,7 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
     }
     setError("");
     setLoading(true);
+    if (!await requestAuthentication("email")) { setLoading(false); return; }
     const { error: authError } = await authClient.emailOtp.requestEmailChange({
       newEmail: validation.value,
       otp: currentOtp,
@@ -178,6 +180,7 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
     }
     setError("");
     setLoading(true);
+    if (!await requestAuthentication("email")) { setLoading(false); return; }
     const { error: authError } = await authClient.emailOtp.changeEmail({ newEmail, otp });
     setLoading(false);
     if (authError) {

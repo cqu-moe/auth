@@ -1,3 +1,4 @@
+import { provePassword } from "./test-utils/auth-strength";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
@@ -110,6 +111,8 @@ describe("native two-factor authentication", () => {
     expect(pluginIds).toContain("email-otp");
     expect(auth.options.user?.changeEmail).toBeUndefined();
     expect(auth.options.disabledPaths).toEqual([
+      "/two-factor/send-otp",
+      "/two-factor/verify-otp",
       "/token",
       "/sign-in/email-otp",
       "/email-otp/request-password-reset",
@@ -133,12 +136,6 @@ describe("native two-factor authentication", () => {
       twoFactorCookieMaxAge: 600,
       trustDeviceMaxAge: 2_592_000,
       totpOptions: { digits: 6, period: 30 },
-      otpOptions: {
-        digits: 6,
-        period: 5,
-        allowedAttempts: 3,
-        storeOTP: "hashed",
-      },
       backupCodeOptions: {
         amount: 10,
         length: 10,
@@ -259,6 +256,7 @@ describe("native two-factor authentication", () => {
     });
     expect(checkedCurrent.status).toBe(200);
 
+    await provePassword(auth, headers, "password123", "email");
     const sentNew = await post(auth, "/email-otp/request-email-change", headers, {
       newEmail: "new@example.com",
       otp: currentOtp,
@@ -293,12 +291,13 @@ describe("native two-factor authentication", () => {
     database.close();
   });
 
-  it("enrolls a user, completes TOTP login, and consumes an email OTP and backup code", async () => {
+  it("enrolls a user, completes TOTP login, and consumes a backup code", async () => {
     const { auth, database } = authForTest();
     const { runMigrations } = await getMigrations(auth.options);
     await runMigrations();
     const headers = await signUp(auth);
 
+    await provePassword(auth, headers, "password123", "mfa");
     const enabled = await auth.api.enableTwoFactor({
       headers,
       body: { password: "password123" },
@@ -331,16 +330,6 @@ describe("native two-factor authentication", () => {
     expect(database.prepare('SELECT id FROM "session"').get()).toMatchObject({});
 
     await auth.api.signOut({ headers: sessionHeaders });
-    const otpSignIn = await auth.api.signInEmail({
-      body: { email: "user@example.com", password: "password123" },
-      returnHeaders: true,
-    });
-    const otpHeaders = new Headers({ cookie: cookieFromHeaders(otpSignIn.headers) });
-    sendEmail.mockClear();
-    await auth.api.sendTwoFactorOTP({ headers: otpHeaders });
-    await auth.api.verifyTwoFactorOTP({ headers: otpHeaders, body: { code: otpFromEmail() } });
-
-    await auth.api.signOut({ headers: otpHeaders });
     const backupSignIn = await auth.api.signInEmail({
       body: { email: "user@example.com", password: "password123" },
       returnHeaders: true,
@@ -366,9 +355,7 @@ describe("native two-factor authentication", () => {
 
   it("rate limits every sensitive native two-factor and email-OTP path", async () => {
     const rules = [
-      ["/two-factor/send-otp", 3],
       ["/two-factor/verify-totp", 5],
-      ["/two-factor/verify-otp", 5],
       ["/two-factor/verify-backup-code", 5],
       ["/email-otp/send-verification-otp", 3],
       ["/email-otp/check-verification-otp", 5],

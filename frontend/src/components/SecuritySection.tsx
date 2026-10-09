@@ -1,3 +1,4 @@
+import { requestAuthentication } from "../lib/recent-authentication";
 import { FormEvent, useState } from "react";
 import { Link } from "react-router-dom";
 import { ActionButton, Alert, AlertDescription, Button, Input, Label } from "@cqu-moe/ui";
@@ -32,6 +33,7 @@ function ChangePasswordEditor({ onCancel, onSuccess }: { onCancel: () => void; o
     }
 
     setLoading(true);
+    if (!await requestAuthentication("password")) { setLoading(false); return; }
     const { error } = await authClient.changePassword({
       currentPassword,
       newPassword,

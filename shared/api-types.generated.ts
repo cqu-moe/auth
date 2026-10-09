@@ -2110,6 +2110,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/security/challenge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST auth /security/challenge */
+        post: operations["post_api_v1_auth_security_challenge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/security/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST auth /security/complete */
+        post: operations["post_api_v1_auth_security_complete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/security/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET auth /security/status */
+        get: operations["get_api_v1_auth_security_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/send-verification-email": {
         parameters: {
             query?: never;
@@ -2290,26 +2341,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/auth/two-factor/send-otp": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * POST auth /two-factor/send-otp
-         * @description Send two factor OTP to the user
-         */
-        post: operations["post_api_v1_auth_two_factor_send_otp"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/auth/two-factor/verify-backup-code": {
         parameters: {
             query?: never;
@@ -2324,26 +2355,6 @@ export interface paths {
          * @description Verify a backup code for two-factor authentication
          */
         post: operations["post_api_v1_auth_two_factor_verify_backup_code"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/two-factor/verify-otp": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * POST auth /two-factor/verify-otp
-         * @description Verify two factor OTP
-         */
-        post: operations["post_api_v1_auth_two_factor_verify_otp"];
         delete?: never;
         options?: never;
         head?: never;
@@ -13726,6 +13737,256 @@ export interface operations {
             };
         };
     };
+    post_api_v1_auth_security_challenge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    password: string;
+                    /** @enum {string} */
+                    purpose: "password" | "email" | "mfa" | "admin";
+                };
+            };
+        };
+        responses: {
+            /** @description Bad Request. Usually due to missing parameters, or invalid parameters. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message: string;
+                    };
+                };
+            };
+            /** @description Unauthorized. Due to missing or invalid authentication. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message: string;
+                    };
+                };
+            };
+            /** @description Forbidden. You do not have permission to access this resource or to perform this action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message?: string;
+                    };
+                };
+            };
+            /** @description Not Found. The requested resource was not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message?: string;
+                    };
+                };
+            };
+            /** @description Too Many Requests. You have exceeded the rate limit. Try again later. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message?: string;
+                    };
+                };
+            };
+            /** @description Internal Server Error. This is a problem with the server that you cannot fix. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message?: string;
+                    };
+                };
+            };
+        };
+    };
+    post_api_v1_auth_security_complete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    challenge: string;
+                    /** @enum {string} */
+                    method: "totp" | "backup-code";
+                    code: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Bad Request. Usually due to missing parameters, or invalid parameters. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message: string;
+                    };
+                };
+            };
+            /** @description Unauthorized. Due to missing or invalid authentication. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message: string;
+                    };
+                };
+            };
+            /** @description Forbidden. You do not have permission to access this resource or to perform this action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message?: string;
+                    };
+                };
+            };
+            /** @description Not Found. The requested resource was not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message?: string;
+                    };
+                };
+            };
+            /** @description Too Many Requests. You have exceeded the rate limit. Try again later. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message?: string;
+                    };
+                };
+            };
+            /** @description Internal Server Error. This is a problem with the server that you cannot fix. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message?: string;
+                    };
+                };
+            };
+        };
+    };
+    get_api_v1_auth_security_status: {
+        parameters: {
+            query?: {
+                purpose?: "password" | "email" | "mfa" | "admin";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bad Request. Usually due to missing parameters, or invalid parameters. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message: string;
+                    };
+                };
+            };
+            /** @description Unauthorized. Due to missing or invalid authentication. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message: string;
+                    };
+                };
+            };
+            /** @description Forbidden. You do not have permission to access this resource or to perform this action. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message?: string;
+                    };
+                };
+            };
+            /** @description Not Found. The requested resource was not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message?: string;
+                    };
+                };
+            };
+            /** @description Too Many Requests. You have exceeded the rate limit. Try again later. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message?: string;
+                    };
+                };
+            };
+            /** @description Internal Server Error. This is a problem with the server that you cannot fix. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message?: string;
+                    };
+                };
+            };
+        };
+    };
     post_api_v1_auth_send_verification_email: {
         parameters: {
             query?: never;
@@ -14727,100 +14988,6 @@ export interface operations {
             };
         };
     };
-    post_api_v1_auth_two_factor_send_otp: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": {
-                    trustDevice?: boolean;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        status?: boolean;
-                    };
-                };
-            };
-            /** @description Bad Request. Usually due to missing parameters, or invalid parameters. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        message: string;
-                    };
-                };
-            };
-            /** @description Unauthorized. Due to missing or invalid authentication. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        message: string;
-                    };
-                };
-            };
-            /** @description Forbidden. You do not have permission to access this resource or to perform this action. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        message?: string;
-                    };
-                };
-            };
-            /** @description Not Found. The requested resource was not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        message?: string;
-                    };
-                };
-            };
-            /** @description Too Many Requests. You have exceeded the rate limit. Try again later. */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        message?: string;
-                    };
-                };
-            };
-            /** @description Internal Server Error. This is a problem with the server that you cannot fix. */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        message?: string;
-                    };
-                };
-            };
-        };
-    };
     post_api_v1_auth_two_factor_verify_backup_code: {
         parameters: {
             query?: never;
@@ -14895,132 +15062,6 @@ export interface operations {
                              * @description Timestamp when the session expires
                              */
                             expiresAt: string;
-                        };
-                    };
-                };
-            };
-            /** @description Bad Request. Usually due to missing parameters, or invalid parameters. */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        message: string;
-                    };
-                };
-            };
-            /** @description Unauthorized. Due to missing or invalid authentication. */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        message: string;
-                    };
-                };
-            };
-            /** @description Forbidden. You do not have permission to access this resource or to perform this action. */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        message?: string;
-                    };
-                };
-            };
-            /** @description Not Found. The requested resource was not found. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        message?: string;
-                    };
-                };
-            };
-            /** @description Too Many Requests. You have exceeded the rate limit. Try again later. */
-            429: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        message?: string;
-                    };
-                };
-            };
-            /** @description Internal Server Error. This is a problem with the server that you cannot fix. */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        message?: string;
-                    };
-                };
-            };
-        };
-    };
-    post_api_v1_auth_two_factor_verify_otp: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** @description The otp code to verify. Eg: "012345" */
-                    code: string;
-                    trustDevice?: boolean;
-                };
-            };
-        };
-        responses: {
-            /** @description Two-factor OTP verified successfully */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @description Session token for the authenticated session */
-                        token: string;
-                        /** @description The authenticated user object */
-                        user: {
-                            /** @description Unique identifier of the user */
-                            id: string;
-                            /**
-                             * Format: email
-                             * @description User's email address
-                             */
-                            email?: string | null;
-                            /** @description Whether the email is verified */
-                            emailVerified?: boolean | null;
-                            /** @description User's name */
-                            name?: string | null;
-                            /**
-                             * Format: uri
-                             * @description User's profile image URL
-                             */
-                            image?: string | null;
-                            /**
-                             * Format: date-time
-                             * @description Timestamp when the user was created
-                             */
-                            createdAt: string;
-                            /**
-                             * Format: date-time
-                             * @description Timestamp when the user was last updated
-                             */
-                            updatedAt: string;
                         };
                     };
                 };

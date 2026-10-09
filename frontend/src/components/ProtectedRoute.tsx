@@ -1,3 +1,4 @@
+import AdminAuthentication from "./AdminAuthentication";
 import { ReactNode } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { PageState } from "@cqu-moe/ui";
@@ -35,5 +36,5 @@ export default function ProtectedRoute({ children, requireAdmin = false }: Prote
     }
   }
 
-  return <>{children}</>;
+  return requireAdmin ? <AdminAuthentication>{children}</AdminAuthentication> : <>{children}</>;
 }
