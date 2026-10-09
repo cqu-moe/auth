@@ -1,5 +1,5 @@
 export type BindKind = "direct" | "forward";
-export type BindStatus = "unbound" | "pending" | "active" | "revoked";
+export type BindStatus = "unbound" | "pending" | "active" | "revoked" | "deleting";
 
 export interface BindingSnapshot {
   address?: string;
@@ -81,7 +81,7 @@ export function clearBindProgress(storage: ProgressRemover, userId: string) {
   }
 }
 
-const bindStatuses = new Set<BindStatus>(["unbound", "pending", "active", "revoked"]);
+const bindStatuses = new Set<BindStatus>(["unbound", "pending", "active", "revoked", "deleting"]);
 const bindKinds = new Set<BindKind>(["direct", "forward"]);
 
 export function parseBindingSnapshot(value: unknown): BindingSnapshot {

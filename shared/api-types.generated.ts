@@ -2494,7 +2494,7 @@ export interface components {
         BindingSnapshot: {
             address?: string;
             /** @enum {string} */
-            bindStatus: "unbound" | "pending" | "active" | "revoked";
+            bindStatus: "unbound" | "pending" | "active" | "revoked" | "deleting";
             /** @enum {string} */
             kind?: "direct" | "forward";
             forwardAddress?: string;

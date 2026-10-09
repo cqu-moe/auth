@@ -5,7 +5,7 @@ import { errorResponse } from "../utils/error";
 import { cquBindAddresses, cquCredentials } from "../db/schema";
 import { genAddressToken } from "../services/cqu-2fa/token";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getCquBinding } from "../services/cqu-binding";
 import { requireSession } from "../middleware/authentication";
 import { JsonBodyError, parseJsonBody } from "../api/validation";
@@ -168,19 +168,14 @@ cquBinding.put("/credentials", async (c) => {
     .from(cquBindAddresses)
     .where(eq(cquBindAddresses.userId, user.id))
     .get();
+  if (bind?.status === "deleting" || bind?.status === "revoked") {
+    return errorResponse(c, "BINDING_UNAVAILABLE", "绑定已停用或正在解绑", 409);
+  }
   if (!bind) {
     return errorResponse(c, "NO_BIND_ADDRESS", "先获取绑定地址", 400);
   }
 
   const { ciphertext, iv } = await encrypt(password, c.env.ENCRYPTION_KEY);
-
-  // 先只读现有凭据。真正的 D1 写入推迟到 DO 登录成功之后：并发提交若命中
-  // CQU_LOGIN_IN_FLIGHT，不能在返回 409 前改掉当前有效凭据。
-  const existingCreds = await db
-    .select()
-    .from(cquCredentials)
-    .where(eq(cquCredentials.userId, user.id))
-    .get();
 
   // 触发 DO 首登。userId 只来自 session（绝不取客户端入参）。
   const stub = c.env.CQU_SESSION.get(c.env.CQU_SESSION.idFromName(user.id));
@@ -225,45 +220,23 @@ cquBinding.put("/credentials", async (c) => {
   // DO 登录成功后才持久化新凭据并激活两张表。若 D1 写失败，返回独立的可重试
   // 错误；重试 /credentials 会重新登录并完成同一组幂等写入。
   try {
-    if (existingCreds) {
-      await db
-        .update(cquCredentials)
-        .set({ studentId, encryptedPassword: ciphertext, iv })
-        .where(eq(cquCredentials.userId, user.id));
-    } else {
-      try {
-        await db.insert(cquCredentials).values({
-          id: crypto.randomUUID(),
-          userId: user.id,
-          studentId,
-          encryptedPassword: ciphertext,
-          iv,
-          status: "pending",
-          boundAt: sql`(datetime('now'))`,
-        });
-      } catch (error) {
-        const raced = await db
-          .select()
-          .from(cquCredentials)
-          .where(eq(cquCredentials.userId, user.id))
-          .get();
-        if (!raced) throw error;
-        await db
-          .update(cquCredentials)
-          .set({ studentId, encryptedPassword: ciphertext, iv })
-          .where(eq(cquCredentials.userId, user.id));
-      }
-    }
-    await db.batch([
-      db
-        .update(cquBindAddresses)
-        .set({ status: "active" })
-        .where(eq(cquBindAddresses.userId, user.id)),
-      db
-        .update(cquCredentials)
-        .set({ status: "active" })
-        .where(eq(cquCredentials.userId, user.id)),
+    // The binding token fences a completed login against concurrent deletion
+    // and re-creation. The conditional upsert and activation are one D1 batch.
+    const writes = await c.env.DATABASE.batch([
+      c.env.DATABASE.prepare(`INSERT INTO cqu_credentials
+        (id,user_id,student_id,encrypted_password,iv,status)
+        SELECT ?,user_id,?,?,?,'active' FROM cqu_bind_addresses
+        WHERE user_id = ? AND token = ? AND status IN ('pending','active')
+        ON CONFLICT(user_id) DO UPDATE SET student_id=excluded.student_id,
+        encrypted_password=excluded.encrypted_password,iv=excluded.iv,status='active'
+        WHERE cqu_credentials.status != 'deleting' AND cqu_credentials.status != 'revoked'`)
+        .bind(crypto.randomUUID(), studentId, ciphertext, iv, user.id, bind.token),
+      c.env.DATABASE.prepare("UPDATE cqu_bind_addresses SET status='active' WHERE user_id=? AND token=? AND status IN ('pending','active')")
+        .bind(user.id, bind.token),
     ]);
+    if (!writes[0].meta.changes || !writes[1].meta.changes) {
+      return errorResponse(c, "BINDING_UNAVAILABLE", "绑定已停用或正在解绑", 409);
+    }
   } catch (err) {
     console.error("[cqu-binding] activate update failed after successful init", {
       userId: user.id,
@@ -308,51 +281,27 @@ cquBinding.get("/events", async (c) => {
   return stub.fetch(c.req.raw);
 });
 
-// DELETE /api/cqu/binding （← 原 POST /unbind）
-// 彻底解绑：删除 cqu_credentials + cqu_bind_addresses（旧 DELETE /api/cqu/bind 漏删了
-// 后者，残留地址行会让创建幂等命中旧 token、绑定状态显示错乱），再 destroy DO 会话。
-// 成功返回 204（无 body）。
-// userId 只取自 session/JWT（鉴权中间件已 set），绝不取客户端入参。
-// 删表失败返回可重试错误而非裸 500；DO destroy 失败仅记日志不阻断（两张表已删干净，
-// 业务上已是解绑态，DO 储存会在下次保活/重绑时被覆盖）。
+// D1 keeps the deletion intent until DO cleanup is acknowledged. A failed
+// request can be retried without losing the identity of the pending binding.
 cquBinding.delete("/", async (c) => {
   const user = c.get("user") as { id: string };
   const db = drizzle(c.env.DATABASE);
-
-  // ① 删凭证表。② 删绑定地址表。任一失败都返回可重试错误，避免半解绑残留。
   try {
-    await db.delete(cquCredentials).where(eq(cquCredentials.userId, user.id));
-  } catch (err) {
-    console.error("[cqu-binding] unbind: delete cqu_credentials failed", {
-      userId: user.id,
-      err,
-    });
-    return errorResponse(c, "UNBIND_FAILED", "解绑失败，请稍后重试", 503);
-  }
-
-  try {
-    await db.delete(cquBindAddresses).where(eq(cquBindAddresses.userId, user.id));
-  } catch (err) {
-    console.error("[cqu-binding] unbind: delete cqu_bind_addresses failed", {
-      userId: user.id,
-      err,
-    });
-    return errorResponse(c, "UNBIND_FAILED", "解绑失败，请稍后重试", 503);
-  }
-
-  // ③ DO destroy：best-effort。两张表已删，业务上已解绑；DO 失败不应回滚或阻断成功响应。
-  try {
+    await db.batch([
+      db.update(cquCredentials).set({ status: "deleting" }).where(eq(cquCredentials.userId, user.id)),
+      db.update(cquBindAddresses).set({ status: "deleting" }).where(eq(cquBindAddresses.userId, user.id)),
+    ]);
     const stub = c.env.CQU_SESSION.get(c.env.CQU_SESSION.idFromName(user.id));
-    await stub.fetch(new Request("https://do/destroy", { method: "POST" }));
-  } catch (err) {
-    console.error("[cqu-binding] unbind: DO destroy failed (non-fatal)", {
-      userId: user.id,
-      err,
-    });
+    const response = await stub.fetch(new Request("https://do/destroy", { method: "POST", body: JSON.stringify({ userId: user.id }) }));
+    if (!response.ok) throw new Error("CQU cleanup was not acknowledged");
+    await db.batch([
+      db.delete(cquCredentials).where(and(eq(cquCredentials.userId, user.id), eq(cquCredentials.status, "deleting"))),
+      db.delete(cquBindAddresses).where(and(eq(cquBindAddresses.userId, user.id), eq(cquBindAddresses.status, "deleting"))),
+    ]);
+    return c.body(null, 204);
+  } catch {
+    return errorResponse(c, "UNBIND_FAILED", "解绑尚未完成，请稍后重试", 503);
   }
-
-  // 成功解绑 → 204 No Content（无 body）。
-  return c.body(null, 204);
 });
 
 export { cquBinding };

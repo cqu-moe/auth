@@ -39,6 +39,12 @@ export function createHttpFixture() {
 
   return {
     env,
+    seedBearerIdentity(userId: string, clientId: string) {
+      database.prepare("INSERT INTO user (id, name, email, createdAt, updatedAt) VALUES (?, ?, ?, datetime('now'), datetime('now'))")
+        .run(userId, userId, `${userId}@example.com`);
+      database.prepare("INSERT INTO oauthClient (id, clientId, redirectUris) VALUES (?, ?, '[]')")
+        .run(clientId, clientId);
+    },
     assetsFetch,
     doFetch,
     close: async () => database.close(),

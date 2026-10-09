@@ -111,7 +111,12 @@ describe("harvest refreshed storage state", () => {
           return Response.json({ ok: true, ...data, state: refreshedState() });
         } });
         const target = instance as unknown as HarvestTarget;
-        expect(await target.dataHarvest({ recipe, clientId: "calendar", source: "rpc" })).toEqual(data);
+        const harvest = target.dataHarvest({ recipe, clientId: "calendar", source: "rpc" });
+        if (["unbound", "revoked", "needs_reauth"].includes(change)) {
+          await expect(harvest).rejects.toMatchObject({ code: "SESSION_INACTIVE" });
+        } else {
+          expect(await harvest).toEqual(data);
+        }
         const stored = await ctx.storage.get<StoredState>("state");
         if (change === "deleted") expect(stored).toBeUndefined();
         else if (change === "metadata") expect(stored).toEqual({ ...latest, storageState: refreshedState() });
@@ -138,7 +143,7 @@ describe("harvest refreshed storage state", () => {
     });
   });
 
-  it("a refresh read failure returns data without resetting the durable object", async () => {
+  it("an authority read failure withholds data without resetting the durable object", async () => {
     const stub = freshStub("refresh-read-failure");
     await seedSession(stub);
     await runInDurableObject(stub, async (instance, ctx) => {
@@ -147,7 +152,7 @@ describe("harvest refreshed storage state", () => {
         getSpy = vi.spyOn(ctx.storage, "get").mockRejectedValueOnce(new Error("SECRET storage unavailable"));
         return Response.json({ ok: true, ...data, state: refreshedState() });
       } });
-      expect(await (instance as unknown as HarvestTarget).dataHarvest({ recipe, clientId: "calendar", source: "rpc" })).toEqual(data);
+      await expect((instance as unknown as HarvestTarget).dataHarvest({ recipe, clientId: "calendar", source: "rpc" })).rejects.toThrow();
       getSpy?.mockRestore();
       expect((await ctx.storage.get<StoredState>("state"))?.storageState).toEqual(validStorageState());
     });

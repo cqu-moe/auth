@@ -41,7 +41,10 @@ export function createSqliteD1(database: DatabaseSync): D1Database {
         return result<T>([], Number(execution.changes));
       },
       async all<T = Record<string, unknown>>() {
-        return result(statement.all(...values) as T[]);
+        const before = Number(database.prepare("SELECT total_changes() AS count").get()!.count);
+        const rows = statement.all(...values) as T[];
+        const after = Number(database.prepare("SELECT total_changes() AS count").get()!.count);
+        return result(rows, after - before);
       },
       async raw<T = unknown[]>(options?: { columnNames?: boolean }) {
         statement.setReturnArrays(true);
