@@ -1,3 +1,4 @@
+import PasskeySettings from "../components/PasskeySettings";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
 import { ChevronDown, Link2, Loader2, Mail } from "lucide-react";
@@ -480,6 +481,7 @@ export function SettingsSecurity() {
     <Layout>
       <PageHeader title="安全" description="二次验证与登录密码。" />
       <SecuritySection twoFactorEnabled={user?.twoFactorEnabled === true} />
+      <PasskeySettings />
     </Layout>
   );
 }

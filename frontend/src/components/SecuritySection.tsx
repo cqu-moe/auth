@@ -33,7 +33,7 @@ function ChangePasswordEditor({ onCancel, onSuccess }: { onCancel: () => void; o
     }
 
     setLoading(true);
-    if (!await requestAuthentication("password")) { setLoading(false); return; }
+    if (!await requestAuthentication("password", currentPassword)) { setLoading(false); return; }
     const { error } = await authClient.changePassword({
       currentPassword,
       newPassword,

@@ -28,7 +28,7 @@ export function sensitivePurpose(path: string): SecurityPurpose | null {
   if (path === "/admin/set-user-password") return "admin";
   if (path === "/change-password" || path === "/set-password") return "password";
   if (["/change-email", "/email-otp/request-email-change", "/email-otp/change-email"].includes(path)) return "email";
-  if (["/two-factor/enable", "/two-factor/disable", "/two-factor/get-totp-uri", "/two-factor/generate-backup-codes"].includes(path)) return "mfa";
+  if (["/passkey/generate-register-options", "/passkey/verify-registration", "/passkey/delete-passkey", "/passkey/update-passkey", "/two-factor/enable", "/two-factor/disable", "/two-factor/get-totp-uri", "/two-factor/generate-backup-codes"].includes(path)) return "mfa";
   return null;
 }
 

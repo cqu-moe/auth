@@ -20,6 +20,7 @@ const entries = (policy: AuthPolicyKind, values: readonly string[]) =>
 
 const AUTH_POLICIES = new Map<string, AuthPolicyKind>([
   ...entries("public", [
+    "GET /passkey/generate-authenticate-options", "POST /passkey/verify-authentication",
     "GET /callback/:id", "POST /callback/:id", "GET /cloudflare/geolocation",
     "GET /delete-user/callback", "POST /email-otp/verify-email",
     "GET /error", "POST /get-access-token", "GET /jwks",
@@ -48,7 +49,8 @@ const AUTH_POLICIES = new Map<string, AuthPolicyKind>([
     "POST /admin/unban-user", "POST /admin/update-user",
   ]),
   ...entries("session", [
-    "POST /security/challenge", "POST /security/complete", "GET /security/status",
+    "GET /passkey/generate-register-options", "POST /passkey/verify-registration", "GET /passkey/list-user-passkeys", "POST /passkey/delete-passkey", "POST /passkey/update-passkey",
+    "POST /security/passkey/options", "POST /security/passkey/complete", "POST /security/challenge", "POST /security/complete", "GET /security/status",
     "GET /account-info", "POST /change-email", "POST /change-password",
     "POST /delete-user", "POST /email-otp/change-email",
     "POST /email-otp/request-email-change", "POST /email-otp/send-verification-otp",

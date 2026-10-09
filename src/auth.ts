@@ -1,3 +1,4 @@
+import { verifiedPasskey, passkeyStepUp, enforcePasskeyRegistration } from "./services/passkey";
 import { authenticationStrength, enforceAuthenticationStrength, recordAuthenticationProof } from "./services/auth-strength";
 import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
@@ -131,12 +132,15 @@ export function createAuth(env: Env, request: Request) {
         },
         hooks: {
           after: createAuthMiddleware(async (ctx) => {
-            if (["/two-factor/verify-totp", "/two-factor/verify-backup-code"].includes(ctx.path) && ctx.context.newSession && !(ctx.context.returned instanceof APIError)) {
+            if (ctx.path === "/passkey/generate-authenticate-options" && !(ctx.context.returned instanceof APIError)) return ctx.json({ ...(ctx.context.returned as Record<string, unknown>), userVerification: "required" });
+            if (["/two-factor/verify-totp", "/two-factor/verify-backup-code", "/passkey/verify-authentication"].includes(ctx.path) && ctx.context.newSession && !(ctx.context.returned instanceof APIError)) {
               await recordAuthenticationProof(ctx.context, ctx.context.newSession, "mfa", true);
             }
           }),
           before: createAuthMiddleware(async (ctx) => {
             await enforceAuthenticationStrength(ctx);
+            await enforcePasskeyRegistration(ctx);
+            if (ctx.path === "/passkey/generate-register-options") return { context: { query: ctx.query } };
             if (ctx.path === "/two-factor/enable" && ctx.body?.method === "otp") {
               throw new APIError("FORBIDDEN", { message: "邮箱验证码不能作为第二因子" });
             }
@@ -224,6 +228,8 @@ export function createAuth(env: Env, request: Request) {
           "/verify-email",
         ],
         plugins: [
+          verifiedPasskey(env.BETTER_AUTH_URL),
+          passkeyStepUp(env.BETTER_AUTH_URL),
           authenticationStrength((headers, method, code) => verifyCurrentFactor(env, request, headers, method, code)),
           admin({
             ac,

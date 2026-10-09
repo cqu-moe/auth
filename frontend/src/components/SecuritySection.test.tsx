@@ -74,9 +74,7 @@ describe("security settings section", () => {
     await setInputValue(container.querySelector<HTMLInputElement>("#newPassword")!, "new-password-123");
     await setInputValue(container.querySelector<HTMLInputElement>("#confirmNewPassword")!, "new-password-123");
     await submit(container.querySelector<HTMLFormElement>("#change-password-form")!);
-    expect(authClient.changePassword).not.toHaveBeenCalled();
-    await setInputValue(container.querySelector<HTMLInputElement>("#recent-password")!, "old-password");
-    await submit(container.querySelector<HTMLFormElement>('[role="dialog"] form')!);
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
 
     expect(authClient.changePassword).toHaveBeenCalledWith({
       currentPassword: "old-password",

@@ -1,3 +1,4 @@
+import { startAuthentication } from "@simplewebauthn/browser";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button, Input, Label } from "@cqu-moe/ui";
 import type { AuthenticationRequest } from "../lib/recent-authentication";
@@ -14,7 +15,7 @@ export default function RecentAuthentication() {
     const listener = (event: Event) => {
       const request = (event as CustomEvent<AuthenticationRequest>).detail;
       setPending((previous) => { previous?.resolve(false); return request; });
-      setPassword(""); setChallenge(""); setCode(""); setError("");
+      setPassword(""); setChallenge(request.challenge ?? ""); setCode(""); setError(request.error ?? "");
     };
     window.addEventListener("auth:verify", listener);
     return () => window.removeEventListener("auth:verify", listener);
@@ -36,6 +37,19 @@ export default function RecentAuthentication() {
     } catch { setError("网络错误，请重试"); }
     finally { setBusy(false); }
   };
+  const verifyPasskey = async () => {
+    setBusy(true); setError("");
+    try {
+      const optionsResponse = await fetch("/api/v1/auth/security/passkey/options", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ purpose: pending.purpose }) });
+      const options = await optionsResponse.json();
+      if (!optionsResponse.ok) { setError(options.message ?? "无法使用 Passkey"); return; }
+      const response = await startAuthentication({ optionsJSON: options.options });
+      const verified = await fetch("/api/v1/auth/security/passkey/complete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ challengeId: options.challengeId, response }) });
+      if (verified.ok && (await verified.json()).verified) finish(true);
+      else setError("Passkey 验证失败，请重试");
+    } catch { setError("Passkey 验证未完成，请重试"); }
+    finally { setBusy(false); }
+  };
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
     <section role="dialog" aria-modal="true" aria-labelledby="recent-auth-title" className="w-full max-w-sm rounded-lg border border-border bg-background p-6 shadow-lg">
       <h2 id="recent-auth-title" className="text-lg font-semibold">验证身份后继续</h2>
@@ -45,6 +59,7 @@ export default function RecentAuthentication() {
         {error && <p role="alert" className="text-sm text-destructive">{error}{error.includes("设置") && <a href="/settings/two-factor" className="underline"> 前往安全设置</a>}</p>}
         <div className="flex gap-2"><Button type="button" variant="outline" disabled={busy} onClick={() => finish(false)}>取消</Button><Button type="submit" disabled={busy}>{busy ? "正在验证…" : "验证并继续"}</Button></div>
       </form>
+      <Button type="button" variant="outline" className="mt-3 w-full" disabled={busy} onClick={() => void verifyPasskey()}>使用 Passkey 验证</Button>
     </section>
   </div>;
 }
