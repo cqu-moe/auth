@@ -310,11 +310,27 @@ export const AUTH_OPERATIONS = [
   },
   {
     "method": "POST",
+    "path": "/security/passkey/change-password"
+  },
+  {
+    "method": "POST",
     "path": "/security/passkey/complete"
   },
   {
     "method": "POST",
     "path": "/security/passkey/options"
+  },
+  {
+    "method": "POST",
+    "path": "/security/passkey/two-factor/disable"
+  },
+  {
+    "method": "POST",
+    "path": "/security/passkey/two-factor/enable"
+  },
+  {
+    "method": "POST",
+    "path": "/security/passkey/two-factor/generate-backup-codes"
   },
   {
     "method": "GET",

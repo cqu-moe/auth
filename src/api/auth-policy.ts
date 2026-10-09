@@ -50,6 +50,7 @@ const AUTH_POLICIES = new Map<string, AuthPolicyKind>([
   ]),
   ...entries("session", [
     "GET /passkey/generate-register-options", "POST /passkey/verify-registration", "GET /passkey/list-user-passkeys", "POST /passkey/delete-passkey", "POST /passkey/update-passkey",
+    "POST /security/passkey/change-password", "POST /security/passkey/two-factor/enable", "POST /security/passkey/two-factor/disable", "POST /security/passkey/two-factor/generate-backup-codes",
     "POST /security/passkey/options", "POST /security/passkey/complete", "POST /security/challenge", "POST /security/complete", "GET /security/status",
     "GET /account-info", "POST /change-email", "POST /change-password",
     "POST /delete-user", "POST /email-otp/change-email",

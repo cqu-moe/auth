@@ -919,6 +919,12 @@
   },
   {
     "method": "POST",
+    "path": "/api/v1/auth/security/passkey/change-password",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
     "path": "/api/v1/auth/security/passkey/complete",
     "policy": "session",
     "source": "better-auth-1.7.7"
@@ -926,6 +932,24 @@
   {
     "method": "POST",
     "path": "/api/v1/auth/security/passkey/options",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/two-factor/disable",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/two-factor/enable",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/two-factor/generate-backup-codes",
     "policy": "session",
     "source": "better-auth-1.7.7"
   },

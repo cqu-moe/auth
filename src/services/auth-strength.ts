@@ -7,12 +7,19 @@ export type SecurityPurpose = typeof purposes[number];
 type SecuritySession = { user: { id: string; twoFactorEnabled?: boolean | null }; session: { id: string; expiresAt: Date } };
 const prefix = (sessionId: string, purpose: string) => `security-proof:${sessionId}:${purpose}`;
 
-export async function hasAuthenticationProof(context: Pick<AuthContext, "internalAdapter">, session: SecuritySession, purpose: string): Promise<boolean> {
+export async function hasAuthenticationProof(context: Pick<AuthContext, "internalAdapter">, session: SecuritySession, purpose: string, method?: "password" | "passkey"): Promise<boolean> {
   const row = await context.internalAdapter.findVerificationValue(prefix(session.session.id, purpose));
-  return !!row && row.value === session.user.id && row.expiresAt.getTime() > Date.now();
+  if (!row || row.expiresAt.getTime() <= Date.now()) return false;
+  // Existing short-lived proofs remain valid on upgrade, but cannot stand in
+  // for a UV Passkey when a password-free operation specifically requires it.
+  if (row.value === session.user.id) return method !== "passkey";
+  try {
+    const proof = JSON.parse(row.value) as { userId: string; method: string };
+    return proof.userId === session.user.id && (!method || proof.method === method);
+  } catch { return false; }
 }
 
-export async function recordAuthenticationProof(context: Pick<AuthContext, "internalAdapter">, session: SecuritySession, purpose: SecurityPurpose, strong: boolean): Promise<void> {
+export async function recordAuthenticationProof(context: Pick<AuthContext, "internalAdapter">, session: SecuritySession, purpose: SecurityPurpose, strong: boolean, method: "password" | "passkey" = "password"): Promise<void> {
   const entries: Array<{ purpose: string; expiresAt: Date }> = [{ purpose, expiresAt: new Date(Date.now() + 300_000) }];
   if (strong) entries.push({ purpose: "strong", expiresAt: session.session.expiresAt });
   // Admin admission is session-long; an explicit admin step-up additionally
@@ -20,7 +27,7 @@ export async function recordAuthenticationProof(context: Pick<AuthContext, "inte
   for (const entry of entries) {
     const identifier = prefix(session.session.id, entry.purpose);
     await context.internalAdapter.deleteVerificationByIdentifier(identifier);
-    await context.internalAdapter.createVerificationValue({ identifier, value: session.user.id, expiresAt: entry.expiresAt });
+    await context.internalAdapter.createVerificationValue({ identifier, value: JSON.stringify({ userId: session.user.id, method }), expiresAt: entry.expiresAt });
   }
 }
 

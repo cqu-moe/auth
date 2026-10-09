@@ -1,3 +1,4 @@
+import { passkeyAccountOperations } from "./services/passkey-account-operations";
 import { verifiedPasskey, passkeyStepUp, enforcePasskeyRegistration } from "./services/passkey";
 import { authenticationStrength, enforceAuthenticationStrength, recordAuthenticationProof } from "./services/auth-strength";
 import { betterAuth } from "better-auth";
@@ -149,9 +150,9 @@ export function createAuth(env: Env, request: Request) {
           after: createAuthMiddleware(async (ctx) => {
             if (ctx.path === "/passkey/generate-authenticate-options" && !(ctx.context.returned instanceof APIError)) return ctx.json({ ...(ctx.context.returned as Record<string, unknown>), userVerification: "required" });
             if (["/two-factor/verify-totp", "/two-factor/verify-backup-code", "/passkey/verify-authentication"].includes(ctx.path) && ctx.context.newSession && !(ctx.context.returned instanceof APIError)) {
-              await recordAuthenticationProof(ctx.context, ctx.context.newSession, "mfa", true);
+              await recordAuthenticationProof(ctx.context, ctx.context.newSession, "mfa", true, ctx.path === "/passkey/verify-authentication" ? "passkey" : "password");
             }
-            if (ctx.path === "/change-password" && !(ctx.context.returned instanceof APIError) && ctx.context.session) {
+            if (["/change-password", "/security/passkey/change-password"].includes(ctx.path) && !(ctx.context.returned instanceof APIError) && ctx.context.session) {
               const current = ctx.context.session.session;
               const sessions = await ctx.context.internalAdapter.listSessions(current.userId);
               await ctx.context.internalAdapter.deleteSessions(sessions.filter(session => session.id !== current.id).map(session => session.token));
@@ -274,6 +275,7 @@ export function createAuth(env: Env, request: Request) {
         plugins: [
           verifiedPasskey(env.BETTER_AUTH_URL),
           passkeyStepUp(env.BETTER_AUTH_URL),
+          passkeyAccountOperations(),
           authenticationStrength((headers, method, code) => verifyCurrentFactor(env, request, headers, method, code)),
           admin({
             ac,

@@ -80,7 +80,7 @@ export function passkeyStepUp(baseURL: string): BetterAuthPlugin {
         if (!result.verified) throw new APIError("UNAUTHORIZED", { message: "Passkey 验证失败" });
         const updated = await ctx.context.adapter.incrementOne({ model: "passkey", where: [{ field: "id", value: key.id }, { field: "userId", value: session.user.id }, { field: "counter", value: key.counter }], increment: { counter: result.authenticationInfo.newCounter - key.counter } });
         if (!updated) throw new APIError("UNAUTHORIZED", { message: "Passkey 已更改，请重试" });
-        await recordAuthenticationProof(ctx.context, session, pending.purpose, true);
+        await recordAuthenticationProof(ctx.context, session, pending.purpose, true, "passkey");
         return ctx.json({ verified: true });
       }),
     },

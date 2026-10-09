@@ -1531,6 +1531,16 @@
   },
   {
     "method": "POST",
+    "path": "/api/v1/auth/security/passkey/change-password",
+    "kind": "canonical",
+    "requestValidation": "json-body-and-parameters",
+    "requestReason": "The Cloudflare projection retains the JSON body and path/query parameters; pattern and uniqueItems constraints remain application-validated.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "POST",
     "path": "/api/v1/auth/security/passkey/complete",
     "kind": "canonical",
     "requestValidation": "json-body-and-parameters",
@@ -1542,6 +1552,36 @@
   {
     "method": "POST",
     "path": "/api/v1/auth/security/passkey/options",
+    "kind": "canonical",
+    "requestValidation": "json-body-and-parameters",
+    "requestReason": "The Cloudflare projection retains the JSON body and path/query parameters; pattern and uniqueItems constraints remain application-validated.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/two-factor/disable",
+    "kind": "canonical",
+    "requestValidation": "json-body-and-parameters",
+    "requestReason": "The Cloudflare projection retains the JSON body and path/query parameters; pattern and uniqueItems constraints remain application-validated.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/two-factor/enable",
+    "kind": "canonical",
+    "requestValidation": "json-body-and-parameters",
+    "requestReason": "The Cloudflare projection retains the JSON body and path/query parameters; pattern and uniqueItems constraints remain application-validated.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/two-factor/generate-backup-codes",
     "kind": "canonical",
     "requestValidation": "json-body-and-parameters",
     "requestReason": "The Cloudflare projection retains the JSON body and path/query parameters; pattern and uniqueItems constraints remain application-validated.",

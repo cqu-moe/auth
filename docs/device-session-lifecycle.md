@@ -40,8 +40,10 @@ introspection is an authenticated server-to-server authority check.
 - Central single-device revocation ends that session and its OAuth renewal.
 - Central all-device logout ends every central session and associated OAuth
   renewal. Device trust and pending second-factor login records are removed.
-- Password change verifies the existing password, preserves the current session,
-  ends other sessions and removes existing device trust.
+- Password change requires purpose-bound recent authentication. The password path
+  verifies the existing password and configured second factor; the Passkey path
+  accepts server-verified UV without a password. Both preserve the current
+  session, end other sessions and remove existing device trust.
 - Password reset ends old sessions, OAuth renewal and device trust, while keeping
   registered MFA/Passkeys. The next login must still satisfy those factors.
 

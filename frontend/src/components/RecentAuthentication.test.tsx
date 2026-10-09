@@ -25,7 +25,7 @@ it("allows a Passkey alone to complete the pending operation only after the serv
   const button = () => Array.from(container.querySelectorAll("button")).find(item => item.textContent === "使用 Passkey 验证")!;
   await click(button());
   expect(completed).toBe(false);
-  expect(container.querySelector('[role="alert"]')?.textContent).toContain("Passkey 验证失败");
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain("Passkey");
   accepted = true;
   await click(button());
   expect(completed).toBe(true);

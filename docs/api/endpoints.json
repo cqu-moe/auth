@@ -1073,6 +1073,13 @@
   {
     "host": "auth.cqu.moe",
     "method": "POST",
+    "path": "/api/v1/auth/security/passkey/change-password",
+    "operationId": "post_api_v1_auth_security_passkey_change_password",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
     "path": "/api/v1/auth/security/passkey/complete",
     "operationId": "post_api_v1_auth_security_passkey_complete",
     "kind": "canonical"
@@ -1082,6 +1089,27 @@
     "method": "POST",
     "path": "/api/v1/auth/security/passkey/options",
     "operationId": "post_api_v1_auth_security_passkey_options",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/two-factor/disable",
+    "operationId": "post_api_v1_auth_security_passkey_two_factor_disable",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/two-factor/enable",
+    "operationId": "post_api_v1_auth_security_passkey_two_factor_enable",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/security/passkey/two-factor/generate-backup-codes",
+    "operationId": "post_api_v1_auth_security_passkey_two_factor_generate_backup_codes",
     "kind": "canonical"
   },
   {

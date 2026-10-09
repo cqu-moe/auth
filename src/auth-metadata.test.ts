@@ -76,6 +76,10 @@ POST /passkey/verify-authentication
 GET /passkey/list-user-passkeys
 POST /passkey/delete-passkey
 POST /passkey/update-passkey
+POST /security/passkey/change-password
+POST /security/passkey/two-factor/enable
+POST /security/passkey/two-factor/disable
+POST /security/passkey/two-factor/generate-backup-codes
 POST /security/passkey/options
 POST /security/passkey/complete
 POST /refresh-token
@@ -121,11 +125,11 @@ describe("Better Auth migration baseline", () => {
         return methods.map((method) => `${method} ${endpoint.path}`);
       }).sort();
 
-      expect(endpoints).toHaveLength(91);
+      expect(endpoints).toHaveLength(95);
       expect(operations).toEqual(EXPECTED_OPERATIONS);
       expect(AUTH_OPERATIONS.map(({ method, path }) => `${method} ${path}`).sort())
         .toEqual(operations);
-      expect(operations).toHaveLength(95);
+      expect(operations).toHaveLength(99);
       expect(operations.filter((operation) => operation.endsWith(" /get-session")))
         .toEqual(["GET /get-session"]);
     } finally {

@@ -1,4 +1,4 @@
-import { startAuthentication } from "@simplewebauthn/browser";
+import { authenticateWithPasskey } from "../lib/passkey-operations";
 import { useEffect, useState, type FormEvent } from "react";
 import { Button, Input, Label } from "@cqu-moe/ui";
 import type { AuthenticationRequest } from "../lib/recent-authentication";
@@ -40,14 +40,9 @@ export default function RecentAuthentication() {
   const verifyPasskey = async () => {
     setBusy(true); setError("");
     try {
-      const optionsResponse = await fetch("/api/v1/auth/security/passkey/options", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ purpose: pending.purpose }) });
-      const options = await optionsResponse.json();
-      if (!optionsResponse.ok) { setError(options.message ?? "无法使用 Passkey"); return; }
-      const response = await startAuthentication({ optionsJSON: options.options });
-      const verified = await fetch("/api/v1/auth/security/passkey/complete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ challengeId: options.challengeId, response }) });
-      if (verified.ok && (await verified.json()).verified) finish(true);
-      else setError("Passkey 验证失败，请重试");
-    } catch { setError("Passkey 验证未完成，请重试"); }
+      await authenticateWithPasskey(pending.purpose);
+      finish(true);
+    } catch (error) { setError(error instanceof Error ? error.message : "Passkey 验证未完成，请重试"); }
     finally { setBusy(false); }
   };
   return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

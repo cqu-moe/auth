@@ -46,9 +46,11 @@ it("registers multiple keys, requires UV for login, and reauthenticates the same
   expect(await (await get("/passkey/list-user-passkeys")).json()).toHaveLength(1);
 });
 
+let passkeyFixtureNumber = 0;
 async function passkeyFixture(role: "admin" | "user" = "user", strong = false) {
   const api = await createApiFixture();
   const headers = await api.signIn(role, strong);
+  headers.set("cf-connecting-ip", `192.0.2.${++passkeyFixtureNumber}`);
   headers.set("origin", "http://localhost:8787"); headers.set("content-type", "application/json");
   const absorb = (response: Response) => {
     const cookies = new Map((headers.get("cookie") ?? "").split("; ").map(c => c.split(/=(.*)/s).slice(0, 2) as [string, string]));
@@ -136,4 +138,54 @@ it("rejects expired, replayed and cross-session registration, login and step-up 
   expect(results.filter(result => result.ok)).toHaveLength(1);
   expect((await authenticate()).ok).toBe(false);
 
+});
+
+it("uses UV Passkey alone for password and factor mutations without weakening the password path", async () => {
+  const { authenticator } = await import("./passkey-authenticator");
+  const { api, headers, get, post } = await passkeyFixture("admin", true);
+  const device = await authenticator();
+  const options = await (await get("/passkey/generate-register-options")).json<{ challenge: string }>();
+  expect((await post("/passkey/verify-registration", { response: await device.register(options.challenge) })).status).toBe(200);
+  const change = () => post("/security/passkey/change-password", { newPassword: "next-test-password" });
+  expect((await change()).status).toBe(403);
+  const prove = async (purpose: "password" | "mfa" | "email") => {
+    const challenge = await (await post("/security/passkey/options", { purpose })).json<{ challengeId: string; options: { challenge: string } }>();
+    expect((await post("/security/passkey/complete", { challengeId: challenge.challengeId, response: await device.authenticate(challenge.options.challenge) })).status).toBe(200);
+  };
+  await prove("email");
+  expect((await change()).status).toBe(403);
+  await prove("password");
+  expect((await change()).status).toBe(200);
+  const { env } = await import("cloudflare:test"); const { createAuth } = await import("../../src/auth");
+  const auth = createAuth(env, new Request(env.BETTER_AUTH_URL)); const context = await auth.$context;
+  const current = await auth.api.getSession({ headers });
+  expect(current).not.toBeNull();
+  const loginWithPassword = (password: string) => api.request("/api/v1/auth/sign-in/email", { method: "POST", headers: { origin: env.BETTER_AUTH_URL, "content-type": "application/json", "cf-connecting-ip": "192.0.2.144" }, body: JSON.stringify({ email: current!.user.email, password }) });
+  expect((await loginWithPassword("local-test-password")).status).toBe(401);
+  const newPasswordLogin = await loginWithPassword("next-test-password");
+  expect(newPasswordLogin.status).toBe(200);
+  expect(await newPasswordLogin.json()).toMatchObject({ twoFactorRedirect: true });
+  // Expired proof cannot authorize another password change.
+  await context.adapter.update({ model: "verification", where: [{ field: "identifier", value: `security-proof:${current!.session.id}:password` }], update: { expiresAt: new Date(Date.now() - 1) } });
+  expect((await change()).status).toBe(403);
+
+  expect((await post("/security/passkey/two-factor/disable", {})).status).toBe(403);
+  // Password plus the configured second factor still gates the native path.
+  expect((await post("/two-factor/disable", { password: "wrong-password" })).ok).toBe(false);
+  await prove("mfa");
+  const regenerated = await post("/security/passkey/two-factor/generate-backup-codes", {});
+  expect(regenerated.status).toBe(200);
+  const codes = await regenerated.json<{ backupCodes: string[] }>();
+  expect((await post("/two-factor/verify-backup-code", { code: codes.backupCodes[0], disableSession: true })).status).toBe(200);
+  expect((await post("/security/passkey/two-factor/disable", {})).status).toBe(200);
+  expect(await (await get("/get-session")).json()).toMatchObject({ user: { twoFactorEnabled: false } });
+  const enrollment = await post("/security/passkey/two-factor/enable", {});
+  expect(enrollment.status).toBe(200);
+  const enrolled = await enrollment.json<{ totpURI: string; backupCodes: string[] }>();
+  const { createOTP } = await import("@better-auth/utils/otp"); const { base32 } = await import("@better-auth/utils/base32");
+  const code = await createOTP(new TextDecoder().decode(base32.decode(new URL(enrolled.totpURI).searchParams.get("secret")!))).totp();
+  expect((await post("/two-factor/verify-totp", { code })).status).toBe(200);
+  expect(await (await get("/get-session")).json()).toMatchObject({ user: { twoFactorEnabled: true } });
+  const other = await api.signIn("user"); other.set("origin", env.BETTER_AUTH_URL); other.set("content-type", "application/json");
+  expect((await api.request("/api/v1/auth/security/passkey/change-password", { method: "POST", headers: other, body: JSON.stringify({ newPassword: "attacker-password" }) })).status).toBe(403);
 });

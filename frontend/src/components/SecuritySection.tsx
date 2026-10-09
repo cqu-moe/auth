@@ -1,3 +1,5 @@
+import AuthenticationMethodChoice, { type AuthenticationMethod } from "./AuthenticationMethodChoice";
+import { passkeyAccountOperation } from "../lib/passkey-operations";
 import { requestAuthentication } from "../lib/recent-authentication";
 import { FormEvent, useState } from "react";
 import { Link } from "react-router-dom";
@@ -11,6 +13,7 @@ interface SecuritySectionProps {
 }
 
 function ChangePasswordEditor({ onCancel, onSuccess }: { onCancel: () => void; onSuccess: () => void }) {
+  const [method, setMethod] = useState<AuthenticationMethod>("password");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -34,8 +37,8 @@ function ChangePasswordEditor({ onCancel, onSuccess }: { onCancel: () => void; o
     }
 
     setLoading(true);
-    if (!await requestAuthentication("password", currentPassword)) { setLoading(false); return; }
-    const { error } = await authClient.changePassword({
+    if (method === "password" && !await requestAuthentication("password", currentPassword)) { setLoading(false); return; }
+    const { error } = method === "passkey" ? await passkeyAccountOperation("change-password", { newPassword }) : await authClient.changePassword({
       currentPassword,
       newPassword,
       revokeOtherSessions: true,
@@ -57,7 +60,8 @@ function ChangePasswordEditor({ onCancel, onSuccess }: { onCancel: () => void; o
         </Alert>
       )}
 
-      <div className="field">
+      <AuthenticationMethodChoice value={method} onChange={setMethod} disabled={loading} />
+      {method === "password" && <div className="field">
         <Label htmlFor="currentPassword">当前密码</Label>
         <Input
           id="currentPassword"
@@ -68,7 +72,7 @@ function ChangePasswordEditor({ onCancel, onSuccess }: { onCancel: () => void; o
           autoComplete="current-password"
           autoFocus
         />
-      </div>
+      </div>}
 
       <div className="field">
         <Label htmlFor="newPassword">新密码</Label>
