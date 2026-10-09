@@ -17,6 +17,7 @@ POST /admin/impersonate-user
 POST /admin/list-user-sessions
 GET /admin/list-users
 POST /admin/remove-user
+POST /admin/reset-authentication
 POST /admin/revoke-user-session
 POST /admin/revoke-user-sessions
 POST /admin/set-role
@@ -125,11 +126,11 @@ describe("Better Auth migration baseline", () => {
         return methods.map((method) => `${method} ${endpoint.path}`);
       }).sort();
 
-      expect(endpoints).toHaveLength(95);
+      expect(endpoints).toHaveLength(96);
       expect(operations).toEqual(EXPECTED_OPERATIONS);
       expect(AUTH_OPERATIONS.map(({ method, path }) => `${method} ${path}`).sort())
         .toEqual(operations);
-      expect(operations).toHaveLength(99);
+      expect(operations).toHaveLength(100);
       expect(operations.filter((operation) => operation.endsWith(" /get-session")))
         .toEqual(["GET /get-session"]);
     } finally {

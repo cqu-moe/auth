@@ -4,7 +4,7 @@ import type { createAuth } from "../auth";
 
 export async function provePassword(auth: ReturnType<typeof createAuth>, headers: Headers, password: string, purpose: "password" | "email" | "mfa") {
   const response = await auth.handler(new Request("http://localhost:8787/api/v1/auth/security/challenge", {
-    method: "POST", headers: new Headers({ cookie: headers.get("cookie") ?? "", origin: "http://localhost:8787", "content-type": "application/json" }), body: JSON.stringify({ password, purpose }),
+    method: "POST", headers: new Headers({ ...Object.fromEntries(headers), origin: "http://localhost:8787", "content-type": "application/json" }), body: JSON.stringify({ password, purpose }),
   }));
   if (!response.ok) throw new Error(`proof failed: ${response.status} ${await response.text()}`);
 }

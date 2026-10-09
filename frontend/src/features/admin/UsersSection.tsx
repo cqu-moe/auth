@@ -1,3 +1,4 @@
+import { AccountRecovery } from "./AccountRecovery";
 // --- Entitlement panel (per-user 分级权益 / 能力授权) ---
 // 表单态/矩阵实现见 components/EntitlementFields。保存为整组替换(full replace):
 // 仅把勾选的 flag 与非空 quota 发给 PUT,未勾/空缺省即「false / 无限」。
@@ -109,6 +110,7 @@ export function UsersSection() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [recoveryUser, setRecoveryUser] = useState<User | null>(null);
   const [entitlementUser, setEntitlementUser] = useState<User | null>(null);
 
   const fetchUsers = useCallback(async (page = 1) => {
@@ -193,6 +195,7 @@ export function UsersSection() {
               </span>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-2">
+              {canEditQuota && <Button variant="outline" onClick={() => setRecoveryUser(user)}>重置认证</Button>}
               <Button
                 variant="outline"
                 onClick={() => setEntitlementUser(user)}
@@ -254,6 +257,7 @@ export function UsersSection() {
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex items-center justify-end gap-2">
+                    {canEditQuota && <Button variant="outline" size="sm" onClick={() => setRecoveryUser(user)}>重置认证</Button>}
                     <Button
                       variant="outline"
                       size="sm"
@@ -315,6 +319,7 @@ export function UsersSection() {
         </div>
       )}
 
+      {recoveryUser && <AccountRecovery user={recoveryUser} onClose={() => setRecoveryUser(null)} />}
       {entitlementUser && (
         <EntitlementPanel
           user={entitlementUser}

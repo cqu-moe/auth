@@ -38,6 +38,10 @@ export const AUTH_OPERATIONS = [
   },
   {
     "method": "POST",
+    "path": "/admin/reset-authentication"
+  },
+  {
+    "method": "POST",
     "path": "/admin/revoke-user-session"
   },
   {

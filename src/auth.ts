@@ -1,3 +1,5 @@
+import { administratorRecovery } from "./services/admin-recovery";
+import { authDatabase } from "./services/auth-reset-revision";
 import { passkeyAccountOperations } from "./services/passkey-account-operations";
 import { verifiedPasskey, passkeyStepUp, enforcePasskeyRegistration } from "./services/passkey";
 import { authenticationStrength, enforceAuthenticationStrength, recordAuthenticationProof } from "./services/auth-strength";
@@ -97,7 +99,7 @@ export function createAuth(env: Env, request: Request) {
     secret: env.BETTER_AUTH_SECRET,
     ...withCloudflare(
       {
-        d1Native: env.DATABASE,
+        d1Native: authDatabase(env.DATABASE, request),
         cf: (request.cf ?? {}) as CloudflareGeolocation,
         autoDetectIpAddress: true,
       },
@@ -118,7 +120,14 @@ export function createAuth(env: Env, request: Request) {
             });
           },
         },
+        verification: { additionalFields: { authUserId: { type: "string", required: false, input: false } } },
         databaseHooks: {
+          verification: {
+            create: { before: async (verification, context) => {
+              const owner = context?.context.session?.user.id ?? context?.context.newSession?.user.id;
+              return { data: { ...verification, ...(owner ? { authUserId: owner } : {}) } };
+            } },
+          },
           session: {
             delete: {
               before: async (session, context) => {
@@ -184,6 +193,16 @@ export function createAuth(env: Env, request: Request) {
           before: createAuthMiddleware(async (ctx) => {
             await enforceAuthenticationStrength(ctx);
             await enforcePasskeyRegistration(ctx);
+            if (ctx.path === "/email-otp/change-email") {
+              const session = await getSessionFromCtx(ctx);
+              if (session) {
+                const newEmail = String(ctx.body?.newEmail ?? "").trim().toLowerCase();
+                const challenge = await ctx.context.internalAdapter.findVerificationValue(`change-email-otp-${session.user.email.toLowerCase()}-${newEmail}`);
+                if ((challenge as { authUserId?: string } | null)?.authUserId !== session.user.id) {
+                  throw new APIError("BAD_REQUEST", { message: "请重新请求邮箱验证码" });
+                }
+              }
+            }
             if (ctx.path === "/passkey/generate-register-options") return { context: { query: ctx.query } };
             if (ctx.path === "/two-factor/enable" && ctx.body?.method === "otp") {
               throw new APIError("FORBIDDEN", { message: "邮箱验证码不能作为第二因子" });
@@ -273,6 +292,7 @@ export function createAuth(env: Env, request: Request) {
           "/verify-email",
         ],
         plugins: [
+          administratorRecovery(env.DATABASE, request),
           verifiedPasskey(env.BETTER_AUTH_URL),
           passkeyStepUp(env.BETTER_AUTH_URL),
           passkeyAccountOperations(),
