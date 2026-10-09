@@ -15,13 +15,15 @@ type Lifecycle = {
 
 const REDACTED = "[redacted]";
 const EMAIL = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
-const LABELED_SECRET = /\b(password|cookie|authorization|token|student_?id|email|otp|code|ticket)\s*[:=]\s*[^\s,;&]+/gi;
-const BEARER = /\bBearer\s+[^\s,;&]+/gi;
+const LABELED_SECRET = /\b(dpop|password|cookie|authorization|token|student_?id|email|otp|code|ticket)\s*[:=]\s*[^\s,;&]+/gi;
+const BEARER = /\b(?:Bearer|DPoP)\s+[^\s,;&]+/gi;
 
 function isSensitiveKey(key: string): boolean {
   const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
   return normalized === "password"
     || normalized === "authorization"
+    || normalized === "dpop"
+    || normalized === "dpopproof"
     || normalized === "studentid"
     || normalized === "email"
     || normalized === "otp"

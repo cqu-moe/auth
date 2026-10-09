@@ -1,9 +1,8 @@
 import type { Context, MiddlewareHandler } from "hono";
-import { verifyBearerToken } from "better-auth/oauth2";
+import { verifyAuthAccessTokenRequest } from "../services/auth-access-token";
 import { createAuth } from "../auth";
 import { problem } from "../api/problem";
 import type { HonoEnv, Principal, RequestAuthCache } from "../types";
-import { authUrls } from "../auth-config";
 import { isBanned } from "../services/oauth-tokens";
 
 function getCache(c: Context<HonoEnv>): RequestAuthCache {
@@ -49,17 +48,8 @@ function claimScopes(value: unknown): string[] | null {
 async function bearerPrincipal(c: Context<HonoEnv>): Promise<Principal | null> {
   const cache = getCache(c);
   cache.bearer ??= (async () => {
-    const authorization = c.req.header("Authorization");
-    if (!authorization?.startsWith("Bearer ")) return null;
-    const token = authorization.slice(7);
-    if (!token) return null;
-
     try {
-      const { issuer, jwksUrl } = authUrls(c.env.BETTER_AUTH_URL);
-      const payload = await verifyBearerToken(token, {
-        verifyOptions: { issuer, audience: issuer },
-        jwksUrl,
-      });
+      const payload = await verifyAuthAccessTokenRequest(c.req.raw, c.env);
       const userId = claimString(payload.sub);
       const clientId = claimString(payload.azp ?? payload.client_id);
       const scopes = claimScopes(payload.scope);

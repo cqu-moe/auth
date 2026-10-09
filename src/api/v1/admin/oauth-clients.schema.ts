@@ -28,6 +28,7 @@ export const OAuthClientCreateBody = z.strictObject({
   skip_consent: z.boolean().optional(),
   enable_end_session: z.boolean().optional(),
   require_pkce: z.literal(true).optional(),
+  dpop_bound_access_tokens: z.boolean().optional(),
   subject_type: z.enum(["public", "pairwise"]).optional(),
   metadata: z.looseObject({}).optional(),
 });
@@ -49,6 +50,7 @@ export const OAuthClientPatchBody = z.strictObject({
   skip_consent: z.boolean().optional(),
   enable_end_session: z.boolean().optional(),
   require_pkce: z.literal(true).optional(),
+  dpop_bound_access_tokens: z.boolean().optional(),
   disabled: z.boolean().optional(),
   metadata: z.looseObject({}).nullable().optional(),
   scope: NullableString.optional(),

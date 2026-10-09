@@ -11,7 +11,13 @@ export function createAuthApi() {
     router.on(operation.method, operation.path, async (c) => {
       if (operation.path === "/error") return c.redirect("/auth/error", 302);
 
-      const request = c.req.raw;
+      // Provider DPoP must see the configured public origin, never a proxy's
+      // internal bind address or untrusted Forwarded/X-Forwarded-* headers.
+      const publicUrl = new URL(c.req.url);
+      const origin = new URL(c.env.BETTER_AUTH_URL);
+      publicUrl.protocol = origin.protocol;
+      publicUrl.host = origin.host;
+      const request = new Request(publicUrl, c.req.raw);
       const auth = createAuth(c.env, request);
       if (operation.path === "/sign-up/email") {
         return handleInvitationSignup(

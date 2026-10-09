@@ -15,10 +15,10 @@ vi.mock("../auth", () => ({
   }),
 }));
 
-vi.mock("better-auth/oauth2", () => ({
+vi.mock("../services/auth-access-token", () => ({
   // #21：让「有效签名、任意 scope」的 token 在旧代码里能通过 bearer 分支，
   // 从而证明路由层不再依赖 bearer 鉴权。
-  verifyBearerToken: async () => ({
+  verifyAuthAccessTokenRequest: async () => ({
     sub: "current-user",
     azp: "evil-client",
     scope: "openid",

@@ -6,6 +6,8 @@ describe("Worker PostHog privacy boundary", () => {
     const properties = sanitizePostHogProperties({
       service: "auth-worker",
       password: "secret-password",
+      DPoP: "secret-proof",
+      detail: "DPoP secret-dpop-token dpop=secret-proof-log",
       cookie: "secret-cookie",
       authorization: "Bearer secret-token",
       studentId: "2026000000",
@@ -21,6 +23,8 @@ describe("Worker PostHog privacy boundary", () => {
     const serialized = JSON.stringify(properties);
     for (const secret of [
       "secret-password",
+      "secret-proof",
+      "secret-dpop-token",
       "secret-cookie",
       "secret-token",
       "2026000000",
