@@ -68,6 +68,15 @@ describe("interactive device lifetime", () => {
       expect(response.status).toBe(200);
       return response.json();
     };
+    // Backend Service Binding requests may lack a client IP. Ordinary page/API
+    // traffic must not exhaust the native 100/min login-oriented default.
+    await env.DATABASE.prepare("DELETE FROM rateLimit").run();
+    for (let i = 0; i < 101; i++) expect(await introspect()).toMatchObject({ active: true });
+    const unauthorized = await fixture.authHandler(new Request(`${env.BETTER_AUTH_URL}/api/v1/auth/oauth2/introspect`, {
+      method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ token, token_type_hint: "access_token" }),
+    }));
+    expect(unauthorized.status).toBe(401);
     const ordinary = await introspect();
     expect(ordinary).toMatchObject({ active: true, sub: fixture.websiteSession.userId });
     expect(ordinary).not.toHaveProperty("user");

@@ -314,6 +314,10 @@ export function createAuth(env: Env, request: Request) {
             },
           }),
           oauthProvider({
+            // Consumers introspect on every protected request, including private
+            // Service Binding calls without an IP. Keep a bounded shared budget
+            // sized for backend traffic instead of the native 100/min default.
+            rateLimit: { introspect: { window: 60, max: 6000 } },
             // Native userinfo has already verified token, DPoP and replay here.
             // Check current authority without consuming the same proof twice.
             customUserInfoClaims: async ({ jwt }) => {

@@ -1,9 +1,10 @@
 import { authenticateWithPasskey } from "../lib/passkey-operations";
-import { useEffect, useState, type FormEvent } from "react";
-import { Button, Input, Label } from "@cqu-moe/ui";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Button, Input, Label, Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@cqu-moe/ui";
 import type { AuthenticationRequest } from "../lib/recent-authentication";
 
 export default function RecentAuthentication() {
+  const returnFocus = useRef<HTMLElement | null>(null);
   const [pending, setPending] = useState<AuthenticationRequest | null>(null);
   const [password, setPassword] = useState("");
   const [challenge, setChallenge] = useState("");
@@ -14,6 +15,7 @@ export default function RecentAuthentication() {
   useEffect(() => {
     const listener = (event: Event) => {
       const request = (event as CustomEvent<AuthenticationRequest>).detail;
+      if (document.activeElement instanceof HTMLElement) returnFocus.current = document.activeElement;
       setPending((previous) => { previous?.resolve(false); return request; });
       setPassword(""); setChallenge(request.challenge ?? ""); setCode(""); setError(request.error ?? "");
     };
@@ -45,16 +47,23 @@ export default function RecentAuthentication() {
     } catch (error) { setError(error instanceof Error ? error.message : "Passkey 验证未完成，请重试"); }
     finally { setBusy(false); }
   };
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-    <section role="dialog" aria-modal="true" aria-labelledby="recent-auth-title" className="w-full max-w-sm rounded-lg border border-border bg-background p-6 shadow-lg">
-      <h2 id="recent-auth-title" className="text-lg font-semibold">验证身份后继续</h2>
-      <p className="my-3 text-sm text-muted-foreground">请确认是你本人操作，验证在五分钟内有效。</p>
+  return <Dialog open onOpenChange={open => { if (!open && !busy) finish(false); }}>
+    <DialogContent className="max-w-sm" showCloseButton={!busy}
+      onEscapeKeyDown={event => { if (busy) event.preventDefault(); }}
+      onPointerDownOutside={event => event.preventDefault()}
+      onCloseAutoFocus={event => {
+        if (returnFocus.current?.isConnected) { event.preventDefault(); returnFocus.current.focus(); }
+      }}>
+      <DialogHeader>
+        <DialogTitle>验证身份后继续</DialogTitle>
+        <DialogDescription>请确认是你本人操作，验证在五分钟内有效。</DialogDescription>
+      </DialogHeader>
       <form onSubmit={submit} className="space-y-4">
-        {challenge ? <><Label htmlFor="recent-factor">验证方式</Label><select id="recent-factor" value={method} onChange={e => setMethod(e.target.value)}><option value="totp">身份验证器</option><option value="backup-code">备用恢复码</option></select><Label htmlFor="recent-code">验证码</Label><Input id="recent-code" autoFocus autoComplete="one-time-code" value={code} onChange={e => setCode(e.target.value)} required /></> : <><Label htmlFor="recent-password">当前密码</Label><Input id="recent-password" type="password" autoFocus autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required /></>}
+        {challenge ? <><Label htmlFor="recent-factor">验证方式</Label><select id="recent-factor" value={method} onChange={e => setMethod(e.target.value)}><option value="totp">身份验证器</option><option value="backup-code">备用恢复码</option></select><Label htmlFor="recent-code">验证码</Label><Input id="recent-code" autoComplete="one-time-code" value={code} onChange={e => setCode(e.target.value)} required /></> : <><Label htmlFor="recent-password">当前密码</Label><Input id="recent-password" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required /></>}
         {error && <p role="alert" className="text-sm text-destructive">{error}{error.includes("设置") && <a href="/settings/two-factor" className="underline"> 前往安全设置</a>}</p>}
         <div className="flex gap-2"><Button type="button" variant="outline" disabled={busy} onClick={() => finish(false)}>取消</Button><Button type="submit" disabled={busy}>{busy ? "正在验证…" : "验证并继续"}</Button></div>
       </form>
       <Button type="button" variant="outline" className="mt-3 w-full" disabled={busy} onClick={() => void verifyPasskey()}>使用 Passkey 验证</Button>
-    </section>
-  </div>;
+    </DialogContent>
+  </Dialog>;
 }

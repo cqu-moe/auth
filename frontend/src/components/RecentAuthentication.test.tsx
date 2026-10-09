@@ -19,16 +19,37 @@ it("allows a Passkey alone to complete the pending operation only after the serv
     return Response.json({ verified: accepted }, { status: accepted ? 200 : 401 });
   });
   webauthn.startAuthentication.mockResolvedValue({ id: "registered-key", response: {} });
-  const container = await renderUi(createElement(RecentAuthentication));
+  await renderUi(createElement(RecentAuthentication));
   let completed = false;
   await act(async () => { void requestAuthentication("admin").then(result => { completed = result; }); });
-  const button = () => Array.from(container.querySelectorAll("button")).find(item => item.textContent === "使用 Passkey 验证")!;
+  const button = () => Array.from(document.querySelectorAll("button")).find(item => item.textContent === "使用 Passkey 验证")!;
   await click(button());
   expect(completed).toBe(false);
-  expect(container.querySelector('[role="alert"]')?.textContent).toContain("Passkey");
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain("Passkey");
   accepted = true;
   await click(button());
   expect(completed).toBe(true);
-  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
   expect(requests.some(path => path.endsWith("/security/challenge") || path.endsWith("/security/complete"))).toBe(false);
+});
+
+
+it("cancels with Escape and restores focus to the initiating control", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({ verified: false }));
+  let result: boolean | undefined;
+  const container = await renderUi(createElement("div", null,
+    createElement("button", { onClick: () => { void requestAuthentication("mfa").then(value => { result = value; }); } }, "安全操作"),
+    createElement(RecentAuthentication)));
+  const trigger = container.querySelector("button")!;
+  trigger.focus();
+  await click(trigger);
+  const dialog = document.querySelector('[role="dialog"]')!;
+  expect(dialog).not.toBeNull();
+  await act(async () => { trigger.focus(); });
+  expect(dialog.contains(document.activeElement)).toBe(true);
+  await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(result).toBe(false);
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  expect(document.activeElement).toBe(trigger);
 });
