@@ -452,13 +452,14 @@ admin.patch("/users/:id/cqu-binding", async (c) => {
   }
 
   try {
-    const db = drizzle(c.env.DATABASE);
-    // D1: 翻转该用户所有绑定地址行的状态。幂等 — 0 行匹配（无绑定）是安全 no-op。
-    // 凭证 NOT 删除。
-    await db
-      .update(cquBindAddresses)
-      .set({ status })
-      .where(eq(cquBindAddresses.userId, userId));
+    const pending = await c.env.DATABASE.prepare("SELECT 1 AS pending FROM cqu_bind_addresses WHERE user_id = ? AND status = 'deleting' UNION ALL SELECT 1 FROM cqu_credentials WHERE user_id = ? AND status = 'deleting'").bind(userId, userId).first();
+    if (pending) return errorResponse(c, "CQU_BINDING_UPDATE_FAILED", "解绑尚未完成，请先重试解绑", 409);
+    // Include legacy credentials-only accounts. Preserve a concurrently started
+    // deletion: administrative reactivation must never erase that intent.
+    await c.env.DATABASE.batch([
+      c.env.DATABASE.prepare("UPDATE cqu_bind_addresses SET status = ? WHERE user_id = ? AND status != 'deleting'").bind(status, userId),
+      c.env.DATABASE.prepare("UPDATE cqu_credentials SET status = ? WHERE user_id = ? AND status != 'deleting'").bind(status, userId),
+    ]);
 
     // DO：revoked → /revoke（status → revoked，deleteAlarm，清 loginInFlight）；
     // active → /unrevoke（status → expired，setAlarm now → keepalive/relogin）。

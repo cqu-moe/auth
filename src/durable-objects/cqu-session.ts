@@ -594,7 +594,8 @@ export class CquSessionDO extends DurableObject<Env> {
           return Response.json(status);
         }
         case "destroy": {
-          await this.destroy();
+          const body = await request.json<{ userId?: string }>().catch(() => ({} as { userId?: string }));
+          await this.destroy(body.userId);
           return Response.json({ success: true });
         }
         case "revoke": {
@@ -731,13 +732,37 @@ export class CquSessionDO extends DurableObject<Env> {
   // 是新增的真实出票动作 —— 故 runKeepAlive 的 alive 成功路径已自行补「st_mint 审计 + 计入限流窗口」
   // (source:"keepalive", 见 recordKeepaliveMint), 让审计/限流覆盖 keepalive 的出票面(~24/账号/天)。
   // 区别: keepalive 是后台系统探活, **记账但豁免拒绝**(不调 stMintThrottled, 被限流挡掉会破坏会话保鲜)。
+  // D1 records the user's/admin's intent before a DO call can fail. Check it
+  // at every capability checkpoint, and use the existing alarm to finish
+  // orphan cleanup after an unavailable DO recovers.
+  private async reconcileBinding(): Promise<boolean> {
+    await this.loadState();
+    if (!this.state) return false;
+    const userId = this.state.userId;
+    const revision = await this.ctx.storage.get<number>("bindingRevision");
+    const rows = await this.env.DATABASE.prepare(
+      "SELECT status FROM cqu_bind_addresses WHERE user_id = ? UNION ALL SELECT status FROM cqu_credentials WHERE user_id = ?"
+    ).bind(userId, userId).all<{ status: string }>();
+    // A newer bind/unbind may have completed while D1 was in flight.
+    if (revision !== await this.ctx.storage.get<number>("bindingRevision")) return this.reconcileBinding();
+    if (!rows.results.length || rows.results.some(row => row.status === "deleting")) {
+      await this.destroy();
+      return false;
+    }
+    if (rows.results.some(row => row.status === "revoked")) {
+      if (await this.getStatus() !== "revoked") await this.revoke();
+      return false;
+    }
+    return true;
+  }
+
   private async getServiceTicket(arg: {
     service?: string;
     serviceUrl?: string;
     clientId?: string | null;
     source?: string;
   }): Promise<string> {
-    await this.loadState();
+    if (!(await this.reconcileBinding())) throw new CquSsoError("SESSION_INACTIVE", "CQU binding inactive");
     const status = await this.getStatus();
     if (!this.state || status !== "active") {
       // needs_reauth: 凭据真死(熔断终态), 区分于一般 SESSION_INACTIVE, 让前端提示重绑。
@@ -878,7 +903,7 @@ export class CquSessionDO extends DurableObject<Env> {
     console.log(
       JSON.stringify(
         buildStMintAudit({
-          userId: this.state.userId,
+          userId: sourceSession.userId,
           clientId,
           host,
           broad,
@@ -887,6 +912,9 @@ export class CquSessionDO extends DurableObject<Env> {
         })
       )
     );
+    if (!(await this.reconcileBinding()) || await this.getStatus() !== "active") {
+      throw new CquSsoError("SESSION_INACTIVE", "CQU binding changed while minting");
+    }
     return ticket;
   }
 
@@ -952,7 +980,7 @@ export class CquSessionDO extends DurableObject<Env> {
     source: string;
     deadlineAt?: number;
   }): Promise<{ captures: HarvestCapture[]; fetches: HarvestFetch[] }> {
-    await this.loadState();
+    if (!(await this.reconcileBinding())) throw new CquSsoError("SESSION_INACTIVE", "CQU binding inactive");
     // RPC 传入的绝对截止时间在此归一化(非法/已过期按 Task 02 受控失败);
     // 整个 harvest(含唯一一次恢复登录与重试)共用这一条预算。
     const deadlineAt = resolveBrowserDeadline(arg.deadlineAt, Date.now());
@@ -1102,6 +1130,9 @@ export class CquSessionDO extends DurableObject<Env> {
           await this.markSessionExpired(sourceSession);
         }
         throw error;
+      }
+      if (!(await this.reconcileBinding()) || await this.getStatus() !== "active") {
+        throw new CquSsoError("SESSION_INACTIVE", "CQU binding changed during harvest");
       }
       if (result.state !== undefined) {
         const complete = canonicalRecipe.capture.every((pattern) => result.captures.some((capture) =>
@@ -1456,7 +1487,7 @@ export class CquSessionDO extends DurableObject<Env> {
     bound: boolean;
     epoch: number;
   }> {
-    await this.loadState();
+    await this.reconcileBinding();
     const [storedEpoch, status, credentials] = await Promise.all([
       this.ctx.storage.get<number>("quickloginBindingEpoch"),
       this.getStatus(),
@@ -1850,9 +1881,24 @@ export class CquSessionDO extends DurableObject<Env> {
     });
   }
 
-  private async destroy(): Promise<void> {
+  private async flushBindingDeletion(): Promise<void> {
+    const userId = await this.ctx.storage.get<string>("bindingDeletion");
+    if (!userId) return;
+    try {
+      await this.env.DATABASE.batch([
+        this.env.DATABASE.prepare("DELETE FROM cqu_credentials WHERE user_id = ? AND status = 'deleting'").bind(userId),
+        this.env.DATABASE.prepare("DELETE FROM cqu_bind_addresses WHERE user_id = ? AND status = 'deleting'").bind(userId),
+      ]);
+      await this.ctx.storage.delete("bindingDeletion");
+    } catch (error) {
+      await this.scheduleSessionAlarm(Date.now() + RETRY_INTERVAL_MS);
+      throw error;
+    }
+  }
+
+  private async destroy(requestedUserId?: string): Promise<void> {
     await this.loadState();
-    const ownerUserId = this.state?.userId;
+    const ownerUserId = this.state?.userId ?? requestedUserId;
     await this.captureInterruptedLogins(true);
     await this.ctx.storage.transaction(async (tx) => {
       const values = await tx.list();
@@ -1864,7 +1910,10 @@ export class CquSessionDO extends DurableObject<Env> {
         credentialRevision: ((values.get("credentialRevision") as number | undefined) ?? previousEpoch) + 1,
         quickloginBindingEpoch: Number.isSafeInteger(previousEpoch) && previousEpoch >= 0 ? Math.min(previousEpoch + 1, Number.MAX_SAFE_INTEGER) : 1,
       };
-      if (ownerUserId) preserved.bindingOutbox = { ownerUserId, revision: preserved.bindingRevision };
+      if (ownerUserId) {
+        preserved.bindingOutbox = { ownerUserId, revision: preserved.bindingRevision };
+        preserved.bindingDeletion = ownerUserId;
+      } else if (values.has("bindingDeletion")) preserved.bindingDeletion = values.get("bindingDeletion");
       if (pending.length) preserved.interruptedLogins = pending;
       for (const item of pending) {
         const key = this.browserRouteKey(item.token);
@@ -1882,6 +1931,7 @@ export class CquSessionDO extends DurableObject<Env> {
     });
     this.state = null;
     this.quickloginFlights.clear();
+    await this.flushBindingDeletion();
     if ((await this.ctx.storage.get<InterruptedLogin[]>("interruptedLogins"))?.length) await this.scheduleSessionAlarm(Date.now());
     await this.flushBindingOutbox();
   }
@@ -1926,6 +1976,9 @@ export class CquSessionDO extends DurableObject<Env> {
   }
 
   async alarm(): Promise<void> {
+    await this.flushBindingDeletion();
+    await this.loadState();
+    if (this.state) await this.reconcileBinding();
     await this.flushBindingOutbox();
     const transition = await this.ctx.storage.get<{ id: string; deadlineAt: number }>("bindingTransition");
     if (transition && transition.deadlineAt + BROWSER_CLEANUP_MARGIN_MS < Date.now()) await this.rollbackBindingTransition(transition.id);
@@ -3202,6 +3255,7 @@ export class CquSessionDO extends DurableObject<Env> {
       } catch {
         // 诊断失败绝不影响登录主流程。
       }
+      if (!(await this.reconcileBinding())) return "failed";
       let committed = false;
       await this.ctx.storage.transaction(async (tx) => {
         const [currentLock, currentBindingEpoch, currentStatus, storedState] =

@@ -7,7 +7,7 @@
 //     同一对象, 故 spy 对 DO 内出站生效。
 //   · alarm() 直接经 runInDurableObject(stub, inst => inst.alarm()) 驱动(faithful 到方法体);
 //     不走 runDurableObjectAlarm —— 后者需 storage 里有已排定的 alarm, 与直接 seed state 不契合。
-import { env, runInDurableObject } from "cloudflare:test";
+import { applyD1Migrations, env, runInDurableObject } from "cloudflare:test";
 import { vi, type MockInstance } from "vitest";
 import type { CquStorageState } from "../../src/services/cqu-sso";
 import { encrypt } from "../../src/services/crypto";
@@ -55,6 +55,7 @@ export function validAtrustStorageState(
 }
 
 export interface SeedOpts {
+  userId?: string;
   status?: string;
   storageState?: CquStorageState | null;
   loginAt?: number;
@@ -67,12 +68,15 @@ export async function seedSession(
   stub: DurableObjectStub,
   opts: SeedOpts = {}
 ): Promise<void> {
+  await applyD1Migrations(env.DATABASE, env.TEST_MIGRATIONS);
+  const userId = opts.userId ?? "u1";
+  await env.DATABASE.prepare("INSERT INTO cqu_bind_addresses (token,user_id,sender_whitelist,status) VALUES (?,?,'[]','active') ON CONFLICT(user_id) DO UPDATE SET status = 'active'").bind(`fixture-${userId}`, userId).run();
   const now = Date.now();
   await runInDurableObject(stub, async (_inst, state) => {
     await state.storage.put({
       status: opts.status ?? "active",
       state: {
-        userId: "u1",
+        userId,
         studentId: "2020000001",
         storageState:
           opts.storageState === undefined ? validStorageState() : opts.storageState,
