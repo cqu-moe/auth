@@ -274,6 +274,18 @@ export const AUTH_OPERATIONS = [
   },
   {
     "method": "POST",
+    "path": "/security/challenge"
+  },
+  {
+    "method": "POST",
+    "path": "/security/complete"
+  },
+  {
+    "method": "GET",
+    "path": "/security/status"
+  },
+  {
+    "method": "POST",
     "path": "/send-verification-email"
   },
   {
@@ -310,15 +322,7 @@ export const AUTH_OPERATIONS = [
   },
   {
     "method": "POST",
-    "path": "/two-factor/send-otp"
-  },
-  {
-    "method": "POST",
     "path": "/two-factor/verify-backup-code"
-  },
-  {
-    "method": "POST",
-    "path": "/two-factor/verify-otp"
   },
   {
     "method": "POST",

@@ -13,6 +13,7 @@ import { isScheduleBindingContinuation } from "../lib/cqu-bind-continuation";
 
 export default function Login() {
   const navigate = useNavigate();
+  const { refetch: refetchSession } = authClient.useSession();
   const [searchParams] = useSearchParams();
   const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
   const scheduleSource = isScheduleBindingContinuation(postLoginRedirect, window.location.origin);
@@ -35,6 +36,7 @@ export default function Login() {
     } else {
       const destination = getLoginNavigationDestination(data, postLoginRedirect);
       if (!destination) return;
+      await refetchSession();
       if (isExternalHttpTarget(destination)) {
         window.location.assign(destination);
         return;

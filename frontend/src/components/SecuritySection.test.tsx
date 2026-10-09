@@ -10,6 +10,7 @@ import {
   setInputValue,
   submit,
 } from "../lib/api/quicklogin.testbots";
+import RecentAuthentication from "./RecentAuthentication";
 import SecuritySection from "./SecuritySection";
 
 const authClient = vi.hoisted(() => ({ changePassword: vi.fn() }));
@@ -30,6 +31,7 @@ describe("security settings section", () => {
   afterEach(async () => {
     await cleanupUi();
     authClient.changePassword.mockReset();
+    vi.restoreAllMocks();
   });
 
   it("shows an unconfigured account and points to the dedicated settings page", () => {
@@ -57,11 +59,13 @@ describe("security settings section", () => {
 
   it("revokes other sessions when changing the password", async () => {
     authClient.changePassword.mockResolvedValue({});
+    vi.spyOn(globalThis, "fetch").mockImplementation(async input => Response.json({ verified: String(input).endsWith("/challenge") }));
     const container = await renderUi(
       createElement(
         MemoryRouter,
         { initialEntries: ["/settings"] },
-        createElement(SecuritySection, { twoFactorEnabled: false })
+        createElement(SecuritySection, { twoFactorEnabled: false }),
+        createElement(RecentAuthentication)
       )
     );
 
@@ -70,6 +74,9 @@ describe("security settings section", () => {
     await setInputValue(container.querySelector<HTMLInputElement>("#newPassword")!, "new-password-123");
     await setInputValue(container.querySelector<HTMLInputElement>("#confirmNewPassword")!, "new-password-123");
     await submit(container.querySelector<HTMLFormElement>("#change-password-form")!);
+    expect(authClient.changePassword).not.toHaveBeenCalled();
+    await setInputValue(container.querySelector<HTMLInputElement>("#recent-password")!, "old-password");
+    await submit(container.querySelector<HTMLFormElement>('[role="dialog"] form')!);
 
     expect(authClient.changePassword).toHaveBeenCalledWith({
       currentPassword: "old-password",

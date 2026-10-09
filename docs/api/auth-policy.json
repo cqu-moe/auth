@@ -865,6 +865,24 @@
   },
   {
     "method": "POST",
+    "path": "/api/v1/auth/security/challenge",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/security/complete",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "GET",
+    "path": "/api/v1/auth/security/status",
+    "policy": "session",
+    "source": "better-auth-1.7.7"
+  },
+  {
+    "method": "POST",
     "path": "/api/v1/auth/send-verification-email",
     "policy": "public",
     "source": "better-auth-1.7.7"
@@ -919,19 +937,7 @@
   },
   {
     "method": "POST",
-    "path": "/api/v1/auth/two-factor/send-otp",
-    "policy": "session-or-two-factor-cookie",
-    "source": "better-auth-1.7.7"
-  },
-  {
-    "method": "POST",
     "path": "/api/v1/auth/two-factor/verify-backup-code",
-    "policy": "session-or-two-factor-cookie",
-    "source": "better-auth-1.7.7"
-  },
-  {
-    "method": "POST",
-    "path": "/api/v1/auth/two-factor/verify-otp",
     "policy": "session-or-two-factor-cookie",
     "source": "better-auth-1.7.7"
   },

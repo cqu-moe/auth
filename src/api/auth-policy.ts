@@ -48,6 +48,7 @@ const AUTH_POLICIES = new Map<string, AuthPolicyKind>([
     "POST /admin/unban-user", "POST /admin/update-user",
   ]),
   ...entries("session", [
+    "POST /security/challenge", "POST /security/complete", "GET /security/status",
     "GET /account-info", "POST /change-email", "POST /change-password",
     "POST /delete-user", "POST /email-otp/change-email",
     "POST /email-otp/request-email-change", "POST /email-otp/send-verification-otp",

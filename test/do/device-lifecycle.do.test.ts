@@ -104,6 +104,10 @@ describe("interactive device lifetime", () => {
     const otherHeaders = new Headers({ cookie: `${ctx.authCookies.sessionToken.name}=${other!.token}.${await makeSignature(other!.token, env.BETTER_AUTH_SECRET)}` });
     const headers = new Headers(fixture.websiteSession.headers);
     headers.set("origin", env.BETTER_AUTH_URL); headers.set("content-type", "application/json");
+    const proof = await fixture.authHandler(new Request(`${env.BETTER_AUTH_URL}/api/v1/auth/security/challenge`, {
+      method: "POST", headers, body: JSON.stringify({ password: "old-test-password", purpose: "password" }),
+    }));
+    expect(proof.status).toBe(200);
     const response = await fixture.authHandler(new Request(`${env.BETTER_AUTH_URL}/api/v1/auth/change-password`, {
       method: "POST", headers, body: JSON.stringify({ currentPassword: "old-test-password", newPassword: "new-test-password", revokeOtherSessions: false }),
     }));

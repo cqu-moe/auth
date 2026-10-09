@@ -1,3 +1,4 @@
+import RecentAuthentication from "./components/RecentAuthentication";
 import { useEffect, useRef } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { PageState } from "@cqu-moe/ui";
@@ -62,6 +63,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <PostHogLifecycle />
+      <RecentAuthentication />
       <EmailVerificationGate>
         <Routes>
           <Route path="/" element={<RootRedirect />} />
