@@ -10,11 +10,12 @@ type WhereValue = string | number | boolean | string[] | Date | number[] | null;
 interface WhereField {
   field: string;
   value: WhereValue;
-  operator?: "eq";
+  operator?: "eq" | "starts_with";
 }
 
 interface RefreshTokenRow extends OAuthTokenRow {
   userId: string;
+  sessionId?: string | null;
   revoked?: Date | null;
 }
 
@@ -108,9 +109,28 @@ export async function assertRefreshTokenUserNotBanned(
     model: "user",
     where: [{ field: "id", value: row.userId }],
   });
-  if (!user || !isBanned(user)) return;
+  const session = row.sessionId ? await adapter.findOne<{ userId: string; expiresAt: Date }>({
+    model: "session", where: [{ field: "id", value: row.sessionId }],
+  }) : null;
+  if (user && !isBanned(user) && session?.userId === row.userId && new Date(session.expiresAt).getTime() > Date.now()) return;
   throw new APIError("BAD_REQUEST", {
     code: "INVALID_GRANT",
     message: "invalid refresh token",
   });
+}
+
+export async function revokeSessionOAuthTokens(adapter: OAuthTokenAdapter, sessionId: string) {
+  for (;;) {
+    const rows = await adapter.findMany<{ id: string }>({ model: "oauthRefreshToken", where: [
+      { field: "sessionId", value: sessionId }, { field: "revoked", value: null },
+    ], limit: 100 });
+    if (!rows.length) return;
+    for (const row of rows) await adapter.update({ model: "oauthRefreshToken", where: [{ field: "id", value: row.id }], update: { revoked: new Date() } });
+  }
+}
+
+export async function clearDeviceTrust(adapter: OAuthTokenAdapter, userId: string) {
+  for (const prefix of ["trust-device-", "2fa-"]) await adapter.deleteMany({ model: "verification", where: [
+    { field: "value", value: userId }, { field: "identifier", operator: "starts_with", value: prefix },
+  ] });
 }

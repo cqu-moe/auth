@@ -14,7 +14,7 @@ describe("request authentication", () => {
     fixture.seedBearerIdentity("user-a", "client-a");
     try {
       verifyBearerToken.mockResolvedValue({
-        sub: "user-a",
+        sub: "user-a", sid: "session-user-a",
         azp: "client-a",
         scope: "cqu:ticket:jwxt",
       });
@@ -39,7 +39,7 @@ describe("request authentication", () => {
     const fixture = createHttpFixture();
     try {
       verifyBearerToken.mockResolvedValue({
-        sub: "user-a",
+        sub: "user-a", sid: "session-user-a",
         scope: "cqu:ticket:jwxt",
       });
 

@@ -12,6 +12,9 @@ import { Resend } from "resend";
 import type { Env } from "./types";
 import { resolveCaps, subsystemForAccessToken } from "./services/entitlements";
 import { isCquMoeHost } from "./utils/cookie-domain";
+import { verifyAuthAccessToken } from "./services/auth-access-token";
+import { currentDeviceAuthority } from "./services/device-authority";
+import { getCquBinding } from "./services/cqu-binding";
 import { authUrls } from "./auth-config";
 import { DEVICE_SCOPE } from "./services/quicklogin/contracts";
 import {
@@ -22,6 +25,8 @@ import {
 } from "./services/quicklogin/oauth-grants";
 import {
   assertRefreshTokenUserNotBanned,
+  revokeSessionOAuthTokens,
+  clearDeviceTrust,
   isBanned,
   revokeUserOAuthTokens,
   type OAuthTokenAdapter,
@@ -100,6 +105,9 @@ export function createAuth(env: Env, request: Request) {
         emailAndPassword: {
           enabled: true,
           revokeSessionsOnPasswordReset: true,
+          onPasswordReset: async ({ user }) => {
+            await clearDeviceTrust((await createAuth(env, request).$context).adapter, user.id);
+          },
           sendResetPassword: async ({ user, url }) => {
             void getResend().emails.send({
               from: "auth.cqu.moe <noreply@cqu.moe>",
@@ -110,6 +118,14 @@ export function createAuth(env: Env, request: Request) {
           },
         },
         databaseHooks: {
+          session: {
+            delete: {
+              before: async (session, context) => {
+                const adapter = context?.context.adapter ?? (await createAuth(env, request).$context).adapter;
+                await revokeSessionOAuthTokens(adapter, session.id);
+              },
+            },
+          },
           user: {
             update: {
               // Every ban path (native /admin/ban-user, admin routes, v1 API)
@@ -134,11 +150,46 @@ export function createAuth(env: Env, request: Request) {
             if (["/two-factor/verify-totp", "/two-factor/verify-backup-code"].includes(ctx.path) && ctx.context.newSession && !(ctx.context.returned instanceof APIError)) {
               await recordAuthenticationProof(ctx.context, ctx.context.newSession, "mfa", true);
             }
+            if (ctx.path === "/change-password" && !(ctx.context.returned instanceof APIError) && ctx.context.session) {
+              const current = ctx.context.session.session;
+              const sessions = await ctx.context.internalAdapter.listSessions(current.userId);
+              await ctx.context.internalAdapter.deleteSessions(sessions.filter(session => session.id !== current.id).map(session => session.token));
+              await clearDeviceTrust(ctx.context.adapter, current.userId);
+            }
+            if (["/revoke-sessions", "/revoke-other-sessions", "/revoke-session"].includes(ctx.path) &&
+                !(ctx.context.returned instanceof APIError) && ctx.context.session) {
+              await clearDeviceTrust(ctx.context.adapter, ctx.context.session.user.id);
+            }
+            if (ctx.path !== "/oauth2/introspect") return;
+            const result = ctx.context.returned as Record<string, unknown> | undefined;
+            if (!result || result.active !== true) return;
+            const authority = await currentDeviceAuthority(ctx.context.adapter, result);
+            if (!authority) return ctx.json({ active: false });
+            const { user, client } = authority;
+            const sub = subsystemForAccessToken({ user, metadata: client.metadata });
+            // skipConsent and subsystem are administrator-controlled client approval.
+            // Profile/email remain exclusively in native scope-filtered userinfo.
+            const response = { ...result };
+            delete response.user;
+            delete response.caps;
+            delete response.cquBindStatus;
+            if (!client.skipConsent || !sub) return ctx.json(response);
+            const { bindStatus } = await getCquBinding(env.DATABASE, user.id);
+            return ctx.json({ ...response,
+              caps: await resolveCaps(env.DATABASE, user.id, sub), cquBindStatus: bindStatus,
+            });
           }),
           before: createAuthMiddleware(async (ctx) => {
             await enforceAuthenticationStrength(ctx);
             if (ctx.path === "/two-factor/enable" && ctx.body?.method === "otp") {
               throw new APIError("FORBIDDEN", { message: "邮箱验证码不能作为第二因子" });
+            }
+            if (ctx.path === "/change-password") ctx.body = { ...ctx.body, revokeOtherSessions: false };
+            if (ctx.path === "/oauth2/userinfo") {
+              const authorization = ctx.headers?.get("authorization");
+              if (!authorization?.startsWith("Bearer ")) throw new APIError("UNAUTHORIZED", { code: "INVALID_TOKEN", message: "Invalid access token" });
+              try { await verifyAuthAccessToken(authorization.slice(7), env); }
+              catch { throw new APIError("UNAUTHORIZED", { code: "INVALID_TOKEN", message: "Invalid access token" }); }
             }
             // Our authorization-code policy has no confidential OIDC exception.
             const authorizationQuery = { ...ctx.query, ...ctx.body };
