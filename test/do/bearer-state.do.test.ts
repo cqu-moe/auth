@@ -16,7 +16,7 @@ describe("existing bearer tokens observe current account and client state", () =
     const auth = createAuth(env, new Request(`${env.BETTER_AUTH_URL}/api/v1/auth/jwks`));
     const ctx = await auth.$context;
     const signed = await auth.api.signJWT({ body: {
-      payload: { sub: userId, azp: OTHER_CLIENT_ID, scope: "cqu:ticket:jwxt" },
+      payload: { sid: (await ctx.adapter.findOne<{ id: string }>({ model: "session", where: [{ field: "userId", value: userId }] }))!.id, sub: userId, azp: OTHER_CLIENT_ID, scope: "cqu:ticket:jwxt" },
       overrideOptions: { jwt: {
         issuer: `${env.BETTER_AUTH_URL}/api/auth`,
         audience: `${env.BETTER_AUTH_URL}/api/auth`, expirationTime: "15m",
