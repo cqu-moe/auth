@@ -167,9 +167,8 @@ describe("Better Auth migration baseline", () => {
       ]));
       expect(ctx.authCookies).toMatchObject({
         sessionToken: {
-          name: "__Secure-better-auth.session_token",
+          name: "__Host-auth-v2.session_token",
           attributes: {
-            domain: "cqu.moe",
             path: "/",
             secure: true,
             httpOnly: true,
@@ -178,8 +177,8 @@ describe("Better Auth migration baseline", () => {
           },
         },
         sessionData: {
-          name: "__Secure-better-auth.session_data",
-          attributes: { domain: "cqu.moe", path: "/", maxAge: 300 },
+          name: "__Host-auth-v2.session_data",
+          attributes: { path: "/", maxAge: 300 },
         },
       });
 

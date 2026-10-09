@@ -1,21 +1,28 @@
 # Auth 安全升级实施记录
 
-总规格：[#41](https://github.com/cqu-moe/auth/issues/41)。集成分支：`codex/auth-security-integration`，基线 `4ea1cf0`。草稿 PR：[#52](https://github.com/cqu-moe/auth/pull/52)。
+总规格 [#41](https://github.com/cqu-moe/auth/issues/41)，Auth 集成分支 `codex/auth-security-integration`，PR [#52](https://github.com/cqu-moe/auth/pull/52)。本记录更新至最终切换实现；没有生产部署或远端迁移写入。最终发布与待人工验收见 [切换手册](../auth-cutover.md)。
 
-本记录区分代码、测试和部署。当前未部署生产，任务仅在对应验收完成后记为完成。
+## 已交付实现
 
-## 接入方基线核实
+- #36 / #37：存量 JWT 验签后校验当前用户、客户端和会话；学校解绑以权威删除状态拒绝新访问，D1/DO 清理失败可重试且不误报成功。
+- #42：Better Auth 1.7.7 与原生 OAuth/D1 存储，移除 Auth 的 KV 依赖，不移除业务系统自己的缓存或会话存储。
+- #43 / #44：当前用户、当前会话、用途绑定的五分钟近期认证；管理员强认证准入；取消邮箱第二因子；可选多个 Passkey，服务端 UV 校验后可独立登录与改密、MFA 管理，无需额外密码/TOTP。
+- #45 / #46：设备与中央会话撤销、单站退出分离；正常改密保留当前已验证会话；人工恢复原子作废全部旧认证、一次返回随机密码，保留学校绑定/权益/RPC 同步；阻止已开始的旧认证在恢复后回写。
+- #47 / #48：可选 DPoP 与共享重放保护，普通 Bearer 兼容；私有 Worker RPC 的服务身份、方法范围、当前用户/业务权益/绑定状态检查。API/MCP 平台仍未实施，仅保留现有身份与权限概念。
+- #49：Schedule 独立会话源码 `9d6cd7f`，独立 PR [#123](https://github.com/cqu-moe/schedule-cloudflare/pull/123)，不是已部署版本。
+- #50：UC 以用户确认的现用源码 `faa7fa3` 为基线，交付 `23b1c1f`；保留原生 EmDash 身份/成员/文件权限和 SESSION KV。仓库没有 remote，未推到旧仓库。
+- #51：中央 `__Host-auth-v2.*`、旧 Cookie 有界清理、收紧可信写入来源；第一方已批准权限免同意且不可通过 consent API 停用；兼容 QuickLogin 0.4.1 的 `prompt=consent`；保留下载站精确只读 CORS 例外。0013 在最终维护窗口作废共享凭据时代的会话、设备令牌和待完成认证，不删除账号/因子/业务资料。
 
-- Schedule：仓库 `cqu-moe/schedule-cloudflare`，当前源码 `e2114ae2abcd461ebab20fb72694d3f2ed8a46b2`。只读查询确认生产 Worker `schedule-beta-cqu-moe` 的流量版本 `27045a03-6584-428e-aaec-88498b0b908c`，其中 `GIT_COMMIT=e2114ae`。后台仍通过 `AuthService` RPC。
-- UC：用户确认代码目录 `/Users/uu/Developer/cqu-moe/uc`。主分支只有文档，在用实现位于 `codex/uc-spec-plan`，源码 `faa7fa373b3c0bd1caedf6efc5b0a77723515e6c`。该分支运行手册记录的修复版本 `cdd2a5d0-7c37-4cd6-befa-c530595ba9fb` 与只读查询到的生产 100% 流量版本相同；使用 EmDash、`AUTH` 服务绑定、`MEDIA`、`SESSION`。`uc-old` 不作为迁移对象。UC 当前没有 Git remote，交付应保留本地独立分支，不擅自推入旧仓库。
-- Auth 移除 KV 不意味着移除业务系统自身的缓存或会话存储。消费者迁移分别在自己的仓库隔离实现；Auth 变更统一合入本集成分支。
+## 证据范围
 
-以上只证明部署对象及代码来源，不证明新的 OAuth 登录、退出或浏览器隔离已通过。
+Auth 本轮完整自动验证为 97 个单元/界面测试文件、877 项，以及 41 个 Workers 文件、384 项；类型、生成契约、导入边界及前端构建通过。针对最终 Cookie/来源、GET 与 form POST 免同意、真实设备授权与 consent 所有权，以及下载站精确只读例外另有真实 HTTP/D1 回归。以最终提交的 CI 为最终自动门禁，数量不代替浏览器或生产验收。
 
-## 当前已合入
+父任务实际本地浏览器在 Auth localhost、Schedule 127.0.0.1、UC [::1] 三个不同主机完成登录、单站退出、显式重新登录和中央全设备退出；Schedule 随后返回 401，UC 受保护成员入口跳回登录。密码管理员强认证准入、TOTP 设置、人工随机密码恢复与关闭结果、正常改密保留当前会话也已实测。正式检查路径为 `/api/v1/auth/get-session`；旧 `/api/auth/get-session` 在本应用为 404，不能拿它判断会话是否丢失。
 
-### #36：存量 JWT 的当前状态校验
+以上浏览器操作先于最终 Cookie 名称切换，切换后的浏览器复验仍须另记。Passkey 的密码学 HTTP/D1 测试通过，但实际浏览器虚拟认证器持续返回 NotAllowedError，未完成浏览器绑定。未安装或操作用户真实扩展，也未用真实密码管理器保存凭据。QuickLogin 0.4.1 干净隔离构建通过 96 项测试、类型/构建/包契约与 8 项发布脚本测试，只生成本地 canary，不代表原生 Chrome identity 或学校 Cookie 操作验收。下载站另有类型、构建、检查及六页导航资源验证。
 
-Bearer 验签后读取用户与客户端当前状态，拒绝被封禁、禁用、删除及查询失败。沿用过期封禁语义和请求级缓存，不假定 JWT 必有 access-token 数据行。
+## 生产仍需执行
 
-回归先复现封禁后旧令牌仍可出票（201），修复后返回 401。实现分支报告后端 701 项、Workers 针对性 4 项、后端及 Workers 类型检查通过。学校出票外部效果使用替身，令牌签名、JWKS、HTTP 与 D1 为真实测试路径。尚未代表整份规格的集成测试结果。
+2026-10-09 只读核实：Auth 最新流量版本仍为 `38dd4e9d-f2d6-4157-8b39-8b80ff5738c4`；远端 0010–0013 尚未应用。OAuth 客户端只有 Schedule 和 QuickLogin，查询 rows_written=0；Schedule 尚缺 refresh/RPC 元数据，QuickLogin 尚 skipConsent=false，UC 尚无 OAuth 注册。Schedule 与 UC 已识别当前生产 Worker/源版本，但本次未迁移上线。下载站 `quick-login-website` 的实际版本另已核实；没有 commit 元数据，不声称与本地源码逐字节一致。
+
+发布必须先完成兼容 Auth、消费者配置/迁移和人工接入清单，再进入维护窗口应用最终凭据退休并发布隔离 Auth。禁止直接把包含 0013 的最终分支作为第一阶段部署，也不允许回滚成根域 Cookie、通配可信来源或旧凭据。完整命令、顺序、失败处理与待人工门禁均在切换手册。

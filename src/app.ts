@@ -46,6 +46,12 @@ export function createApp() {
     }
     if (c.req.method !== "OPTIONS") {
       await next();
+      // Native token responses replace headers set before next(). Restore only
+      // the configured extension's public-client token CORS, without credentials.
+      if (origin && origin === c.env.QUICKLOGIN_EXTENSION_ORIGIN && c.req.method === "POST" && path === "/api/v1/auth/oauth2/token") {
+        c.header("Access-Control-Allow-Origin", origin);
+        c.header("Vary", "Origin", { append: true });
+      }
       if (websiteStatus) {
         c.header("Access-Control-Allow-Origin", origin!);
         c.header("Access-Control-Allow-Credentials", "true");
