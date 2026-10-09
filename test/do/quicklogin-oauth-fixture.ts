@@ -90,8 +90,7 @@ async function createClient(
       tokenEndpointAuthMethod: "none",
       grantTypes: ["authorization_code", "refresh_token"],
       responseTypes: ["code"],
-      public: true,
-      type: "user-agent-based",
+      applicationType: "web",
       requirePKCE: true,
       referenceId: null,
       metadata: input.metadata,
@@ -172,6 +171,10 @@ async function authorizeInstall(
   const authorizeResponse = await fixture.authHandler(
     new Request(authorizeUrl, { headers: authorizeHeaders, redirect: "manual" })
   );
+  if (!authorizeResponse.ok && authorizeResponse.status !== 302) {
+    const error = await authorizeResponse.json<{ error?: string; code?: string }>();
+    throw new OAuthFixtureError("authorize", authorizeResponse.status, error.error ?? error.code);
+  }
   const consentUrl = await redirectTarget(authorizeResponse);
   if (consentUrl.searchParams.get("error") || consentUrl.pathname !== "/oauth/authorize") {
     throw new OAuthFixtureError("authorize", authorizeResponse.status,

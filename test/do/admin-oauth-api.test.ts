@@ -73,6 +73,10 @@ describe("admin OAuth API v1", () => {
       expect(created.headers.get("cache-control")).toBe("no-store");
       const client = await created.json() as { data: { client_id: string; client_secret: string } };
       expect(client.data.client_secret).toBeTruthy();
+      const disablePkce = await fixture.request(`/api/v1/admin/oauth-clients/${client.data.client_id}`, {
+        method: "PATCH", headers, body: JSON.stringify({ require_pkce: false }),
+      });
+      expect(disablePkce.status).toBe(400);
 
       const list = await fixture.request("/api/v1/admin/oauth-clients", { headers });
       const item = (await list.json() as { data: Array<Record<string, unknown>> }).data

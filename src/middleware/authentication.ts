@@ -1,5 +1,5 @@
 import type { Context, MiddlewareHandler } from "hono";
-import { verifyAccessToken } from "better-auth/oauth2";
+import { verifyBearerToken } from "better-auth/oauth2";
 import { createAuth } from "../auth";
 import { problem } from "../api/problem";
 import type { HonoEnv, Principal, RequestAuthCache } from "../types";
@@ -55,7 +55,7 @@ async function bearerPrincipal(c: Context<HonoEnv>): Promise<Principal | null> {
 
     try {
       const { issuer, jwksUrl } = authUrls(c.env.BETTER_AUTH_URL);
-      const payload = await verifyAccessToken(token, {
+      const payload = await verifyBearerToken(token, {
         verifyOptions: { issuer, audience: issuer },
         jwksUrl,
       });

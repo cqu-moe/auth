@@ -1,7 +1,7 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 type BoundStatement = {
-  run<T = Record<string, unknown>>(): Promise<D1Result<T>>;
+  all<T = Record<string, unknown>>(): Promise<D1Result<T>>;
 };
 
 function result<T>(results: T[], changes = 0): D1Result<T> {
@@ -64,7 +64,7 @@ export function createSqliteD1(database: DatabaseSync): D1Database {
     async batch(statements: BoundStatement[]) {
       database.exec("BEGIN");
       try {
-        const results = await Promise.all(statements.map((statement) => statement.run()));
+        const results = await Promise.all(statements.map((statement) => statement.all()));
         database.exec("COMMIT");
         return results;
       } catch (error) {

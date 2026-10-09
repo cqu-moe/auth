@@ -382,7 +382,7 @@ function OAuthClientEditor({
       grant_types: state.grant_types,
       response_types: state.response_types.length ? state.response_types : ["code"],
       skip_consent: state.skip_consent,
-      require_pkce: state.require_pkce,
+      require_pkce: true,
       enable_end_session: state.enable_end_session,
     };
 
@@ -692,12 +692,7 @@ function OAuthClientEditor({
                     addLabel="添加登出回调 URI"
                   />
                 </div>
-                <Toggle
-                  checked={state.require_pkce}
-                  onChange={(v) => patch("require_pkce", v)}
-                  label="要求 PKCE"
-                  hint="授权码流程强制使用 PKCE"
-                />
+                <p className="text-sm text-muted-foreground">授权码流程强制使用 S256 PKCE。</p>
                 <div className="space-y-1.5">
                   <FieldLabel>令牌端点认证方式 (token_endpoint_auth_method)</FieldLabel>
                   <MenuSelect

@@ -786,6 +786,13 @@
   {
     "host": "auth.cqu.moe",
     "method": "POST",
+    "path": "/api/v1/auth/oauth2/authorize",
+    "operationId": "post_api_v1_auth_oauth2_authorize",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
     "path": "/api/v1/auth/oauth2/client/rotate-secret",
     "operationId": "post_api_v1_auth_oauth2_client_rotate_secret",
     "kind": "canonical"
@@ -830,6 +837,20 @@
     "method": "GET",
     "path": "/api/v1/auth/oauth2/end-session",
     "operationId": "get_api_v1_auth_oauth2_end_session",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/end-session",
+    "operationId": "post_api_v1_auth_oauth2_end_session",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/end-session/confirm",
+    "operationId": "post_api_v1_auth_oauth2_end_session_confirm",
     "kind": "canonical"
   },
   {
@@ -921,6 +942,13 @@
     "method": "GET",
     "path": "/api/v1/auth/oauth2/userinfo",
     "operationId": "get_api_v1_auth_oauth2_userinfo",
+    "kind": "canonical"
+  },
+  {
+    "host": "auth.cqu.moe",
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/userinfo",
+    "operationId": "post_api_v1_auth_oauth2_userinfo",
     "kind": "canonical"
   },
   {

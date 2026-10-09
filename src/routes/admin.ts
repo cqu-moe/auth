@@ -94,7 +94,7 @@ function oauthClientUpdateToSchema(update: Record<string, unknown>): Record<stri
   const map: Record<string, string> = {
     client_name: "name", client_uri: "uri", logo_uri: "icon", tos_uri: "tos",
     policy_uri: "policy", token_endpoint_auth_method: "tokenEndpointAuthMethod",
-    type: "type", subject_type: "subjectType", contacts: "contacts",
+    type: "applicationType", subject_type: "subjectType", contacts: "contacts",
     redirect_uris: "redirectUris", post_logout_redirect_uris: "postLogoutRedirectUris",
     grant_types: "grantTypes", response_types: "responseTypes",
     skip_consent: "skipConsent", enable_end_session: "enableEndSession",
@@ -107,13 +107,7 @@ function oauthClientUpdateToSchema(update: Record<string, unknown>): Record<stri
   if (typeof update.scope === "string") {
     out.scopes = update.scope.split(" ").filter(Boolean);
   }
-  // Keep the public flag in sync with the auth method: the plugin derives
-  // isPublic = (token_endpoint_auth_method === "none") on create, and token
-  // validation reads client.public — so an auth-method edit must update it too,
-  // or a client switched to/from "none" gets stuck with the wrong credential mode.
-  if (typeof update.token_endpoint_auth_method === "string") {
-    out.public = update.token_endpoint_auth_method === "none";
-  }
+  if (update.type === "user-agent-based") out.applicationType = "web";
   return out;
 }
 
@@ -155,7 +149,7 @@ function validateOAuthClientUpdate(
     (update.token_endpoint_auth_method as string | undefined) ??
     existing.tokenEndpointAuthMethod ??
     undefined;
-  const type = (update.type as string | undefined) ?? existing.type ?? undefined;
+  const type = (update.type as string | undefined) ?? (existing.applicationType === "native" ? "native" : existing.tokenEndpointAuthMethod === "none" ? "user-agent-based" : "web");
   const isPublic = authMethod === "none";
   if (type) {
     if (isPublic && type !== "native" && type !== "user-agent-based") {
@@ -717,7 +711,7 @@ interface OAuthClientRow {
   grantTypes?: unknown;
   responseTypes?: unknown;
   scopes?: unknown;
-  type?: string | null;
+  applicationType?: string | null;
   requirePKCE?: boolean | null;
   skipConsent?: boolean | null;
   enableEndSession?: boolean | null;
@@ -787,7 +781,7 @@ admin.get("/oauth-clients", async (c) => {
       // string. Use asArray so a raw JSON-string value (sqlite serialization)
       // is parsed too, not joined as the literal "[\"openid\",...]" token.
       scope: asArray(client.scopes).join(" "),
-      type: client.type ?? null,
+      type: client.applicationType === "native" ? "native" : client.tokenEndpointAuthMethod === "none" ? "user-agent-based" : "web",
       require_pkce: client.requirePKCE ?? false,
       skip_consent: client.skipConsent ?? false,
       enable_end_session: client.enableEndSession ?? false,
@@ -865,7 +859,11 @@ admin.post("/oauth-clients", async (c) => {
   try {
     const result = await auth.api.adminCreateOAuthClient({
       headers: c.req.raw.headers,
-      body: parsed.data as never,
+      body: {
+        ...parsed.data,
+        application_type: parsed.data.type === "native" ? "native" : "web",
+        require_pkce: true,
+      } as never,
     });
     return c.json({ data: result });
   } catch (e) {

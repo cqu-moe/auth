@@ -18,7 +18,7 @@ vi.mock("../auth", () => ({
 vi.mock("better-auth/oauth2", () => ({
   // #21：让「有效签名、任意 scope」的 token 在旧代码里能通过 bearer 分支，
   // 从而证明路由层不再依赖 bearer 鉴权。
-  verifyAccessToken: async () => ({
+  verifyBearerToken: async () => ({
     sub: "current-user",
     azp: "evil-client",
     scope: "openid",
