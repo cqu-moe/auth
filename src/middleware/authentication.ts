@@ -1,11 +1,9 @@
 import { hasAuthenticationProof } from "../services/auth-strength";
 import type { Context, MiddlewareHandler } from "hono";
-import { verifyBearerToken } from "better-auth/oauth2";
+import { verifyAuthAccessTokenRequest } from "../services/auth-access-token";
 import { createAuth } from "../auth";
 import { problem } from "../api/problem";
 import type { HonoEnv, Principal, RequestAuthCache } from "../types";
-import { authUrls } from "../auth-config";
-import { isBanned } from "../services/oauth-tokens";
 
 function getCache(c: Context<HonoEnv>): RequestAuthCache {
   let cache = c.get("requestAuthCache");
@@ -50,33 +48,12 @@ function claimScopes(value: unknown): string[] | null {
 async function bearerPrincipal(c: Context<HonoEnv>): Promise<Principal | null> {
   const cache = getCache(c);
   cache.bearer ??= (async () => {
-    const authorization = c.req.header("Authorization");
-    if (!authorization?.startsWith("Bearer ")) return null;
-    const token = authorization.slice(7);
-    if (!token) return null;
-
     try {
-      const { issuer, jwksUrl } = authUrls(c.env.BETTER_AUTH_URL);
-      const payload = await verifyBearerToken(token, {
-        verifyOptions: { issuer, audience: issuer },
-        jwksUrl,
-      });
+      const payload = await verifyAuthAccessTokenRequest(c.req.raw, c.env);
       const userId = claimString(payload.sub);
       const clientId = claimString(payload.azp ?? payload.client_id);
       const scopes = claimScopes(payload.scope);
       if (!userId || !clientId || !scopes) return null;
-      // JWT access tokens are stateless: an oauthAccessToken row is not a
-      // prerequisite. Check authoritative identities on every request instead.
-      const { adapter } = await createAuth(c.env, c.req.raw).$context;
-      const [user, client] = await Promise.all([
-        adapter.findOne<{ banned?: boolean | null; banExpires?: Date | null }>({
-          model: "user", where: [{ field: "id", value: userId }],
-        }),
-        adapter.findOne<{ disabled?: boolean | null }>({
-          model: "oauthClient", where: [{ field: "clientId", value: clientId }],
-        }),
-      ]);
-      if (!user || isBanned(user) || !client || client.disabled) return null;
       return { kind: "bearer", userId, clientId, scopes } satisfies Principal;
     } catch {
       return null;

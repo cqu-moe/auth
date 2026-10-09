@@ -48,6 +48,7 @@
     "@types/node": "^25.9.1",
     "drizzle-kit": "^0.31.10",
     "jsdom": "28.1.0",
+    "oauth4webapi": "^3.8.8",
     "openapi-typescript": "7.13.0",
     "tsx": "4.23.13",
     "typescript": "^6.0.3",

@@ -6787,6 +6787,7 @@ export interface operations {
                     enable_end_session?: boolean;
                     /** @constant */
                     require_pkce?: true;
+                    dpop_bound_access_tokens?: boolean;
                     /** @enum {string} */
                     subject_type?: "public" | "pairwise";
                     metadata?: {
@@ -6884,6 +6885,7 @@ export interface operations {
                     enable_end_session?: boolean;
                     /** @constant */
                     require_pkce?: true;
+                    dpop_bound_access_tokens?: boolean;
                     disabled?: boolean;
                     metadata?: {
                         [key: string]: unknown;

@@ -55,7 +55,7 @@ for (const path of paths) {
   if (c.req.header('Origin') !== c.env.QUICKLOGIN_EXTENSION_ORIGIN || path.endsWith('/resume-ticket') || path === '/overview') return fail(c, new V3Error('FORBIDDEN'));
   const methods = path === '/capabilities' || path.includes(':operationId') ? 'GET' : 'POST';
   if (c.req.header('Access-Control-Request-Method') && c.req.header('Access-Control-Request-Method') !== methods) return fail(c, new V3Error('FORBIDDEN'));
-  c.header('Access-Control-Allow-Methods', methods); c.header('Access-Control-Allow-Headers', 'Authorization, Content-Type'); return c.body(null, 204);
+  c.header('Access-Control-Allow-Methods', methods); c.header('Access-Control-Allow-Headers', 'Authorization, Content-Type, DPoP'); return c.body(null, 204);
  });
 }
 router.get('/capabilities', c => c.json({ data: { protocolVersion: 3, supportedProtocolVersions: [2,3], minExtensionVersion: '0.2.0', serverBuild: c.env.QUICKLOGIN_SERVER_BUILD || BUILD, features: { reconcile: true, operations: true, receipts: true, overview: true } }, meta: meta(c) }));

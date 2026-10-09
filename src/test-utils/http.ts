@@ -44,6 +44,8 @@ export function createHttpFixture() {
         .run(userId, userId, `${userId}@example.com`);
       database.prepare("INSERT INTO oauthClient (id, clientId, redirectUris) VALUES (?, ?, '[]')")
         .run(clientId, clientId);
+      database.prepare("INSERT INTO session (id,token,userId,expiresAt,createdAt,updatedAt) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(`session-${userId}`, `token-${userId}`, userId, new Date(Date.now() + 3600000).toISOString(), new Date().toISOString(), new Date().toISOString());
     },
     assetsFetch,
     doFetch,

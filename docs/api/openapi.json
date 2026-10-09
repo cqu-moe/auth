@@ -5507,6 +5507,9 @@
                     "type": "boolean",
                     "const": true
                   },
+                  "dpop_bound_access_tokens": {
+                    "type": "boolean"
+                  },
                   "subject_type": {
                     "type": "string",
                     "enum": [
@@ -5756,6 +5759,9 @@
                   "require_pkce": {
                     "type": "boolean",
                     "const": true
+                  },
+                  "dpop_bound_access_tokens": {
+                    "type": "boolean"
                   },
                   "disabled": {
                     "type": "boolean"

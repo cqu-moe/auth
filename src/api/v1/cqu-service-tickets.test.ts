@@ -2,18 +2,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../../app";
 import { createHttpFixture } from "../../test-utils/http";
 
-const verifyBearerToken = vi.hoisted(() => vi.fn());
-vi.mock("better-auth/oauth2", () => ({ verifyBearerToken }));
+const verifyAuthAccessTokenRequest = vi.hoisted(() => vi.fn());
+vi.mock("../../services/auth-access-token", () => ({ verifyAuthAccessTokenRequest }));
 
 describe("service ticket API v1", () => {
-  beforeEach(() => verifyBearerToken.mockReset());
+  beforeEach(() => verifyAuthAccessTokenRequest.mockReset());
 
   it("issues through one bearer verification and one DO call", async () => {
     const fixture = createHttpFixture();
     fixture.seedBearerIdentity("ticket-user", "ticket-client");
     try {
-      verifyBearerToken.mockResolvedValue({
-        sub: "ticket-user",
+      verifyAuthAccessTokenRequest.mockResolvedValue({
+        sub: "ticket-user", sid: "session-ticket-user",
         azp: "ticket-client",
         scope: "cqu:ticket:jwxt",
       });
@@ -31,7 +31,7 @@ describe("service ticket API v1", () => {
       expect(response.status).toBe(201);
       expect(response.headers.get("cache-control")).toBe("no-store");
       expect(await response.json()).toEqual({ data: { ticket: "ST-local" } });
-      expect(verifyBearerToken).toHaveBeenCalledTimes(1);
+      expect(verifyAuthAccessTokenRequest).toHaveBeenCalledTimes(1);
       expect(fixture.doFetch).toHaveBeenCalledTimes(1);
     } finally {
       await fixture.close();
@@ -47,8 +47,8 @@ describe("service ticket API v1", () => {
       expect(get.status).toBe(405);
       expect(get.headers.get("allow")).toBe("POST, OPTIONS");
 
-      verifyBearerToken.mockResolvedValue({
-        sub: "ticket-user",
+      verifyAuthAccessTokenRequest.mockResolvedValue({
+        sub: "ticket-user", sid: "session-ticket-user",
         azp: "ticket-client",
         scope: "cqu:ticket:jwxt",
       });
@@ -60,7 +60,7 @@ describe("service ticket API v1", () => {
       }, fixture.env);
       expect(ambiguous.status).toBe(400);
       expect(await ambiguous.json()).toMatchObject({ code: "INVALID_TARGET" });
-      expect(verifyBearerToken).toHaveBeenCalledTimes(1);
+      expect(verifyAuthAccessTokenRequest).toHaveBeenCalledTimes(1);
       expect(fixture.doFetch).not.toHaveBeenCalled();
     } finally {
       await fixture.close();
