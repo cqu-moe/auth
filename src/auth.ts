@@ -188,7 +188,9 @@ export function createAuth(env: Env, request: Request) {
             if (ctx.path === "/two-factor/enable" && ctx.body?.method === "otp") {
               throw new APIError("FORBIDDEN", { message: "邮箱验证码不能作为第二因子" });
             }
-            if (ctx.path === "/change-password") ctx.body = { ...ctx.body, revokeOtherSessions: false };
+            // Return the override: assigning ctx.body alone does not update the native endpoint context.
+            // Our after hook revokes other sessions while keeping this session and its proof intact.
+            if (ctx.path === "/change-password") return { context: { body: { ...ctx.body, revokeOtherSessions: false } } };
             // Our authorization-code policy has no confidential OIDC exception.
             const authorizationQuery = { ...ctx.query, ...ctx.body };
             if (ctx.path === "/oauth2/authorize" &&
