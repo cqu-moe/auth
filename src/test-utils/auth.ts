@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath, URL as NodeURL } from "node:url";
 import { createAuth } from "../auth";
@@ -10,25 +10,12 @@ export const TEST_AUTH_SECRET = "test-secret-that-is-long-enough-for-better-auth
 export function createTestAuth(options: { origin?: string } = {}) {
   const origin = options.origin ?? TEST_AUTH_ORIGIN;
   const database = new DatabaseSync(":memory:");
-  database.exec(
-    readFileSync(
-      fileURLToPath(new NodeURL("../../drizzle/migrations/0004_user_entitlement.sql", import.meta.url)),
-      "utf8"
-    )
-  );
-
-  const kvValues = new Map<string, string>();
+  const migrations = new NodeURL("../../drizzle/migrations/", import.meta.url);
+  for (const name of readdirSync(fileURLToPath(migrations)).filter(name => name.endsWith(".sql")).sort()) {
+    database.exec(readFileSync(new NodeURL(name, migrations), "utf8"));
+  }
   const env = {
     DATABASE: database,
-    KV: {
-      get: async (key: string) => kvValues.get(key) ?? null,
-      put: async (key: string, value: string) => {
-        kvValues.set(key, value);
-      },
-      delete: async (key: string) => {
-        kvValues.delete(key);
-      },
-    },
     BETTER_AUTH_URL: origin,
     BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
     RESEND_API_KEY: "re_test_placeholder",
@@ -38,7 +25,6 @@ export function createTestAuth(options: { origin?: string } = {}) {
     auth: createAuth(env, new Request(`${origin}/settings`)),
     database,
     env,
-    kvValues,
     close: () => database.close(),
   };
 }

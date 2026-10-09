@@ -644,7 +644,7 @@
                         "publishedAt": {
                           "type": "string",
                           "format": "date-time",
-                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
                         },
                         "notes": {
                           "minItems": 1,
@@ -4703,13 +4703,9 @@
                 "type": "object",
                 "properties": {
                   "preset": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
+                    "type": [
+                      "string",
+                      "null"
                     ]
                   }
                 },
@@ -5496,13 +5492,9 @@
                   },
                   "client_secret_expires_at": {
                     "default": 0,
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "number"
-                      }
+                    "type": [
+                      "string",
+                      "number"
                     ]
                   },
                   "skip_consent": {
@@ -5512,7 +5504,8 @@
                     "type": "boolean"
                   },
                   "require_pkce": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "const": true
                   },
                   "subject_type": {
                     "type": "string",
@@ -5642,83 +5635,51 @@
                 "type": "object",
                 "properties": {
                   "client_name": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
+                    "type": [
+                      "string",
+                      "null"
                     ]
                   },
                   "client_uri": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
+                    "type": [
+                      "string",
+                      "null"
                     ]
                   },
                   "logo_uri": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
+                    "type": [
+                      "string",
+                      "null"
                     ]
                   },
                   "tos_uri": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
+                    "type": [
+                      "string",
+                      "null"
                     ]
                   },
                   "policy_uri": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
+                    "type": [
+                      "string",
+                      "null"
                     ]
                   },
                   "token_endpoint_auth_method": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
+                    "type": [
+                      "string",
+                      "null"
                     ]
                   },
                   "type": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
+                    "type": [
+                      "string",
+                      "null"
                     ]
                   },
                   "subject_type": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
+                    "type": [
+                      "string",
+                      "null"
                     ]
                   },
                   "contacts": {
@@ -5793,7 +5754,8 @@
                     "type": "boolean"
                   },
                   "require_pkce": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "const": true
                   },
                   "disabled": {
                     "type": "boolean"
@@ -5811,13 +5773,9 @@
                     ]
                   },
                   "scope": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
+                    "type": [
+                      "string",
+                      "null"
                     ]
                   }
                 },
@@ -6430,14 +6388,14 @@
                     "user": {
                       "type": "object",
                       "properties": {
-                        "id": {
-                          "type": "string"
-                        },
                         "name": {
                           "type": "string"
                         },
                         "email": {
-                          "type": "string"
+                          "type": [
+                            "string",
+                            "null"
+                          ]
                         },
                         "image": {
                           "type": "string"
@@ -6447,9 +6405,28 @@
                         }
                       },
                       "required": [
-                        "id",
                         "emailVerified"
                       ]
+                    },
+                    "account": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "providerId": {
+                          "type": "string"
+                        },
+                        "accountId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "providerId",
+                        "accountId"
+                      ],
+                      "additionalProperties": false
                     },
                     "data": {
                       "type": "object",
@@ -6459,7 +6436,8 @@
                   },
                   "required": [
                     "user",
-                    "data"
+                    "data",
+                    "account"
                   ],
                   "additionalProperties": false
                 }
@@ -6591,17 +6569,11 @@
                     "description": "The user id"
                   },
                   "banReason": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
+                    "type": "string",
                     "description": "The reason for the ban"
                   },
                   "banExpiresIn": {
-                    "type": [
-                      "number",
-                      "null"
-                    ],
+                    "type": "number",
                     "description": "The number of seconds until the ban expires"
                   }
                 },
@@ -6753,26 +6725,33 @@
                     "description": "The email of the user"
                   },
                   "password": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "name": {
                     "type": "string",
                     "description": "The name of the user"
                   },
                   "role": {
-                    "type": [
-                      "string",
-                      "null"
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "description": "The role of the user"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "description": "The roles of user"
+                        }
+                      }
                     ]
                   },
                   "data": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
                   }
                 },
                 "required": [
@@ -7509,19 +7488,17 @@
             "name": "searchValue",
             "in": "query",
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           },
           {
             "name": "searchField",
             "in": "query",
             "schema": {
-              "type": [
-                "string",
-                "null"
+              "type": "string",
+              "enum": [
+                "email",
+                "name"
               ],
               "description": "The field to search in, defaults to email. Can be `email` or `name`. Eg: \"name\""
             }
@@ -7530,9 +7507,11 @@
             "name": "searchOperator",
             "in": "query",
             "schema": {
-              "type": [
-                "string",
-                "null"
+              "type": "string",
+              "enum": [
+                "contains",
+                "starts_with",
+                "ends_with"
               ],
               "description": "The operator to use for the search. Can be `contains`, `starts_with` or `ends_with`. Eg: \"contains\""
             }
@@ -7541,9 +7520,14 @@
             "name": "limit",
             "in": "query",
             "schema": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "The number of users to return"
+                },
+                {
+                  "type": "number"
+                }
               ]
             }
           },
@@ -7551,9 +7535,14 @@
             "name": "offset",
             "in": "query",
             "schema": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "type": "string",
+                  "description": "The offset to start from"
+                },
+                {
+                  "type": "number"
+                }
               ]
             }
           },
@@ -7561,10 +7550,7 @@
             "name": "sortBy",
             "in": "query",
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "description": "The field to sort by"
             }
           },
@@ -7572,9 +7558,10 @@
             "name": "sortDirection",
             "in": "query",
             "schema": {
-              "type": [
-                "string",
-                "null"
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
               ],
               "description": "The direction to sort by"
             }
@@ -7583,10 +7570,7 @@
             "name": "filterField",
             "in": "query",
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "description": "The field to filter by"
             }
           },
@@ -7594,9 +7578,41 @@
             "name": "filterValue",
             "in": "query",
             "schema": {
-              "type": [
-                "string",
-                "null"
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "anyOf": [
+                        {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "description": "The value to filter by"
+                            },
+                            {
+                              "type": "number"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "boolean"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  }
+                }
               ]
             }
           },
@@ -7604,9 +7620,19 @@
             "name": "filterOperator",
             "in": "query",
             "schema": {
-              "type": [
-                "string",
-                "null"
+              "type": "string",
+              "enum": [
+                "eq",
+                "ne",
+                "lt",
+                "lte",
+                "gt",
+                "gte",
+                "in",
+                "not_in",
+                "contains",
+                "starts_with",
+                "ends_with"
               ],
               "description": "The operator to use for the filter"
             }
@@ -8213,7 +8239,19 @@
                     "description": "The user id"
                   },
                   "role": {
-                    "type": "string",
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "description": "The role to set. `admin` or `user` by default"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "description": "The roles to set. `admin` or `user` by default"
+                        }
+                      }
+                    ],
                     "description": "The role to set, this can be a string or an array of strings. Eg: `admin` or `[admin, user]`"
                   }
                 },
@@ -8363,10 +8401,12 @@
                 "properties": {
                   "newPassword": {
                     "type": "string",
+                    "minLength": 1,
                     "description": "The new password"
                   },
                   "userId": {
                     "type": "string",
+                    "minLength": 1,
                     "description": "The user id"
                   }
                 },
@@ -8780,7 +8820,9 @@
                     "description": "The user id"
                   },
                   "data": {
-                    "type": "string",
+                    "type": "object",
+                    "propertyNames": {},
+                    "additionalProperties": {},
                     "description": "The user data to update"
                   }
                 },
@@ -9042,11 +9084,34 @@
           }
         ],
         "requestBody": {
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "error": {
+                    "type": "string"
+                  },
+                  "device_id": {
+                    "type": "string"
+                  },
+                  "error_description": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "user": {
+                    "type": "string"
+                  },
+                  "iss": {
+                    "type": "string"
+                  }
+                }
               }
             }
           }
@@ -9176,10 +9241,7 @@
                     "description": "The new email address to set must be a valid email address"
                   },
                   "callbackURL": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
+                    "type": "string",
                     "description": "The URL to redirect to after email verification"
                   }
                 },
@@ -9354,10 +9416,7 @@
                     "description": "The current password is required"
                   },
                   "revokeOtherSessions": {
-                    "type": [
-                      "boolean",
-                      "null"
-                    ],
+                    "type": "boolean",
                     "description": "Must be a boolean value"
                   }
                 },
@@ -9835,10 +9894,7 @@
             "name": "callbackURL",
             "in": "query",
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ],
+              "type": "string",
               "description": "The URL to redirect to after deletion"
             }
           }
@@ -10150,6 +10206,12 @@
                   },
                   "type": {
                     "type": "string",
+                    "enum": [
+                      "email-verification",
+                      "sign-in",
+                      "forget-password",
+                      "change-email"
+                    ],
                     "description": "Type of the OTP"
                   },
                   "otp": {
@@ -10307,10 +10369,7 @@
                     "description": "New email address to send the OTP"
                   },
                   "otp": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -10462,6 +10521,12 @@
                   },
                   "type": {
                     "type": "string",
+                    "enum": [
+                      "email-verification",
+                      "sign-in",
+                      "forget-password",
+                      "change-email"
+                    ],
                     "description": "Type of the OTP"
                   }
                 },
@@ -10796,29 +10861,41 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "providerId": {
-                    "type": "string",
-                    "description": "The provider ID for the OAuth provider"
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "accountId": {
+                        "type": "string",
+                        "description": "The Better Auth account ID"
+                      },
+                      "userId": {
+                        "type": "string",
+                        "description": "The user ID associated with the account"
+                      }
+                    },
+                    "required": [
+                      "accountId"
+                    ]
                   },
-                  "accountId": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "description": "The account ID associated with the refresh token"
-                  },
-                  "userId": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "description": "The user ID associated with the account"
+                  {
+                    "type": "object",
+                    "properties": {
+                      "useAccountCookie": {
+                        "enum": [
+                          true
+                        ],
+                        "description": "Select the current OAuth account from its signed cookie"
+                      },
+                      "userId": {
+                        "type": "string",
+                        "description": "The user ID associated with the account"
+                      }
+                    },
+                    "required": [
+                      "useAccountCookie"
+                    ]
                   }
-                },
-                "required": [
-                  "providerId"
                 ]
               }
             }
@@ -11295,47 +11372,71 @@
                 "type": "object",
                 "properties": {
                   "callbackURL": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
+                    "type": "string",
                     "description": "The URL to redirect to after the user has signed in"
                   },
                   "provider": {
-                    "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "apple",
+                          "atlassian",
+                          "cloudflare",
+                          "cognito",
+                          "discord",
+                          "facebook",
+                          "figma",
+                          "github",
+                          "microsoft",
+                          "google",
+                          "huggingface",
+                          "slack",
+                          "spotify",
+                          "twitch",
+                          "twitter",
+                          "dropbox",
+                          "kick",
+                          "linear",
+                          "linkedin",
+                          "gitlab",
+                          "tiktok",
+                          "reddit",
+                          "roblox",
+                          "salesforce",
+                          "vk",
+                          "zoom",
+                          "notion",
+                          "kakao",
+                          "naver",
+                          "line",
+                          "paybin",
+                          "paypal",
+                          "polar",
+                          "railway",
+                          "vercel",
+                          "wechat"
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
                   },
                   "idToken": {
-                    "type": [
-                      "object",
-                      "null"
-                    ],
+                    "type": "object",
                     "properties": {
                       "token": {
                         "type": "string"
                       },
                       "nonce": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "type": "string"
                       },
                       "accessToken": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "type": "string"
                       },
                       "refreshToken": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      },
-                      "scopes": {
-                        "type": [
-                          "array",
-                          "null"
-                        ]
+                        "type": "string"
                       }
                     },
                     "required": [
@@ -11343,37 +11444,43 @@
                     ]
                   },
                   "requestSignUp": {
-                    "type": [
-                      "boolean",
-                      "null"
-                    ]
+                    "type": "boolean"
                   },
                   "scopes": {
-                    "type": [
-                      "array",
-                      "null"
-                    ],
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
                     "description": "Additional scopes to request from the provider"
                   },
                   "errorCallbackURL": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
+                    "type": "string",
                     "description": "The URL to redirect to if there is an error during the link process"
                   },
                   "disableRedirect": {
-                    "type": [
-                      "boolean",
-                      "null"
-                    ],
+                    "type": "boolean",
                     "description": "Disable automatic redirection to the provider. Useful for handling the redirection yourself"
                   },
+                  "loginHint": {
+                    "type": "string",
+                    "description": "The login hint to use for the authorization code request"
+                  },
+                  "additionalParams": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Extra query parameters to append to the provider authorization URL (e.g. Cognito identity_provider, Google hd)."
+                  },
                   "additionalData": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
                   }
                 },
                 "required": [
@@ -11806,7 +11913,7 @@
         "tags": [
           "Oauth-provider"
         ],
-        "description": "Authorize an OAuth2 request",
+        "description": "Authorize an OAuth 2.1 request from query parameters or an application/x-www-form-urlencoded POST body",
         "operationId": "get_api_v1_auth_oauth2_authorize",
         "security": [],
         "parameters": [
@@ -11817,7 +11924,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "OAuth2 response type (e.g., 'code')"
+            "description": "OAuth 2.1 response type (e.g., 'code')"
           },
           {
             "name": "client_id",
@@ -11826,7 +11933,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "OAuth2 client ID"
+            "description": "OAuth 2.1 client ID"
           },
           {
             "name": "redirect_uri",
@@ -11836,7 +11943,7 @@
               "type": "string",
               "format": "uri"
             },
-            "description": "OAuth2 redirect URI"
+            "description": "OAuth 2.1 redirect URI"
           },
           {
             "name": "scope",
@@ -11845,7 +11952,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "OAuth2 scopes (space-separated)"
+            "description": "OAuth 2.1 scopes (space-separated)"
           },
           {
             "name": "state",
@@ -11854,7 +11961,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "OAuth2 state parameter"
+            "description": "OAuth 2.1 state parameter"
           },
           {
             "name": "request_uri",
@@ -11891,6 +11998,28 @@
               "type": "string"
             },
             "description": "OpenID Connect nonce"
+          },
+          {
+            "name": "max_age",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Maximum authentication age in seconds; forces re-authentication when exceeded"
+          },
+          {
+            "name": "resource",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Requested protected resource(s) for the access token. May be supplied multiple times as repeated 'resource' query parameters (RFC 8707) or as an array of strings."
           },
           {
             "name": "prompt",
@@ -12019,6 +12148,246 @@
           }
         },
         "summary": "GET auth /oauth2/authorize"
+      },
+      "post": {
+        "tags": [
+          "Oauth-provider"
+        ],
+        "description": "Authorize an OAuth 2.1 request from query parameters or an application/x-www-form-urlencoded POST body",
+        "operationId": "post_api_v1_auth_oauth2_authorize",
+        "security": [],
+        "parameters": [
+          {
+            "name": "response_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "OAuth 2.1 response type (e.g., 'code')"
+          },
+          {
+            "name": "client_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "OAuth 2.1 client ID"
+          },
+          {
+            "name": "redirect_uri",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            },
+            "description": "OAuth 2.1 redirect URI"
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "OAuth 2.1 scopes (space-separated)"
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "OAuth 2.1 state parameter"
+          },
+          {
+            "name": "request_uri",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Pushed Authorization Request URI referencing stored parameters"
+          },
+          {
+            "name": "code_challenge",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "PKCE code challenge"
+          },
+          {
+            "name": "code_challenge_method",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "PKCE code challenge method"
+          },
+          {
+            "name": "nonce",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "OpenID Connect nonce"
+          },
+          {
+            "name": "max_age",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Maximum authentication age in seconds; forces re-authentication when exceeded"
+          },
+          {
+            "name": "resource",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Requested protected resource(s) for the access token. May be supplied multiple times as repeated 'resource' query parameters (RFC 8707) or as an array of strings."
+          },
+          {
+            "name": "prompt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "OAuth2 prompt parameter"
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect to client with code or error",
+            "headers": {
+              "Location": {
+                "description": "Redirect URI with code or error",
+                "schema": {
+                  "type": "string",
+                  "format": "uri"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_description": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            },
+            "description": "Unauthorized. Due to missing or invalid authentication."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Forbidden. You do not have permission to access this resource or to perform this action."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Not Found. The requested resource was not found."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Too Many Requests. You have exceeded the rate limit. Try again later."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Internal Server Error. This is a problem with the server that you cannot fix."
+          }
+        },
+        "summary": "POST auth /oauth2/authorize"
       }
     },
     "/api/v1/auth/oauth2/client/rotate-secret": {
@@ -12178,16 +12547,24 @@
                     "description": "Accept or deny user consent for a set of scopes"
                   },
                   "scope": {
-                    "type": [
-                      "string",
-                      "null"
+                    "type": "string"
+                  },
+                  "claims": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {}
+                      }
                     ]
                   },
                   "oauth_query": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -12339,31 +12716,18 @@
                 "type": "object",
                 "properties": {
                   "selected": {
-                    "type": [
-                      "boolean",
-                      "null"
-                    ]
+                    "type": "boolean"
                   },
                   "created": {
-                    "type": [
-                      "boolean",
-                      "null"
-                    ]
+                    "type": "boolean"
                   },
                   "postLogin": {
-                    "type": [
-                      "boolean",
-                      "null"
-                    ]
+                    "type": "boolean"
                   },
                   "oauth_query": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   }
-                },
-                "required": []
+                }
               }
             }
           }
@@ -12510,115 +12874,115 @@
                 "type": "object",
                 "properties": {
                   "redirect_uris": {
-                    "type": "array"
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
                   },
                   "scope": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "client_name": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "client_uri": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "logo_uri": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "contacts": {
-                    "type": [
-                      "array",
-                      "null"
-                    ]
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
                   },
                   "tos_uri": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "policy_uri": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "software_id": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "software_version": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "software_statement": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "post_logout_redirect_uris": {
-                    "type": [
-                      "array",
-                      "null"
-                    ]
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "backchannel_logout_uri": {
+                    "type": "string"
+                  },
+                  "backchannel_logout_session_required": {
+                    "type": "boolean"
                   },
                   "token_endpoint_auth_method": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "default": "client_secret_basic"
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "application_type": {
+                    "type": "string",
+                    "enum": [
+                      "web",
+                      "native"
+                    ]
+                  },
+                  "jwks": {
+                    "type": "object",
+                    "properties": {
+                      "keys": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {}
+                        }
+                      }
+                    },
+                    "required": [
+                      "keys"
+                    ]
+                  },
+                  "jwks_uri": {
+                    "type": "string"
                   },
                   "grant_types": {
-                    "type": [
-                      "array",
-                      "null"
-                    ],
-                    "default": [
-                      "authorization_code"
-                    ]
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
                   },
                   "response_types": {
-                    "type": [
-                      "array",
-                      "null"
-                    ],
-                    "default": [
-                      "code"
-                    ]
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "code"
+                      ]
+                    }
                   },
-                  "type": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                  "dpop_bound_access_tokens": {
+                    "type": "boolean"
                   }
-                },
-                "required": [
-                  "redirect_uris"
-                ]
+                }
               }
             }
           }
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "OAuth2 application registered successfully",
             "content": {
               "application/json": {
@@ -12698,24 +13062,14 @@
                     },
                     "token_endpoint_auth_method": {
                       "type": "string",
-                      "description": "Response types the client may use",
-                      "enum": [
-                        "none",
-                        "client_secret_basic",
-                        "client_secret_post"
-                      ]
+                      "description": "Requested authentication method for the token endpoint"
                     },
                     "grant_types": {
                       "type": "array",
                       "items": {
-                        "type": "string",
-                        "enum": [
-                          "authorization_code",
-                          "client_credentials",
-                          "refresh_token"
-                        ]
+                        "type": "string"
                       },
-                      "description": "Requested authentication method for the token endpoint"
+                      "description": "Grant types the client may use at the token endpoint"
                     },
                     "response_types": {
                       "type": "array",
@@ -12725,20 +13079,23 @@
                           "code"
                         ]
                       },
-                      "description": "Requested authentication method for the token endpoint"
+                      "description": "Response types the client may use at the authorization endpoint"
                     },
-                    "public": {
-                      "type": "boolean",
-                      "description": "Whether the client is public as determined by the type"
-                    },
-                    "type": {
+                    "application_type": {
                       "type": "string",
-                      "description": "Type of the client",
+                      "description": "OIDC application type used to classify redirect URI policy",
                       "enum": [
                         "web",
-                        "native",
-                        "user-agent-based"
+                        "native"
                       ]
+                    },
+                    "resources": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uri"
+                      },
+                      "description": "Final server-owned resources linked to the client"
                     },
                     "disabled": {
                       "type": "boolean",
@@ -13129,51 +13486,13 @@
         "tags": [
           "Oauth-provider"
         ],
-        "description": "RP-Initiated Logout endpoint. Allows clients to notify the OP that the End-User has logged out.",
+        "description": "RP-Initiated Logout endpoint. Accepts standard logout parameters through GET or an application/x-www-form-urlencoded POST body, plus JSON for Better Auth generated-client calls. Requests without a usable id_token_hint may require explicit OP confirmation.",
         "operationId": "get_api_v1_auth_oauth2_end_session",
         "security": [],
-        "parameters": [
-          {
-            "name": "id_token_hint",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "client_id",
-            "in": "query",
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "post_logout_redirect_uri",
-            "in": "query",
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          {
-            "name": "state",
-            "in": "query",
-            "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          }
-        ],
+        "parameters": [],
         "responses": {
           "200": {
-            "description": "Logout successful. May include redirect_uri if post_logout_redirect_uri was provided.",
+            "description": "Logout completed, or an HTML confirmation page was returned for browser navigation. A redirect is used only for an exact registered post_logout_redirect_uri.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13189,6 +13508,11 @@
                       "description": "Success message"
                     }
                   }
+                }
+              },
+              "text/html": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }
@@ -13291,6 +13615,293 @@
           }
         },
         "summary": "GET auth /oauth2/end-session"
+      },
+      "post": {
+        "tags": [
+          "Oauth-provider"
+        ],
+        "description": "RP-Initiated Logout endpoint. Accepts standard logout parameters through GET or an application/x-www-form-urlencoded POST body, plus JSON for Better Auth generated-client calls. Requests without a usable id_token_hint may require explicit OP confirmation.",
+        "operationId": "post_api_v1_auth_oauth2_end_session",
+        "security": [],
+        "parameters": [],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id_token_hint": {
+                    "type": "string"
+                  },
+                  "client_id": {
+                    "type": "string"
+                  },
+                  "post_logout_redirect_uri": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logout completed, or an HTML confirmation page was returned for browser navigation. A redirect is used only for an exact registered post_logout_redirect_uri.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "redirect_uri": {
+                      "type": "string",
+                      "format": "uri",
+                      "description": "URI to redirect to after logout (if post_logout_redirect_uri was provided)"
+                    },
+                    "message": {
+                      "type": "string",
+                      "description": "Success message"
+                    }
+                  }
+                }
+              },
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            },
+            "description": "Bad Request. Usually due to missing parameters, or invalid parameters."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            },
+            "description": "Unauthorized. Due to missing or invalid authentication."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Forbidden. You do not have permission to access this resource or to perform this action."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Not Found. The requested resource was not found."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Too Many Requests. You have exceeded the rate limit. Try again later."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Internal Server Error. This is a problem with the server that you cannot fix."
+          }
+        },
+        "summary": "POST auth /oauth2/end-session"
+      }
+    },
+    "/api/v1/auth/oauth2/end-session/confirm": {
+      "post": {
+        "tags": [
+          "Oauth-provider"
+        ],
+        "operationId": "post_api_v1_auth_oauth2_end_session_confirm",
+        "security": [],
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "enum": [
+                      "confirm"
+                    ]
+                  }
+                },
+                "required": [
+                  "action"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            },
+            "description": "Bad Request. Usually due to missing parameters, or invalid parameters."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            },
+            "description": "Unauthorized. Due to missing or invalid authentication."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Forbidden. You do not have permission to access this resource or to perform this action."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Not Found. The requested resource was not found."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Too Many Requests. You have exceeded the rate limit. Try again later."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Internal Server Error. This is a problem with the server that you cannot fix."
+          }
+        },
+        "summary": "POST auth /oauth2/end-session/confirm"
       }
     },
     "/api/v1/auth/oauth2/get-client": {
@@ -13799,15 +14410,7 @@
                   },
                   "token_type_hint": {
                     "type": "string",
-                    "enum": [
-                      "access_token",
-                      "refresh_token"
-                    ],
-                    "description": "Hint about the type of the token submitted for introspection"
-                  },
-                  "resource": {
-                    "type": "string",
-                    "description": "Introspects a token for a specific resource."
+                    "description": "Hint about the token type. Recognized values: `access_token`, `refresh_token`."
                   }
                 },
                 "required": [
@@ -14125,10 +14728,7 @@
                     "type": "string"
                   },
                   "oauth_query": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -14256,127 +14856,131 @@
                 "type": "object",
                 "properties": {
                   "redirect_uris": {
-                    "type": "array"
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
                   },
                   "scope": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "client_name": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "client_uri": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "logo_uri": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "contacts": {
-                    "type": [
-                      "array",
-                      "null"
-                    ]
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
                   },
                   "tos_uri": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "policy_uri": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "software_id": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "software_version": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "software_statement": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "post_logout_redirect_uris": {
-                    "type": [
-                      "array",
-                      "null"
-                    ]
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "backchannel_logout_uri": {
+                    "type": "string"
+                  },
+                  "backchannel_logout_session_required": {
+                    "type": "boolean"
                   },
                   "token_endpoint_auth_method": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "default": "client_secret_basic"
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "jwks": {
+                    "type": "object",
+                    "properties": {
+                      "keys": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {}
+                        }
+                      }
+                    },
+                    "required": [
+                      "keys"
+                    ]
+                  },
+                  "jwks_uri": {
+                    "type": "string"
                   },
                   "grant_types": {
-                    "type": [
-                      "array",
-                      "null"
-                    ],
-                    "default": [
-                      "authorization_code"
-                    ]
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
                   },
                   "response_types": {
-                    "type": [
-                      "array",
-                      "null"
-                    ],
-                    "default": [
-                      "code"
-                    ]
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "code"
+                      ]
+                    }
                   },
-                  "type": {
-                    "type": [
-                      "string",
-                      "null"
+                  "application_type": {
+                    "type": "string",
+                    "enum": [
+                      "web",
+                      "native"
                     ]
                   },
                   "subject_type": {
-                    "type": [
-                      "string",
-                      "null"
+                    "type": "string",
+                    "enum": [
+                      "public",
+                      "pairwise"
                     ]
                   },
+                  "dpop_bound_access_tokens": {
+                    "type": "boolean"
+                  },
+                  "resources": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
                   "skip_consent": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   }
-                },
-                "required": [
-                  "redirect_uris"
-                ]
+                }
               }
             }
           }
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "OAuth2 application registered successfully",
             "content": {
               "application/json": {
@@ -14462,26 +15066,25 @@
                       },
                       "description": "List of allowed logout redirect uris"
                     },
+                    "backchannel_logout_uri": {
+                      "type": "string",
+                      "format": "uri",
+                      "description": "RP URL to receive signed Logout Tokens when the end-user's OP session terminates"
+                    },
+                    "backchannel_logout_session_required": {
+                      "type": "boolean",
+                      "description": "Whether the RP requires a `sid` claim in every Logout Token"
+                    },
                     "token_endpoint_auth_method": {
                       "type": "string",
-                      "description": "Requested authentication method for the token endpoint",
-                      "enum": [
-                        "none",
-                        "client_secret_basic",
-                        "client_secret_post"
-                      ]
+                      "description": "Requested authentication method for the token endpoint"
                     },
                     "grant_types": {
                       "type": "array",
                       "items": {
-                        "type": "string",
-                        "enum": [
-                          "authorization_code",
-                          "client_credentials",
-                          "refresh_token"
-                        ]
+                        "type": "string"
                       },
-                      "description": "Requested authentication method for the token endpoint"
+                      "description": "Grant types the client may use at the token endpoint"
                     },
                     "response_types": {
                       "type": "array",
@@ -14491,20 +15094,23 @@
                           "code"
                         ]
                       },
-                      "description": "Requested authentication method for the token endpoint"
+                      "description": "Response types the client may use at the authorization endpoint"
                     },
-                    "public": {
-                      "type": "boolean",
-                      "description": "Whether the client is public as determined by the type"
-                    },
-                    "type": {
+                    "application_type": {
                       "type": "string",
-                      "description": "Type of the client",
+                      "description": "OIDC application type used to classify redirect URI policy",
                       "enum": [
                         "web",
-                        "native",
-                        "user-agent-based"
+                        "native"
                       ]
+                    },
+                    "resources": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uri"
+                      },
+                      "description": "Final resource identifiers linked to the registered client"
                     },
                     "disabled": {
                       "type": "boolean",
@@ -14652,11 +15258,7 @@
                   },
                   "token_type_hint": {
                     "type": "string",
-                    "enum": [
-                      "access_token",
-                      "refresh_token"
-                    ],
-                    "description": "Hint about the type of the token submitted for revocation"
+                    "description": "Hint about the token type. Recognized values: `access_token`, `refresh_token`."
                   }
                 },
                 "required": [
@@ -14796,7 +15398,17 @@
             "oauthClientAuth": []
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "DPoP",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "RFC 9449 DPoP proof JWT for issuing DPoP-bound tokens"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -14806,11 +15418,6 @@
                 "properties": {
                   "grant_type": {
                     "type": "string",
-                    "enum": [
-                      "authorization_code",
-                      "client_credentials",
-                      "refresh_token"
-                    ],
                     "description": "OAuth2 grant type"
                   },
                   "client_id": {
@@ -14839,8 +15446,20 @@
                     "description": "Refresh token (for refresh_token grant)"
                   },
                   "resource": {
-                    "type": "string",
-                    "description": "Requested token resource (ie audience) to obtain a JWT formatted access token"
+                    "oneOf": [
+                      {
+                        "type": "string",
+                        "description": "Single resource (URL)"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "description": "Multiple resources (URLs)"
+                      }
+                    ],
+                    "description": "Requested protected resource(s) for the access token"
                   },
                   "scope": {
                     "type": "string",
@@ -14870,7 +15489,8 @@
                       "type": "string",
                       "description": "The type of the token issued",
                       "enum": [
-                        "Bearer"
+                        "Bearer",
+                        "DPoP"
                       ]
                     },
                     "expires_in": {
@@ -15032,94 +15652,79 @@
                     "type": "object",
                     "properties": {
                       "redirect_uris": {
-                        "type": [
-                          "array",
-                          "null"
-                        ]
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
                       },
                       "scope": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "type": "string"
                       },
                       "client_name": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "type": "string"
                       },
                       "client_uri": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "type": "string"
                       },
                       "logo_uri": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "type": "string"
                       },
                       "contacts": {
-                        "type": [
-                          "array",
-                          "null"
-                        ]
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
                       },
                       "tos_uri": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "type": "string"
                       },
                       "policy_uri": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "type": "string"
                       },
                       "software_id": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "type": "string"
                       },
                       "software_version": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "type": "string"
                       },
                       "software_statement": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "type": "string"
                       },
                       "post_logout_redirect_uris": {
-                        "type": [
-                          "array",
-                          "null"
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "backchannel_logout_uri": {
+                        "type": "string"
+                      },
+                      "backchannel_logout_session_required": {
+                        "type": "boolean"
+                      },
+                      "application_type": {
+                        "type": "string",
+                        "enum": [
+                          "web",
+                          "native"
                         ]
                       },
                       "grant_types": {
-                        "type": [
-                          "array",
-                          "null"
-                        ]
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
                       },
                       "response_types": {
-                        "type": [
-                          "array",
-                          "null"
-                        ]
-                      },
-                      "type": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "code"
+                          ]
+                        }
                       }
                     }
                   }
@@ -15260,7 +15865,10 @@
                     "type": "object",
                     "properties": {
                       "scopes": {
-                        "type": "array"
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
                       }
                     },
                     "required": [
@@ -15397,7 +16005,16 @@
             "schema": {
               "type": "string"
             },
-            "description": "Bearer access token"
+            "description": "Bearer or DPoP access token"
+          },
+          {
+            "name": "DPoP",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "RFC 9449 DPoP proof JWT when using a DPoP-bound access token"
           }
         ],
         "responses": {
@@ -15571,6 +16188,224 @@
           }
         },
         "summary": "GET auth /oauth2/userinfo"
+      },
+      "post": {
+        "tags": [
+          "Oauth-provider"
+        ],
+        "description": "Get OpenID Connect user information (UserInfo endpoint)",
+        "operationId": "post_api_v1_auth_oauth2_userinfo",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Bearer or DPoP access token"
+          },
+          {
+            "name": "DPoP",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "RFC 9449 DPoP proof JWT when using a DPoP-bound access token"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "access_token": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User information retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sub": {
+                      "type": "string",
+                      "description": "Subject identifier (user ID)"
+                    },
+                    "email": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "email",
+                      "description": "User's email address, included if 'email' scope is granted"
+                    },
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "User's full name, included if 'profile' scope is granted"
+                    },
+                    "picture": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "uri",
+                      "description": "User's profile picture URL, included if 'profile' scope is granted"
+                    },
+                    "given_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "User's given name, included if 'profile' scope is granted"
+                    },
+                    "family_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "User's family name, included if 'profile' scope is granted"
+                    },
+                    "email_verified": {
+                      "type": [
+                        "boolean",
+                        "null"
+                      ],
+                      "description": "Whether the email is verified, included if 'email' scope is granted"
+                    }
+                  },
+                  "required": [
+                    "sub"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ]
+                }
+              }
+            },
+            "description": "Bad Request. Usually due to missing parameters, or invalid parameters."
+          },
+          "401": {
+            "description": "Unauthorized - invalid or missing access token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_description": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden - insufficient scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "error_description": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Not Found. The requested resource was not found."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Too Many Requests. You have exceeded the rate limit. Try again later."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "Internal Server Error. This is a problem with the server that you cannot fix."
+          }
+        },
+        "summary": "POST auth /oauth2/userinfo"
       }
     },
     "/api/v1/auth/ok": {
@@ -15716,29 +16551,41 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "properties": {
-                  "providerId": {
-                    "type": "string",
-                    "description": "The provider ID for the OAuth provider"
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "accountId": {
+                        "type": "string",
+                        "description": "The Better Auth account ID"
+                      },
+                      "userId": {
+                        "type": "string",
+                        "description": "The user ID associated with the account"
+                      }
+                    },
+                    "required": [
+                      "accountId"
+                    ]
                   },
-                  "accountId": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "description": "The account ID associated with the refresh token"
-                  },
-                  "userId": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "description": "The user ID associated with the account"
+                  {
+                    "type": "object",
+                    "properties": {
+                      "useAccountCookie": {
+                        "enum": [
+                          true
+                        ],
+                        "description": "Select the current OAuth account from its signed cookie"
+                      },
+                      "userId": {
+                        "type": "string",
+                        "description": "The user ID associated with the account"
+                      }
+                    },
+                    "required": [
+                      "useAccountCookie"
+                    ]
                   }
-                },
-                "required": [
-                  "providerId"
                 ]
               }
             }
@@ -15883,10 +16730,7 @@
                     "description": "The email address of the user to send a password reset email to"
                   },
                   "redirectTo": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
+                    "type": "string",
                     "description": "The URL to redirect the user to reset their password. If the token isn't valid or expired, it'll be redirected with a query parameter `?error=INVALID_TOKEN`. If the token is valid, it'll be redirected with a query parameter `?token=VALID_TOKEN"
                   }
                 },
@@ -16037,10 +16881,7 @@
                     "description": "The new password to set"
                   },
                   "token": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
+                    "type": "string",
                     "description": "The token to reset the password"
                   }
                 },
@@ -16926,19 +17767,12 @@
                     "description": "Password of the user"
                   },
                   "callbackURL": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
+                    "type": "string",
                     "description": "Callback URL to use as a redirect for email verification"
                   },
                   "rememberMe": {
-                    "type": [
-                      "boolean",
-                      "null"
-                    ],
-                    "description": "If this is false, the session will not be remembered. Default is `true`.",
-                    "default": true
+                    "type": "boolean",
+                    "description": "If this is false, the session will not be remembered. Default is `true`."
                   }
                 },
                 "required": [
@@ -17105,104 +17939,107 @@
                 "type": "object",
                 "properties": {
                   "callbackURL": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
+                    "type": "string",
                     "description": "Callback URL to redirect to after the user has signed in"
                   },
                   "newUserCallbackURL": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string"
                   },
                   "errorCallbackURL": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
+                    "type": "string",
                     "description": "Callback URL to redirect to if an error happens"
                   },
                   "provider": {
-                    "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "apple",
+                          "atlassian",
+                          "cloudflare",
+                          "cognito",
+                          "discord",
+                          "facebook",
+                          "figma",
+                          "github",
+                          "microsoft",
+                          "google",
+                          "huggingface",
+                          "slack",
+                          "spotify",
+                          "twitch",
+                          "twitter",
+                          "dropbox",
+                          "kick",
+                          "linear",
+                          "linkedin",
+                          "gitlab",
+                          "tiktok",
+                          "reddit",
+                          "roblox",
+                          "salesforce",
+                          "vk",
+                          "zoom",
+                          "notion",
+                          "kakao",
+                          "naver",
+                          "line",
+                          "paybin",
+                          "paypal",
+                          "polar",
+                          "railway",
+                          "vercel",
+                          "wechat"
+                        ]
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
                   },
                   "disableRedirect": {
-                    "type": [
-                      "boolean",
-                      "null"
-                    ],
+                    "type": "boolean",
                     "description": "Disable automatic redirection to the provider. Useful for handling the redirection yourself"
                   },
                   "idToken": {
-                    "type": [
-                      "object",
-                      "null"
-                    ],
+                    "type": "object",
                     "properties": {
                       "token": {
                         "type": "string",
                         "description": "ID token from the provider"
                       },
                       "nonce": {
-                        "type": [
-                          "string",
-                          "null"
-                        ],
+                        "type": "string",
                         "description": "Nonce used to generate the token"
                       },
                       "accessToken": {
-                        "type": [
-                          "string",
-                          "null"
-                        ],
+                        "type": "string",
                         "description": "Access token from the provider"
                       },
                       "refreshToken": {
-                        "type": [
-                          "string",
-                          "null"
-                        ],
+                        "type": "string",
                         "description": "Refresh token from the provider"
                       },
                       "expiresAt": {
-                        "type": [
-                          "number",
-                          "null"
-                        ],
+                        "type": "number",
                         "description": "Expiry date of the token"
                       },
                       "user": {
-                        "type": [
-                          "object",
-                          "null"
-                        ],
+                        "type": "object",
                         "properties": {
                           "name": {
-                            "type": [
-                              "object",
-                              "null"
-                            ],
+                            "type": "object",
                             "properties": {
                               "firstName": {
-                                "type": [
-                                  "string",
-                                  "null"
-                                ]
+                                "type": "string"
                               },
                               "lastName": {
-                                "type": [
-                                  "string",
-                                  "null"
-                                ]
+                                "type": "string"
                               }
                             }
                           },
                           "email": {
-                            "type": [
-                              "string",
-                              "null"
-                            ]
+                            "type": "string"
                           }
                         },
                         "description": "The user object from the provider. Only available for some providers like Apple."
@@ -17213,31 +18050,36 @@
                     ]
                   },
                   "scopes": {
-                    "type": [
-                      "array",
-                      "null"
-                    ],
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
                     "description": "Array of scopes to request from the provider. This will override the default scopes passed."
                   },
                   "requestSignUp": {
-                    "type": [
-                      "boolean",
-                      "null"
-                    ],
+                    "type": "boolean",
                     "description": "Explicitly request sign-up. Useful when disableImplicitSignUp is true for this provider"
                   },
                   "loginHint": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
+                    "type": "string",
                     "description": "The login hint to use for the authorization code request"
                   },
+                  "additionalParams": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Extra query parameters to append to the provider authorization URL (e.g. Cognito identity_provider, Google hd)."
+                  },
                   "additionalData": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
                   }
                 },
                 "required": [
@@ -17391,11 +18233,25 @@
         ],
         "parameters": [],
         "requestBody": {
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                  "callbackURL": {
+                    "type": "string",
+                    "description": "The URL to redirect to after provider logout"
+                  },
+                  "disableRedirect": {
+                    "type": "boolean",
+                    "description": "Return the provider logout URL without redirecting"
+                  },
+                  "state": {
+                    "type": "string",
+                    "description": "State to pass to the provider logout endpoint"
+                  }
+                }
               }
             }
           }
@@ -17410,6 +18266,14 @@
                   "properties": {
                     "success": {
                       "type": "boolean"
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "Provider logout URL when RP-initiated logout is available"
+                    },
+                    "redirect": {
+                      "type": "boolean",
+                      "description": "Whether the client should redirect to the provider logout URL"
                     }
                   }
                 }
@@ -17908,7 +18772,7 @@
         "tags": [
           "Two-factor"
         ],
-        "description": "Use this endpoint to enable two factor authentication. This will generate a TOTP URI and backup codes. Once the user verifies the TOTP URI, the two factor authentication will be enabled.",
+        "description": "Enable two factor authentication. Pass method 'totp' (default) to set up an authenticator app (returns TOTP URI and backup codes), or 'otp' to enable email/SMS-based codes immediately.",
         "operationId": "post_api_v1_auth_two_factor_enable",
         "security": [
           {
@@ -17927,11 +18791,15 @@
                     "type": "string",
                     "description": "User password"
                   },
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "otp",
+                      "totp"
+                    ]
+                  },
                   "issuer": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
+                    "type": "string",
                     "description": "Custom issuer for the TOTP URI"
                   }
                 },
@@ -17950,18 +18818,29 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "method": {
+                      "type": "string",
+                      "enum": [
+                        "otp",
+                        "totp"
+                      ],
+                      "description": "The 2FA method that was enabled."
+                    },
                     "totpURI": {
                       "type": "string",
-                      "description": "TOTP URI"
+                      "description": "TOTP URI for authenticator app setup. Only present when method is 'totp'."
                     },
                     "backupCodes": {
                       "type": "array",
                       "items": {
                         "type": "string"
                       },
-                      "description": "Backup codes"
+                      "description": "Recovery backup codes. Only present when method is 'totp'."
                     }
-                  }
+                  },
+                  "required": [
+                    "method"
+                  ]
                 }
               }
             }
@@ -18393,6 +19272,21 @@
           }
         ],
         "parameters": [],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "trustDevice": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful response",
@@ -18537,17 +19431,11 @@
                     "description": "A backup code to verify. Eg: \"123456\""
                   },
                   "disableSession": {
-                    "type": [
-                      "boolean",
-                      "null"
-                    ],
+                    "type": "boolean",
                     "description": "If true, the session cookie will not be set."
                   },
                   "trustDevice": {
-                    "type": [
-                      "boolean",
-                      "null"
-                    ],
+                    "type": "boolean",
                     "description": "If true, the device will be trusted for 30 days. It'll be refreshed on every sign in request within this time. Eg: true"
                   }
                 },
@@ -18793,10 +19681,7 @@
                     "description": "The otp code to verify. Eg: \"012345\""
                   },
                   "trustDevice": {
-                    "type": [
-                      "boolean",
-                      "null"
-                    ]
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -19010,10 +19895,7 @@
                     "description": "The otp code to verify. Eg: \"012345\""
                   },
                   "trustDevice": {
-                    "type": [
-                      "boolean",
-                      "null"
-                    ],
+                    "type": "boolean",
                     "description": "If true, the device will be trusted for 30 days. It'll be refreshed on every sign in request within this time. Eg: true"
                   }
                 },
@@ -19160,18 +20042,13 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "providerId": {
-                    "type": "string"
-                  },
                   "accountId": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                    "type": "string",
+                    "description": "The Better Auth account ID to unlink"
                   }
                 },
                 "required": [
-                  "providerId"
+                  "accountId"
                 ]
               }
             }
@@ -19307,11 +20184,16 @@
         ],
         "parameters": [],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "propertyNames": {
+                  "type": "string",
+                  "description": "Field name must be a string"
+                },
+                "additionalProperties": {}
               }
             }
           }
@@ -22571,7 +23453,8 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string"
+            "type": "string",
+            "readOnly": true
           },
           "name": {
             "type": "string"
@@ -22589,13 +23472,11 @@
           },
           "createdAt": {
             "type": "string",
-            "format": "date-time",
-            "default": "Generated at runtime"
+            "format": "date-time"
           },
           "updatedAt": {
             "type": "string",
-            "format": "date-time",
-            "default": "Generated at runtime"
+            "format": "date-time"
           },
           "role": {
             "type": "string",
@@ -22622,8 +23503,10 @@
           }
         },
         "required": [
+          "id",
           "name",
           "email",
+          "emailVerified",
           "createdAt",
           "updatedAt"
         ]
@@ -22632,7 +23515,8 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "string"
+            "type": "string",
+            "readOnly": true
           },
           "expiresAt": {
             "type": "string",
@@ -22643,8 +23527,7 @@
           },
           "createdAt": {
             "type": "string",
-            "format": "date-time",
-            "default": "Generated at runtime"
+            "format": "date-time"
           },
           "updatedAt": {
             "type": "string",
@@ -22692,10 +23575,12 @@
             "readOnly": true
           },
           "impersonatedBy": {
-            "type": "string"
+            "type": "string",
+            "readOnly": true
           }
         },
         "required": [
+          "id",
           "expiresAt",
           "token",
           "createdAt",

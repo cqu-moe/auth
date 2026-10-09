@@ -23,6 +23,14 @@ export function toCloudflareSchema(
   for (const [key, value] of Object.entries(schema)) {
     if (UNSUPPORTED.has(key)) throw new Error(`Unsupported OpenAPI 3.1 keyword at ${pointer}/${key}`);
     if (key === "pattern" || key === "uniqueItems") continue;
+    // Zod 4 records emit this 3.1 annotation; JSON object keys are already
+    // strings. Preserve fail-closed behavior for genuinely constrained keys.
+    if (key === "propertyNames") {
+      if (value && typeof value === "object" &&
+          Object.keys(value).every(key => ["type", "description", "title"].includes(key)) &&
+          ((value as { type?: unknown }).type === undefined || (value as { type?: unknown }).type === "string")) continue;
+      throw new Error(`Unsupported constrained propertyNames at ${pointer}`);
+    }
     if (key === "$ref" && typeof value === "string" && !value.startsWith("#/")) {
       throw new Error(`External reference at ${pointer}/$ref`);
     }

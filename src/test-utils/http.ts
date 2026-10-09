@@ -12,7 +12,6 @@ export function createHttpFixture() {
     database.exec(readFileSync(fileURLToPath(new NodeURL(name, migrations)), "utf8"));
   }
 
-  const kvValues = new Map<string, string>();
   const assetsFetch = vi.fn(async () =>
     new Response("<!doctype html><title>test asset</title>", {
       headers: { "content-type": "text/html; charset=utf-8" },
@@ -28,15 +27,6 @@ export function createHttpFixture() {
 
   const env = {
     DATABASE: createSqliteD1(database),
-    KV: {
-      get: async (key: string) => kvValues.get(key) ?? null,
-      put: async (key: string, value: string) => {
-        kvValues.set(key, value);
-      },
-      delete: async (key: string) => {
-        kvValues.delete(key);
-      },
-    },
     RESEND_API_KEY: "re_test_placeholder",
     CQU_SESSION: namespace,
     CQU_LOGIN: namespace,

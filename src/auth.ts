@@ -91,11 +91,11 @@ export function createAuth(env: Env, request: Request) {
     ...withCloudflare(
       {
         d1Native: env.DATABASE,
-        kv: env.KV,
         cf: (request.cf ?? {}) as CloudflareGeolocation,
         autoDetectIpAddress: true,
       },
       {
+        session: { cookieCache: { enabled: false } },
         emailAndPassword: {
           enabled: true,
           revokeSessionsOnPasswordReset: true,
@@ -130,6 +130,12 @@ export function createAuth(env: Env, request: Request) {
         },
         hooks: {
           before: createAuthMiddleware(async (ctx) => {
+            // Our authorization-code policy has no confidential OIDC exception.
+            const authorizationQuery = { ...ctx.query, ...ctx.body };
+            if (ctx.path === "/oauth2/authorize" &&
+                (!authorizationQuery?.code_challenge || authorizationQuery?.code_challenge_method !== "S256")) {
+              throw new APIError("BAD_REQUEST", { code: "INVALID_REQUEST", message: "S256 PKCE is required" });
+            }
             if (ctx.path === "/oauth2/token") {
               const body = ctx.body as {
                 grant_type?: unknown;
@@ -222,7 +228,10 @@ export function createAuth(env: Env, request: Request) {
             loginPage: "/login",
             consentPage: "/oauth/authorize",
             scopes: OAUTH_SCOPES,
-            validAudiences: [urls.issuer],
+            resources: [urls.issuer],
+            // Existing clients share this sole legacy resource. Future API/MCP
+            // resources must enable per-client links before adding audiences.
+            enforcePerClientResources: false,
             postLogin: {
               page: "/oauth/authorize",
               shouldRedirect: async () => false,
@@ -251,10 +260,6 @@ export function createAuth(env: Env, request: Request) {
                 }
                 throw error;
               }
-            },
-            silenceWarnings: {
-              oauthAuthServerConfig: true,
-              openidConfig: true,
             },
           }),
           emailOTP({
@@ -343,7 +348,7 @@ export function createAuth(env: Env, request: Request) {
           enabled: true,
           window: 60,
           max: 30,
-          storage: "secondary-storage",
+          storage: "database",
           customRules: {
             "/two-factor/send-otp": { window: 60, max: 3 },
             "/two-factor/verify-totp": { window: 60, max: 5 },

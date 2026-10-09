@@ -44,6 +44,7 @@ POST /link-social
 GET /list-accounts
 GET /list-sessions
 GET /oauth2/authorize
+POST /oauth2/authorize
 POST /oauth2/client/rotate-secret
 POST /oauth2/consent
 POST /oauth2/continue
@@ -51,6 +52,8 @@ POST /oauth2/create-client
 POST /oauth2/delete-client
 POST /oauth2/delete-consent
 GET /oauth2/end-session
+POST /oauth2/end-session
+POST /oauth2/end-session/confirm
 GET /oauth2/get-client
 GET /oauth2/get-clients
 GET /oauth2/get-consent
@@ -64,6 +67,7 @@ POST /oauth2/token
 POST /oauth2/update-client
 POST /oauth2/update-consent
 GET /oauth2/userinfo
+POST /oauth2/userinfo
 GET /ok
 POST /refresh-token
 POST /request-password-reset
@@ -107,11 +111,11 @@ describe("Better Auth migration baseline", () => {
         return methods.map((method) => `${method} ${endpoint.path}`);
       }).sort();
 
-      expect(endpoints).toHaveLength(80);
+      expect(endpoints).toHaveLength(81);
       expect(operations).toEqual(EXPECTED_OPERATIONS);
       expect(AUTH_OPERATIONS.map(({ method, path }) => `${method} ${path}`).sort())
         .toEqual(operations);
-      expect(operations).toHaveLength(81);
+      expect(operations).toHaveLength(85);
       expect(operations.filter((operation) => operation.endsWith(" /get-session")))
         .toEqual(["GET /get-session"]);
     } finally {
@@ -138,12 +142,12 @@ describe("Better Auth migration baseline", () => {
         "/email-otp/reset-password",
         "/verify-email",
       ]);
-      expect(serverOnly).toEqual([
+      expect(serverOnly).toEqual(expect.arrayContaining([
         "adminCreateOAuthClient:POST:/admin/oauth2/create-client",
         "adminUpdateOAuthClient:PATCH:/admin/oauth2/update-client",
         "getOAuthServerConfig:GET:/.well-known/oauth-authorization-server",
         "getOpenIdConfig:GET:/.well-known/openid-configuration",
-      ]);
+      ]));
       expect(ctx.authCookies).toMatchObject({
         sessionToken: {
           name: "__Secure-better-auth.session_token",

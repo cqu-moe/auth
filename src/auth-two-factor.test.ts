@@ -24,18 +24,8 @@ function authForTest() {
       "utf8"
     )
   );
-  const kvValues = new Map<string, string>();
   const env = {
     DATABASE: database,
-    KV: {
-      get: async (key: string) => kvValues.get(key) ?? null,
-      put: async (key: string, value: string) => {
-        kvValues.set(key, value);
-      },
-      delete: async (key: string) => {
-        kvValues.delete(key);
-      },
-    },
     BETTER_AUTH_URL: "http://localhost:8787",
     BETTER_AUTH_SECRET: "test-secret-that-is-long-enough-for-better-auth",
     RESEND_API_KEY: "re_test_placeholder",
@@ -109,7 +99,7 @@ describe("native two-factor authentication", () => {
     vi.useRealTimers();
   });
 
-  it("enables Better Auth two-factor and native email verification OTP", () => {
+  it("enables Better Auth two-factor and native email verification OTP", async () => {
     const { auth, database } = authForTest();
     const plugins = auth.options.plugins ?? [];
     const pluginIds = plugins.map((plugin) => plugin.id);
@@ -159,7 +149,7 @@ describe("native two-factor authentication", () => {
       enabled: true,
       window: 60,
       max: 30,
-      storage: "secondary-storage",
+      storage: "database",
       customRules: {
         "/two-factor/send-otp": { window: 60, max: 3 },
         "/two-factor/verify-totp": { window: 60, max: 5 },
@@ -172,6 +162,7 @@ describe("native two-factor authentication", () => {
         "/email-otp/change-email": { window: 60, max: 5 },
       },
     });
+    await auth.$context;
     database.close();
   });
 
@@ -190,6 +181,7 @@ describe("native two-factor authentication", () => {
     }
 
     expect(sendEmail).not.toHaveBeenCalled();
+    await auth.$context;
     database.close();
   });
 
@@ -204,6 +196,7 @@ describe("native two-factor authentication", () => {
     expect(html).toMatch(/>\d{6}</);
     expect(html).not.toContain("href=");
     expect(html).not.toContain("/api/auth/verify-email");
+    await auth.$context;
     database.close();
   });
 
@@ -241,6 +234,7 @@ describe("native two-factor authentication", () => {
       new Request("http://localhost:8787/api/auth/verify-email?token=legacy")
     );
     expect(legacy.status).toBe(404);
+    await auth.$context;
     database.close();
   });
 
@@ -277,6 +271,7 @@ describe("native two-factor authentication", () => {
       otp: newEmailOtp,
     });
     expect(changed.status).toBe(200);
+    await auth.$context;
     database.close();
   });
 
@@ -294,6 +289,7 @@ describe("native two-factor authentication", () => {
 
     expect(response.status).toBe(403);
     expect(sendEmail).not.toHaveBeenCalled();
+    await auth.$context;
     database.close();
   });
 
@@ -364,6 +360,7 @@ describe("native two-factor authentication", () => {
       code: enabled.backupCodes[0],
     });
     expect(secondUse.status).toBe(401);
+    await auth.$context;
     database.close();
   });
 
@@ -382,6 +379,8 @@ describe("native two-factor authentication", () => {
 
     for (const [path, max] of rules) {
       const { auth, database } = authForTest();
+      const { runMigrations } = await getMigrations(auth.options);
+      await runMigrations();
       const headers = new Headers();
       const clientIp = "198.51.100.42";
 
@@ -391,7 +390,8 @@ describe("native two-factor authentication", () => {
         else expect(response.status).toBe(429);
       }
 
-      database.close();
+      await auth.$context;
+    database.close();
     }
   });
 
@@ -439,6 +439,7 @@ describe("native two-factor authentication", () => {
       otp: "000000",
     });
     expect(exhausted.status).toBe(403);
+    await auth.$context;
     database.close();
   });
 });

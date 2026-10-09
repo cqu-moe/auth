@@ -2,17 +2,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../../app";
 import { createHttpFixture } from "../../test-utils/http";
 
-const verifyAccessToken = vi.hoisted(() => vi.fn());
-vi.mock("better-auth/oauth2", () => ({ verifyAccessToken }));
+const verifyBearerToken = vi.hoisted(() => vi.fn());
+vi.mock("better-auth/oauth2", () => ({ verifyBearerToken }));
 
 describe("service ticket API v1", () => {
-  beforeEach(() => verifyAccessToken.mockReset());
+  beforeEach(() => verifyBearerToken.mockReset());
 
   it("issues through one bearer verification and one DO call", async () => {
     const fixture = createHttpFixture();
     fixture.seedBearerIdentity("ticket-user", "ticket-client");
     try {
-      verifyAccessToken.mockResolvedValue({
+      verifyBearerToken.mockResolvedValue({
         sub: "ticket-user",
         azp: "ticket-client",
         scope: "cqu:ticket:jwxt",
@@ -31,7 +31,7 @@ describe("service ticket API v1", () => {
       expect(response.status).toBe(201);
       expect(response.headers.get("cache-control")).toBe("no-store");
       expect(await response.json()).toEqual({ data: { ticket: "ST-local" } });
-      expect(verifyAccessToken).toHaveBeenCalledTimes(1);
+      expect(verifyBearerToken).toHaveBeenCalledTimes(1);
       expect(fixture.doFetch).toHaveBeenCalledTimes(1);
     } finally {
       await fixture.close();
@@ -47,7 +47,7 @@ describe("service ticket API v1", () => {
       expect(get.status).toBe(405);
       expect(get.headers.get("allow")).toBe("POST, OPTIONS");
 
-      verifyAccessToken.mockResolvedValue({
+      verifyBearerToken.mockResolvedValue({
         sub: "ticket-user",
         azp: "ticket-client",
         scope: "cqu:ticket:jwxt",
@@ -60,7 +60,7 @@ describe("service ticket API v1", () => {
       }, fixture.env);
       expect(ambiguous.status).toBe(400);
       expect(await ambiguous.json()).toMatchObject({ code: "INVALID_TARGET" });
-      expect(verifyAccessToken).toHaveBeenCalledTimes(1);
+      expect(verifyBearerToken).toHaveBeenCalledTimes(1);
       expect(fixture.doFetch).not.toHaveBeenCalled();
     } finally {
       await fixture.close();

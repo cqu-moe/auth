@@ -29,8 +29,7 @@ export interface QuickloginOAuthClientRecord {
   tokenEndpointAuthMethod: "none";
   grantTypes: string[];
   responseTypes: ["code"];
-  public: true;
-  type: "user-agent-based";
+  applicationType: "web";
   requirePKCE: true;
   referenceId: null;
   metadata: { quickloginOfficial: true; extensionOrigin: string };
@@ -78,7 +77,7 @@ function matches(
     value.tokenEndpointAuthMethod === "none" &&
     sameArray(value.grantTypes, expected.grantTypes) &&
     sameArray(value.responseTypes, expected.responseTypes) &&
-    value.public === true && value.type === "user-agent-based" &&
+    value.applicationType === "web" &&
     value.requirePKCE === true && value.referenceId === null &&
     value.createdAt instanceof Date && value.updatedAt instanceof Date &&
     metadataKeys.length === 2 && metadataKeys[0] === "extensionOrigin" &&
@@ -113,8 +112,7 @@ export async function ensureQuickloginOAuthClient(
     tokenEndpointAuthMethod: "none",
     grantTypes: ["authorization_code", "refresh_token"],
     responseTypes: ["code"],
-    public: true,
-    type: "user-agent-based",
+    applicationType: "web",
     requirePKCE: true,
     referenceId: null,
     metadata: { quickloginOfficial: true, extensionOrigin: env.QUICKLOGIN_EXTENSION_ORIGIN },

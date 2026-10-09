@@ -91,7 +91,7 @@ React 19 + React Router 7 + Tailwind CSS 4 SPA。
 | Binding       | 类型              | 用途                    |
 |---------------|-------------------|-------------------------|
 | DATABASE      | D1                | 用户数据、CQU 凭证       |
-| KV            | KV Namespace      | Better Auth 会话缓存     |
+| (无 KV)       | —                 | 会话、verification、限流均使用 D1 |
 | (Resend API)  | env var           | 密码重置/邮箱验证邮件     |
 | CQU_SESSION   | Durable Object    | CQU CAS 会话状态         |
 | ASSETS        | Static Assets     | 前端 SPA 文件            |

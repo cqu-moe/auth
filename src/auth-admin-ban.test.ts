@@ -14,14 +14,8 @@ vi.mock("resend", () => ({
 
 function authForTest() {
   const database = new DatabaseSync(":memory:");
-  const kvValues = new Map<string, string>();
   const env = {
     DATABASE: database,
-    KV: {
-      get: async (key: string) => kvValues.get(key) ?? null,
-      put: async (key: string, value: string) => { kvValues.set(key, value); },
-      delete: async (key: string) => { kvValues.delete(key); },
-    },
     BETTER_AUTH_URL: "http://localhost:8787",
     BETTER_AUTH_SECRET: "test-secret-that-is-long-enough-for-better-auth",
     RESEND_API_KEY: "re_test_placeholder",

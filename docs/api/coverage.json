@@ -1121,6 +1121,16 @@
   },
   {
     "method": "POST",
+    "path": "/api/v1/auth/oauth2/authorize",
+    "kind": "canonical",
+    "requestValidation": "parameters-only",
+    "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "POST",
     "path": "/api/v1/auth/oauth2/client/rotate-secret",
     "kind": "canonical",
     "requestValidation": "json-body-and-parameters",
@@ -1185,6 +1195,26 @@
     "kind": "canonical",
     "requestValidation": "parameters-only",
     "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/end-session",
+    "kind": "canonical",
+    "requestValidation": "json-body-and-parameters",
+    "requestReason": "The Cloudflare projection retains the JSON body and path/query parameters; pattern and uniqueItems constraints remain application-validated.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/end-session/confirm",
+    "kind": "canonical",
+    "requestValidation": "json-body-and-parameters",
+    "requestReason": "The Cloudflare projection retains the JSON body and path/query parameters; pattern and uniqueItems constraints remain application-validated.",
     "responseValidation": "not-supported-by-cloudflare",
     "responseContract": "problem-details-or-protocol",
     "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
@@ -1315,6 +1345,16 @@
     "kind": "canonical",
     "requestValidation": "parameters-only",
     "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "responseValidation": "not-supported-by-cloudflare",
+    "responseContract": "problem-details-or-protocol",
+    "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
+  },
+  {
+    "method": "POST",
+    "path": "/api/v1/auth/oauth2/userinfo",
+    "kind": "canonical",
+    "requestValidation": "json-body-and-parameters",
+    "requestReason": "The Cloudflare projection retains the JSON body and path/query parameters; pattern and uniqueItems constraints remain application-validated.",
     "responseValidation": "not-supported-by-cloudflare",
     "responseContract": "problem-details-or-protocol",
     "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."
@@ -1493,8 +1533,8 @@
     "method": "POST",
     "path": "/api/v1/auth/two-factor/send-otp",
     "kind": "canonical",
-    "requestValidation": "parameters-only",
-    "requestReason": "This operation has no JSON request body; documented parameters remain projected.",
+    "requestValidation": "json-body-and-parameters",
+    "requestReason": "The Cloudflare projection retains the JSON body and path/query parameters; pattern and uniqueItems constraints remain application-validated.",
     "responseValidation": "not-supported-by-cloudflare",
     "responseContract": "problem-details-or-protocol",
     "responseReason": "The application or protocol handler enforces the documented response; Cloudflare does not validate responses."

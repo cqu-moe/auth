@@ -28,7 +28,7 @@ describe("official quicklogin OAuth client registration", () => {
       tokenEndpointAuthMethod: "none",
       grantTypes: ["authorization_code", "refresh_token"],
       requirePKCE: true,
-      public: true,
+      applicationType: "web",
       scopes: ["openid", "offline_access", "cqu:quicklogin:device"],
       metadata: {
         quickloginOfficial: true,

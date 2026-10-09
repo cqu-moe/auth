@@ -351,3 +351,31 @@ GET  /api/v1/auth/oauth2/end-session  ?id_token_hint=…&post_logout_redirect_ur
 
 **标准 scope**:`openid` · `profile` · `email` · `offline_access`
 **CQU scope**:`cqu:ticket:jwxt` · `cqu:ticket:jxpj` · `cqu:ticket:library` · `cqu:ticket:card` · `cqu:ticket:any`(广域,需 admin 授权 + 用户 opt-in)
+
+## Better Auth 1.7 升级基线
+
+Auth 的前后端 Better Auth / OAuth provider 固定为 1.7.7，Cloudflare 适配器为
+0.3.1（peer 范围支持 Better Auth 1.5+）。会话、verification 和原生数据库限流均使用
+D1；不再需要 KV binding，关闭 session cookie cache。CQU Durable Objects 保持原职责。
+
+部署顺序为先备份 D1、应用手写 `0010_auth_17_d1.sql`，再发布匹配的前后端。
+迁移保留账号、密码哈希、学校凭据、权益和 JWK 原文；从每把 JWK 派生算法元数据。
+旧 `type` / `public` 列仅留作回滚资料，新版本使用 `applicationType` 与
+`tokenEndpointAuthMethod`。公开浏览器客户端映射为 `web` + `none`，原 `native`
+保持 `native`；上线前核对已有特殊回调客户端。后台服务未自动授予新的机器 scope。
+旧 KV 中的短期验证码不会迁移，升级期间可能需要重新请求验证码、登录或连接。
+不得删除生产 KV namespace 作为本次配置变更的一部分。
+
+所有授权码调用必须提供 S256 challenge 和对应 verifier，机密客户端同样如此；管理台
+不能关闭 PKCE。现有管理 API 的 `type` 字段仍兼容，后端映射到新模型。
+issuer 仍为 `https://auth.cqu.moe/api/auth`，HTTP 端点仍位于 `/api/v1/auth`。
+
+现阶段只有 issuer 对应的一个资源，显式保留已有客户端对该资源的可请求性
+（`enforcePerClientResources: false`），仍受客户端 scope 和业务权限约束。
+未来增加 API/MCP 资源前必须启用逐客户端资源关联并迁移已有客户端；不得直接在这个
+兼容配置下增加新 audience。本次没有创建 API/MCP 业务端点，跨站 Cookie 收口待消费者迁移。
+
+本地回归使用真实 workerd/D1：`npm run test:do`，其中
+`auth-d1-baseline.test.ts` 覆盖并发限流、授权码单次消费、PKCE/回调/事务校验、
+TOTP 登录与退出、OTP 过期和 verification 清理；`auth-upgrade-migration.test.ts`
+从带数据的旧 schema 升级后验证登录、学校数据、权益和客户端保留。

@@ -1,7 +1,7 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 
 type BoundStatement = {
-  run<T = Record<string, unknown>>(): Promise<D1Result<T>>;
+  all<T = Record<string, unknown>>(): Promise<D1Result<T>>;
 };
 
 function result<T>(results: T[], changes = 0): D1Result<T> {
@@ -41,7 +41,10 @@ export function createSqliteD1(database: DatabaseSync): D1Database {
         return result<T>([], Number(execution.changes));
       },
       async all<T = Record<string, unknown>>() {
-        return result(statement.all(...values) as T[]);
+        const before = Number(database.prepare("SELECT total_changes() AS count").get()!.count);
+        const rows = statement.all(...values) as T[];
+        const after = Number(database.prepare("SELECT total_changes() AS count").get()!.count);
+        return result(rows, after - before);
       },
       async raw<T = unknown[]>(options?: { columnNames?: boolean }) {
         statement.setReturnArrays(true);
@@ -64,7 +67,7 @@ export function createSqliteD1(database: DatabaseSync): D1Database {
     async batch(statements: BoundStatement[]) {
       database.exec("BEGIN");
       try {
-        const results = await Promise.all(statements.map((statement) => statement.run()));
+        const results = await Promise.all(statements.map((statement) => statement.all()));
         database.exec("COMMIT");
         return results;
       } catch (error) {

@@ -34,10 +34,7 @@
     "migrations_dir": "drizzle/migrations"
   }],
 
-  "kv_namespaces": [{
-    "binding": "KV",
-    "id": "6b00aa8948df452d956bd948b4c0b603"
-  }],
+
 
   "queues": {
     "consumers": [{

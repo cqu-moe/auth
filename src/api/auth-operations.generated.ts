@@ -146,6 +146,10 @@ export const AUTH_OPERATIONS = [
   },
   {
     "method": "POST",
+    "path": "/oauth2/authorize"
+  },
+  {
+    "method": "POST",
     "path": "/oauth2/client/rotate-secret"
   },
   {
@@ -171,6 +175,14 @@ export const AUTH_OPERATIONS = [
   {
     "method": "GET",
     "path": "/oauth2/end-session"
+  },
+  {
+    "method": "POST",
+    "path": "/oauth2/end-session"
+  },
+  {
+    "method": "POST",
+    "path": "/oauth2/end-session/confirm"
   },
   {
     "method": "GET",
@@ -222,6 +234,10 @@ export const AUTH_OPERATIONS = [
   },
   {
     "method": "GET",
+    "path": "/oauth2/userinfo"
+  },
+  {
+    "method": "POST",
     "path": "/oauth2/userinfo"
   },
   {
