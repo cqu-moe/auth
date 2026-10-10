@@ -1,55 +1,90 @@
 name: Tests
-
 on:
+  pull_request:
   push:
     branches: ['**']
-    paths-ignore:
-      - '**.md'
-      - 'docs/**/*.md'
-      - '.gitignore'
-      - 'LICENSE'
+    tags: ['v*']
   workflow_dispatch:
-
 permissions:
   contents: read
-
 concurrency:
-  group: tests-${{ github.ref }}
-  cancel-in-progress: true
-
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: Application checks and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+      WRANGLER_LOG_PATH: /tmp/auth-ci-wrangler.log
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           package_json_file: frontend/package.json
-
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: 22
+          node-version: '22.22.3'
           cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Install (root)
-        run: npm ci
-
-      - name: Install (frontend)
-        run: pnpm install --frozen-lockfile
+      - run: npm ci
+      - run: pnpm install --frozen-lockfile
         working-directory: frontend
-
-      - name: Test
-        run: npm test
-
-      - name: Test (Workers / Durable Objects)
-        run: npm run test:do
+      - run: npm run check:ci
+      - run: npm run build:ci
+      - run: npm run package:ci
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: auth-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+  container:
+    name: Chromium container tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: bash scripts/test-container.sh
+  ci:
+    name: CI
+    if: always()
+    needs: [test, container]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require all checks
         env:
-          WRANGLER_LOG_PATH: /tmp/auth-api-v1-wrangler.log
-
-      - name: Test (Chromium container)
+          TEST_RESULT: ${{ needs.test.result }}
+          CONTAINER_RESULT: ${{ needs.container.result }}
+        run: test "$TEST_RESULT" = success && test "$CONTAINER_RESULT" = success
+  release:
+    name: Versioned build archive
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - name: Validate release source and version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          docker build --platform linux/amd64 -t cqu-browser-tests ./container
-          docker run --rm --platform linux/amd64 -v "$PWD:/workspace:ro" cqu-browser-tests \
-            sh -c 'python -m pip install --disable-pip-version-check pytest==9.1.1 pytest-asyncio==1.4.0 && PYTHONPATH=/app python -m pytest -q -o cache_dir=/tmp/pytest-cache /workspace/container'
+          git merge-base --is-ancestor HEAD origin/main
+          node -e 'if (process.env.RELEASE_TAG !== "v" + require("./package.json").version) process.exit(1)'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: auth-${{ github.sha }}
+          path: artifacts
+      - name: Publish verified archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          cd artifacts
+          shasum -a 256 -c SHA256SUMS
+          gh release create "$RELEASE_TAG" ./*.tar.gz SHA256SUMS --verify-tag --generate-notes --title "$RELEASE_TAG"
