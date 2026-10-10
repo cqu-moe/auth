@@ -1,6 +1,6 @@
 # 交接文档：CQU 2FA 邮件取码无人值守会话重绑
 
-> 跨 session 接力用。**只记未完成事项 + 必要现状/备查**；已完成的历史细节见 git log、`CLAUDE.md`、自动记忆。
+> 跨 session 接力用。**只记未完成事项 + 必要现状/备查**；已完成的历史细节见 git log、`AGENTS.md`、自动记忆。
 > 仓库：`/Users/uu/Documents/Coding/cqu-moe/auth`，分支已并入 **main**（feat 分支已删）。
 > 更新：2026-06-14（session-3 收尾，已精简）。
 
@@ -44,4 +44,4 @@ CQU 增强登录无人值守会话重绑 **已上线并生产实证可用**：�
 - **2FA 码 / 绑定确认码有效期 ~10min**（邮件正文写的"2分钟"不准）。
 - **CI/CD**：`.github/workflows/deploy.yml`（`on: push` 全分支 + dispatch；md/docs `paths-ignore`）。main → 迁移 + deploy；分支 → versions upload。**DO 限制**：本 Worker 用 Durable Objects → CF 不生成 preview URL，分支版本无可点预览链接（要可测分支环境只能另建独立预览 Worker）。secret `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` 已设；CF git-connected Workers Builds 已禁用。
 - **部署坑**：`wrangler deploy` 不跑 D1 迁移（CI 里单独 `migrations apply --remote`）；容器构建需 Docker（CI runner 自带）。
-- 其余架构/gotcha 见 `CLAUDE.md` 与自动记忆 `project_cqu_2fa_email_rebind`。
+- 其余架构/gotcha 见 `AGENTS.md` 与自动记忆 `project_cqu_2fa_email_rebind`。

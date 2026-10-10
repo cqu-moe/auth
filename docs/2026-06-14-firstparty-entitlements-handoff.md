@@ -58,7 +58,7 @@
 - `context7-mcp` / Context7 MCP — 核对 better-auth jwt/cookie/RPC 当前 API(上方未完成项 #3)。
 - `cloudflare:durable-objects` + `workers-best-practices` — 改 DO 取票分支 + RPC entrypoint 时。
 - `better-auth-best-practices` — caps 下发钩子(customSession/jwt/customAccessTokenClaims)。
-- `claude-md-management:revise-claude-md` — 实现后同步 CLAUDE.md。
+- `mattpocock-skills:writing-for-agents` — 实现后同步 AGENTS.md。
 
 ## 备查:为什么这么设计(一句话)
 
