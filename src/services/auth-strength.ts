@@ -48,7 +48,8 @@ export async function enforceAuthenticationStrength(ctx: Parameters<typeof getSe
       if (factor?.verified === false) purpose = "mfa";
     }
   }
-  const administrative = ctx.path.startsWith("/admin/");
+  // Native stop-impersonating restores the signed original administrator session.
+  const administrative = ctx.path.startsWith("/admin/") && ctx.path !== "/admin/stop-impersonating";
   if (!purpose && !administrative) return;
   const session = await getSessionFromCtx(ctx);
   if (!session) return; // Native endpoint retains its normal unauthenticated error.

@@ -26,3 +26,18 @@ The local HTTP and workerd regressions cover both exact Origins, code/refresh to
 response CORS, authenticated v2/v3 device registration, unauthenticated failures,
 lookalike rejection and website-only restrictions. A merged commit, a deployed
 Worker and actual installed Chrome Web Store acceptance are separate evidence.
+
+## Restore the administrator after reviewer-account impersonation
+
+`POST /api/v1/auth/admin/stop-impersonating` is a session endpoint, exempt only
+from the broad `/admin/*` strong-authentication hook. During impersonation the
+current session belongs to the ordinary reviewer, so requiring its strong-admin
+proof prevented returning to the original administrator.
+
+The unchanged native Better Auth route requires an impersonated session, the
+signed `admin_session` Cookie, and an original session owned by the administrator
+named in `impersonatedBy`. Missing, tampered or cross-admin Cookies cannot restore
+an administrator. Other native and application administrator actions continue to
+require strong authentication. Successful restoration deletes the impersonated
+session, clears the temporary admin Cookie and resumes the original administrator
+session and its existing strong-authentication proof.
