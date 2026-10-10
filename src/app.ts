@@ -14,6 +14,7 @@ import { AUTH_BASE_PATH } from "../shared/api-paths";
 import { buildOpenApiDocument } from "./api/openapi/document";
 import { getBetterAuthOpenApi, mergeBetterAuthOpenApi } from "./api/openapi/auth";
 import { captureHonoException } from "./lib/posthog";
+import { acceptedQuickloginOrigin } from "./services/quicklogin/extension-origin";
 
 export function createApp() {
   const app = new Hono<HonoEnv>();
@@ -32,23 +33,26 @@ export function createApp() {
 
   app.use("/*", async (c, next) => {
     const path = new URL(c.req.url).pathname;
-    if (path.startsWith("/api/v1/cqu/quicklogin/devices")) {
+    if (path.startsWith("/api/v1/cqu/quicklogin/devices") ||
+      /^\/api\/v1\/cqu\/quicklogin\/(capabilities|registrations|overview)\/?$/.test(path)) {
       return next();
     }
     const origin = c.req.header("origin");
     const websiteStatus = origin === "https://quicklogin.cqu.moe" &&
       /^\/api\/v1\/cqu\/quicklogin\/?$/.test(path) &&
       (["GET", "HEAD"].includes(c.req.method) || (c.req.method === "OPTIONS" && c.req.header("access-control-request-method") === "GET"));
+    const extensionTokenOrigin = path === "/api/v1/auth/oauth2/token"
+      ? acceptedQuickloginOrigin(c.env, origin) : null;
     if (origin) {
-      c.header("Access-Control-Allow-Origin", websiteStatus ? origin : "*");
+      c.header("Access-Control-Allow-Origin", extensionTokenOrigin ?? (websiteStatus ? origin : "*"));
       if (websiteStatus) c.header("Access-Control-Allow-Credentials", "true");
       c.header("Vary", "Origin");
     }
     if (c.req.method !== "OPTIONS") {
       await next();
       // Native token responses replace headers set before next(). Restore only
-      // the configured extension's public-client token CORS, without credentials.
-      if (origin && origin === c.env.QUICKLOGIN_EXTENSION_ORIGIN && c.req.method === "POST" && path === "/api/v1/auth/oauth2/token") {
+      // a configured extension's public-client token CORS, without credentials.
+      if (origin && acceptedQuickloginOrigin(c.env, origin) && c.req.method === "POST" && path === "/api/v1/auth/oauth2/token") {
         c.header("Access-Control-Allow-Origin", origin);
         c.header("Vary", "Origin", { append: true });
       }

@@ -16,10 +16,10 @@ beforeEach(async () => {
   vi.restoreAllMocks();
 });
 
-function extensionHeaders(authorization: string): Headers {
+function extensionHeaders(authorization: string, origin = env.QUICKLOGIN_EXTENSION_ORIGIN): Headers {
   return new Headers({
     authorization,
-    origin: env.QUICKLOGIN_EXTENSION_ORIGIN,
+    origin,
     "content-type": "application/json",
   });
 }
@@ -354,21 +354,21 @@ describe("quicklogin device HTTP", () => {
 });
 
 describe('QuickLogin v3 HTTP contracts', () => {
- it('serves capabilities and registers the existing bearer device with a parsed v3 snapshot', async () => {
+ it.each([env.QUICKLOGIN_EXTENSION_ORIGIN, 'chrome-extension://ainapeknaclcpoioimonkodmoakhacjd'])('serves capabilities and registers the existing bearer device with a parsed v3 snapshot for %s', async origin => {
   const { parseApiResponse, parseCapabilities, parseRegistrationResponse, parseReconcileResponse } = await import('../../src/services/quicklogin/protocol-v3');
-  const capabilities = await SELF.fetch('http://localhost:8787/api/v1/cqu/quicklogin/capabilities', { headers: { Origin: env.QUICKLOGIN_EXTENSION_ORIGIN } });
+  const capabilities = await SELF.fetch('http://localhost:8787/api/v1/cqu/quicklogin/capabilities', { headers: { Origin: origin } });
   expect(capabilities.status).toBe(200);
   expect(parseApiResponse(await capabilities.json(), parseCapabilities).data.supportedProtocolVersions).toEqual([2,3]);
   const fixture = await createOAuthFixture(env), install = await authorizeOfficialInstall(fixture, { websiteSession: fixture.websiteSession });
   const authorization = install.request().headers.get('authorization')!;
   const client = { installationId:'http-install', extensionVersion:'0.2.0', buildId:'test', browserVersion:'152' };
   const request = { protocolVersion:3, requestId:'http-r', registrationId:'http-reg', client, deviceName:'HTTP Chrome' };
-  const registered = await SELF.fetch('http://localhost:8787/api/v1/cqu/quicklogin/registrations',{method:'POST',headers:extensionHeaders(authorization),body:JSON.stringify(request)});
+  const registered = await SELF.fetch('http://localhost:8787/api/v1/cqu/quicklogin/registrations',{method:'POST',headers:extensionHeaders(authorization, origin),body:JSON.stringify(request)});
   expect(registered.status).toBe(200);
   const data = parseApiResponse(await registered.json(),parseRegistrationResponse).data;
-  const replay = await SELF.fetch('http://localhost:8787/api/v1/cqu/quicklogin/registrations',{method:'POST',headers:extensionHeaders(authorization),body:JSON.stringify(request)});
+  const replay = await SELF.fetch('http://localhost:8787/api/v1/cqu/quicklogin/registrations',{method:'POST',headers:extensionHeaders(authorization, origin),body:JSON.stringify(request)});
   expect(parseApiResponse(await replay.json(),parseRegistrationResponse).data.deviceId).toBe(data.deviceId);
-  const reconciled=await SELF.fetch(`http://localhost:8787/api/v1/cqu/quicklogin/devices/${data.deviceId}/reconcile`,{method:'POST',headers:extensionHeaders(authorization),body:JSON.stringify({protocolVersion:3,requestId:'http-sync',client,observed:null,reportEpoch:'http-epoch',clientReportSeq:1,local:{enabledIntent:true,mode:'automatic',cookieState:'missing',receipt:null}})});
+  const reconciled=await SELF.fetch(`http://localhost:8787/api/v1/cqu/quicklogin/devices/${data.deviceId}/reconcile`,{method:'POST',headers:extensionHeaders(authorization, origin),body:JSON.stringify({protocolVersion:3,requestId:'http-sync',client,observed:null,reportEpoch:'http-epoch',clientReportSeq:1,local:{enabledIntent:true,mode:'automatic',cookieState:'missing',receipt:null}})});
   expect(reconciled.status).toBe(200);
   expect(parseApiResponse(await reconciled.json(),parseReconcileResponse).data.snapshot.identity.installationId).toBe('http-install');
  });

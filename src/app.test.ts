@@ -205,6 +205,77 @@ describe("API and SPA routing boundary", () => {
     }
   });
 
+  it.each([
+    "chrome-extension://igfidegfgfoofnoncpmbcokbffjmmook",
+    "chrome-extension://ainapeknaclcpoioimonkodmoakhacjd",
+  ])("accepts only configured extension CORS while retaining bearer and website guards: %s", async origin => {
+    const fixture = createHttpFixture();
+    Object.assign(fixture.env, {
+      QUICKLOGIN_EXTENSION_ORIGIN: "chrome-extension://igfidegfgfoofnoncpmbcokbffjmmook",
+      QUICKLOGIN_STORE_EXTENSION_ORIGIN: "chrome-extension://ainapeknaclcpoioimonkodmoakhacjd",
+      QUICKLOGIN_DEVICE_MODE: "on",
+    });
+    try {
+      const app = createApp();
+      for (const path of ["devices", "registrations", "devices/any/reconcile"]) {
+        const url = `/api/v1/cqu/quicklogin/${path}`;
+        const preflight = await app.request(url, {
+          method: "OPTIONS",
+          headers: { origin, "access-control-request-method": "POST" },
+        }, fixture.env);
+        expect(preflight.status, path).toBe(204);
+        expect(preflight.headers.get("access-control-allow-origin"), path).toBe(origin);
+        expect(preflight.headers.get("access-control-allow-credentials"), path).toBeNull();
+        const unauthenticated = await app.request(url, {
+          method: "POST", headers: { origin },
+        }, fixture.env);
+        expect(unauthenticated.status, path).toBe(401);
+        expect(unauthenticated.headers.get("access-control-allow-origin"), path).toBe(origin);
+      }
+      for (const [path, method] of [["overview", "GET"], ["devices/any/resume-ticket", "POST"]]) {
+        const response = await app.request(`/api/v1/cqu/quicklogin/${path}`, {
+          method, headers: { origin, authorization: "Bearer invalid" },
+        }, fixture.env);
+        expect(response.status, path).toBe(401);
+        expect(response.headers.get("access-control-allow-origin"), path).toBeNull();
+        const preflight = await app.request(`/api/v1/cqu/quicklogin/${path}`, {
+          method: "OPTIONS", headers: { origin, "access-control-request-method": method },
+        }, fixture.env);
+        expect(preflight.status, path).toBe(403);
+        expect(preflight.headers.get("access-control-allow-origin"), path).toBeNull();
+      }
+    } finally { await fixture.close(); }
+  });
+
+  it.each([
+    undefined,
+    "*",
+    "chrome-extension://ainapeknaclcpoioimonkodmoakhacjd.attacker.example",
+    "chrome-extension://ainapeknaclcpoioimonkodmoakhacjd/",
+    "chrome-extension://abcdefghijklmnopabcdefghijklmnop",
+    "https://ainapeknaclcpoioimonkodmoakhacjd",
+  ])("rejects missing or unlisted extension Origins without CORS: %s", async origin => {
+    const fixture = createHttpFixture();
+    Object.assign(fixture.env, {
+      QUICKLOGIN_EXTENSION_ORIGIN: "chrome-extension://igfidegfgfoofnoncpmbcokbffjmmook",
+      QUICKLOGIN_STORE_EXTENSION_ORIGIN: "chrome-extension://ainapeknaclcpoioimonkodmoakhacjd",
+      QUICKLOGIN_DEVICE_MODE: "on",
+    });
+    try {
+      const app = createApp();
+      for (const path of ["devices", "registrations", "devices/any/reconcile"]) {
+        for (const method of ["OPTIONS", "POST"]) {
+          const response = await app.request(`/api/v1/cqu/quicklogin/${path}`, {
+            method,
+            headers: { ...(origin ? { origin } : {}), "access-control-request-method": "POST" },
+          }, fixture.env);
+          expect(response.status, `${method} ${path}`).toBe(403);
+          expect(response.headers.get("access-control-allow-origin"), path).toBeNull();
+        }
+      }
+    } finally { await fixture.close(); }
+  });
+
   it("logs only anonymous normalized legacy telemetry", async () => {
     const fixture = createHttpFixture();
     const info = vi.spyOn(console, "info").mockImplementation(() => {});

@@ -12,6 +12,7 @@
     "QUICKLOGIN_DEVICE_MODE": "on",
     "QUICKLOGIN_CLIENT_ID": "cqu-quicklogin-chrome",
     "QUICKLOGIN_EXTENSION_ORIGIN": "chrome-extension://igfidegfgfoofnoncpmbcokbffjmmook",
+    "QUICKLOGIN_STORE_EXTENSION_ORIGIN": "chrome-extension://ainapeknaclcpoioimonkodmoakhacjd",
     "POSTHOG_HOST": "https://p.cqu.moe",
     "ENVIRONMENT": "production",
     // 浏览器后端已固定为 Cloudflare APAC Containers(2026-09-08 全量切换,

@@ -37,6 +37,51 @@ describe("official quicklogin OAuth client registration", () => {
     });
   });
 
+  it("registers both exact extension callbacks under the existing public client", async () => {
+    const result = await ensureQuickloginOAuthClient({
+      ...env,
+      QUICKLOGIN_STORE_EXTENSION_ORIGIN: "chrome-extension://ainapeknaclcpoioimonkodmoakhacjd",
+    }, {
+      findOne: async () => null,
+      create: async ({ data }) => data,
+    });
+    expect(result).toMatchObject({
+      clientId: "cqu-quicklogin-chrome",
+      redirectUris: [
+        "https://abcdefghijklmnopabcdefghijklmnop.chromiumapp.org/",
+        "https://ainapeknaclcpoioimonkodmoakhacjd.chromiumapp.org/",
+      ],
+      scopes: ["openid", "offline_access", "cqu:quicklogin:device"],
+      requirePKCE: true,
+      grantTypes: ["authorization_code", "refresh_token"],
+      metadata: { quickloginOfficial: true, extensionOrigin: env.QUICKLOGIN_EXTENSION_ORIGIN },
+    });
+    const dualOriginEnv = { ...env,
+      QUICKLOGIN_STORE_EXTENSION_ORIGIN: "chrome-extension://ainapeknaclcpoioimonkodmoakhacjd" };
+    await expect(ensureQuickloginOAuthClient(dualOriginEnv, {
+      findOne: async () => result,
+      create: async ({ data }) => data,
+    })).resolves.toBe(result);
+    const canaryOnly = await desiredRecord();
+    await expect(ensureQuickloginOAuthClient(dualOriginEnv, {
+      findOne: async () => canaryOnly,
+      create: async ({ data }) => data,
+    })).rejects.toMatchObject({ code: "EXISTING_CLIENT_MISMATCH" });
+  });
+
+  it.each([
+    "*",
+    "https://ainapeknaclcpoioimonkodmoakhacjd",
+    "chrome-extension://ainapeknaclcpoioimonkodmoakhacjd.attacker.example",
+    "chrome-extension://ainapeknaclcpoioimonkodmoakhacjd/",
+    "",
+  ])("rejects malformed store Origin configuration: %s", async origin => {
+    await expect(ensureQuickloginOAuthClient({ ...env, QUICKLOGIN_STORE_EXTENSION_ORIGIN: origin }, {
+      findOne: async () => null,
+      create: async ({ data }) => data,
+    })).rejects.toMatchObject({ code: "INVALID_CONFIG" });
+  });
+
   it("fails closed when a client with the production id has a different contract", async () => {
     await expect(ensureQuickloginOAuthClient(env, {
       findOne: async () => ({ clientId: env.QUICKLOGIN_CLIENT_ID, requirePKCE: false }),

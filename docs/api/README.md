@@ -27,7 +27,7 @@ optional-session, session-only, admin, Bearer, OAuth client, and two-factor-cook
 - `GET` device list and device `DELETE` use the Auth website Cookie and require the
   configured website origin at runtime where applicable.
 - Register, device `PUT`, status, refresh, and export use Bearer authentication and
-  the single configured extension origin. OPTIONS is registered only for the five
+  one of the exact configured canary/store extension origins. OPTIONS is registered only for the five
   exact device resources and advertises only that resource's methods.
 - Device success and error responses are native QuickLogin DTOs, including
   `QuickloginNativeError`; they are not wrapped in `{data}` or Problem Details.

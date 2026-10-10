@@ -45,7 +45,7 @@ export default defineConfig({
           BIND_EMAIL_DOMAIN: "cquotp.com",
           QUICKLOGIN_CLIENT_ID: "quicklogin-test-client",
           QUICKLOGIN_EXTENSION_ORIGIN:
-            "chrome-extension://quicklogin-test-extension",
+            "chrome-extension://igfidegfgfoofnoncpmbcokbffjmmook",
           QUICKLOGIN_DEVICE_MODE: "on",
           TEST_MIGRATIONS: testMigrations,
         },

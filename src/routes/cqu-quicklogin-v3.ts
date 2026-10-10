@@ -7,6 +7,7 @@ import { QuickloginDeviceClient } from '../services/quicklogin/device-client';
 import { QuickloginLoginBrokerClient } from '../services/quicklogin/login-broker-client';
 import { getTrustedClientIp, readJson } from '../services/quicklogin/http';
 import { hasQuickloginPolicy } from '../services/quicklogin/eligibility';
+import { acceptedQuickloginOrigin } from '../services/quicklogin/extension-origin';
 import { quickloginDeviceModeEnabled } from '../services/quicklogin/mode';
 import { snapshotV3, unknownBinding } from '../services/quicklogin/snapshot-v3';
 import { V3Error } from '../services/quicklogin/device-v3-store';
@@ -31,7 +32,7 @@ function currentAck(ack: Omit<ReceiptAck, 'snapshot'>, snapshot: DeviceSnapshot)
  return { ...ack, snapshot };
 }
 async function principal(c: Context<HonoEnv>, deviceId?: string) {
- if (c.req.header('Origin') !== c.env.QUICKLOGIN_EXTENSION_ORIGIN) throw new QuickloginDeviceAuthError('FORBIDDEN');
+ if (!acceptedQuickloginOrigin(c.env, c.req.header('Origin'))) throw new QuickloginDeviceAuthError('FORBIDDEN');
  if (!quickloginDeviceModeEnabled(c.env)) throw new V3Error('SERVICE_PAUSED');
  const p = await verifyQuickloginBearer(c.req.raw, c.env);
  if (deviceId && p.deviceId !== deviceId) throw new QuickloginDeviceAuthError('FORBIDDEN');
@@ -48,11 +49,12 @@ async function website(c: Context<HonoEnv>, write = false) {
 for (const path of paths) {
  router.use(path, async (c, next) => {
   c.header('Cache-Control', 'no-store');
-  if (c.req.header('Origin') === c.env.QUICKLOGIN_EXTENSION_ORIGIN && !c.req.path.endsWith('/resume-ticket') && !c.req.path.endsWith('/overview')) { c.header('Access-Control-Allow-Origin', c.env.QUICKLOGIN_EXTENSION_ORIGIN); c.header('Vary', 'Origin'); }
+  const origin = acceptedQuickloginOrigin(c.env, c.req.header('Origin'));
+  if (origin && !c.req.path.endsWith('/resume-ticket') && !c.req.path.endsWith('/overview')) { c.header('Access-Control-Allow-Origin', origin); c.header('Vary', 'Origin'); }
   await next();
  });
  router.options(path, c => {
-  if (c.req.header('Origin') !== c.env.QUICKLOGIN_EXTENSION_ORIGIN || path.endsWith('/resume-ticket') || path === '/overview') return fail(c, new V3Error('FORBIDDEN'));
+  if (!acceptedQuickloginOrigin(c.env, c.req.header('Origin')) || path.endsWith('/resume-ticket') || path === '/overview') return fail(c, new V3Error('FORBIDDEN'));
   const methods = path === '/capabilities' || path.includes(':operationId') ? 'GET' : 'POST';
   if (c.req.header('Access-Control-Request-Method') && c.req.header('Access-Control-Request-Method') !== methods) return fail(c, new V3Error('FORBIDDEN'));
   c.header('Access-Control-Allow-Methods', methods); c.header('Access-Control-Allow-Headers', 'Authorization, Content-Type, DPoP'); return c.body(null, 204);

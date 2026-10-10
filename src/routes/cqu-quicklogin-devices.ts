@@ -26,6 +26,7 @@ import {
 import type { DeviceAuthority, DeviceStatus, ErrorCode } from "../services/quicklogin/contracts";
 import { quickloginDeviceModeEnabled } from "../services/quicklogin/mode";
 import { hasQuickloginPolicy } from "../services/quicklogin/eligibility";
+import { acceptedQuickloginOrigin } from "../services/quicklogin/extension-origin";
 
 const router = new Hono<HonoEnv>();
 const DEVICE_BASE_PATH = "/api/v1/cqu/quicklogin/devices";
@@ -44,8 +45,8 @@ function isDeviceOperation(method: string, pathname: string): boolean {
 
 router.use("*", async (c, next) => {
   c.header("Cache-Control", "no-store");
-  const origin = c.req.header("Origin");
-  if (origin === c.env.QUICKLOGIN_EXTENSION_ORIGIN) {
+  const origin = acceptedQuickloginOrigin(c.env, c.req.header("Origin"));
+  if (origin) {
     c.header("Access-Control-Allow-Origin", origin);
     c.header("Vary", "Origin");
   }
@@ -68,7 +69,7 @@ function preflightMethods(pathname: string): string[] {
 }
 
 const devicePreflight = (c: Context<HonoEnv>) => {
-  if (c.req.header("Origin") !== c.env.QUICKLOGIN_EXTENSION_ORIGIN) {
+  if (!acceptedQuickloginOrigin(c.env, c.req.header("Origin"))) {
     return apiError(c, "FORBIDDEN", 403);
   }
   const methods = preflightMethods(new URL(c.req.url).pathname);
@@ -86,7 +87,7 @@ for (const path of ["/", "/:id", "/:id/status", "/:id/refresh", "/:id/export"]) 
 }
 
 async function devicePrincipal(c: Context<HonoEnv>) {
-  if (c.req.header("Origin") !== c.env.QUICKLOGIN_EXTENSION_ORIGIN) {
+  if (!acceptedQuickloginOrigin(c.env, c.req.header("Origin"))) {
     throw new QuickloginDeviceAuthError("FORBIDDEN");
   }
   return verifyQuickloginBearer(c.req.raw, c.env);
