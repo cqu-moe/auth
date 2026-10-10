@@ -45,10 +45,11 @@ const AUTH_POLICIES = new Map<string, AuthPolicyKind>([
     "POST /admin/list-user-sessions", "GET /admin/list-users",
     "POST /admin/remove-user", "POST /admin/revoke-user-session",
     "POST /admin/revoke-user-sessions", "POST /admin/set-role",
-    "POST /admin/reset-authentication", "POST /admin/set-user-password", "POST /admin/stop-impersonating",
+    "POST /admin/reset-authentication", "POST /admin/set-user-password",
     "POST /admin/unban-user", "POST /admin/update-user",
   ]),
   ...entries("session", [
+    "POST /admin/stop-impersonating",
     "GET /passkey/generate-register-options", "POST /passkey/verify-registration", "GET /passkey/list-user-passkeys", "POST /passkey/delete-passkey", "POST /passkey/update-passkey",
     "POST /security/passkey/change-password", "POST /security/passkey/two-factor/enable", "POST /security/passkey/two-factor/disable", "POST /security/passkey/two-factor/generate-backup-codes",
     "POST /security/passkey/options", "POST /security/passkey/complete", "POST /security/challenge", "POST /security/complete", "GET /security/status",

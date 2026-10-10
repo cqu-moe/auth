@@ -50,12 +50,15 @@ it("honors approved first-party authorization despite the installed plugin's pro
   const { createOAuthFixture, authorizeWithOverrides, OTHER_CLIENT_ID, OTHER_REDIRECT_URI, OFFICIAL_CLIENT_ID, OFFICIAL_REDIRECT_URI } = await import("./quicklogin-oauth-fixture");
   const { createAuth } = await import("../../src/auth");
   const extensionOrigin = "chrome-extension://igfidegfgfoofnoncpmbcokbffjmmook";
-  const extensionEnv = { ...env, QUICKLOGIN_EXTENSION_ORIGIN: extensionOrigin };
+  const storeOrigin = "chrome-extension://ainapeknaclcpoioimonkodmoakhacjd";
+  const extensionEnv = { ...env, QUICKLOGIN_EXTENSION_ORIGIN: extensionOrigin, QUICKLOGIN_STORE_EXTENSION_ORIGIN: storeOrigin };
   const app = createApp();
   const tokenUrl = `${env.BETTER_AUTH_URL}/api/v1/auth/oauth2/token`;
-  const preflight = await app.request(tokenUrl, { method: "OPTIONS", headers: { origin: extensionOrigin, "access-control-request-method": "POST", "access-control-request-headers": "content-type" } }, extensionEnv);
+  for (const origin of [extensionOrigin, storeOrigin]) {
+  const preflight = await app.request(tokenUrl, { method: "OPTIONS", headers: { origin, "access-control-request-method": "POST", "access-control-request-headers": "content-type" } }, extensionEnv);
   expect(preflight.status).toBe(204);
-  expect(preflight.headers.get("access-control-allow-origin")).toBe("*");
+  expect(preflight.headers.get("access-control-allow-origin")).toBe(origin);
+  }
   await createApiFixture();
   const fixture = await createOAuthFixture(env);
   const adapter = (await createAuth(env, new Request(env.BETTER_AUTH_URL)).$context).adapter;
@@ -64,7 +67,7 @@ it("honors approved first-party authorization despite the installed plugin's pro
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
   const challenge = btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
   const query = new URLSearchParams({ client_id: OFFICIAL_CLIENT_ID, redirect_uri: OFFICIAL_REDIRECT_URI, response_type: "code", scope: "openid offline_access cqu:quicklogin:device", resource: `${env.BETTER_AUTH_URL}/api/auth`, state: "unchanged", prompt: "consent", code_challenge: challenge, code_challenge_method: "S256" });
-  for (const method of ["GET", "POST"]) {
+  for (const [method, origin] of [["GET", extensionOrigin], ["POST", storeOrigin]]) {
     const headers = new Headers(fixture.websiteSession.headers); headers.set("origin", env.BETTER_AUTH_URL); headers.set("content-type", "application/x-www-form-urlencoded");
     const request = new Request(`${env.BETTER_AUTH_URL}/api/v1/auth/oauth2/authorize${method === "GET" ? `?${query}` : ""}`, { method, headers, ...(method === "POST" ? { body: query } : {}) });
     const response = await fixture.authHandler(request);
@@ -73,22 +76,22 @@ it("honors approved first-party authorization despite the installed plugin's pro
     expect(location, `${method} ${response.status} ${JSON.stringify(body)}`).toBeTruthy();
     const redirect = new URL(location!, env.BETTER_AUTH_URL); expect(redirect.origin, location).toBe(new URL(OFFICIAL_REDIRECT_URI).origin); expect(redirect.searchParams.get("state")).toBe("unchanged");
     expect(redirect.searchParams.get("code"), location).toBeTruthy();
-    const token = await app.request(tokenUrl, { method: "POST", headers: { origin: extensionOrigin, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "authorization_code", client_id: OFFICIAL_CLIENT_ID, redirect_uri: OFFICIAL_REDIRECT_URI, code: redirect.searchParams.get("code")!, code_verifier: verifier, resource: `${env.BETTER_AUTH_URL}/api/auth` }) }, extensionEnv);
+    const token = await app.request(tokenUrl, { method: "POST", headers: { origin, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "authorization_code", client_id: OFFICIAL_CLIENT_ID, redirect_uri: OFFICIAL_REDIRECT_URI, code: redirect.searchParams.get("code")!, code_verifier: verifier, resource: `${env.BETTER_AUTH_URL}/api/auth` }) }, extensionEnv);
     expect(token.status, await token.clone().text()).toBe(200);
-    expect(token.headers.get("access-control-allow-origin")).toBe(extensionOrigin);
+    expect(token.headers.get("access-control-allow-origin")).toBe(origin);
     expect(token.headers.get("access-control-allow-credentials")).toBeNull();
     const tokens = await token.json() as { access_token: string; refresh_token: string };
-    const refreshed = await app.request(tokenUrl, { method: "POST", headers: { origin: extensionOrigin, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "refresh_token", client_id: OFFICIAL_CLIENT_ID, refresh_token: tokens.refresh_token }) }, extensionEnv);
+    const refreshed = await app.request(tokenUrl, { method: "POST", headers: { origin, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ grant_type: "refresh_token", client_id: OFFICIAL_CLIENT_ID, refresh_token: tokens.refresh_token }) }, extensionEnv);
     expect(refreshed.status, await refreshed.clone().text()).toBe(200);
-    expect(refreshed.headers.get("access-control-allow-origin")).toBe(extensionOrigin);
+    expect(refreshed.headers.get("access-control-allow-origin")).toBe(origin);
     const refreshedTokens = await refreshed.json() as { access_token: string };
     const deviceUrl = `${env.BETTER_AUTH_URL}/api/v1/cqu/quicklogin/devices`;
-    const devicePreflight = await app.request(deviceUrl, { method: "OPTIONS", headers: { origin: extensionOrigin, "access-control-request-method": "POST", "access-control-request-headers": "authorization,content-type" } }, extensionEnv);
+    const devicePreflight = await app.request(deviceUrl, { method: "OPTIONS", headers: { origin, "access-control-request-method": "POST", "access-control-request-headers": "authorization,content-type" } }, extensionEnv);
     expect(devicePreflight.status).toBe(204);
-    expect(devicePreflight.headers.get("access-control-allow-origin")).toBe(extensionOrigin);
-    const device = await app.request(deviceUrl, { method: "POST", headers: { origin: extensionOrigin, authorization: `Bearer ${refreshedTokens.access_token}`, "content-type": "application/json" }, body: JSON.stringify({ deviceName: "Cutover Chrome", browserFamily: "chrome", browserVersion: "140" }) }, extensionEnv);
+    expect(devicePreflight.headers.get("access-control-allow-origin")).toBe(origin);
+    const device = await app.request(deviceUrl, { method: "POST", headers: { origin, authorization: `Bearer ${refreshedTokens.access_token}`, "content-type": "application/json" }, body: JSON.stringify({ deviceName: "Cutover Chrome", browserFamily: "chrome", browserVersion: "140" }) }, extensionEnv);
     expect(device.status, await device.clone().text()).toBe(200);
-    expect(device.headers.get("access-control-allow-origin")).toBe(extensionOrigin);
+    expect(device.headers.get("access-control-allow-origin")).toBe(origin);
     expect(device.headers.get("access-control-allow-credentials")).toBeNull();
 
   }

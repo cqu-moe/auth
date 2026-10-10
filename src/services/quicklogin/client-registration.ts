@@ -1,5 +1,6 @@
 import type { Env } from "../../types";
 import { DEVICE_SCOPE } from "./contracts";
+import { quickloginExtensionOrigins } from "./extension-origin";
 
 export interface ClientAdapter {
   findOne<T>(input: {
@@ -39,12 +40,6 @@ export class QuickloginClientRegistrationError extends Error {
   constructor(public readonly code: "INVALID_CONFIG" | "EXISTING_CLIENT_MISMATCH") {
     super(code);
   }
-}
-
-function extensionId(origin: string): string {
-  const match = /^chrome-extension:\/\/([a-p]{32})$/.exec(origin);
-  if (!match) throw new QuickloginClientRegistrationError("INVALID_CONFIG");
-  return match[1];
 }
 
 function metadata(value: unknown): Record<string, unknown> | null {
@@ -87,14 +82,15 @@ function matches(
 }
 
 export async function ensureQuickloginOAuthClient(
-  env: Pick<Env, "QUICKLOGIN_CLIENT_ID" | "QUICKLOGIN_EXTENSION_ORIGIN">,
+  env: Pick<Env, "QUICKLOGIN_CLIENT_ID" | "QUICKLOGIN_EXTENSION_ORIGIN" | "QUICKLOGIN_STORE_EXTENSION_ORIGIN">,
   adapter: ClientAdapter,
   now = new Date()
 ): Promise<QuickloginOAuthClientRecord> {
   if (!env.QUICKLOGIN_CLIENT_ID) {
     throw new QuickloginClientRegistrationError("INVALID_CONFIG");
   }
-  const id = extensionId(env.QUICKLOGIN_EXTENSION_ORIGIN);
+  const origins = quickloginExtensionOrigins(env);
+  if (!origins.length) throw new QuickloginClientRegistrationError("INVALID_CONFIG");
   const desired: QuickloginOAuthClientRecord = {
     clientId: env.QUICKLOGIN_CLIENT_ID,
     clientSecret: null,
@@ -107,7 +103,7 @@ export async function ensureQuickloginOAuthClient(
     createdAt: now,
     updatedAt: now,
     name: "CQU 快捷登录",
-    redirectUris: [`https://${id}.chromiumapp.org/`],
+    redirectUris: origins.map(origin => `https://${origin.slice("chrome-extension://".length)}.chromiumapp.org/`),
     postLogoutRedirectUris: [],
     tokenEndpointAuthMethod: "none",
     grantTypes: ["authorization_code", "refresh_token"],
