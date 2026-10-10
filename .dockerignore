@@ -1,0 +1,11 @@
+# The production image uses container/ as its build context. This allowlist is
+# used only by Dockerfile.test, whose context is the repository root.
+*
+!container
+!container/Dockerfile
+!container/test_*.py
+!container/fixtures
+!container/fixtures/**
+!src
+!src/services
+!src/services/cqu-browser-budget.ts

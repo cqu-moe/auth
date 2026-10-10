@@ -28,6 +28,8 @@ npm ci && npx --yes pnpm@11.19.0 --dir frontend install --frozen-lockfile && VIT
 ```
 
 其中 `build:cloudflare` 在构建前执行应用、Workers 和 Docker 容器检查，任何一步失败即停止；Cloudflare 的 deploy command 保持现有命令及 release 标记。
+
+容器检查先按生产 Dockerfile 构建基础镜像，再用 `container/Dockerfile.test` 在镜像构建阶段安装固定版本 pytest 并运行测试。根 `.dockerignore` 仅允许测试文件、fixture 和必要源码契约进入测试上下文，不使用 Cloudflare 构建机不支持的 `docker run`。当 Cloudflare 设置 `WRANGLER_CI_OVERRIDE_NETWORK_MODE_HOST` 时，两次构建都采用与 Wrangler 相同的 host 网络；生产镜像仍使用原 Dockerfile。
 构建环境需要 Node 22、与 frontend/package.json 一致的 pnpm 和 Docker。
 不在 Wrangler custom build hook 内跑测试，避免 Workers 测试读取 Wrangler 配置时递归构建。
 
