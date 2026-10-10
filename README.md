@@ -8,3 +8,7 @@
 - 历史执行证据：[交接入口](HANDOFF.md)
 
 本地分别安装根目录 npm 依赖和 frontend 的 pnpm 依赖，配置本地 `.dev.vars` 后按各自 `package.json` 启动。检查和部署边界见 [开发与验证](docs/agents/development.md)。
+
+## CI/CD
+
+自动测试、构建产物与 Cloudflare 部署门禁见 [CI/CD](docs/ci-cd.md)。
