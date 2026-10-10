@@ -1,0 +1,13 @@
+ARG BASE=cqu-browser-tests:local
+FROM ${BASE}
+
+WORKDIR /workspace
+ENV PYTHONPATH=/app:/workspace/container
+COPY container/Dockerfile /workspace/container/Dockerfile
+COPY container/test_*.py /workspace/container/
+COPY container/fixtures /workspace/container/fixtures
+COPY src/services/cqu-browser-budget.ts /workspace/src/services/cqu-browser-budget.ts
+
+RUN python -m pip install --disable-pip-version-check pytest==9.1.1 pytest-asyncio==1.4.0 \
+  && /usr/bin/tini -g -s -- xvfb-run -a -s "-screen 0 1440x1000x24 -nolisten tcp" \
+    python -m pytest -q -o cache_dir=/tmp/pytest-cache /workspace/container
