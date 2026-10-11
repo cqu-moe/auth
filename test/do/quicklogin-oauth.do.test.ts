@@ -20,12 +20,30 @@ beforeAll(async () => applyD1Migrations(env.DATABASE, env.TEST_MIGRATIONS));
 beforeEach(async () => {
   for (const table of [
     "oauthAccessToken", "oauthRefreshToken", "oauthConsent", "oauthClient",
-    "session", "account", "user", "jwks",
+    "session", "account", "user", "jwks", "rateLimit",
   ]) await env.DATABASE.prepare(`DELETE FROM ${table}`).run();
 });
 afterEach(() => vi.restoreAllMocks());
 
 describe("quicklogin OAuth grants", () => {
+  it("keeps valid device tokens usable after repeated local JWKS verification", async () => {
+    const fixture = await createOAuthFixture(env);
+    const install = await authorizeOfficialInstall(fixture, { websiteSession: fixture.websiteSession });
+    for (let attempt = 1; attempt <= 35; attempt++) {
+      const outcome = await verifyQuickloginBearer(install.request(), env)
+        .then(principal => ({ userId: principal.userId }), error => ({ code: error.code }));
+      expect(outcome, `verification ${attempt}`).toEqual({ userId: fixture.websiteSession.userId });
+    }
+    // Public traffic keeps its protection, even when its bucket is exhausted.
+    const jwksRequest = () => new Request(`${env.BETTER_AUTH_URL}/api/v1/auth/jwks`);
+    for (let attempt = 0; attempt < 30; attempt++) {
+      expect((await fixture.authHandler(jwksRequest())).status).toBe(200);
+    }
+    expect((await fixture.authHandler(jwksRequest())).status).toBe(429);
+    await expect(verifyQuickloginBearer(install.request(), env)).resolves
+      .toMatchObject({ userId: fixture.websiteSession.userId });
+  });
+
   it("creates a distinct live grant per consent and preserves it across refresh", async () => {
     const fixture = await createOAuthFixture(env);
     const first = await authorizeOfficialInstall(fixture, { websiteSession: fixture.websiteSession });
