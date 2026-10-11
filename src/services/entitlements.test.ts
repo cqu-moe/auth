@@ -132,6 +132,9 @@ describe("subsystemForAccessToken (least-disclosure gating)", () => {
   it("user present, valid subsystem 'cqu' → 'cqu'", () => {
     expect(subsystemForAccessToken({ user: { id: "u1" }, metadata: { subsystem: "cqu" } })).toBe("cqu");
   });
+  it("user present, valid subsystem 'feed' → 'feed'", () => {
+    expect(subsystemForAccessToken({ user: { id: "u1" }, metadata: { subsystem: "feed" } })).toBe("feed");
+  });
 });
 
 describe("validateEntitlementItems (admin write validation)", () => {
@@ -142,6 +145,18 @@ describe("validateEntitlementItems (admin write validation)", () => {
       { subsystem: "eval", capability: "submit", value: "1" },
     ];
     expect(validateEntitlementItems(items)).toBe(null);
+  });
+  it("accepts only the exact enabled value for feed.access", () => {
+    expect(
+      validateEntitlementItems([
+        { subsystem: "feed", capability: "access", value: "1" },
+      ])
+    ).toBe(null);
+    expect(
+      validateEntitlementItems([
+        { subsystem: "feed", capability: "access", value: "0" },
+      ])
+    ).not.toBe(null);
   });
   it("rejects unknown subsystem → non-null error", () => {
     const err = validateEntitlementItems([
@@ -243,6 +258,27 @@ describe("validateEntitlementItems (admin write validation)", () => {
         { subsystem: "eval", capability: "submit", value: "1" },
       ])
     ).toBe(null);
+  });
+
+  it("resolves feed.access without disclosing other subsystems", () => {
+    const rows = [
+      { subsystem: "feed", capability: "access", value: "1" },
+      { subsystem: "calendar", capability: "sync", value: "1" },
+      { subsystem: "cqu", capability: "quicklogin_access", value: "1" },
+    ];
+    const caps = rowsToCaps(rows, "feed");
+    expect(caps).toEqual({ feed: { access: true } });
+    expect((caps as any).calendar).toBeUndefined();
+    expect((caps as any).cqu).toBeUndefined();
+  });
+
+  it("does not default feed.access on for users with unrelated entitlements", () => {
+    const unrelatedOnly = rowsToCaps([
+      { subsystem: "calendar", capability: "sync", value: "1" },
+      { subsystem: "cqu", capability: "quicklogin_access", value: "1" },
+    ]);
+    expect(unrelatedOnly.feed.access).toBe(false);
+    expect(rowsToCaps([]).feed.access).toBe(false);
   });
 });
 
