@@ -6,6 +6,8 @@ import { QuickloginAccountClient } from '../../src/services/quicklogin/account-c
 import { QuickloginDeviceClient } from '../../src/services/quicklogin/device-client';
 import { QuickloginLoginBrokerClient } from '../../src/services/quicklogin/login-broker-client';
 import { seedSession, seedCredentials, validStorageState } from './helpers';
+import { snapshotV3 } from '../../src/services/quicklogin/snapshot-v3';
+import { tupleForSnapshot } from '../../src/services/quicklogin/protocol-v3';
 beforeEach(() => { vi.spyOn(CquQuickloginDeviceDO.prototype, "alarm").mockResolvedValue(); vi.spyOn(CquSessionDO.prototype, "alarm").mockResolvedValue(); });
 afterEach(() => vi.restoreAllMocks());
 async function setup() {
@@ -428,5 +430,41 @@ it('does not let an old rejected broker call settle a successor operation', asyn
   await expect(flight).resolves.toBeUndefined();
   expect(await state.storage.get('session')).toEqual(next);
   expect(await state.storage.getAlarm()).toBe(alarm);
+ });
+});
+
+
+describe('first enable after school binding', () => {
+ it('accepts the fresh server snapshot for a newly registered disabled device', async () => {
+  const userId = `first-enable-${crypto.randomUUID()}`;
+  const accounts = new QuickloginAccountClient(env), devices = new QuickloginDeviceClient(env);
+  await accounts.initializeQuickloginPolicy(userId, { migrationId:userId, deviceLimit:5, masterEnabled:true });
+  const bindingStub = env.CQU_SESSION.get(env.CQU_SESSION.idFromName(userId));
+  await seedSession(bindingStub, { userId, extra: { quickloginBindingEpoch:3, credentialRevision:4, bindingRevision:5 } });
+  await seedCredentials(bindingStub);
+  const grant = await accounts.createPendingGrant(userId, 'test-client', Date.now());
+  await accounts.activateGrant(userId, grant.grantId, Date.now());
+  const device = await accounts.registerV3(userId, grant.grantId, {
+   protocolVersion:3, requestId:'register', registrationId:crypto.randomUUID(), client, deviceName:'New Chrome',
+  });
+  const before = await snapshotV3(env, userId, device.deviceId);
+  expect(before.authorization).toMatchObject({ policy:'device_off', masterEnabled:true, deviceEnabled:false });
+  expect(before.capabilities.canEnable).toBe(true);
+  const authority = await accounts.getDeviceAuthority(userId, device.deviceId);
+  const stub = env.CQU_QUICKLOGIN_DEVICE.get(env.CQU_QUICKLOGIN_DEVICE.idFromName(`${userId}:${device.deviceId}`));
+  await runInDurableObject(stub, async (_, state) => {
+   expect(await state.storage.getAlarm()).toBeNull();
+  });
+  await expect(devices.operateV3(authority, {
+   protocolVersion:3, requestId:'stale-enable', command:'set_enabled', enabled:true,
+   idempotencyKey:'stale-enable', expected:{...tupleForSnapshot(before)!, bindingEpoch:0, credentialRevision:0},
+  })).rejects.toMatchObject({ code:'STALE_SNAPSHOT' });
+  const outcome = await devices.operateV3(authority, {
+   protocolVersion:3, requestId:'enable', command:'set_enabled', enabled:true,
+   idempotencyKey:'first-enable', expected:tupleForSnapshot(before)!,
+  }).then(operation => ({ state:operation.state }), error => ({ code:error.code }));
+  expect(outcome).toEqual({ state:'succeeded' });
+  const after = await snapshotV3(env, userId, device.deviceId);
+  expect(after.authorization).toMatchObject({ policy:'enabled', deviceEnabled:true });
  });
 });
