@@ -112,12 +112,14 @@ def safe_capture_exception(
     if client is None:
         return
     try:
-        safe_error = RuntimeError(_redact_text(str(error)))
+        error_class = type(error).__name__
+        safe_error = RuntimeError(_redact_text(str(error)) or error_class)
         client.capture_exception(
             (RuntimeError, safe_error, error.__traceback__),
             distinct_id=f"request:{uuid.uuid4().hex}",
             properties={
                 **_sanitize(properties or {}),
+                "error_class": error_class,
                 "$process_person_profile": False,
             },
         )
