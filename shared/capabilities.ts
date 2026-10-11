@@ -26,6 +26,9 @@ export const CAPABILITIES = {
     submit: { type: "flag", label: "提交评教" },
     batch: { type: "flag", label: "批量评教" },
   },
+  feed: {
+    access: { type: "flag", label: "通知存档访问" },
+  },
   cqu: {
     quicklogin_device_limit: {
       type: "quota",
