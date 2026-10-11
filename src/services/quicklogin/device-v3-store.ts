@@ -62,21 +62,23 @@ export class DeviceV3Store {
   if (!session) throw new V3Error('INTERNAL_STATE_UNAVAILABLE');
   let binding: BindingSnapshot | null = null;
   try { binding = await this.binding(live); } catch { /* Readiness is withheld by the aggregator when binding authority is unavailable. */ }
-  if (binding && live.allowed) {
+  if (binding) {
    const changed = session.bindingEpoch !== binding.bindingEpoch || (session.credentialRevision ?? session.bindingEpoch) !== binding.credentialRevision;
    const recoverableLegacyReason = session.reasonCode == null || session.reasonCode === 'BLOCKED_UNKNOWN' || session.reasonCode === 'BINDING_UNBOUND';
-   const legacy = recoverableLegacyReason && session.state === 'needs_reauth' && binding.state === 'bound' && binding.credentialsState !== 'rejected' && binding.credentialsState !== 'interaction_required' && session.legacyRecoveryEpoch !== binding.bindingEpoch;
+   const legacy = live.allowed && recoverableLegacyReason && session.state === 'needs_reauth' && binding.state === 'bound' && binding.credentialsState !== 'rejected' && binding.credentialsState !== 'interaction_required' && session.legacyRecoveryEpoch !== binding.bindingEpoch;
    if (changed || legacy) {
     await this.storage.transaction(async tx => {
      const current = await tx.get<StoredDeviceSession>(SESSION);
      if (!current || current.generation !== live.generation) return;
      session = { ...current, bindingEpoch: binding!.bindingEpoch, credentialRevision: binding!.credentialRevision,
-       state: binding!.state === 'bound' ? 'preparing' : 'needs_reauth', reasonCode: binding!.state === 'bound' ? null : binding!.state === 'updating' ? 'BINDING_UPDATING' : 'BINDING_UNBOUND',
+       // Keep disabled/paused devices aligned without starting a school session.
+       state: !live.allowed ? current.state : binding!.state === 'bound' ? 'preparing' : 'needs_reauth',
+       reasonCode: !live.allowed ? current.reasonCode : binding!.state === 'bound' ? null : binding!.state === 'updating' ? 'BINDING_UPDATING' : 'BINDING_UNBOUND',
        storageState: changed ? null : current.storageState, exportDigest: changed ? null : current.exportDigest,
        legacyRecoveryEpoch: binding!.bindingEpoch, deviceRevision: (current.deviceRevision ?? 0) + 1, nextAttemptAt: null };
      delete session.operationId; delete session.leaseToken;
      await tx.put(SESSION, session); await tx.delete(REPORT);
-     if (binding!.state === 'bound') await tx.setAlarm(Date.now());
+     if (live.allowed && binding!.state === 'bound') await tx.setAlarm(Date.now());
     });
    }
   }
