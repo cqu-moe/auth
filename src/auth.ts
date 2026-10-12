@@ -91,6 +91,7 @@ const currentEmailOtpPaths = new Set([
 
 export function createAuth(env: Env, request: Request) {
   const getResend = () => new Resend(env.RESEND_API_KEY);
+  const emailFrom = env.AUTH_EMAIL_FROM?.trim() || "auth.cqu.moe <noreply@cqu.moe>";
   const urls = authUrls(env.BETTER_AUTH_URL);
   const quickloginConsentReference = createQuickloginConsentReference(env);
 
@@ -114,7 +115,7 @@ export function createAuth(env: Env, request: Request) {
           },
           sendResetPassword: async ({ user, url }) => {
             void getResend().emails.send({
-              from: "auth.cqu.moe <noreply@cqu.moe>",
+              from: emailFrom,
               to: user.email,
               subject: "重置密码 - auth.cqu.moe",
               html: `<p>点击链接重置密码：<a href="${url}">${url}</a></p>`,
@@ -377,7 +378,7 @@ export function createAuth(env: Env, request: Request) {
                   };
 
               await getResend().emails.send({
-                from: "auth.cqu.moe <noreply@cqu.moe>",
+                from: emailFrom,
                 to: email,
                 subject: copy.subject,
                 html: `<p>${copy.intro}</p><p style="font-size:24px;font-weight:700;letter-spacing:6px">${otp}</p><p>验证码 5 分钟内有效，请勿转发。</p>`,

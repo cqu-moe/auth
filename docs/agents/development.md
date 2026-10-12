@@ -22,3 +22,15 @@
 部署前读取当前 `package.json`、Wrangler 配置和 `.github/workflows/`。旧交接中的部署工作流及分支状态仅为历史，不假定 push 就会上线。`npm run deploy` 会实际部署，需在用户授权范围内执行。
 
 报告区分本地检查、CI、合并、Worker 部署与已登录业务验收。分支版本上传不能当作生产部署，也不能假定 DO Worker 有可用的 preview URL；需要时核实独立预览环境。
+
+### Auth 邮件发件人
+
+可选 Worker 变量 `AUTH_EMAIL_FROM` 统一配置邮箱验证/更换邮箱 OTP 与密码重置邮件的发件人。值会去掉首尾空白；未设置、空字符串或全空白时，仍使用 `auth.cqu.moe <noreply@cqu.moe>`。Resend 客户端保持延迟初始化。
+
+T17 隔离 Auth 的专用 Wrangler 配置在 `vars` 中加入以下字段（本地可写入该环境的 `.dev.vars`）；对应账号须已验证发件域，`RESEND_API_KEY` 继续通过 secret 配置：
+
+```json
+"AUTH_EMAIL_FROM": "重大通知 <notifications@feed.cqu.moe>"
+```
+
+仅隔离环境设置此覆盖值，生产配置不增加该字段。此变量不影响 `schedule-notifications` 队列的固定发件人，也不改变 [Auth 二次验证策略](../adr/0006-sensitive-operation-reauthentication.md)：中央账号邮件 2FA 路由禁用，继续使用 TOTP、恢复码或 Passkey。本配置不涉及学校 CQU 邮件验证码接收。
