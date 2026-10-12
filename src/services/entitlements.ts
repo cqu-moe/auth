@@ -15,6 +15,9 @@ export function rowsToCaps(rows: Row[], only?: Subsystem): Caps {
   for (const sub of subs) {
     out[sub] = {};
     for (const [key, def] of Object.entries(CAPABILITIES[sub])) {
+      // Feed 的配额有独立三态 RPC 契约。旧 caps/OAuth 路径必须继续只暴露
+      // feed.access，不能把缺失/无限折叠成 null 后外泄。
+      if (sub === "feed" && key === "sub_limit") continue;
       const row = rows.find((r) => r.subsystem === sub && r.capability === key);
       if (def.type === "flag") out[sub][key] = row?.value === "1";
       else

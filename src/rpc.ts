@@ -17,6 +17,17 @@ import { requiredScopeForTarget } from "./services/required-scope";
 import type { HarvestCapture, HarvestFetch } from "./services/cqu-node-protocol";
 import { resolveBrowserDeadline } from "./services/cqu-browser-budget";
 import { CquSsoError } from "./services/cqu-sso";
+import {
+  feedAuthError,
+  feedRecipientDataError,
+  parseFeedRequest,
+  resolveFeedContext,
+  type FeedAuthError,
+  type FeedAuthRequest,
+  type FeedAuthResult,
+  type FeedPolicy,
+  type FeedRecipient,
+} from "./services/feed-policy";
 import type { Env } from "./types";
 
 // 纯 scope 映射在 services/required-scope.ts(单独成模块以便 Node-pool 单测);此处再导出。
@@ -122,6 +133,71 @@ export class AuthService extends WorkerEntrypoint<Env> {
     return !!row;
   }
 
+  private async authorizeFeedService(
+    args: unknown,
+    method: "getFeedPolicy" | "getFeedRecipient"
+  ): Promise<{ request: FeedAuthRequest } | { error: FeedAuthResult<never> }> {
+    const parsed = parseFeedRequest(args);
+    if ("code" in parsed) {
+      return { error: feedAuthError(parsed.code, crypto.randomUUID(), parsed.retryable) };
+    }
+    const requestId = crypto.randomUUID();
+    try {
+      const { adapter } = await createAuth(
+        this.env,
+        new Request(this.env.BETTER_AUTH_URL)
+      ).$context;
+      const client = await adapter.findOne<OAuthClientSecretRow>({
+        model: "oauthClient",
+        where: [{ field: "clientId", value: parsed.clientId }],
+      });
+      if (
+        !client?.clientSecret ||
+        client.disabled ||
+        !constantTimeEquals(
+          await hashOAuthClientSecret(parsed.clientSecret),
+          client.clientSecret
+        )
+      ) {
+        console.info(JSON.stringify({
+          event: "auth.rpc.request",
+          clientId: parsed.clientId,
+          userId: parsed.userId,
+          method,
+          identityStatus: "INVALID_CLIENT",
+        }));
+        return { error: feedAuthError("INVALID_CLIENT", requestId) };
+      }
+      const methods = client.metadata?.rpcMethods;
+      const subsystem = client.metadata?.subsystem;
+      const allowed =
+        Array.isArray(methods) &&
+        methods.every((value) => typeof value === "string") &&
+        methods.includes(method) &&
+        subsystem === "feed";
+      if (!allowed) {
+        console.info(JSON.stringify({
+          event: "auth.rpc.request",
+          clientId: parsed.clientId,
+          userId: parsed.userId,
+          method,
+          identityStatus: "CLIENT_NOT_ALLOWED",
+        }));
+        return { error: feedAuthError("CLIENT_NOT_ALLOWED", requestId) };
+      }
+      console.info(JSON.stringify({
+        event: "auth.rpc.request",
+        clientId: parsed.clientId,
+        userId: parsed.userId,
+        method,
+        identityStatus: "verified",
+      }));
+      return { request: parsed };
+    } catch {
+      return { error: feedAuthError("AUTH_UNAVAILABLE", requestId, true) };
+    }
+  }
+
   /** Current calendar rights, including false flags; no school binding needed. */
   async getCaps(args: {
     clientId: string;
@@ -131,6 +207,57 @@ export class AuthService extends WorkerEntrypoint<Env> {
     const authorization = await this.authorizeService(args, "getCaps");
     if ("error" in authorization || authorization.subsystem !== "calendar") return null;
     return resolveCapsForRpc(this.env.DATABASE, args.userId);
+  }
+
+  async getFeedPolicy(args: unknown): Promise<FeedAuthResult<FeedPolicy>> {
+    const authorization = await this.authorizeFeedService(args, "getFeedPolicy");
+    if ("error" in authorization) return authorization.error;
+    const context = await resolveFeedContext(
+      this.env.DATABASE,
+      authorization.request.userId
+    );
+    if ("code" in context) {
+      return feedAuthError(context.code, crypto.randomUUID(), context.retryable);
+    }
+    return {
+      ok: true,
+      contractVersion: 1,
+      checkedAt: context.checkedAt,
+      data: context.policy,
+    };
+  }
+
+  async getFeedRecipient(args: unknown): Promise<
+    FeedAuthResult<{ policy: FeedPolicy; recipient: FeedRecipient }>
+  > {
+    const authorization = await this.authorizeFeedService(args, "getFeedRecipient");
+    if ("error" in authorization) return authorization.error;
+    const context = await resolveFeedContext(
+      this.env.DATABASE,
+      authorization.request.userId
+    );
+    if ("code" in context) {
+      return feedAuthError(context.code, crypto.randomUUID(), context.retryable);
+    }
+    const recipientError = feedRecipientDataError(context.user);
+    if (recipientError) {
+      return feedAuthError(
+        recipientError.code,
+        crypto.randomUUID(),
+        recipientError.retryable
+      );
+    }
+    const recipient: FeedRecipient = !context.policy.access
+      ? { status: "blocked" }
+      : context.user.emailVerified === true || context.user.emailVerified === 1
+        ? { status: "verified", email: context.user.email }
+        : { status: "unverified" };
+    return {
+      ok: true,
+      contractVersion: 1,
+      checkedAt: context.checkedAt,
+      data: { policy: context.policy, recipient },
+    };
   }
 
   /** Client target scopes, current business rights and school binding all apply.

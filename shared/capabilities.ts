@@ -28,6 +28,7 @@ export const CAPABILITIES = {
   },
   feed: {
     access: { type: "flag", label: "通知存档访问" },
+    sub_limit: { type: "quota", label: "订阅上限", unit: "个" },
   },
   cqu: {
     quicklogin_device_limit: {
