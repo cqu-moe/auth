@@ -651,6 +651,49 @@ async def test_outer_short_budget_classifies_observed_hung_body(monkeypatch, ext
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("on_sso", [False, True])
+async def test_prefetch_failure_bounds_page_content_and_keeps_classification(monkeypatch, on_sso):
+    page = TimelinePage()
+
+    async def hung_content():
+        await asyncio.Event().wait()
+
+    async def no_wait(*args, **kwargs):
+        pass
+
+    page.content = hung_content
+    if on_sso:
+        page.url = m.cqu_login.SSO + "/login"
+    monkeypatch.setattr(m, "ChromiumSession", lambda **kwargs: page)
+    monkeypatch.setattr(m, "wait_for_harvest_captures", no_wait)
+    monkeypatch.setattr(m, "PAGE_CONTENT_TIMEOUT_S", 0.01)
+    operation = m.harvest({}, {"navUrl": NAV, "capture": [TABLE], "fetch": []})
+    if on_sso:
+        with pytest.raises(m.HarvestExpiredError):
+            await operation
+        return
+    with pytest.raises(m.HarvestTransientError) as failure:
+        await operation
+    assert failure.value.code == "WAF_BOOTSTRAP_TIMEOUT"
+    assert "NAV_START" in str(failure.value.diagnostics)
+
+
+@pytest.mark.asyncio
+async def test_inner_browser_call_timeout_is_classified_transient(monkeypatch):
+    page = TimelinePage()
+
+    async def cdp_timeout(*args, **kwargs):
+        raise TimeoutError
+
+    monkeypatch.setattr(m, "ChromiumSession", lambda **kwargs: page)
+    monkeypatch.setattr(m, "wait_for_harvest_captures", cdp_timeout)
+    with pytest.raises(m.HarvestTransientError) as failure:
+        await m.harvest({}, {"navUrl": NAV, "capture": [TABLE], "fetch": []})
+    assert failure.value.code == "WAF_BOOTSTRAP_TIMEOUT"
+    assert str(failure.value) == "browser call timed out"
+
+
+@pytest.mark.asyncio
 async def test_empty_judge_data_does_not_prove_schedule_unpublished():
     page = TimelinePage(bootstrap(judge=100) + [
         (40, response("/judge-release-schedule-stu", body='{"data":""}')),

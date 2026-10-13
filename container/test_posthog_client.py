@@ -53,6 +53,16 @@ class PostHogPrivacyTests(unittest.TestCase):
         client.capture_exception.assert_called_once()
 
 
+    def test_empty_exception_message_keeps_original_class(self):
+        client = Mock()
+
+        safe_capture_exception(client, TimeoutError())
+
+        (_, safe_error, _), = client.capture_exception.call_args.args
+        self.assertEqual(str(safe_error), "TimeoutError")
+        self.assertEqual(client.capture_exception.call_args.kwargs["properties"]["error_class"], "TimeoutError")
+
+
 class PostHogLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_middleware_reports_and_reraises_unexpected_exception(self):
         client = Mock()
