@@ -1,0 +1,85 @@
+.verification-code-input {
+  position: relative;
+  display: block;
+  width: 100%;
+  max-width: 18rem;
+}
+
+.verification-code-display {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--space-1, 0.25rem);
+  pointer-events: none;
+}
+
+.verification-code-digit {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 3rem;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-md, var(--radius));
+  background: var(--surface);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.verification-code-digit[data-active="true"] {
+  border-color: var(--foreground);
+  box-shadow: inset 0 0 0 1px var(--foreground);
+}
+
+.verification-code-digit[data-active="true"]:not([data-filled="true"])::after {
+  content: "";
+  width: 1px;
+  height: 1.25rem;
+  background: currentColor;
+}
+
+.verification-code-digit[data-selected="true"] {
+  border-color: var(--input);
+  background: color-mix(in oklab, var(--foreground) 10%, var(--surface));
+}
+
+.verification-code-input[data-invalid="true"] .verification-code-digit {
+  border-color: var(--destructive);
+}
+
+.verification-code-input[data-disabled="true"] .verification-code-digit {
+  border-color: var(--border);
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
+.verification-code-input[data-input="otp"] .verification-code-field {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  min-height: 3rem;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  transition: none;
+  box-shadow: none;
+  opacity: 1;
+}
+
+.verification-code-input[data-input="otp"] .verification-code-field::selection {
+  background: transparent;
+}
+
+.verification-code-input[data-input="otp"] .verification-code-field:focus-visible {
+  border-color: transparent;
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+  box-shadow: none;
+}

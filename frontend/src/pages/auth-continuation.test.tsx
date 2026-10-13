@@ -115,6 +115,11 @@ describe("authentication continuation links", () => {
       else Array.from(container.querySelectorAll("button")).find(button => button.textContent === "使用 Passkey 登录")?.click();
     });
     expect(container.querySelector("[data-location]")?.textContent).toBe("/login");
+    expect(container.querySelector('button[type="submit"]')?.getAttribute("aria-busy")).toBe("true");
+    await act(async () => {
+      container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(authMocks.signIn).toHaveBeenCalledTimes(method === "password" ? 1 : 0);
     await act(async () => { finish(); });
     expect(container.querySelector("[data-location]")?.textContent).toBe("/settings");
   });

@@ -1,11 +1,12 @@
 import { requestAuthentication } from "../lib/recent-authentication";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { ActionButton, Alert, AlertDescription, Button, Input, Label, PageHeader } from "@cqu-moe/ui";
 import { validateNewEmail } from "../lib/account-settings";
 import { nextEmailChangeStep, restartEmailChangeFlow, type EmailChangeStep } from "../lib/email-change-flow";
 import { authClient } from "../lib/auth-client";
+import { VerificationCodeInput } from "./VerificationCodeInput";
 import { mapAuthError, normalizeOtp } from "../lib/two-factor";
 
 export interface EmailChangeFlowProps {
@@ -19,23 +20,6 @@ function emailError(error: AuthError, fallback: string) {
   if (error?.code === "CURRENT_EMAIL_OTP_ONLY") return "只能验证当前登录邮箱";
   if (error?.message === "Email already in use") return "该邮箱已被其他账户使用";
   return mapAuthError(error?.code, error?.message ?? fallback);
-}
-
-function OtpInput({ id, value, onChange }: { id: string; value: string; onChange: (value: string) => void }) {
-  return (
-    <Input
-      id={id}
-      value={value}
-      onChange={(event) => onChange(normalizeOtp(event.target.value))}
-      inputMode="numeric"
-      autoComplete="one-time-code"
-      pattern="[0-9]*"
-      maxLength={6}
-      required
-      className="font-mono tracking-widest"
-      placeholder="000000"
-    />
-  );
 }
 
 function FlowProgress({ step }: { step: EmailChangeStep }) {
@@ -94,6 +78,8 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
   const [cooldown, setCooldown] = useState(0);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const loadingRef = useRef(false);
+  const errorId = "email-change-error";
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -102,95 +88,131 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
   }, [cooldown]);
 
   const sendCurrentOtp = async () => {
+    if (loadingRef.current) return;
     if (!currentEmail) {
       setError("无法读取当前登录邮箱，请重新登录后再试");
       return;
     }
     setError("");
+    loadingRef.current = true;
     setLoading(true);
-    const { error: authError } = await authClient.emailOtp.sendVerificationOtp({
-      email: currentEmail,
-      type: "email-verification",
-    });
-    setLoading(false);
-    if (authError) {
-      setError(emailError(authError, "验证码发送失败，请稍后重试"));
-      return;
+    try {
+      const { error: authError } = await authClient.emailOtp.sendVerificationOtp({
+        email: currentEmail,
+        type: "email-verification",
+      });
+      if (authError) {
+        setError(emailError(authError, "验证码发送失败，请稍后重试"));
+        return;
+      }
+      setCurrentOtpSent(true);
+      setCurrentOtp("");
+      setCooldown(60);
+    } catch {
+      setError("网络错误，请检查连接后重试");
+    } finally {
+      loadingRef.current = false;
+      setLoading(false);
     }
-    setCurrentOtpSent(true);
-    setCurrentOtp("");
-    setCooldown(60);
   };
 
   const verifyCurrentOtp = async (event: FormEvent) => {
     event.preventDefault();
+    if (loadingRef.current) return;
     const otp = normalizeOtp(currentOtp);
     if (otp.length !== 6) {
       setError("请输入 6 位验证码");
       return;
     }
     setError("");
+    loadingRef.current = true;
     setLoading(true);
-    const { error: authError } = await authClient.emailOtp.checkVerificationOtp({
-      email: currentEmail,
-      type: "email-verification",
-      otp,
-    });
-    setLoading(false);
-    if (authError) {
-      setError(emailError(authError, "当前邮箱验证码验证失败"));
-      return;
+    try {
+      const { error: authError } = await authClient.emailOtp.checkVerificationOtp({
+        email: currentEmail,
+        type: "email-verification",
+        otp,
+      });
+      if (authError) {
+        setError(emailError(authError, "当前邮箱验证码验证失败"));
+        return;
+      }
+      setCurrentOtp(otp);
+      setStep(nextEmailChangeStep(step, "current-otp-verified"));
+    } catch {
+      setError("网络错误，请检查连接后重试");
+    } finally {
+      loadingRef.current = false;
+      setLoading(false);
     }
-    setCurrentOtp(otp);
-    setStep(nextEmailChangeStep(step, "current-otp-verified"));
   };
 
   const requestNewEmailOtp = async (event: FormEvent) => {
     event.preventDefault();
+    if (loadingRef.current) return;
     const validation = validateNewEmail(currentEmail, newEmail);
     if (validation.error || validation.value === null) {
       setError(validation.error ?? "新邮箱不合法");
       return;
     }
     setError("");
+    loadingRef.current = true;
     setLoading(true);
-    if (!await requestAuthentication("email")) { setLoading(false); return; }
-    const { error: authError } = await authClient.emailOtp.requestEmailChange({
-      newEmail: validation.value,
-      otp: currentOtp,
-    });
-    setLoading(false);
-    if (authError) {
-      setError(emailError(authError, "新邮箱验证码发送失败，请重新开始"));
-      return;
+    try {
+      if (!await requestAuthentication("email")) return;
+      const { error: authError } = await authClient.emailOtp.requestEmailChange({
+        newEmail: validation.value,
+        otp: currentOtp,
+      });
+      if (authError) {
+        setError(emailError(authError, "新邮箱验证码发送失败，请重新开始"));
+        return;
+      }
+      setNewEmail(validation.value);
+      setCurrentOtp("");
+      setNewEmailOtp("");
+      setCooldown(60);
+      setStep(nextEmailChangeStep(step, "new-otp-sent"));
+    } catch {
+      setError("网络错误，请检查连接后重试");
+    } finally {
+      loadingRef.current = false;
+      setLoading(false);
     }
-    setNewEmail(validation.value);
-    setCurrentOtp("");
-    setNewEmailOtp("");
-    setCooldown(60);
-    setStep(nextEmailChangeStep(step, "new-otp-sent"));
   };
 
   const changeEmail = async (event: FormEvent) => {
     event.preventDefault();
+    if (loadingRef.current) return;
     const otp = normalizeOtp(newEmailOtp);
     if (otp.length !== 6) {
       setError("请输入 6 位验证码");
       return;
     }
     setError("");
+    loadingRef.current = true;
     setLoading(true);
-    if (!await requestAuthentication("email")) { setLoading(false); return; }
-    const { error: authError } = await authClient.emailOtp.changeEmail({ newEmail, otp });
-    setLoading(false);
-    if (authError) {
-      setError(emailError(authError, "新邮箱验证码验证失败"));
-      return;
+    try {
+      if (!await requestAuthentication("email")) return;
+      const { error: authError } = await authClient.emailOtp.changeEmail({ newEmail, otp });
+      if (authError) {
+        setError(emailError(authError, "新邮箱验证码验证失败"));
+        return;
+      }
+      setCurrentOtp("");
+      setNewEmailOtp("");
+      setStep(nextEmailChangeStep(step, "email-changed"));
+      try {
+        await onSessionRefresh();
+      } catch {
+        setError("登录邮箱已更新，刷新会话失败，请刷新页面或重新登录。");
+      }
+    } catch {
+      setError("网络错误，请检查连接后重试");
+    } finally {
+      loadingRef.current = false;
+      setLoading(false);
     }
-    await onSessionRefresh();
-    setCurrentOtp("");
-    setNewEmailOtp("");
-    setStep(nextEmailChangeStep(step, "email-changed"));
   };
 
   const restartCurrentEmailVerification = () => {
@@ -216,14 +238,14 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
       <FlowProgress step={step} />
       {error && (
         <Alert variant="destructive" className="mt-4">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription id={errorId}>{error}</AlertDescription>
         </Alert>
       )}
 
       {step === "current-email" && (
         <section className="content-panel" aria-labelledby="verify-current-email-heading">
           <h2 id="verify-current-email-heading" className="text-base font-semibold text-foreground">验证当前邮箱</h2>
-          <p className="mt-1 text-sm text-muted-foreground">先向当前登录邮箱发送 6 位验证码。</p>
+          <p className="mt-1 text-sm text-muted-foreground">{currentOtpSent ? "验证码已发送，请输入邮件中的 6 位数字。" : "先向当前登录邮箱发送 6 位验证码。"}</p>
           {!currentOtpSent ? (
             <ActionButton
               type="button"
@@ -236,7 +258,17 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
             <form onSubmit={verifyCurrentOtp} className="mt-4 space-y-4" noValidate>
               <div className="field">
                 <Label htmlFor="current-email-otp">当前邮箱验证码</Label>
-                <OtpInput id="current-email-otp" value={currentOtp} onChange={setCurrentOtp} />
+                <VerificationCodeInput
+                  id="current-email-otp"
+                  value={currentOtp}
+                  onChange={(value) => {
+                    setCurrentOtp(value);
+                    if (error) setError("");
+                  }}
+                  disabled={loading}
+                  aria-invalid={Boolean(error)}
+                  aria-describedby={error ? errorId : undefined}
+                />
               </div>
               <div className="flex flex-wrap items-center gap-3">
                 <ActionButton
@@ -271,7 +303,10 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
               id="new-email"
               type="email"
               value={newEmail}
-              onChange={(event) => setNewEmail(event.target.value)}
+              onChange={(event) => { setNewEmail(event.target.value); setError(""); }}
+              readOnly={loading}
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? errorId : undefined}
               required
               autoComplete="email"
               autoCapitalize="none"
@@ -298,7 +333,17 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
           />
           <div className="field">
             <Label htmlFor="new-email-otp">新邮箱验证码</Label>
-            <OtpInput id="new-email-otp" value={newEmailOtp} onChange={setNewEmailOtp} />
+            <VerificationCodeInput
+              id="new-email-otp"
+              value={newEmailOtp}
+                  onChange={(value) => {
+                    setNewEmailOtp(value);
+                    if (error) setError("");
+                  }}
+              disabled={loading}
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? errorId : undefined}
+            />
           </div>
           <ActionButton
             type="submit"
