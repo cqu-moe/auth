@@ -1,4 +1,6 @@
 import posthog from "posthog-js";
+import "posthog-js/dist/posthog-recorder";
+import "posthog-js/dist/exception-autocapture";
 
 type EventLike = {
   event: string;
@@ -122,6 +124,7 @@ export function initPostHog(): boolean {
   clearLegacyPostHogCookie(token);
   posthog.init(token, {
     api_host: host,
+    disable_external_dependency_loading: true,
     asset_host: host,
     ui_host: "https://us.posthog.com",
     persistence: "localStorage",
@@ -141,7 +144,7 @@ export function initPostHog(): boolean {
     disable_product_tours: true,
     disable_web_experiments: true,
     disable_conversations: true,
-    advanced_disable_flags: true,
+    advanced_disable_feature_flags: true,
     save_referrer: false,
     save_campaign_params: false,
     disable_scroll_properties: true,
