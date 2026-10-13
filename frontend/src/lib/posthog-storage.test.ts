@@ -11,6 +11,7 @@ describe("browser PostHog persistence", () => {
 
   it("uses localStorage only and removes the legacy PostHog cookie", async () => {
     vi.stubEnv("VITE_POSTHOG_PROJECT_TOKEN", "test");
+    vi.stubEnv("VITE_POSTHOG_ALLOW_NON_PRODUCTION", "true");
     document.cookie = "ph_test_posthog=legacy; Path=/";
     const telemetry = await import("./posthog");
     const init = vi.spyOn(telemetry.posthog, "init").mockReturnValue(telemetry.posthog);
@@ -22,6 +23,9 @@ describe("browser PostHog persistence", () => {
       ui_host: "https://us.posthog.com",
       persistence: "localStorage",
       cross_subdomain_cookie: false,
+      capture_pageview: false,
+      autocapture: false,
+      disable_session_recording: true,
     }));
     expect(document.cookie).not.toContain("ph_test_posthog");
   });

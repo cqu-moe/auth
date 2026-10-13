@@ -366,11 +366,14 @@ describe('QuickLogin v3 HTTP contracts', () => {
   const registered = await SELF.fetch('http://localhost:8787/api/v1/cqu/quicklogin/registrations',{method:'POST',headers:extensionHeaders(authorization, origin),body:JSON.stringify(request)});
   expect(registered.status).toBe(200);
   const data = parseApiResponse(await registered.json(),parseRegistrationResponse).data;
+  expect(data.centralUserId).toBe(fixture.websiteSession.userId);
   const replay = await SELF.fetch('http://localhost:8787/api/v1/cqu/quicklogin/registrations',{method:'POST',headers:extensionHeaders(authorization, origin),body:JSON.stringify(request)});
   expect(parseApiResponse(await replay.json(),parseRegistrationResponse).data.deviceId).toBe(data.deviceId);
   const reconciled=await SELF.fetch(`http://localhost:8787/api/v1/cqu/quicklogin/devices/${data.deviceId}/reconcile`,{method:'POST',headers:extensionHeaders(authorization, origin),body:JSON.stringify({protocolVersion:3,requestId:'http-sync',client,observed:null,reportEpoch:'http-epoch',clientReportSeq:1,local:{enabledIntent:true,mode:'automatic',cookieState:'missing',receipt:null}})});
   expect(reconciled.status).toBe(200);
-  expect(parseApiResponse(await reconciled.json(),parseReconcileResponse).data.snapshot.identity.installationId).toBe('http-install');
+  const reconciledData = parseApiResponse(await reconciled.json(),parseReconcileResponse).data;
+  expect(reconciledData.snapshot.identity.installationId).toBe('http-install');
+  expect(reconciledData.centralUserId).toBe(fixture.websiteSession.userId);
  });
  it('enforces Origin on v3 routes and exposes structured protocol failures',async()=>{
   const response=await SELF.fetch('http://localhost:8787/api/v1/cqu/quicklogin/registrations',{method:'POST',headers:{Origin:'https://evil.example','Content-Type':'application/json'},body:'{}'});

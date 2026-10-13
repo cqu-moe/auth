@@ -67,7 +67,7 @@ router.post('/registrations', async c => {
   const accounts = new QuickloginAccountClient(c.env), device = await accounts.registerV3(p.userId, p.grantId, input);
   // Keep existing user intent across upgrades; a new disabled device is enabled by its explicit operation.
   const snapshot = await snapshotV3(c.env, p.userId, device.deviceId);
-  return c.json({ data: { deviceId: device.deviceId, snapshot }, meta: meta(c, requestId) });
+  return c.json({ data: { centralUserId: p.userId, deviceId: device.deviceId, snapshot }, meta: meta(c, requestId) });
  } catch (e) { return fail(c,e,requestId); }
 });
 router.post('/devices/:id/resume-ticket', async c => {
@@ -105,7 +105,7 @@ router.post('/devices/:id/reconcile', async c => {
   await devices.reportV3(a,input);
   const read = await devices.readV3(a); await accounts.projectV3(p.userId,p.deviceId!,p.grantId,read.report,read.client);
   const snapshot = await snapshotV3(c.env,p.userId,p.deviceId!);
-  return c.json({ data: { snapshot, receiptAck: ack ? currentAck(ack, snapshot) : null }, meta: meta(c, requestId) });
+  return c.json({ data: { centralUserId: p.userId, snapshot, receiptAck: ack ? currentAck(ack, snapshot) : null }, meta: meta(c, requestId) });
  } catch(e) { return fail(c,e,requestId); }
 });
 router.post('/devices/:id/operations', async c => {

@@ -55,9 +55,9 @@ export interface Capabilities { protocolVersion: 3; supportedProtocolVersions: n
 export interface SsoCookie { name: string; value: string; domain: 'sso.cqu.edu.cn' | '.sso.cqu.edu.cn'; path: string; secure: boolean; httpOnly: boolean; sameSite: 'Strict' | 'Lax' | 'None'; expires: number }
 export interface ExportEnvelope extends VersionTuple { protocolVersion: 3; exportId: string; createdAt: number; applyBefore: number; cookies: SsoCookie[] }
 export interface ReceiptAck { accepted: boolean; exportId: string | null; acceptedTuple: VersionTuple | null; reportEpoch: string; clientReportSeq: number; receivedAt: number; reasonCode: ReasonCode | null; snapshot: DeviceSnapshot }
-export interface ReconcileResponse { snapshot: DeviceSnapshot; receiptAck: ReceiptAck | null }
+export interface ReconcileResponse { centralUserId: string; snapshot: DeviceSnapshot; receiptAck: ReceiptAck | null }
 export interface OperationResponse { operation: Operation; snapshot: DeviceSnapshot }
-export interface RegistrationResponse { deviceId: string; snapshot: DeviceSnapshot }
+export interface RegistrationResponse { centralUserId: string; deviceId: string; snapshot: DeviceSnapshot }
 export interface Overview { binding: BindingFacts; accountRevision: number; masterEnabled: boolean; deviceLimit: number; used: number; devices: DeviceSnapshot[] }
 export interface ApiMeta { protocolVersion: 3; requestId: string; serverTime: number; serverBuild: string }
 export interface ApiResponse<T> { data: T; meta: ApiMeta }
@@ -172,9 +172,9 @@ export const parseReceiptAck: Parser<ReceiptAck> = boundary(value => {
   if (!v.accepted && v.reasonCode === null) invalid();
   return v;
 });
-export const parseReconcileResponse: Parser<ReconcileResponse> = boundary(object<ReconcileResponse>({ snapshot: parseDeviceSnapshot, receiptAck: nullable(parseReceiptAck) }));
+export const parseReconcileResponse: Parser<ReconcileResponse> = boundary(object<ReconcileResponse>({ centralUserId: identifier, snapshot: parseDeviceSnapshot, receiptAck: nullable(parseReceiptAck) }));
 export const parseOperationResponse: Parser<OperationResponse> = boundary(value => { const v = object<OperationResponse>({ operation: parseOperation, snapshot: parseDeviceSnapshot })(value); if (v.operation.versions.deviceId !== v.snapshot.identity.deviceId) invalid(); return v; });
-export const parseRegistrationResponse: Parser<RegistrationResponse> = boundary(value => { const v = object<RegistrationResponse>({ deviceId: identifier, snapshot: parseDeviceSnapshot })(value); if (v.deviceId !== v.snapshot.identity.deviceId) invalid(); return v; });
+export const parseRegistrationResponse: Parser<RegistrationResponse> = boundary(value => { const v = object<RegistrationResponse>({ centralUserId: identifier, deviceId: identifier, snapshot: parseDeviceSnapshot })(value); if (v.deviceId !== v.snapshot.identity.deviceId) invalid(); return v; });
 export const parseOverview: Parser<Overview> = boundary(object<Overview>({ binding: parseBindingFacts, accountRevision: integer, masterEnabled: boolean, deviceLimit: integer, used: integer, devices: list(parseDeviceSnapshot, 100) }));
 export const parseApiMeta: Parser<ApiMeta> = boundary(object<ApiMeta>({ protocolVersion: protocol, requestId: identifier, serverTime: integer, serverBuild: identifier }));
 export function parseApiResponse<T>(value: unknown, parseData: Parser<T>): ApiResponse<T> { size(value, parseData === parseExportEnvelope ? MAX_EXPORT_BYTES : MAX_JSON_BYTES); const v = record(value); return { data: parseData(v.data), meta: parseApiMeta(v.meta) }; }

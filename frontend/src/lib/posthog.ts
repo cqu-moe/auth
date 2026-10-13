@@ -2,95 +2,77 @@ import posthog from "posthog-js";
 
 type EventLike = {
   event: string;
+  uuid?: unknown;
+  timestamp?: unknown;
   properties: Record<string, unknown>;
 };
 
 type IdentityTransition = {
   identify: string | null;
-  captureLogin: boolean;
   reset: boolean;
 };
 
 const REDACTED = "[redacted]";
-const EMAIL = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
-const LABELED_SECRET = /\b(password|cookie|authorization|token|student_?id|email|otp|code|ticket)\s*[:=]\s*[^\s,;&]+/gi;
-const BEARER = /\bBearer\s+[^\s,;&]+/gi;
-
-function isSensitiveKey(key: string): boolean {
-  const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
-  return normalized === "password"
-    || normalized === "authorization"
-    || normalized === "studentid"
-    || normalized === "email"
-    || normalized === "otp"
-    || normalized === "code"
-    || normalized === "ticket"
-    || normalized === "schedule"
-    || normalized === "subscriptionurl"
-    || normalized.endsWith("password")
-    || normalized.endsWith("cookie")
-    || normalized.endsWith("token")
-    || (normalized.endsWith("code") && normalized !== "errorcode");
+const ORIGIN = "https://auth.cqu.moe";
+const ALLOWED_EVENTS = new Set(["app_session_ready", "$identify", "$snapshot", "$exception"]);
+const KNOWN_PATHS = new Set(["/", "/login", "/register", "/forgot-password", "/reset-password", "/settings", "/security", "/sessions", "/devices", "/quicklogin", "/oauth/authorize", "/auth/error"]);
+const TRANSPORT_KEYS = new Set(["token", "distinct_id", "$device_id", "$session_id", "$window_id", "$lib", "$lib_version", "$process_person_profile"]);
+const PROPERTY_ALLOWLIST = new Set(["telemetry_version", "product", "surface", "environment", "release", "actor_type", "trigger", "operation", "stage", "flow", "outcome", "error_code", "warning_code", "duration_ms", "duration_basis", "operation_id", "no_op", "is_test", "format", "source_type", "view_type", "route", "$process_person_profile"]);
+const SNAPSHOT_KEYS = new Set([...TRANSPORT_KEYS, "$snapshot_data", "$snapshot_bytes", "$snapshot_host"]);
+const IDENTIFY_KEYS = new Set([...TRANSPORT_KEYS, "$anon_distinct_id", "$user_id"]);
+const EXCEPTION_CLASSES = new Set(["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError", "DOMException", "AbortError"]);
+export function templateRoutePath(pathname: string): string {
+  if (KNOWN_PATHS.has(pathname)) return pathname;
+  return "/unknown";
 }
 
-function redactText(value: string): string {
-  return value
-    .replace(EMAIL, REDACTED)
-    .replace(LABELED_SECRET, (_match, label: string) => `${label}=${REDACTED}`)
-    .replace(BEARER, `Bearer ${REDACTED}`);
-}
-
-function normalizedPath(pathname: string): string {
-  return pathname
-    .split("/")
-    .map((segment) => {
-      if (/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(segment)) return ":id";
-      if (/^\d{6,}$/.test(segment)) return ":id";
-      if (/^(?=.*[a-z])(?=.*\d)[a-z0-9_-]{16,}$/i.test(segment)) return ":id";
-      return segment;
-    })
-    .join("/");
-}
-
-function sanitizeUrl(value: string): string {
+function safeUrl(value: unknown): string {
   try {
-    const relative = value.startsWith("/");
-    const url = new URL(value, "https://redacted.invalid");
-    url.pathname = normalizedPath(url.pathname);
-    url.search = "";
-    url.hash = "";
-    return relative ? url.pathname : url.toString();
-  } catch {
-    return redactText(value.split(/[?#]/, 1)[0] ?? "");
-  }
+    const url = new URL(String(value), ORIGIN);
+    return url.origin === ORIGIN ? ORIGIN + templateRoutePath(url.pathname) : ORIGIN + "/unknown";
+  } catch { return ORIGIN + "/unknown"; }
 }
 
 function sanitizeValue(value: unknown, key = ""): unknown {
-  if (isSensitiveKey(key)) return REDACTED;
   if (typeof value === "string") {
-    const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
-    return normalized.includes("url") || normalized.includes("referrer")
-      ? sanitizeUrl(value)
-      : redactText(value);
+    if (key === "$current_url") return safeUrl(value);
+    if ((key === "error_code" || key === "warning_code") && !/^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(value)) return "UNKNOWN_ERROR";
+    return value.length <= 128 ? value : REDACTED;
   }
-  if (Array.isArray(value)) return value.map((item) => sanitizeValue(item));
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([childKey, childValue]) => [
-        childKey,
-        sanitizeValue(childValue, childKey),
-      ])
-    );
-  }
-  return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "boolean" || value === null) return value;
+  return REDACTED;
 }
 
 export function sanitizePostHogEvent<T extends EventLike>(event: T | null): T | null {
-  if (!event) return null;
-  return {
-    ...event,
-    properties: sanitizeValue(event.properties) as Record<string, unknown>,
-  };
+  if (!event || !ALLOWED_EVENTS.has(event.event)) return null;
+  const source = event.properties ?? {};
+  const keys = event.event === "$snapshot" ? SNAPSHOT_KEYS
+    : event.event === "$identify" ? IDENTIFY_KEYS
+    : new Set([...TRANSPORT_KEYS, ...PROPERTY_ALLOWLIST, "$current_url"]);
+  const properties: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (!(key in source)) continue;
+    properties[key] = event.event === "$snapshot" || TRANSPORT_KEYS.has(key) || IDENTIFY_KEYS.has(key)
+      ? source[key] : sanitizeValue(source[key], key);
+  }
+  {
+    // reset() clears registered properties; every business event keeps its contract.
+    Object.assign(properties, { telemetry_version: 2, product: "auth", surface: "web", environment, release,
+      ...(isTestEvent ? { is_test: true } : {}) });
+  }
+  if (event.event === "$exception") {
+    const first = Array.isArray(source.$exception_list) ? source.$exception_list[0] : undefined;
+    const type = first && EXCEPTION_CLASSES.has(first.type) ? first.type : "Error";
+    properties.$exception_list = [{ type, value: "Unhandled browser error", mechanism: { type: "generic", handled: false } }];
+    properties.$exception_type = type;
+    properties.error_code = "EXCEPTION";
+    properties.operation = "exception";
+    properties.outcome = "failure";
+  }
+  // SDK-generated $set and $set_once may contain initial URLs and referrers.
+  return { event: event.event, ...(event.uuid === undefined ? {} : { uuid: event.uuid }),
+    ...(event.timestamp === undefined ? {} : { timestamp: event.timestamp }), properties } as T;
 }
 
 export function identityTransition(
@@ -100,19 +82,18 @@ export function identityTransition(
   if (currentUserId) {
     return {
       identify: currentUserId,
-      captureLogin: previousUserId === null,
       reset: typeof previousUserId === "string" && previousUserId !== currentUserId,
     };
   }
   return {
     identify: null,
-    captureLogin: false,
     reset: typeof previousUserId === "string",
   };
 }
 
 const token = import.meta.env.VITE_POSTHOG_PROJECT_TOKEN?.trim();
 const host = import.meta.env.VITE_POSTHOG_HOST?.trim() || "https://p.cqu.moe";
+const isTestEvent = !import.meta.env.PROD || (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("telemetry_test") === "1");
 const environment = import.meta.env.PROD ? "production" : import.meta.env.MODE === "test" ? "test" : "development";
 const release = import.meta.env.VITE_RELEASE?.trim() || "development";
 let initialized = false;
@@ -128,9 +109,12 @@ function clearLegacyPostHogCookie(projectToken: string): void {
 
 export function initPostHog(): boolean {
   if (initialized) return true;
+  if (!import.meta.env.PROD && import.meta.env.VITE_POSTHOG_ALLOW_NON_PRODUCTION !== "true") return false;
   if (!token) {
     if (import.meta.env.DEV) {
-      console.info("VITE_POSTHOG_PROJECT_TOKEN is not configured; PostHog is disabled.");
+      console.error(
+        "VITE_POSTHOG_PROJECT_TOKEN is not configured; PostHog events will be missed in this development build."
+      );
     }
     return false;
   }
@@ -143,33 +127,59 @@ export function initPostHog(): boolean {
     persistence: "localStorage",
     cross_subdomain_cookie: false,
     defaults: "2026-05-30",
-    capture_pageview: "history_change",
-    capture_pageleave: true,
+    capture_pageview: false,
+    capture_pageleave: false,
     capture_exceptions: {
       capture_unhandled_errors: true,
       capture_unhandled_rejections: true,
       capture_console_errors: false,
     },
-    autocapture: {
-      dom_event_allowlist: ["click"],
-      element_allowlist: ["a", "button"],
-      url_allowlist: [/^https?:\/\/[^/]+\/auth\/error$/],
-      css_selector_ignorelist: [".ph-no-capture", "[data-ph-no-autocapture]", "[data-sensitive]"],
-    },
-    capture_heatmaps: true,
+    autocapture: false,
+    capture_performance: false,
+    capture_dead_clicks: false,
+    disable_surveys: true,
+    disable_product_tours: true,
+    disable_web_experiments: true,
+    disable_conversations: true,
+    advanced_disable_flags: true,
+    save_referrer: false,
+    save_campaign_params: false,
+    disable_scroll_properties: true,
+    logs: { captureConsoleLogs: false },
+    capture_heatmaps: false,
     disable_session_recording: true,
     session_recording: {
+      sampleRate: 1,
       maskAllInputs: true,
       maskTextSelector: "*",
-      blockSelector: "[data-sensitive]",
+      maskTextFn: () => REDACTED,
+      maskAllElementAttributes: true,
+      blockSelector: "img,picture,svg,video,audio,canvas,iframe,[data-sensitive],[data-ph-no-capture]",
+      slimDOMOptions: "all",
+      collectFonts: false,
+      captureJsonLd: false,
+      recordCrossOriginIframes: false,
       recordHeaders: false,
       recordBody: false,
+      streamNetworkBody: false,
+      captureCanvas: { recordCanvas: false },
+      maskCapturedNetworkRequestFn: request => Object.keys(request).length === 1
+        ? { ...request, name: safeUrl(request.name) } : null,
     },
-    before_send: sanitizePostHogEvent,
+    before_send: event => event?.event === "$snapshot" && window.location.origin !== ORIGIN ? null : sanitizePostHogEvent(event),
     person_profiles: "identified_only",
     ip: false,
   });
-  posthog.register({ service: "auth-web", environment, release });
+  posthog.register({
+    telemetry_version: 2,
+    product: "auth",
+    surface: "web",
+    environment,
+    release,
+    actor_type: "user",
+    trigger: "user",
+    ...(isTestEvent ? { is_test: true } : {}),
+  });
   initialized = true;
   return true;
 }
@@ -183,15 +193,24 @@ export function syncPostHogIdentity(
   currentUserId: string | null
 ): void {
   if (!initialized) return;
-  const action = identityTransition(previousUserId, currentUserId);
+  const persistedUserId = posthog.get_property("$user_id");
+  const action = identityTransition(typeof persistedUserId === "string" ? persistedUserId : previousUserId, currentUserId);
   if (action.reset) posthog.reset();
   if (action.identify) posthog.identify(action.identify);
-  if (action.captureLogin) posthog.capture("auth_login_completed", { outcome: "success" });
+}
+
+export function capturePostHogSessionReady(): void {
+  if (!initialized) return;
+  posthog.capture("app_session_ready", {
+    operation: "session",
+    stage: "ready",
+    outcome: "success",
+  });
 }
 
 export function syncPostHogReplay(pathname: string): void {
   if (!initialized) return;
-  if (pathname === "/auth/error") posthog.startSessionRecording();
+  if (window.location.origin === ORIGIN && pathname.startsWith("/")) posthog.startSessionRecording(true);
   else posthog.stopSessionRecording();
 }
 
