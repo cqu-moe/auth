@@ -45,6 +45,19 @@ function button(container: HTMLElement, name: string): HTMLButtonElement {
   return found;
 }
 
+async function openDeviceMenu(container: HTMLElement): Promise<HTMLElement> {
+  const trigger = container.querySelector('button[aria-haspopup="menu"]');
+  if (!(trigger instanceof HTMLButtonElement)) throw new Error("missing device menu");
+  await act(async () => {
+    trigger.focus();
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  });
+  await settleUi();
+  const item = document.querySelector('[role="menuitem"]');
+  if (!(item instanceof HTMLElement)) throw new Error("missing exit action");
+  return item;
+}
+
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
     .IS_REACT_ACT_ENVIRONMENT = true;
@@ -87,11 +100,14 @@ describe("QuickLogin settings", () => {
     expect(container.textContent).toContain("当前插件");
     expect(container.textContent).toContain("最近联系");
     expect(container.textContent).not.toContain("最近 IP");
-    expect(container.textContent).toContain("退出设备");
+    expect(container.textContent).not.toContain("退出设备");
     expect(container.textContent).not.toContain(QUICKLOGIN_REVOKE_WARNING);
     vi.stubGlobal("confirm", vi.fn(() => false));
-    await click(button(container, "退出设备"));
+    const exit = await openDeviceMenu(container);
+    expect(exit.textContent).toContain("退出设备");
+    await click(exit);
     expect(confirm).toHaveBeenCalledWith(QUICKLOGIN_REVOKE_WARNING);
+    expect(api.revokeQuickloginDevice).not.toHaveBeenCalled();
   });
 
   it("reloads the summary and devices after changing the master switch", async () => {
@@ -142,7 +158,7 @@ describe("QuickLogin settings", () => {
     vi.stubGlobal("confirm", vi.fn(() => true));
     const container = await renderUi(createElement(QuickloginSettings));
 
-    await click(button(container, "退出设备"));
+    await click(await openDeviceMenu(container));
 
     expect(api.revokeQuickloginDevice).toHaveBeenCalledWith("device-a");
     expect(container.textContent).toContain("宿舍 Chrome");
@@ -329,9 +345,10 @@ describe("QuickLogin settings", () => {
     if (!(toggle instanceof HTMLButtonElement)) throw new Error("missing master switch");
 
     await click(toggle);
-    const revoke = button(container, "退出设备");
-    expect(revoke.disabled).toBe(true);
-    await click(revoke);
+    const menu = container.querySelector('button[aria-haspopup="menu"]') as HTMLButtonElement;
+    expect(menu.disabled).toBe(true);
+    await click(menu);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
     expect(api.revokeQuickloginDevice).not.toHaveBeenCalled();
 
     pending.resolve({
