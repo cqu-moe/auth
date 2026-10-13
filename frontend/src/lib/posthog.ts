@@ -50,7 +50,7 @@ export function sanitizePostHogEvent<T extends EventLike>(event: T | null): T | 
   const keys = event.event === "$snapshot" ? SNAPSHOT_KEYS
     : event.event === "$identify" ? IDENTIFY_KEYS
     : new Set([...TRANSPORT_KEYS, ...PROPERTY_ALLOWLIST, "$current_url"]);
-  const properties: Record<string, unknown> = {};
+  const properties: Record<string, unknown> = { $geoip_disable: true };
   for (const key of keys) {
     if (!(key in source)) continue;
     properties[key] = event.event === "$snapshot" || TRANSPORT_KEYS.has(key) || IDENTIFY_KEYS.has(key)

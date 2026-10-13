@@ -161,7 +161,7 @@ function createClient(env: TelemetryEnv): PostHog | null {
       if (!event) return null;
       return {
         ...event,
-        properties: sanitizePostHogProperties(event.properties ?? {}),
+        properties: { ...sanitizePostHogProperties(event.properties ?? {}), $geoip_disable: true },
       };
     },
   });

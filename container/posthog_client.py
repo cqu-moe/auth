@@ -131,7 +131,7 @@ def sanitize_event(event: dict | None) -> dict | None:
     properties = event.get("properties")
     if not isinstance(properties, Mapping):
         return event
-    event["properties"] = _sanitize_properties(properties)
+    event["properties"] = {**_sanitize_properties(properties), "$geoip_disable": True}
     if event.get("event") == "$exception":
         error_type = event["properties"].get("$exception_type", "Error")
         if not isinstance(error_type, str) or not re.fullmatch(r"[A-Z][A-Za-z0-9_$]{0,63}", error_type):

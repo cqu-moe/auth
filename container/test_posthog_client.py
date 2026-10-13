@@ -45,7 +45,7 @@ class PostHogPrivacyTests(unittest.TestCase):
             self.assertNotIn(secret, serialized)
         self.assertEqual(
             event["properties"],
-            {"product": "auth", "$exception_list": [{
+            {"product": "auth", "$geoip_disable": True, "$exception_list": [{
                 "type": "Error", "value": "Browser operation failed",
                 "mechanism": {"type": "generic", "handled": True},
             }]},

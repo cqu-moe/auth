@@ -98,6 +98,7 @@ describe("real posthog-js event sanitization", () => {
     const sanitized = sanitizedEvents[0]!;
     expect(Object.keys(sanitized).sort()).toEqual(["event", "properties", "timestamp", "uuid"]);
     expect(sanitized.properties.token).toBe(token);
+    expect(sanitized.properties.$geoip_disable).toBe(true);
     expect(sanitized.properties.distinct_id).toBe("central-user-a");
     expect(sanitized.properties.$current_url).toBe("https://auth.cqu.moe/");
     expect(sanitized.properties.email).toBeUndefined();
@@ -167,6 +168,7 @@ describe("real posthog-js event sanitization", () => {
     expect(sanitized.properties.$snapshot_data).toBe(raw.properties.$snapshot_data);
     expect(sanitized.properties.$snapshot_data).toBe(snapshotData);
     expect(sanitized.properties.token).toBe(token);
+    expect(sanitized.properties.$geoip_disable).toBe(true);
     expect(sanitized.properties.distinct_id).toBe("central-user-a");
     expect(sanitized.properties.$snapshot_bytes).toBe(43);
     expect(sanitized.properties.$session_id).toBe("session-a");
