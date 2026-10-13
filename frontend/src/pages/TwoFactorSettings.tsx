@@ -1,7 +1,7 @@
 import AuthenticationMethodChoice, { type AuthenticationMethod } from "../components/AuthenticationMethodChoice";
 import { passkeyAccountOperation } from "../lib/passkey-operations";
 import { requestAuthentication } from "../lib/recent-authentication";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Download } from "lucide-react";
 import QRCode from "qrcode";
@@ -16,6 +16,7 @@ import {
   PageHeader,
 } from "@cqu-moe/ui";
 import Layout from "../components/Layout";
+import { VerificationCodeInput } from "../components/VerificationCodeInput";
 import { authClient } from "../lib/auth-client";
 import {
   completeTotpEnrollment,
@@ -46,10 +47,14 @@ function PasswordField({
   id,
   value,
   onChange,
+  disabled,
+  error,
 }: {
   id: string;
   value: string;
   onChange: (value: string) => void;
+  disabled: boolean;
+  error: string;
 }) {
   return (
     <div className="field">
@@ -60,6 +65,9 @@ function PasswordField({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         required
+        readOnly={disabled}
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? "two-factor-settings-error" : undefined}
         autoComplete="current-password"
       />
     </div>
@@ -142,6 +150,8 @@ export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettin
   const [managementAction, setManagementAction] = useState<"" | "regenerate" | "disable">("");
   const [managementPassword, setManagementPassword] = useState("");
   const [generatedCodes, setGeneratedCodes] = useState<string[] | null>(null);
+  const loadingRef = useRef(false);
+  const errorId = "two-factor-settings-error";
 
   const manualSecret = useMemo(() => {
     if (!secret) return "";
@@ -169,76 +179,98 @@ export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettin
 
   const beginEnrollment = async (event: FormEvent) => {
     event.preventDefault();
+    if (loadingRef.current) return;
     setError("");
+    loadingRef.current = true;
     setLoading(true);
-    if (method === "password" && !await requestAuthentication("mfa", password)) { setLoading(false); return; }
-    const { data, error: authError } = method === "passkey" ? await passkeyAccountOperation<{ method: "totp"; totpURI: string; backupCodes: string[] }>("two-factor/enable") : await authClient.twoFactor.enable({ password });
-    setLoading(false);
-    if (authError || !data) {
-      setError(errorMessage(authError, "无法开启二次验证，请检查当前密码"));
-      return;
+    try {
+      if (method === "password" && !await requestAuthentication("mfa", password)) return;
+      const { data, error: authError } = method === "passkey" ? await passkeyAccountOperation<{ method: "totp"; totpURI: string; backupCodes: string[] }>("two-factor/enable") : await authClient.twoFactor.enable({ password });
+      if (authError || !data) {
+        setError(errorMessage(authError, "无法开启二次验证，请检查当前密码"));
+        return;
+      }
+      if (!("totpURI" in data)) {
+        setError("无法获取身份验证器配置，请稍后重试");
+        return;
+      }
+      setPassword("");
+      setSecret({ totpURI: data.totpURI, backupCodes: data.backupCodes });
+      setStep("scan");
+    } catch {
+      setError("网络错误，请检查连接后重试");
+    } finally {
+      loadingRef.current = false;
+      setLoading(false);
     }
-    if (!("totpURI" in data)) {
-      setError("无法获取身份验证器配置，请稍后重试");
-      return;
-    }
-    setPassword("");
-    setSecret({ totpURI: data.totpURI, backupCodes: data.backupCodes });
-    setStep("scan");
   };
 
   const verifyTotp = async (event: FormEvent) => {
     event.preventDefault();
+    if (loadingRef.current) return;
     setError("");
     const code = normalizeOtp(totpCode);
     if (code.length !== 6) {
       setError("请输入 6 位验证码");
       return;
     }
+    loadingRef.current = true;
     setLoading(true);
-    const authError = await completeTotpEnrollment({
-      verifyTotp: () => authClient.twoFactor.verifyTotp({ code }),
-      revealBackupCodes: () => {
-        setTotpCode("");
-        setStep("backup-codes");
-        setLoading(false);
-      },
-      refetchSession,
-    });
-    if (authError) {
+    try {
+      const authError = await completeTotpEnrollment({
+        verifyTotp: () => authClient.twoFactor.verifyTotp({ code }),
+        revealBackupCodes: () => {
+          setTotpCode("");
+          setStep("backup-codes");
+        },
+        refetchSession,
+      });
+      if (authError) {
+        setError(errorMessage(authError, "验证失败，请重试"));
+        return;
+      }
+    } catch {
+      setError("网络错误，请检查连接后重试");
+    } finally {
+      loadingRef.current = false;
       setLoading(false);
-      setError(errorMessage(authError, "验证失败，请重试"));
-      return;
     }
   };
 
   const submitManagement = async (event: FormEvent) => {
     event.preventDefault();
+    if (loadingRef.current) return;
     setError("");
+    loadingRef.current = true;
     setLoading(true);
-    if (method === "password" && !await requestAuthentication("mfa", managementPassword)) { setLoading(false); return; }
-    if (managementAction === "regenerate") {
-      const { data, error: authError } = method === "passkey" ? await passkeyAccountOperation<{ backupCodes: string[] }>("two-factor/generate-backup-codes") : await authClient.twoFactor.generateBackupCodes({ password: managementPassword });
-      setLoading(false);
-      if (authError || !data) {
-        setError(errorMessage(authError, "恢复码生成失败，请检查当前密码"));
+    try {
+      if (method === "password" && !await requestAuthentication("mfa", managementPassword)) return;
+      if (managementAction === "regenerate") {
+        const { data, error: authError } = method === "passkey" ? await passkeyAccountOperation<{ backupCodes: string[] }>("two-factor/generate-backup-codes") : await authClient.twoFactor.generateBackupCodes({ password: managementPassword });
+        if (authError || !data) {
+          setError(errorMessage(authError, "恢复码生成失败，请检查当前密码"));
+          return;
+        }
+        setManagementPassword("");
+        setGeneratedCodes(data.backupCodes);
+        return;
+      }
+
+      const { error: authError } = method === "passkey" ? await passkeyAccountOperation("two-factor/disable") : await authClient.twoFactor.disable({ password: managementPassword });
+      if (authError) {
+        setError(errorMessage(authError, "关闭失败，请检查当前密码"));
         return;
       }
       setManagementPassword("");
-      setGeneratedCodes(data.backupCodes);
-      return;
+      setManagementAction("");
+      setGeneratedCodes(null);
+      await refetchSession();
+    } catch {
+      setError("网络错误，请检查连接后重试");
+    } finally {
+      loadingRef.current = false;
+      setLoading(false);
     }
-
-    const { error: authError } = method === "passkey" ? await passkeyAccountOperation("two-factor/disable") : await authClient.twoFactor.disable({ password: managementPassword });
-    setLoading(false);
-    if (authError) {
-      setError(errorMessage(authError, "关闭失败，请检查当前密码"));
-      return;
-    }
-    setManagementPassword("");
-    setManagementAction("");
-    setGeneratedCodes(null);
-    await refetchSession();
   };
 
   return (
@@ -256,14 +288,14 @@ export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettin
       <div className="content-panel">
         {error && (
           <Alert variant="destructive" className="mb-4">
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription id={errorId}>{error}</AlertDescription>
           </Alert>
         )}
 
         {!enabled && step === "password" && (
-          <form onSubmit={beginEnrollment} className="space-y-4" noValidate>
+          <form onSubmit={beginEnrollment} className="space-y-4">
             <AuthenticationMethodChoice value={method} onChange={setMethod} disabled={loading} />
-            {method === "password" && <PasswordField id="two-factor-enrollment-password" value={password} onChange={setPassword} />}
+            {method === "password" && <PasswordField id="two-factor-enrollment-password" value={password} onChange={value => { setPassword(value); setError(""); }} disabled={loading} error={error} />}
             <ActionButton
               type="submit"
               disabled={loading}
@@ -285,17 +317,16 @@ export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettin
             <form onSubmit={verifyTotp} className="mt-4 space-y-4" noValidate>
               <div className="field">
                 <Label htmlFor="two-factor-totp">身份验证器验证码</Label>
-                <Input
+                <VerificationCodeInput
                   id="two-factor-totp"
                   value={totpCode}
-                  onChange={(event) => setTotpCode(normalizeOtp(event.target.value))}
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  pattern="[0-9]*"
-                  maxLength={6}
-                  required
-                  className="font-mono tracking-widest"
-                  placeholder="000000"
+                  onChange={(value) => {
+                    setTotpCode(value);
+                    setError("");
+                  }}
+                  disabled={loading}
+                  aria-invalid={Boolean(error)}
+                  aria-describedby={error ? errorId : undefined}
                 />
               </div>
               <ActionButton
@@ -328,12 +359,12 @@ export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettin
               </Button>
             </div>
             {managementAction && (
-              <form onSubmit={submitManagement} className="inline-editor mt-4 space-y-4 rounded-lg p-4" noValidate>
+              <form onSubmit={submitManagement} className="inline-editor mt-4 space-y-4 rounded-lg p-4">
                 <p className={managementAction === "disable" ? "text-sm text-destructive" : "text-sm text-foreground"}>
                   {managementAction === "disable" ? "关闭后，登录将不再要求身份验证器验证码。" : "重新生成后，旧恢复码将立即失效。"}
                 </p>
                 <AuthenticationMethodChoice value={method} onChange={setMethod} disabled={loading} />
-                {method === "password" && <PasswordField id="two-factor-management-password" value={managementPassword} onChange={setManagementPassword} />}
+                {method === "password" && <PasswordField id="two-factor-management-password" value={managementPassword} onChange={value => { setManagementPassword(value); setError(""); }} disabled={loading} error={error} />}
                 <div className="flex gap-3">
                   <Button type="button" variant="outline" onClick={() => setManagementAction("")} disabled={loading}>
                     取消

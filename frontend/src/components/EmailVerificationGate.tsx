@@ -1,6 +1,6 @@
 import { ReactNode, useEffect } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { PageState } from "@cqu-moe/ui";
+import { Button, PageState } from "@cqu-moe/ui";
 import { authClient } from "../lib/auth-client";
 import { getEmailVerificationRedirect } from "../lib/email-verification-routing";
 import {
@@ -9,6 +9,14 @@ import {
   withRedirectParam,
 } from "../lib/post-login-redirect";
 import { verificationContinuation } from "../lib/cqu-bind-continuation";
+
+import SessionPending from "./SessionPending";
+
+// Public forms stay mounted during signed-out session refetches (e.g. login).
+const publicEntryPaths = new Set([
+  "/login", "/register", "/reset-password", "/reset-password/confirm",
+  "/two-factor", "/auth/error",
+]);
 
 interface EmailVerificationGateProps {
   children: ReactNode;
@@ -19,26 +27,25 @@ function ExternalRedirect({ url }: { url: string }) {
     window.location.replace(url);
   }, [url]);
 
-  return (
-    <div className="flex min-h-dvh items-center justify-center bg-background p-6">
-      <div className="w-full max-w-sm">
-        <PageState state="loading" title="正在跳转" description="即将返回发起登录的应用…" />
-      </div>
-    </div>
-  );
+  return <SessionPending message="正在返回发起登录的应用…" />;
 }
 
 export default function EmailVerificationGate({ children }: EmailVerificationGateProps) {
-  const { data: session, isPending } = authClient.useSession();
+  const { data: session, isPending, error, refetch } = authClient.useSession();
   const location = useLocation();
 
   if (isPending) {
+    return publicEntryPaths.has(location.pathname) ? <>{children}</> : <SessionPending />;
+  }
+
+  if (error && error.status !== 401 && !session && !publicEntryPaths.has(location.pathname)) {
     return (
-      <div className="flex min-h-dvh items-center justify-center bg-background p-6">
+      <main className="flex min-h-dvh items-center justify-center bg-background p-6">
         <div className="w-full max-w-sm">
-          <PageState state="loading" title="正在检查邮箱验证状态" description="正在确认登录状态…" />
+          <PageState state="error" title="暂时无法确认登录状态" description="请检查网络连接后重试。"
+            action={<Button onClick={() => void refetch()}>重新加载</Button>} />
         </div>
-      </div>
+      </main>
     );
   }
 

@@ -1,7 +1,7 @@
 import AuthenticationMethodChoice, { type AuthenticationMethod } from "./AuthenticationMethodChoice";
 import { passkeyAccountOperation } from "../lib/passkey-operations";
 import { requestAuthentication } from "../lib/recent-authentication";
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ActionButton, Alert, AlertDescription, Button, Input, Label } from "@cqu-moe/ui";
 import { authClient } from "../lib/auth-client";
@@ -18,37 +18,65 @@ function ChangePasswordEditor({ onCancel, onSuccess }: { onCancel: () => void; o
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [formError, setFormError] = useState("");
-  const [fieldErrors, setFieldErrors] = useState<{ newPassword?: string; confirm?: string }>({});
+  const [fieldErrors, setFieldErrors] = useState<{
+    currentPassword?: string;
+    newPassword?: string;
+    confirm?: string;
+  }>({});
   const [loading, setLoading] = useState(false);
+  const currentPasswordRef = useRef<HTMLInputElement>(null);
+  const newPasswordRef = useRef<HTMLInputElement>(null);
+  const confirmPasswordRef = useRef<HTMLInputElement>(null);
+  const submittingRef = useRef(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current) return;
+
     setFormError("");
-    setFieldErrors({});
+    const nextFieldErrors: typeof fieldErrors = {};
+    if (method === "password" && !currentPassword) {
+      nextFieldErrors.currentPassword = "请输入当前密码";
+    }
+    if (newPassword.length < 8) nextFieldErrors.newPassword = "新密码至少需要 8 个字符";
+    if (newPassword !== confirmPassword) nextFieldErrors.confirm = "两次输入的新密码不一致";
+    setFieldErrors(nextFieldErrors);
 
-    if (newPassword.length < 8) {
-      setFieldErrors({ newPassword: "新密码至少需要 8 个字符" });
+    if (nextFieldErrors.currentPassword) {
+      currentPasswordRef.current?.focus();
+      return;
+    } else if (nextFieldErrors.newPassword) {
+      newPasswordRef.current?.focus();
+      return;
+    } else if (nextFieldErrors.confirm) {
+      confirmPasswordRef.current?.focus();
       return;
     }
 
-    if (newPassword !== confirmPassword) {
-      setFieldErrors({ confirm: "两次输入的新密码不一致" });
-      return;
-    }
-
+    submittingRef.current = true;
     setLoading(true);
-    if (method === "password" && !await requestAuthentication("password", currentPassword)) { setLoading(false); return; }
-    const { error } = method === "passkey" ? await passkeyAccountOperation("change-password", { newPassword }) : await authClient.changePassword({
-      currentPassword,
-      newPassword,
-      revokeOtherSessions: true,
-    });
-    setLoading(false);
+    try {
+      if (method === "password" && !(await requestAuthentication("password", currentPassword))) {
+        return;
+      }
+      const { error } = method === "passkey"
+        ? await passkeyAccountOperation("change-password", { newPassword })
+        : await authClient.changePassword({
+            currentPassword,
+            newPassword,
+            revokeOtherSessions: true,
+          });
 
-    if (error) {
-      setFormError(error.message ?? "修改失败，请检查当前密码是否正确");
-    } else {
-      onSuccess();
+      if (error) {
+        setFormError(error.message ?? "修改失败，请检查当前密码是否正确");
+      } else {
+        onSuccess();
+      }
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "网络错误，请重试");
+    } finally {
+      submittingRef.current = false;
+      setLoading(false);
     }
   };
 
@@ -65,30 +93,62 @@ function ChangePasswordEditor({ onCancel, onSuccess }: { onCancel: () => void; o
         <Label htmlFor="currentPassword">当前密码</Label>
         <Input
           id="currentPassword"
+            ref={currentPasswordRef}
           type="password"
           value={currentPassword}
-          onChange={(e) => setCurrentPassword(e.target.value)}
+            onChange={(e) => {
+              setCurrentPassword(e.target.value);
+              if (fieldErrors.currentPassword && e.target.value) {
+                setFieldErrors((errors) => ({ ...errors, currentPassword: undefined }));
+              }
+            }}
+            onBlur={() => {
+              if (!currentPassword) {
+                setFieldErrors((errors) => ({ ...errors, currentPassword: "请输入当前密码" }));
+              }
+            }}
           required
           autoComplete="current-password"
           autoFocus
+            aria-invalid={fieldErrors.currentPassword ? true : undefined}
+            aria-describedby={fieldErrors.currentPassword ? "current-password-error" : undefined}
         />
+          {fieldErrors.currentPassword && (
+            <p id="current-password-error" className="field-error" role="alert">
+              {fieldErrors.currentPassword}
+            </p>
+          )}
       </div>}
 
       <div className="field">
         <Label htmlFor="newPassword">新密码</Label>
         <Input
           id="newPassword"
+            ref={newPasswordRef}
           type="password"
           value={newPassword}
-          onChange={(e) => setNewPassword(e.target.value)}
+            onChange={(e) => {
+              setNewPassword(e.target.value);
+              if (fieldErrors.newPassword && e.target.value.length >= 8) {
+                setFieldErrors((errors) => ({ ...errors, newPassword: undefined }));
+              }
+              if (fieldErrors.confirm && e.target.value === confirmPassword) {
+                setFieldErrors((errors) => ({ ...errors, confirm: undefined }));
+              }
+            }}
+            onBlur={() => {
+              if (newPassword.length < 8) {
+                setFieldErrors((errors) => ({ ...errors, newPassword: "新密码至少需要 8 个字符" }));
+              }
+            }}
           required
           autoComplete="new-password"
           aria-invalid={fieldErrors.newPassword ? true : undefined}
-          aria-describedby="new-password-hint"
+            aria-describedby={fieldErrors.newPassword ? "new-password-error" : "new-password-hint"}
           placeholder="至少 8 个字符"
         />
         {fieldErrors.newPassword ? (
-          <p className="field-error" role="alert">{fieldErrors.newPassword}</p>
+          <p id="new-password-error" className="field-error" role="alert">{fieldErrors.newPassword}</p>
         ) : (
           <p id="new-password-hint" className="field-hint">至少 8 个字符，建议混合字母、数字和符号。</p>
         )}
@@ -98,15 +158,27 @@ function ChangePasswordEditor({ onCancel, onSuccess }: { onCancel: () => void; o
         <Label htmlFor="confirmNewPassword">确认新密码</Label>
         <Input
           id="confirmNewPassword"
+            ref={confirmPasswordRef}
           type="password"
           value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
+            onChange={(e) => {
+              setConfirmPassword(e.target.value);
+              if (fieldErrors.confirm && e.target.value === newPassword) {
+                setFieldErrors((errors) => ({ ...errors, confirm: undefined }));
+              }
+            }}
+            onBlur={() => {
+              if (confirmPassword !== newPassword) {
+                setFieldErrors((errors) => ({ ...errors, confirm: "两次输入的新密码不一致" }));
+              }
+            }}
           required
           autoComplete="new-password"
           aria-invalid={fieldErrors.confirm ? true : undefined}
+            aria-describedby={fieldErrors.confirm ? "confirm-password-error" : undefined}
         />
         {fieldErrors.confirm && (
-          <p className="field-error" role="alert">{fieldErrors.confirm}</p>
+          <p id="confirm-password-error" className="field-error" role="alert">{fieldErrors.confirm}</p>
         )}
       </div>
 

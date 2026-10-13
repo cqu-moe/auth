@@ -1,4 +1,4 @@
-import { useState, FormEvent } from "react";
+import { useState, FormEvent, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { MailCheck } from "lucide-react";
 import { ActionButton, Alert, AlertDescription, Button, Input, Label } from "@cqu-moe/ui";
@@ -11,27 +11,44 @@ export default function ResetPassword() {
   const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
+  const [emailError, setEmailError] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const submittingRef = useRef(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current) return;
+
     setError("");
+    if (!emailRef.current?.validity.valid) {
+      setEmailError("请输入有效的邮箱地址");
+      emailRef.current?.focus();
+      return;
+    }
+
+    submittingRef.current = true;
     setLoading(true);
+    try {
+      const { error } = await authClient.requestPasswordReset({
+        email,
+        redirectTo: withRedirectParam("/reset-password/confirm", postLoginRedirect),
+      });
 
-    const { error } = await authClient.requestPasswordReset({
-      email,
-      redirectTo: withRedirectParam("/reset-password/confirm", postLoginRedirect),
-    });
-
-    setLoading(false);
-
-    if (error) {
-      setError(error.message ?? "发送失败，请稍后重试");
-    } else {
-      setSent(true);
+      if (error) {
+        setError(error.message ?? "发送失败，请稍后重试");
+      } else {
+        setSent(true);
+      }
+    } catch {
+      setError("网络错误，请稍后重试");
+    } finally {
+      submittingRef.current = false;
+      setLoading(false);
     }
   };
+
 
   if (sent) {
     return (
@@ -63,22 +80,36 @@ export default function ResetPassword() {
           <Label htmlFor="email">邮箱</Label>
           <Input
             id="email"
+            ref={emailRef}
             type="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              if (emailError && e.target.validity.valid) setEmailError("");
+            }}
+            onBlur={() => {
+              if (!emailRef.current?.validity.valid) setEmailError("请输入有效的邮箱地址");
+            }}
             required
             autoComplete="email"
             autoCapitalize="none"
             spellCheck={false}
             inputMode="email"
             placeholder="your@email.com"
+            aria-invalid={emailError ? true : undefined}
+            aria-describedby={emailError ? "email-error" : undefined}
           />
+          {emailError && (
+            <p id="email-error" className="field-error" role="alert">
+              {emailError}
+            </p>
+          )}
         </div>
 
         <ActionButton
           type="submit"
           className="w-full"
-          state={loading ? "loading" : error ? "error" : "idle"}
+          state={loading ? "loading" : error || emailError ? "error" : "idle"}
           labels={{
             idle: "发送重置链接",
             loading: "发送中…",
