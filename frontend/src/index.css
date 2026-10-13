@@ -80,10 +80,31 @@ code {
   color: var(--foreground);
   text-decoration: none;
 }
-.auth-brand svg {
-  width: 24px;
-  height: 24px;
-  color: var(--foreground);
+.brand-logo {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.brand-logo img {
+  display: block;
+  width: var(--space-8);
+  height: var(--space-8);
+}
+.brand-logo .brand-logo-dark {
+  display: none;
+}
+:root[data-theme='dark'] .brand-logo .brand-logo-light {
+  display: none;
+}
+:root[data-theme='dark'] .brand-logo .brand-logo-dark {
+  display: block;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .brand-logo .brand-logo-light {
+    display: none;
+  }
+  :root:not([data-theme]) .brand-logo .brand-logo-dark {
+    display: block;
+  }
 }
 .auth-header-actions {
   display: flex;

@@ -1,7 +1,7 @@
 import { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Fingerprint } from "lucide-react";
 import { ThemeMenu } from "@cqu-moe/ui";
+import BrandLogo from "./BrandLogo";
 
 /**
  * 登录/注册/验证等未认证入口的独立品牌外壳：
@@ -20,7 +20,7 @@ export default function AuthLayout({
     <div className="auth-page">
       <header className="auth-header">
         <Link to="/login" className="auth-brand">
-          <Fingerprint aria-hidden="true" />
+          <BrandLogo />
           CQU Auth
         </Link>
         <div className="auth-header-actions">

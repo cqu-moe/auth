@@ -1,9 +1,10 @@
 import { ReactNode } from "react";
 import { Link, NavLink as RouterNavLink, Outlet, useNavigate } from "react-router-dom";
-import { Fingerprint, KeyRound, Layers, Settings, Ticket, Users } from "lucide-react";
+import { KeyRound, Layers, Settings, Ticket, Users } from "lucide-react";
 import { AppShell, ContentContainer, PageHeader } from "@cqu-moe/ui";
 import { authClient } from "../lib/auth-client";
 import ShellUtilities from "../components/ShellUtilities";
+import BrandLogo from "../components/BrandLogo";
 
 /** 管理区外壳：独立侧栏列出管理分区，底部提供返回账户设置的入口。 */
 export default function AdminLayout() {
@@ -16,7 +17,7 @@ export default function AdminLayout() {
 
   return (
     <AppShell
-      brand={<Link to="/settings" className="auth-brand"><Fingerprint aria-hidden="true" />CQU Auth</Link>}
+      brand={<Link to="/settings" className="auth-brand"><BrandLogo />CQU Auth</Link>}
       navigation={
         <>
           <span className="ds-nav-label">管理</span>
