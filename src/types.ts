@@ -20,6 +20,7 @@ export interface Env {
   BIND_EMAIL_DOMAIN: string;
   POSTHOG_PROJECT_TOKEN?: string;
   POSTHOG_HOST?: string;
+  POSTHOG_ENABLED?: string;
   ENVIRONMENT?: "production" | "preview" | "development";
   RELEASE?: string;
 }

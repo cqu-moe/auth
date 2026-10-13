@@ -17,7 +17,11 @@ import EmailVerificationGate from "./components/EmailVerificationGate";
 import AuthError from "./pages/AuthError";
 import NotFound from "./pages/NotFound";
 import AdminLayout, { AdminPage } from "./pages/Admin";
-import { syncPostHogIdentity, syncPostHogReplay } from "./lib/posthog";
+import {
+  capturePostHogSessionReady,
+  syncPostHogIdentity,
+  syncPostHogReplay,
+} from "./lib/posthog";
 
 const CquBindWizard = lazy(() => import("./pages/CquBindWizard"));
 const TwoFactorSettings = lazy(() => import("./pages/TwoFactorSettings"));
@@ -30,11 +34,16 @@ function PostHogLifecycle() {
   const { data: session, isPending } = authClient.useSession();
   const location = useLocation();
   const previousUserId = useRef<string | null | undefined>(undefined);
+  const readyUserId = useRef<string | null>(null);
 
   useEffect(() => {
     if (isPending) return;
     const currentUserId = (session?.user as { id?: string } | undefined)?.id ?? null;
     syncPostHogIdentity(previousUserId.current, currentUserId);
+    if (currentUserId && readyUserId.current !== currentUserId) {
+      capturePostHogSessionReady();
+      readyUserId.current = currentUserId;
+    }
     previousUserId.current = currentUserId;
   }, [isPending, session]);
 

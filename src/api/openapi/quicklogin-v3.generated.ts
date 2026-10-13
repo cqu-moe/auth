@@ -1,4 +1,4 @@
-// Generated from canonical protocol-v3.ts; SHA-256 0263d6f205e113cdc2da8661f2fdf8c7e5b52b5a41045b90633d8d5989625a38
+// Generated from canonical protocol-v3.ts; SHA-256 d08b76f3df71879dcedb754b6df0f01eb0da912a5c1f00495283f3512a21cec1
 export const QUICKLOGIN_V3_SCHEMAS: Record<string, Record<string, unknown>> = {
   "QuickloginV3Capabilities": {
     "type": "object",
@@ -88,10 +88,14 @@ export const QUICKLOGIN_V3_SCHEMAS: Record<string, Record<string, unknown>> = {
   "QuickloginV3RegistrationResponse": {
     "type": "object",
     "required": [
+      "centralUserId",
       "deviceId",
       "snapshot"
     ],
     "properties": {
+      "centralUserId": {
+        "type": "string"
+      },
       "deviceId": {
         "type": "string"
       },
@@ -146,10 +150,14 @@ export const QUICKLOGIN_V3_SCHEMAS: Record<string, Record<string, unknown>> = {
   "QuickloginV3ReconcileResponse": {
     "type": "object",
     "required": [
+      "centralUserId",
       "snapshot",
       "receiptAck"
     ],
     "properties": {
+      "centralUserId": {
+        "type": "string"
+      },
       "snapshot": {
         "$ref": "#/components/schemas/QuickloginV3DeviceSnapshot"
       },

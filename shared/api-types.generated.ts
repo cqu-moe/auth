@@ -2849,6 +2849,7 @@ export interface components {
             resumeTicket?: string;
         };
         QuickloginV3RegistrationResponse: {
+            centralUserId: string;
             deviceId: string;
             snapshot: components["schemas"]["QuickloginV3DeviceSnapshot"];
         };
@@ -2863,6 +2864,7 @@ export interface components {
             local: components["schemas"]["QuickloginV3LocalReport"];
         };
         QuickloginV3ReconcileResponse: {
+            centralUserId: string;
             snapshot: components["schemas"]["QuickloginV3DeviceSnapshot"];
             receiptAck: components["schemas"]["QuickloginV3ReceiptAck"] | null;
         };
