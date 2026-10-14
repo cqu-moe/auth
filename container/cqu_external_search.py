@@ -691,8 +691,14 @@ EXTERNAL_APP_READY_JS = """() => {
     || label?.nextElementSibling?.querySelector('.ant-select')
     || (label?.nextElementSibling?.classList?.contains('ant-select') && label.nextElementSibling)
     || label?.parentElement?.querySelector('.ant-select');
-  return !!control && !control.classList.contains('ant-select-disabled')
-    && control.checkVisibility({checkOpacity:true, checkVisibilityCSS:true});
+  const disabled = !!control?.classList.contains('ant-select-disabled');
+  const visible = !!control?.checkVisibility({checkOpacity:true, checkVisibilityCSS:true});
+  return {
+    ready: !!control && !disabled && visible,
+    documentState: document.readyState,
+    rangeLabel: !!label, rangeControl: !!control, disabled, visible,
+    selectCount: Math.min(document.querySelectorAll('.ant-select').length, 1000),
+  };
 }"""
 
 
@@ -701,11 +707,26 @@ async def wait_for_external_app(page) -> None:
     started = asyncio.get_running_loop().time()
     deadline = started + 15
     context_errors = 0
+    attempts = 0
+    last_error = "none"
+    last_probe = {}
     while (remaining := deadline - asyncio.get_running_loop().time()) > 0:
+        attempts += 1
         try:
-            if await asyncio.wait_for(page.evaluate(EXTERNAL_APP_READY_JS, {}), remaining) is True:
-                return
-        except Exception:
+            probe = await asyncio.wait_for(page.evaluate(EXTERNAL_APP_READY_JS, {}), remaining)
+            if isinstance(probe, dict):
+                # Explicit scalar projection: no page text, URLs or school state.
+                last_probe = {key: probe.get(key) is True for key in (
+                    "ready", "rangeLabel", "rangeControl", "disabled", "visible",
+                )}
+                state = probe.get("documentState")
+                last_probe["documentState"] = state if isinstance(state, str) and state in {"loading", "interactive", "complete"} else "unknown"
+                count = probe.get("selectCount")
+                last_probe["selectCount"] = min(max(count, 0), 1000) if isinstance(count, int) else 0
+                if last_probe["ready"]:
+                    return
+        except Exception as error:
+            last_error = type(error).__name__ if isinstance(error, (TimeoutError, RuntimeError, ConnectionError)) else "other"
             # Startup redirects replace the execution context. Recheck the new
             # document within the same deadline rather than failing the search.
             context_errors += 1
@@ -717,9 +738,18 @@ async def wait_for_external_app(page) -> None:
     except Exception:
         pass
     # Fixed values only: never log the document, URL, cookies, or browser state.
+    path = urllib.parse.urlsplit(page.url).path
+    page_kind = "all_course" if path == "/tt/AllCourseSchedule" else (
+        "login" if path in {"/authserver/login", "/login"} else "other"
+    )
     logging.getLogger(__name__).warning(
-        "external-page readiness timeout (elapsed_ms=%d context_errors=%d expired=%s)",
-        round((asyncio.get_running_loop().time() - started) * 1000), context_errors, expired,
+        "external-page readiness timeout %s",
+        json.dumps({
+            "elapsedMs": round((asyncio.get_running_loop().time() - started) * 1000),
+            "attempts": attempts, "contextErrors": context_errors,
+            "lastError": last_error, "pageKind": page_kind,
+            "expired": expired, "lastProbe": last_probe,
+        }, sort_keys=True, separators=(",", ":")),
     )
     raise ExternalSearchTransientError("TGT_EXPIRED" if expired else "APP_READY_TIMEOUT")
 
