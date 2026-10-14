@@ -26,7 +26,9 @@ def browser(monkeypatch, tmp_path):
                 return {"product": "Chrome/146.0.0.0"}
             if method == "Page.navigate":
                 self.handlers["Network.requestWillBeSent"]({
-                    "request": {"url": "https://my.cqu.edu.cn/cas?ticket=ST-synthetic"},
+                    "requestId": "synthetic-navigation-1",
+                    "type": "Document",
+                    "request": {"url": "https://my.cqu.edu.cn/cas?ticket=ST-synthetic", "method": "GET"},
                 })
                 if self.navigation_error:
                     return {"errorText": self.navigation_error}
