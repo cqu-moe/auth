@@ -48,6 +48,7 @@ ERROR_STATUS = {
 
 ALL_COURSE_URL = "https://my.cqu.edu.cn/tt/AllCourseSchedule"
 ADMIN_SEARCH_MARKER = "/api/timetable/admin-class/dept-admin-classes"
+INSTRUCTOR_SEARCH_MARKER = "/api/timetable/instructor/filter"
 SESSION_INFO_URL = "https://my.cqu.edu.cn/api/resourceapi/session/info-detail"
 SESSION_LIST_URL = "https://my.cqu.edu.cn/api/resourceapi/session/list"
 DEPARTMENT_LIST_URL = "https://my.cqu.edu.cn/api/resourceapi/department/list"
@@ -136,6 +137,72 @@ ADMIN_CLASS_KEYWORD_ACTION_JS = """async ({ keyword }) => {
   return input.value;
 }"""
 
+INSTRUCTOR_FILTER_ACTION_JS = """async () => {
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const visible = element => !!element && element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+  const click = element => {
+    if (!visible(element)) throw new Error('control not visible');
+    element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+    element.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+    element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    element.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true }));
+    element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  };
+  const controlFor = text => {
+    for (const label of document.querySelectorAll('label,span')) {
+      if (label.tagName === 'SPAN' && label.children.length) continue;
+      if (label.textContent.trim().replace(/[:：]\\s*$/, '') !== text) continue;
+      const item = label.closest('.ant-form-item,.ant-row');
+      return item?.querySelector('.ant-select') || label.nextElementSibling?.querySelector('.ant-select')
+        || label.nextElementSibling?.classList?.contains('ant-select') && label.nextElementSibling
+        || label.parentElement?.querySelector('.ant-select');
+    }
+    return null;
+  };
+  const optionText = option => (option.textContent || option.getAttribute('title') || '').trim();
+  const choose = async (label, wanted) => {
+    const control = controlFor(label);
+    if (!control) throw new Error('control missing: ' + label);
+    click(control.querySelector('.ant-select-selector') || control);
+    const deadline = Date.now() + 5000;
+    while (Date.now() < deadline) {
+      const options = [...document.querySelectorAll('.ant-select-dropdown .ant-select-item-option,[role="listbox"] [role="option"]')]
+        .filter(option => visible(option));
+      const match = options.find(option => optionText(option) === wanted);
+      if (match) { click(match); return; }
+      await sleep(80);
+    }
+    throw new Error('option missing: ' + wanted);
+  };
+
+  await choose('查询范围', '教师');
+  for (const label of ['校区', '层次']) {
+    const control = controlFor(label);
+    const clear = control?.querySelector('.ant-select-clear,.ant-select-selection__clear');
+    if (clear && visible(clear)) click(clear);
+  }
+  const keywordControl = [...document.querySelectorAll('.ant-select')].find(control =>
+    control.querySelector('input[placeholder*="教师"],input[placeholder*="工号"]'));
+  const targetClear = keywordControl?.querySelector('.ant-select-clear,.ant-select-selection__clear');
+  if (targetClear && visible(targetClear)) click(targetClear);
+  return [...document.querySelectorAll('.ant-select-selection-item,.ant-select-selection-selected-value')]
+    .some(element => (element.textContent || '').trim() === '教师') ? '教师' : '';
+}"""
+
+INSTRUCTOR_KEYWORD_ACTION_JS = """async ({ keyword }) => {
+  const visible = element => !!element && element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+  const input = [...document.querySelectorAll('input')]
+    .filter(element => element.placeholder?.includes('教师') || element.placeholder?.includes('工号'))
+    .find(visible);
+  if (!input) throw new Error('keyword control missing');
+  input.focus();
+  input.value = keyword;
+  input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: keyword }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  return input.value;
+}"""
+
 
 def _is_expected_search_request(request, expected_origin: str, filters: dict) -> bool:
     parsed = urllib.parse.urlsplit(getattr(request, "url", ""))
@@ -165,6 +232,19 @@ def _is_expected_search_request(request, expected_origin: str, filters: dict) ->
     if not isinstance(body, list):
         return False
     return body == [] if not filters.get("departmentName", "") else len(body) > 0
+
+
+def _is_expected_instructor_request(request, expected_origin: str, keyword: str) -> bool:
+    parsed = urllib.parse.urlsplit(getattr(request, "url", ""))
+    response_origin = f"{parsed.scheme}://{parsed.netloc}"
+    if response_origin != expected_origin or parsed.path != INSTRUCTOR_SEARCH_MARKER:
+        return False
+    if getattr(request, "method", "").upper() != "GET":
+        return False
+    # The production anti-bot layer can rewrite query text. The fixed path and
+    # final-keypress correlation carry the business identity; do not require a
+    # plaintext nameOrCode value to survive transport rewriting.
+    return True
 
 
 async def perform_admin_class_search(page, filters: dict) -> dict:
@@ -253,16 +333,102 @@ async def perform_admin_class_search(page, filters: dict) -> dict:
         await close_collector()
 
 
-async def _read_search_response(response, captures: list[dict]) -> None:
+async def _read_search_response(response, captures: list[dict], instructor: bool = False) -> None:
     try:
-        captures.append({
-            "status": getattr(response, "status", 0),
-            "body": await response.text(),
-        })
+        status = getattr(response, "status", 0)
+        body = await response.text()
+        if instructor and 200 <= status < 300:
+            raw = json.loads(body)
+            if not isinstance(raw, list) or any(not isinstance(item, dict) for item in raw):
+                body = "null"
+            else:
+                body = json.dumps([{key: item[key] for key in
+                    ("id", "name", "code", "departmentName", "campusName") if key in item}
+                    for item in raw])
+        captures.append({"status": status, "body": body})
     except asyncio.CancelledError:
         raise
     except Exception:
         return
+
+
+async def perform_instructor_search(page, filters: dict) -> dict:
+    """Drive visible teacher controls and capture only the candidate response."""
+    captures: list[dict] = []
+    expected_page_url = urllib.parse.urlsplit(page.url)
+    expected_origin = f"{expected_page_url.scheme}://{expected_page_url.netloc}"
+    accepted_requests: dict[int, object] = {}
+    tasks: set[asyncio.Task] = set()
+    closed = False
+    submit_started = False
+
+    def on_request(request) -> None:
+        if closed or not submit_started:
+            return
+        if _is_expected_instructor_request(request, expected_origin, filters.get("keyword", "")):
+            accepted_requests[id(request)] = request
+
+    def on_response(response) -> None:
+        if closed:
+            return
+        request = getattr(response, "request", None)
+        if id(request) not in accepted_requests:
+            return
+        tasks.add(asyncio.create_task(_read_search_response(response, captures, instructor=True)))
+
+    async def close_collector() -> None:
+        nonlocal closed
+        closed = True
+        for task in tuple(tasks):
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    try:
+        outcome = await page.evaluate("""async () => {
+          try { return { ok: true, value: await (""" + INSTRUCTOR_FILTER_ACTION_JS + """)() }; }
+          catch (error) { return { ok: false, error: error ? String(error.message || error) : 'action failed' }; }
+        }""", {})
+        if not isinstance(outcome, dict) or outcome.get("ok") is not True or outcome.get("value") != "教师":
+            raise RuntimeError(
+                str(outcome.get("error", "instructor filter action failed"))
+                if isinstance(outcome, dict) else "instructor filter action failed"
+            )
+
+        page.on_request(on_request)
+        page.on_response(on_response)
+        submit_started = True
+        keyword_outcome = await page.evaluate("""async (args) => {
+          try { return { ok: true, value: await (""" + INSTRUCTOR_KEYWORD_ACTION_JS + """)(args) }; }
+          catch (error) { return { ok: false, error: error ? String(error.message || error) : 'action failed' }; }
+        }""", {"keyword": filters.get("keyword", "")})
+        if (
+            not isinstance(keyword_outcome, dict) or keyword_outcome.get("ok") is not True
+            or keyword_outcome.get("value") != filters.get("keyword", "")
+        ):
+            raise RuntimeError(
+                str(keyword_outcome.get("error", "instructor keyword failed"))
+                if isinstance(keyword_outcome, dict) else "instructor keyword failed"
+            )
+        deadline = asyncio.get_running_loop().time() + 12
+        while asyncio.get_running_loop().time() < deadline:
+            capture = captures[0] if captures else {}
+            status = capture.get("status", 0)
+            if status == 403:
+                raise ExternalSearchTransientError("PAGE_PERMISSION_DENIED")
+            if status == 412:
+                raise ExternalSearchTransientError("WAF_CHALLENGE")
+            if status == 401:
+                raise ExternalSearchTransientError("TGT_EXPIRED")
+            if status >= 400:
+                raise ExternalSearchTransientError("SEARCH_API_REJECTED")
+            if capture and 200 <= capture["status"] < 300:
+                return capture
+            await page.pause(100)
+        raise ExternalSearchTransientError("SEARCH_CAPTURE_TIMEOUT")
+    finally:
+        await close_collector()
 
 
 def _json_body(entry: dict, code: str) -> object:
@@ -338,6 +504,24 @@ def _admin_items(value: object) -> tuple[list[dict], bool]:
     return items, len(value) >= 200
 
 
+def _instructor_items(value: object) -> tuple[list[dict], bool]:
+    if not isinstance(value, list):
+        raise ExternalSearchTransientError("SEARCH_API_REJECTED")
+    items = []
+    for item in value[:50]:
+        if not isinstance(item, dict):
+            raise ExternalSearchTransientError("SEARCH_API_REJECTED")
+        extra = " / ".join(str(part) for part in (
+            item.get("code", ""), item.get("departmentName", ""), item.get("campusName", "")
+        ) if part != "")
+        items.append({
+            "id": str(item.get("id", "")),
+            "name": str(item.get("name", "")),
+            "extra": extra,
+        })
+    return items, len(value) >= 50
+
+
 def parse_external_search_recipe(body: dict) -> dict:
     if not isinstance(body, dict):
         raise ExternalSearchRecipeError("recipe must be an object")
@@ -345,7 +529,7 @@ def parse_external_search_recipe(body: dict) -> dict:
     if unknown:
         raise ExternalSearchRecipeError("recipe contains unsupported transport fields")
     action = body.get("action")
-    if action not in {"department_list", "admin_class_search"}:
+    if action not in {"department_list", "admin_class_search", "instructor_search"}:
         raise ExternalSearchRecipeError("unsupported action")
 
     department_id = body.get("departmentId", "")
@@ -362,6 +546,8 @@ def parse_external_search_recipe(body: dict) -> dict:
         raise ExternalSearchRecipeError("invalid grade")
     if action == "department_list" and (department_id or department_name or grade or keyword):
         raise ExternalSearchRecipeError("department list accepts no filters")
+    if action == "instructor_search" and (department_id or department_name or grade or not keyword):
+        raise ExternalSearchRecipeError("instructor search accepts only a keyword")
     return {
         "action": action,
         "departmentId": department_id,
@@ -401,7 +587,7 @@ def sanitize_external_search_result(value: object) -> dict:
         raise ExternalSearchRecipeError("search result must be an object")
     source_type = value.get("sourceType")
     session = value.get("session")
-    if value.get("contractVersion") != 1 or source_type not in {"department", "admin_class"}:
+    if value.get("contractVersion") != 1 or source_type not in {"department", "admin_class", "instructor"}:
         raise ExternalSearchRecipeError("search result contract is invalid")
     if not isinstance(session, dict):
         raise ExternalSearchRecipeError("search session is invalid")
@@ -419,7 +605,7 @@ def sanitize_external_search_result(value: object) -> dict:
     items = value.get("items")
     truncated = value.get("truncated")
     if not isinstance(items, list) or not isinstance(truncated, bool):
-        raise ExternalSearchRecipeError("admin-class result is invalid")
+        raise ExternalSearchRecipeError("search result is invalid")
     typed_items = []
     for item in items[:200]:
         if not isinstance(item, dict):
@@ -436,6 +622,8 @@ def sanitize_external_search_result(value: object) -> dict:
 
 async def external_search(state: dict, recipe: dict) -> dict:
     """Run one fixed action in the user's hydrated AllCourseSchedule browser session."""
+    if recipe.get("action") not in {"department_list", "admin_class_search", "instructor_search"}:
+        raise ExternalSearchRecipeError("unsupported action")
     browser = ChromiumSession(seed_state=state)
     async with browser:
         try:
@@ -468,15 +656,25 @@ async def external_search(state: dict, recipe: dict) -> dict:
                 "departments": _department_nodes(_json_body(entries[2], "SEARCH_API_REJECTED")),
             }
 
-        capture = await perform_admin_class_search(browser, recipe)
-        try:
-            raw = json.loads(capture["body"])
-        except Exception:
-            raise ExternalSearchTransientError("SEARCH_BODY_TIMEOUT") from None
-        items, truncated = _admin_items(raw)
+        if recipe["action"] == "instructor_search":
+            capture = await perform_instructor_search(browser, recipe)
+            try:
+                raw = json.loads(capture["body"])
+            except Exception:
+                raise ExternalSearchTransientError("SEARCH_BODY_TIMEOUT") from None
+            items, truncated = _instructor_items(raw)
+            source_type = "instructor"
+        else:
+            capture = await perform_admin_class_search(browser, recipe)
+            try:
+                raw = json.loads(capture["body"])
+            except Exception:
+                raise ExternalSearchTransientError("SEARCH_BODY_TIMEOUT") from None
+            items, truncated = _admin_items(raw)
+            source_type = "admin_class"
         return {
             "contractVersion": 1,
-            "sourceType": "admin_class",
+            "sourceType": source_type,
             "session": session,
             "items": items,
             "truncated": truncated,

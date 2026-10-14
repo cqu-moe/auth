@@ -1,6 +1,7 @@
-/** Typed external AllCourseSchedule capture contract (T03: admin classes). */
+/** Typed external AllCourseSchedule capture contract (T03/T06). */
 
-export type ExternalCaptureSourceType = "admin_class";
+export type ExternalCaptureSourceType = "admin_class" | "instructor";
+export type ExternalCaptureAction = "admin_class_capture" | "instructor_capture";
 
 export interface CquExternalCaptureArgs {
   clientId: string;
@@ -16,14 +17,14 @@ export interface CquExternalCaptureArgs {
 }
 
 export interface ExternalCaptureRecipe {
-  action: "admin_class_capture";
+  action: ExternalCaptureAction;
   sourceType: ExternalCaptureSourceType;
   targetId: string;
   targetName: string;
   expectedSessionId: string;
 }
 
-export interface ExternalCaptureTimetableRow {
+interface ExternalCaptureTimetableContent {
   courseName?: string;
   instructorName?: string;
   roomName?: string;
@@ -33,8 +34,19 @@ export interface ExternalCaptureTimetableRow {
   teachingWeek?: string;
   period?: string;
   exprProjectName?: string;
+}
+
+export interface AdminClassCaptureTimetableRow extends ExternalCaptureTimetableContent {
   assignTeachingObject: Array<{ adminClassId: string }>;
 }
+
+export interface InstructorCaptureTimetableRow extends ExternalCaptureTimetableContent {
+  instructorIdList: string[];
+}
+
+export type ExternalCaptureTimetableRow =
+  | AdminClassCaptureTimetableRow
+  | InstructorCaptureTimetableRow;
 
 export interface CquExternalCaptureResult {
   contractVersion: 1;
@@ -85,15 +97,18 @@ export function parseExternalCaptureArgs(
   if (typeof args !== "object" || args === null) return { error: "INVALID_REQUEST" };
   const raw = args as Record<string, unknown>;
   if (Object.keys(raw).some(key => !ARG_KEYS.has(key))) return { error: "INVALID_REQUEST" };
-  if (raw.sourceType !== "admin_class") return { error: "INVALID_REQUEST" };
+  if (raw.sourceType !== "admin_class" && raw.sourceType !== "instructor") {
+    return { error: "INVALID_REQUEST" };
+  }
   const targetId = boundedText(raw.targetId, 100);
   const targetName = boundedText(raw.targetName);
   const expectedSessionId = boundedOptionalText(raw.expectedSessionId, 100);
   if (!targetId || !targetName || expectedSessionId === null) return { error: "INVALID_REQUEST" };
   if (raw.courseId !== undefined) return { error: "INVALID_REQUEST" };
+  const sourceType = raw.sourceType;
   const recipe = parseExternalCaptureRecipe({
-    action: "admin_class_capture",
-    sourceType: "admin_class",
+    action: sourceType === "admin_class" ? "admin_class_capture" : "instructor_capture",
+    sourceType,
     targetId,
     targetName,
     expectedSessionId,
@@ -109,7 +124,12 @@ export function parseExternalCaptureRecipe(
   if (Object.keys(raw).some(key => !RECIPE_KEYS.has(key))) {
     return { error: "INVALID_CAPTURE_RECIPE" };
   }
-  if (raw.action !== "admin_class_capture" || raw.sourceType !== "admin_class") {
+  const sourceType = raw.sourceType;
+  if (sourceType !== "admin_class" && sourceType !== "instructor") return { error: "INVALID_CAPTURE_RECIPE" };
+  const expectedAction = sourceType === "admin_class"
+    ? "admin_class_capture"
+    : "instructor_capture";
+  if (raw.action !== expectedAction) {
     return { error: "INVALID_CAPTURE_RECIPE" };
   }
   const targetId = boundedText(raw.targetId, 100);
@@ -119,8 +139,8 @@ export function parseExternalCaptureRecipe(
     return { error: "INVALID_CAPTURE_RECIPE" };
   }
   return {
-    action: "admin_class_capture",
-    sourceType: "admin_class",
+    action: expectedAction,
+    sourceType,
     targetId,
     targetName,
     expectedSessionId,
@@ -150,26 +170,48 @@ function parseSession(value: unknown): CquExternalCaptureResult["session"] | nul
   return { id, name, beginDate };
 }
 
-function parseRow(value: unknown, targetId: string): ExternalCaptureTimetableRow | null {
+function parseRow(
+  value: unknown,
+  targetId: string,
+  sourceType: ExternalCaptureSourceType
+): ExternalCaptureTimetableRow | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
-  const assignments = raw.assignTeachingObject;
-  if (!Array.isArray(assignments) || assignments.length === 0) return null;
-  const assignTeachingObject: Array<{ adminClassId: string }> = [];
-  for (const assignment of assignments) {
-    if (typeof assignment !== "object" || assignment === null) return null;
-    const adminClassId = boundedText((assignment as Record<string, unknown>).adminClassId, 100);
-    if (!adminClassId) return null;
-    assignTeachingObject.push({ adminClassId });
+  let ownership: ExternalCaptureTimetableRow;
+  if (sourceType === "admin_class") {
+    const assignments = raw.assignTeachingObject;
+    if (!Array.isArray(assignments) || assignments.length === 0) return null;
+    const assignTeachingObject: Array<{ adminClassId: string }> = [];
+    for (const assignment of assignments) {
+      if (typeof assignment !== "object" || assignment === null) return null;
+      const adminClassId = boundedText((assignment as Record<string, unknown>).adminClassId, 100);
+      if (!adminClassId) return null;
+      assignTeachingObject.push({ adminClassId });
+    }
+    if (!assignTeachingObject.some(assignment => assignment.adminClassId === targetId)) return null;
+    ownership = { assignTeachingObject };
+  } else {
+    if (Object.entries(raw).some(([key, value]) => Array.isArray(value) && key !== "instructorIdList")) {
+      return null;
+    }
+    const instructorIds = raw.instructorIdList;
+    if (!Array.isArray(instructorIds) || instructorIds.length === 0) return null;
+    const instructorIdList: string[] = [];
+    for (const instructorId of instructorIds) {
+      const typed = boundedText(instructorId, 100);
+      if (!typed) return null;
+      instructorIdList.push(typed);
+    }
+    if (!instructorIdList.includes(targetId)) return null;
+    ownership = { instructorIdList };
   }
-  if (!assignTeachingObject.some(assignment => assignment.adminClassId === targetId)) return null;
   const contentKeys = ["courseName", "instructorName", "roomName", "position", "campusName", "teachingWeek", "period", "exprProjectName"] as const;
   const invalidContent = contentKeys.some(key => raw[key] !== undefined && raw[key] !== null && raw[key] !== "" && boundedText(raw[key], 500) === null);
   const weekDay = raw.weekDay;
   if (invalidContent || (weekDay !== undefined && weekDay !== null && (typeof weekDay !== "number" || !Number.isSafeInteger(weekDay) || weekDay < 1 || weekDay > 7))) {
-    return { assignTeachingObject };
+    return ownership;
   }
-  const row: ExternalCaptureTimetableRow = { assignTeachingObject };
+  const row: ExternalCaptureTimetableRow = { ...ownership };
   for (const key of contentKeys) {
     const text = optionalText(raw[key]);
     if (text !== undefined) row[key] = text;
@@ -205,7 +247,7 @@ export function parseExternalCaptureResult(
   if (expected.expectedSessionId && expected.expectedSessionId !== session.id) return { error: "SCHEMA_INVALID" };
   const rows: ExternalCaptureTimetableRow[] = [];
   for (const row of rawRows) {
-    const parsed = parseRow(row, expected.targetId);
+    const parsed = parseRow(row, expected.targetId, expected.sourceType);
     if (!parsed) return { error: "SCHEMA_INVALID" };
     rows.push(parsed);
   }

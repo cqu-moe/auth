@@ -1,6 +1,6 @@
-/** Typed external AllCourseSchedule search contract (T02: departments + admin classes). */
+/** Typed external AllCourseSchedule search contract (T02/T06: departments, classes, instructors). */
 
-export type ExternalSearchSourceType = "department" | "admin_class";
+export type ExternalSearchSourceType = "department" | "admin_class" | "instructor";
 
 export interface CquExternalSearchArgs {
   clientId: string;
@@ -41,14 +41,14 @@ export type CquExternalSearchResult =
     }
   | {
       contractVersion: 1;
-      sourceType: "admin_class";
+      sourceType: "admin_class" | "instructor";
       session: ExternalSearchSession;
       items: ExternalSearchItem[];
       truncated: boolean;
     };
 
 export interface ExternalSearchRecipe {
-  action: "department_list" | "admin_class_search";
+  action: "department_list" | "admin_class_search" | "instructor_search";
   departmentId: string;
   departmentName: string;
   grade: string;
@@ -65,7 +65,7 @@ export function parseExternalSearchRecipe(value: unknown): ExternalSearchRecipe 
   if (typeof value !== "object" || value === null) return { error: "INVALID_SEARCH_RECIPE" };
   const raw = value as Record<string, unknown>;
   const action = raw.action;
-  if (action !== "department_list" && action !== "admin_class_search") {
+  if (action !== "department_list" && action !== "admin_class_search" && action !== "instructor_search") {
     return { error: "INVALID_SEARCH_RECIPE" };
   }
   if (Object.keys(raw).some(key => !["action", "departmentId", "departmentName", "grade", "keyword"].includes(key))) {
@@ -86,6 +86,9 @@ export function parseExternalSearchRecipe(value: unknown): ExternalSearchRecipe 
   if (action === "department_list" && (departmentId || departmentName || grade || keyword)) {
     return { error: "INVALID_SEARCH_RECIPE" };
   }
+  if (action === "instructor_search" && (departmentId || departmentName || grade || !keyword)) {
+    return { error: "INVALID_SEARCH_RECIPE" };
+  }
   return { action, departmentId, departmentName, grade, keyword };
 }
 
@@ -103,7 +106,7 @@ export function parseExternalSearchArgs(
 ): ExternalSearchRecipe | { error: "INVALID_REQUEST" } {
   if (typeof args !== "object" || args === null) return { error: "INVALID_REQUEST" };
   const raw = args as Record<string, unknown>;
-  if (raw.sourceType !== "department" && raw.sourceType !== "admin_class") {
+  if (raw.sourceType !== "department" && raw.sourceType !== "admin_class" && raw.sourceType !== "instructor") {
     return { error: "INVALID_REQUEST" };
   }
   const departmentId = optionalString(raw.departmentId);
@@ -131,6 +134,10 @@ export function parseExternalSearchArgs(
 
   if (raw.sourceType === "department") {
     return { action: "department_list", departmentId: "", departmentName: "", grade: "", keyword: "" };
+  }
+  if (raw.sourceType === "instructor") {
+    if (departmentId || departmentName || grade || !keyword) return { error: "INVALID_REQUEST" };
+    return { action: "instructor_search", departmentId: "", departmentName: "", grade: "", keyword };
   }
   return { action: "admin_class_search", departmentId, departmentName, grade, keyword };
 }
@@ -195,7 +202,7 @@ export function parseExternalSearchResult(
   }
   return {
     contractVersion: 1,
-    sourceType: "admin_class",
+    sourceType: expectedSourceType,
     session,
     items,
     truncated: root.truncated || root.items.length > ITEM_LIMIT,

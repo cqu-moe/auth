@@ -132,6 +132,73 @@ it("dispatches one fixed admin-class capture and returns only whitelisted busine
   expect(JSON.stringify(result)).not.toContain("SECRET");
 });
 
+it("dispatches one fixed instructor capture and preserves only exact-ID ownership", async () => {
+  const f = await fixture();
+  f.fetch.mockImplementationOnce(async () => Response.json({
+    ok: true,
+    contractVersion: 1,
+    sourceType: "instructor",
+    target: { id: "teacher-1", name: "张三" },
+    session: { id: "session-current", name: "2026秋", beginDate: "2026-09-07" },
+    timetable: {
+      classTimetableVOList: [{
+        courseName: "高等数学",
+        instructorName: "张三",
+        roomName: "D101",
+        position: "1",
+        campusName: "A校区",
+        weekDay: 1,
+        teachingWeek: "110",
+        period: "101",
+        instructorIdList: ["teacher-other", "teacher-1"],
+        mobilePhone: "SECRET",
+      }],
+      maxSection: 12,
+    },
+    state: { cookies: ["SECRET"] },
+  }));
+
+  const result = await f.rpc.cquExternalCapture({
+    ...f.args,
+    sourceType: "instructor",
+    targetId: "teacher-1",
+    targetName: "张三",
+    expectedSessionId: "session-current",
+    deadlineAt: Date.now() + 90_000,
+  });
+
+  expect(result).toEqual({
+    contractVersion: 1,
+    sourceType: "instructor",
+    target: { id: "teacher-1", name: "张三" },
+    session: { id: "session-current", name: "2026秋", beginDate: "2026-09-07" },
+    timetable: {
+      classTimetableVOList: [{
+        courseName: "高等数学",
+        instructorName: "张三",
+        roomName: "D101",
+        position: "1",
+        campusName: "A校区",
+        weekDay: 1,
+        teachingWeek: "110",
+        period: "101",
+        instructorIdList: ["teacher-other", "teacher-1"],
+      }],
+      maxSection: 12,
+    },
+  });
+  const request = f.fetch.mock.calls[0][0];
+  await expect(request.clone().json()).resolves.toEqual({
+    action: "instructor_capture",
+    sourceType: "instructor",
+    targetId: "teacher-1",
+    targetName: "张三",
+    expectedSessionId: "session-current",
+    deadlineAt: expect.any(Number),
+  });
+  expect(JSON.stringify(result)).not.toContain("SECRET");
+});
+
 it("rejects transport controls and unsupported sources before browser dispatch", async () => {
   const f = await fixture();
   await expect(f.rpc.cquExternalCapture({

@@ -1,4 +1,4 @@
-"""Fixed current-term admin-class capture actions."""
+"""Fixed current-term external timetable capture actions."""
 
 import asyncio
 import datetime
@@ -8,7 +8,7 @@ import urllib.parse
 import browser_profile
 from chromium_session import ChromiumSession
 from cqu_data_harvest import StageTrace, is_expired_harvest, run_serial_inpage_gets
-from cqu_external_search import perform_admin_class_search
+from cqu_external_search import perform_admin_class_search, perform_instructor_search
 
 
 ALLOWED_RECIPE_KEYS = frozenset({
@@ -19,6 +19,15 @@ ALL_COURSE_URL = "https://my.cqu.edu.cn/tt/AllCourseSchedule"
 SESSION_INFO_PATH = "/api/resourceapi/session/info-detail"
 SESSION_LIST_PATH = "/api/resourceapi/session/list"
 ADMIN_TABLE_MARKER = "/api/timetable/class/timetable/adminClass/table-detail"
+INSTRUCTOR_TABLE_MARKER = "/api/timetable/class/timetable/instructor/table-detail"
+CAPTURE_ACTIONS = {
+    "admin_class": "admin_class_capture",
+    "instructor": "instructor_capture",
+}
+CAPTURE_TABLE_MARKERS = {
+    "admin_class": ADMIN_TABLE_MARKER,
+    "instructor": INSTRUCTOR_TABLE_MARKER,
+}
 
 
 class ExternalCaptureRecipeError(ValueError):
@@ -74,6 +83,10 @@ SELECT_TARGET_JS = """async ({ targetId, targetName }) => {
         || value.startsWith(targetName + '[');
     };
     const byName = options.filter(exactName);
+    const byId = options.filter(element =>
+      element.dataset.value === targetId || element.getAttribute('data-value') === targetId);
+    if (byId.length > 1) throw new Error('ambiguous target');
+    if (byId.length === 1) { click(byId[0]); return true; }
     if (byName.length > 1) throw new Error('ambiguous target');
     if (byName.length === 1) { click(byName[0]); return true; }
     await sleep(80);
@@ -105,7 +118,8 @@ def parse_external_capture_recipe(body: dict) -> dict:
     unknown = set(body) - ALLOWED_BODY_KEYS
     if unknown:
         raise ExternalCaptureRecipeError("recipe contains unsupported transport fields")
-    if body.get("action") != "admin_class_capture" or body.get("sourceType") != "admin_class":
+    source_type = body.get("sourceType")
+    if source_type not in CAPTURE_ACTIONS or body.get("action") != CAPTURE_ACTIONS[source_type]:
         raise ExternalCaptureRecipeError("unsupported action")
     target_id = body.get("targetId", "")
     target_name = body.get("targetName", "")
@@ -119,8 +133,8 @@ def parse_external_capture_recipe(body: dict) -> dict:
     if any(ord(ch) < 0x20 or ord(ch) == 0x7f for ch in target_id + target_name + expected_session_id):
         raise ExternalCaptureRecipeError("target fields contain control characters")
     return {
-        "action": "admin_class_capture",
-        "sourceType": "admin_class",
+        "action": CAPTURE_ACTIONS[source_type],
+        "sourceType": source_type,
         "targetId": target_id,
         "targetName": target_name,
         "expectedSessionId": expected_session_id,
@@ -142,12 +156,13 @@ async def _read_response(response, captures: list[dict]) -> None:
 def _is_expected_capture_request(
     request,
     expected_origin: str,
+    source_type: str,
     target_id: str,
     session_id: str,
 ) -> bool:
     parsed = urllib.parse.urlsplit(getattr(request, "url", ""))
     response_origin = f"{parsed.scheme}://{parsed.netloc}"
-    if response_origin != expected_origin or parsed.path != ADMIN_TABLE_MARKER:
+    if response_origin != expected_origin or parsed.path != (ADMIN_TABLE_MARKER if source_type == "admin_class" else INSTRUCTOR_TABLE_MARKER):
         return False
     if getattr(request, "method", "").upper() != "POST":
         return False
@@ -227,19 +242,22 @@ def _search_target(value: object, recipe: dict) -> None:
     for item in value:
         if not isinstance(item, dict):
             raise ExternalCaptureTransientError("SCHEMA_INVALID")
+        name = item.get("className") if recipe["sourceType"] == "admin_class" else item.get("name")
         if str(item.get("id", "")) == recipe["targetId"]:
             by_id.append(item)
-        if item.get("className") == recipe["targetName"]:
+        if name == recipe["targetName"]:
             by_name.append(item)
-    if len(by_name) > 1:
+    if recipe["sourceType"] == "admin_class" and len(by_name) > 1:
         raise ExternalCaptureTransientError("AMBIGUOUS_TARGET")
     if len(by_id) > 1:
         raise ExternalCaptureTransientError("AMBIGUOUS_TARGET")
-    if len(by_name) != 1 or len(by_id) != 1 or by_id[0].get("className") != recipe["targetName"]:
+    if len(by_id) != 1 or by_id[0].get("className" if recipe["sourceType"] == "admin_class" else "name") != recipe["targetName"]:
         raise ExternalCaptureTransientError("TARGET_NOT_FOUND")
+    if recipe["sourceType"] == "admin_class" and len(by_name) != 1:
+        raise ExternalCaptureTransientError("AMBIGUOUS_TARGET" if by_name else "TARGET_NOT_FOUND")
 
 
-def _sanitized_timetable(value: object, target_id: str) -> dict:
+def _sanitized_timetable(value: object, target_id: str, source_type: str = "admin_class") -> dict:
     if not isinstance(value, dict) or any(isinstance(item, list) and key != "classTimetableVOList" for key, item in value.items()):
         raise ExternalCaptureTransientError("SCHEMA_INVALID")
     rows = value.get("classTimetableVOList")
@@ -250,19 +268,26 @@ def _sanitized_timetable(value: object, target_id: str) -> dict:
     for row in rows:
         if not isinstance(row, dict):
             raise ExternalCaptureTransientError("SCHEMA_INVALID")
-        assignments = row.get("assignTeachingObject")
-        if not isinstance(assignments, list) or not assignments:
-            raise ExternalCaptureTransientError("SCHEMA_INVALID")
-        typed_assignments = []
-        owns_target = False
-        for assignment in assignments:
-            if not isinstance(assignment, dict):
+        if source_type == "instructor":
+            ids = row.get("instructorIdList")
+            if not isinstance(ids, list) or not ids:
                 raise ExternalCaptureTransientError("SCHEMA_INVALID")
-            admin_class_id = _required_text(assignment.get("adminClassId"), 100)
-            owns_target = owns_target or admin_class_id == target_id
-            typed_assignments.append({"adminClassId": admin_class_id})
-        if not owns_target:
-            raise ExternalCaptureTransientError("SCHEMA_INVALID")
+            typed_ids = [_required_text(value, 100) for value in ids]
+            if target_id not in typed_ids:
+                raise ExternalCaptureTransientError("SCHEMA_INVALID")
+            ownership = {"instructorIdList": typed_ids}
+        else:
+            assignments = row.get("assignTeachingObject")
+            if not isinstance(assignments, list) or not assignments:
+                raise ExternalCaptureTransientError("SCHEMA_INVALID")
+            typed_assignments = []
+            for assignment in assignments:
+                if not isinstance(assignment, dict):
+                    raise ExternalCaptureTransientError("SCHEMA_INVALID")
+                typed_assignments.append({"adminClassId": _required_text(assignment.get("adminClassId"), 100)})
+            if not any(item["adminClassId"] == target_id for item in typed_assignments):
+                raise ExternalCaptureTransientError("SCHEMA_INVALID")
+            ownership = {"assignTeachingObject": typed_assignments}
         # Keep verified ownership while withholding any unverifiable content.
         # Schedule then reports the row as skipped instead of a complete success.
         typed = {}
@@ -281,7 +306,7 @@ def _sanitized_timetable(value: object, target_id: str) -> dict:
                 typed["weekDay"] = int(week_day)
         except ExternalCaptureTransientError:
             typed = {}
-        typed["assignTeachingObject"] = typed_assignments
+        typed.update(ownership)
         result.append(typed)
     return {"classTimetableVOList": result, "maxSection": max_section}
 
@@ -310,6 +335,14 @@ async def _clear_selected_targets(page) -> None:
 
 
 async def capture_admin_class(page, recipe: dict) -> dict:
+    return await _capture_target(page, recipe)
+
+
+async def capture_instructor(page, recipe: dict) -> dict:
+    return await _capture_target(page, recipe)
+
+
+async def _capture_target(page, recipe: dict) -> dict:
     """Search normally, select the exact ID, and capture the current table response."""
     trace = StageTrace()
     entries: list[dict] = []
@@ -329,11 +362,9 @@ async def capture_admin_class(page, recipe: dict) -> dict:
         raise ExternalCaptureTransientError("CURRENT_SESSION_CHANGED")
 
     await _clear_selected_targets(page)
-    search = await perform_admin_class_search(page, {
-        "departmentId": "",
-        "departmentName": "",
-        "grade": "",
-        "keyword": recipe["targetName"],
+    search_action = perform_instructor_search if recipe["sourceType"] == "instructor" else perform_admin_class_search
+    search = await search_action(page, {
+        "departmentId": "", "departmentName": "", "grade": "", "keyword": recipe["targetName"],
     })
     _search_target(_json_entry(search, "CAPTURE_API_REJECTED"), recipe)
 
@@ -347,7 +378,7 @@ async def capture_admin_class(page, recipe: dict) -> dict:
     def on_request(request) -> None:
         if closed or not selecting:
             return
-        if _is_expected_capture_request(request, expected_origin, recipe["targetId"], session["id"]):
+        if _is_expected_capture_request(request, expected_origin, recipe["sourceType"], recipe["targetId"], session["id"]):
             accepted_requests[id(request)] = request
 
     def on_response(response) -> None:
@@ -387,7 +418,7 @@ async def capture_admin_class(page, recipe: dict) -> dict:
             if capture and 200 <= status < 300:
                 timetable = _sanitized_timetable(
                     _json_entry(capture, "CAPTURE_API_REJECTED"),
-                    recipe["targetId"],
+                    recipe["targetId"], recipe["sourceType"],
                 )
                 current_entries = []
                 await run_serial_inpage_gets(page, [{"method": "GET", "url": page_origin + SESSION_INFO_PATH}], trace, current_entries)
@@ -396,7 +427,7 @@ async def capture_admin_class(page, recipe: dict) -> dict:
                     raise ExternalCaptureTransientError("CURRENT_SESSION_CHANGED")
                 return {
                     "contractVersion": 1,
-                    "sourceType": "admin_class",
+                    "sourceType": recipe["sourceType"],
                     "target": {"id": recipe["targetId"], "name": recipe["targetName"]},
                     "session": session,
                     "timetable": timetable,
@@ -409,7 +440,7 @@ async def capture_admin_class(page, recipe: dict) -> dict:
 
 def sanitize_external_capture_result(value: object) -> dict:
     """Rebuild the result allowlist before it crosses the container boundary."""
-    if not isinstance(value, dict) or value.get("contractVersion") != 1 or value.get("sourceType") != "admin_class":
+    if not isinstance(value, dict) or value.get("contractVersion") != 1 or value.get("sourceType") not in CAPTURE_ACTIONS:
         raise ExternalCaptureRecipeError("capture result contract is invalid")
     target = value.get("target")
     session = value.get("session")
@@ -418,14 +449,14 @@ def sanitize_external_capture_result(value: object) -> dict:
     target_id = _required_text(target.get("id"), 100)
     return {
         "contractVersion": 1,
-        "sourceType": "admin_class",
+        "sourceType": value["sourceType"],
         "target": {"id": target_id, "name": _required_text(target.get("name"), 200)},
         "session": {
             "id": _required_text(session.get("id"), 100),
             "name": _required_text(session.get("name"), 100),
             "beginDate": _required_text(session.get("beginDate"), 10),
         },
-        "timetable": _sanitized_timetable(value.get("timetable"), target_id),
+        "timetable": _sanitized_timetable(value.get("timetable"), target_id, value["sourceType"]),
     }
 
 

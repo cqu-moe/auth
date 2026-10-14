@@ -3,6 +3,7 @@
 import os
 import sys
 import asyncio
+import json
 import urllib.parse
 from unittest.mock import AsyncMock, Mock
 
@@ -62,6 +63,36 @@ class ExternalSearchTestCase(AioHTTPTestCase):
         body = await response.json()
         assert body["ok"] is True
         assert body["items"] == [{"id": "class-1", "name": "电气1班", "extra": "2026级"}]
+        assert body["truncated"] is True
+
+    async def test_fixed_instructor_recipe_reaches_browser_action(self):
+        async def fake_search(state, recipe):
+            assert recipe == {
+                "action": "instructor_search",
+                "departmentId": "",
+                "departmentName": "",
+                "grade": "",
+                "keyword": "张",
+            }
+            return {
+                "contractVersion": 1,
+                "sourceType": "instructor",
+                "session": {"id": "session-current", "name": "2026秋"},
+                "items": [{"id": "teacher-1", "name": "张三", "extra": "10001 / 电气工程学院 / A校区"}],
+                "truncated": True,
+            }
+
+        server.cqu_external_search.external_search = fake_search
+        response = await self.client.post("/external-search", json={
+            "state": {"cookies": [], "origins": []},
+            "action": "instructor_search",
+            "keyword": "张",
+        })
+        assert response.status == 200
+        body = await response.json()
+        assert body["ok"] is True
+        assert body["sourceType"] == "instructor"
+        assert body["items"] == [{"id": "teacher-1", "name": "张三", "extra": "10001 / 电气工程学院 / A校区"}]
         assert body["truncated"] is True
 
     async def test_external_search_reports_bounded_business_telemetry(self):
@@ -250,6 +281,113 @@ def test_admin_class_action_distinguishes_page_permission_denied(monkeypatch, tm
                         {"departmentId": "", "departmentName": "", "grade": "", "keyword": "电气"},
                     )
                 assert raised.value.code == "PAGE_PERMISSION_DENIED"
+        finally:
+            await runner.cleanup()
+
+    asyncio.run(run())
+
+
+async def start_instructor_site(search_status=200):
+    app = __import__("aiohttp", fromlist=["web"]).web.Application()
+    calls = []
+
+    async def page(_request):
+        return __import__("aiohttp", fromlist=["web"]).web.Response(text="""<!doctype html><html><body>
+          <main aria-label="排课管理">
+            <div class="ant-select ant-select-disabled" aria-label="学期"><div class="ant-select-selection-item">2026年秋</div></div>
+            <div><span>查询范围：</span><div class="ant-select" data-control="range"><div class="ant-select-selection-item">行政班</div></div></div>
+            <div class="target-control"><div class="ant-select"><div class="ant-select-selection__placeholder">请输入教师姓名或工号</div><input class="ant-input ant-select-search__field" data-control="keyword" placeholder="请输入教师姓名或工号" value=""></div></div>
+          </main><script>
+            window.termTouched = false;
+            window.range = '行政班';
+            document.querySelector('[aria-label="学期"]').addEventListener('click', () => { window.termTouched = true; });
+            document.querySelector('[data-control="range"]').addEventListener('click', () => {
+              const list = document.createElement('div');
+              list.className = 'ant-select-dropdown';
+              const option = document.createElement('div');
+              option.className = 'ant-select-item-option';
+              option.textContent = '教师';
+              option.onclick = () => {
+                window.range = '教师';
+                document.querySelector('[data-control="range"] .ant-select-selection-item').textContent = '教师';
+                list.remove();
+              };
+              list.append(option);
+              document.body.append(list);
+            });
+            document.querySelector('[data-control="keyword"]').addEventListener('input', event => {
+              if (window.range !== '教师') return;
+              const query = new URLSearchParams({nameOrCode: event.target.value, limitNum: '50', deptId: ''});
+              fetch('/api/timetable/instructor/filter?' + query);
+            });
+            fetch('/api/timetable/instructor/filter?stale=1');
+          </script></body></html>""", content_type="text/html")
+
+    async def search(request):
+        calls.append({"nameOrCode": request.query.get("nameOrCode"), "limit": request.query.get("limitNum")})
+        if request.query.get("stale") == "1":
+            await asyncio.sleep(0.25)
+            return __import__("aiohttp", fromlist=["web"]).web.json_response([
+                {"id": "teacher-stale", "name": "旧教师", "code": "90000", "certificate": "SECRET"}
+            ])
+        return __import__("aiohttp", fromlist=["web"]).web.json_response([
+            {
+                "id": f"teacher-{index}",
+                "name": "张三",
+                "code": f"1000{index}",
+                "departmentName": "电气工程学院",
+                "campusName": "A校区",
+                "mobilePhone": "SECRET",
+                "certificate": "SECRET",
+            }
+            for index in range(50)
+        ], status=search_status)
+
+    app.router.add_get("/", page)
+    app.router.add_get("/api/resourceapi/session/info-detail", lambda _request: __import__("aiohttp", fromlist=["web"]).web.json_response({
+        "curSessionId": "session-current",
+        "sessionFinder": [{"id": "session-current", "name": "2026秋"}],
+    }))
+    app.router.add_get("/api/resourceapi/session/list", lambda _request: __import__("aiohttp", fromlist=["web"]).web.json_response({
+        "sessionVOList": [{"id": "session-current", "year": "2026", "term": "秋"}],
+    }))
+    app.router.add_get("/api/timetable/instructor/filter", search)
+    runner = __import__("aiohttp", fromlist=["web"]).web.AppRunner(app)
+    await runner.setup()
+    site = __import__("aiohttp", fromlist=["web"]).web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    address = site._server.sockets[0].getsockname()
+    return runner, f"http://{address[0]}:{address[1]}", calls
+
+
+def test_instructor_action_uses_visible_page_controls_and_safe_projection(monkeypatch, tmp_path):
+    async def run():
+        runner, origin, calls = await start_instructor_site()
+        monkeypatch.setenv("CQU_CDP_RUNTIME_DIR", str(tmp_path))
+        monkeypatch.setattr(cqu_external_search, "ALL_COURSE_URL", origin + "/")
+        monkeypatch.setattr(cqu_external_search, "SESSION_INFO_URL", origin + "/api/resourceapi/session/info-detail")
+        monkeypatch.setattr(cqu_external_search, "SESSION_LIST_URL", origin + "/api/resourceapi/session/list")
+        try:
+            result = await cqu_external_search.external_search(
+                {"cookies": [], "origins": []},
+                {
+                    "action": "instructor_search",
+                    "departmentId": "",
+                    "departmentName": "",
+                    "grade": "",
+                    "keyword": "张",
+                },
+            )
+            assert calls == [
+                {"nameOrCode": None, "limit": None},
+                {"nameOrCode": "张", "limit": "50"},
+            ]
+            assert len(result["items"]) == 50
+            assert result["items"][0] == {
+                "id": "teacher-0", "name": "张三", "extra": "10000 / 电气工程学院 / A校区"
+            }
+            assert result["truncated"] is True
+            assert "SECRET" not in json.dumps(result, ensure_ascii=False)
         finally:
             await runner.cleanup()
 
