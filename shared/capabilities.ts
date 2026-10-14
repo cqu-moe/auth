@@ -7,6 +7,15 @@ export interface CapDef {
   type: CapType;
   label: string;
   unit?: string;
+  /** Optional quotas distinguish an absent row (undefined) from an explicit value. */
+  optional?: boolean;
+  /** An absent row means ungranted; an empty row is an explicit unlimited value. */
+  allowUnlimited?: boolean;
+  minimum?: number;
+  zeroAllowed?: boolean;
+  hint?: string;
+  /** Manual-only rights are never stored in presets or applied automatically. */
+  manualOnly?: boolean;
 }
 
 export const CAPABILITIES = {
@@ -21,6 +30,25 @@ export const CAPABILITIES = {
     share_limit: { type: "quota", label: "分享链接上限", unit: "条" }, // 每用户分享链接总数;null=无限
     sync_interval: { type: "quota", label: "同步间隔", unit: "分钟" }, // 自动同步间隔档位(越小越新鲜);null=默认/最长。实际下限受 cron 每小时一次限制
     manual_refresh: { type: "quota", label: "每日手动刷新上限", unit: "次/天" }, // null=无限
+    external_sync_interval: {
+      type: "quota",
+      label: "外部自动同步间隔",
+      unit: "分钟",
+      optional: true,
+      minimum: 15,
+      zeroAllowed: true,
+      manualOnly: true,
+      hint: "未配置或 0 关闭周期采集；有效间隔不低于 15 分钟，不支持无限频率。",
+    },
+    external_manual_refresh: {
+      type: "quota",
+      label: "外部每日手动刷新上限",
+      unit: "次/天",
+      optional: true,
+      allowUnlimited: true,
+      manualOnly: true,
+      hint: "未配置表示未授予；0 表示明确关闭；选择“无限”表示明确无限。",
+    },
   },
   eval: {
     submit: { type: "flag", label: "提交评教" },

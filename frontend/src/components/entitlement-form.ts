@@ -17,7 +17,13 @@ export interface EntitlementItem {
 // 表单态:flag → boolean(勾选=授权);quota → 字符串(空=无限,否则数字串)。
 // key = `${subsystem}.${capability}`。保存时压回 EntitlementItem[]:
 // 仅把勾选的 flag(value "1")与非空 quota 发出,未勾/空缺省即「false / 无限」。
-export type EntitlementForm = Record<string, { flag?: boolean; quota?: string }>;
+// optional quota 另有 state:unset=未授予、unlimited=明确无限、number=明确数值。
+export type OptionalQuotaState = "unset" | "unlimited" | "number";
+export type EntitlementForm = Record<string, {
+  flag?: boolean;
+  quota?: string;
+  optionalQuota?: OptionalQuotaState;
+}>;
 
 // 子系统中文名(展示用;键来自 CAPABILITIES,缺省回退键名本身)。
 export const SUBSYSTEM_LABELS: Record<string, string> = {
@@ -40,8 +46,22 @@ export function formFromItems(items: EntitlementItem[]): EntitlementForm {
       if (caps[capability].type === "flag") {
         form[key] = { flag: value === "1" };
       } else {
-        // quota:存在且为数字串则填入;空/缺省 → 无限(空输入框)。
-        form[key] = { quota: value && /^\d+$/.test(value) ? value : "" };
+        if (caps[capability].optional) {
+          if (value === undefined) form[key] = { optionalQuota: "unset" };
+          else if (value === "") {
+            form[key] = {
+              optionalQuota: caps[capability].allowUnlimited ? "unlimited" : "unset",
+            };
+          } else {
+            form[key] = {
+              optionalQuota: "number",
+              quota: /^\d+$/.test(value) ? value : "",
+            };
+          }
+        } else {
+          // quota:存在且为数字串则填入;空/缺省 → 无限(空输入框)。
+          form[key] = { quota: value && /^\d+$/.test(value) ? value : "" };
+        }
       }
     }
   }
@@ -61,12 +81,48 @@ export function buildItems(form: EntitlementForm): EntitlementItem[] {
       if (caps[capability].type === "flag") {
         if (entry.flag) items.push({ subsystem, capability, value: "1" });
       } else {
-        const q = (entry.quota ?? "").trim();
-        if (q) items.push({ subsystem, capability, value: q });
+        if (caps[capability].optional) {
+          if (entry.optionalQuota === "unlimited") {
+            items.push({ subsystem, capability, value: "" });
+          } else if (entry.optionalQuota === "number") {
+            const q = (entry.quota ?? "").trim();
+            if (q) items.push({ subsystem, capability, value: q });
+          }
+        } else {
+          const q = (entry.quota ?? "").trim();
+          if (q) items.push({ subsystem, capability, value: q });
+        }
       }
     }
   }
   return items;
+}
+
+export function validateEntitlementForm(form: EntitlementForm): string | null {
+  for (const subsystem of Object.keys(CAPABILITIES) as Subsystem[]) {
+    const caps = CAPABILITIES[subsystem] as Record<string, CapDef>;
+    for (const [capability, def] of Object.entries(caps)) {
+      if (def.type !== "quota" || !def.optional) continue;
+      const entry = form[`${subsystem}.${capability}`];
+      if (entry?.optionalQuota !== "number") continue;
+      const value = (entry.quota ?? "").trim();
+      if (!value) return `请填写${def.label}数值`;
+      const amount = Number(value);
+      if (!Number.isSafeInteger(amount)) {
+        return `${def.label}必须是不超过安全整数范围的非负整数`;
+      }
+      if (
+        def.minimum !== undefined &&
+        amount < def.minimum &&
+        !(def.zeroAllowed && amount === 0)
+      ) {
+        return amount === 0
+          ? `${def.label}不能使用 0，请选择未授予或至少 ${def.minimum} 分钟`
+          : `${def.label}不能小于 ${def.minimum}`;
+      }
+    }
+  }
+  return null;
 }
 
 // 把一组 items 摘要成短文本(预设列表用):取前 max 个能力中文标签,超出以 +N 表示。
