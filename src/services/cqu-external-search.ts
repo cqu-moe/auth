@@ -1,6 +1,6 @@
-/** Typed external AllCourseSchedule search contract (T02: departments + admin classes). */
+/** Typed external AllCourseSchedule search contract (T02/T06: departments, classes, instructors). */
 
-export type ExternalSearchSourceType = "department" | "admin_class" | "course_catalog" | "course";
+export type ExternalSearchSourceType = "department" | "admin_class" | "course_catalog" | "course" | "instructor" | "room";
 
 export interface CquExternalSearchArgs {
   clientId: string;
@@ -44,7 +44,7 @@ export type CquExternalSearchResult =
     }
   | {
       contractVersion: 1;
-      sourceType: "admin_class" | "course_catalog";
+      sourceType: "admin_class" | "course_catalog" | "instructor" | "room";
       session: ExternalSearchSession;
       items: ExternalSearchItem[];
       truncated: boolean;
@@ -58,17 +58,13 @@ export type CquExternalSearchResult =
       truncated: boolean;
     };
 
-export interface CourseSearchRecipe {
-  action: "course_catalog_search" | "teaching_class_search";
-  keyword?: string;
-  courseId?: string;
-  courseName?: string;
-  expectedSessionId?: string;
-}
+export type CourseSearchRecipe =
+  | { action: "course_catalog_search"; keyword: string }
+  | { action: "teaching_class_search"; courseId: string; courseName: string; expectedSessionId: string };
 export type ExternalSearchRecipe = AdminSearchRecipe | CourseSearchRecipe;
 
 export interface AdminSearchRecipe {
-  action: "department_list" | "admin_class_search";
+  action: "department_list" | "admin_class_search" | "instructor_search" | "room_search";
   departmentId: string;
   departmentName: string;
   grade: string;
@@ -95,7 +91,7 @@ export function parseExternalSearchRecipe(value: unknown): ExternalSearchRecipe 
     const courseId = boundedText(raw.courseId, 100), courseName = boundedText(raw.courseName), expectedSessionId = boundedText(raw.expectedSessionId, 100);
     return courseId && courseName && expectedSessionId ? { action, courseId, courseName, expectedSessionId } : { error: "INVALID_SEARCH_RECIPE" };
   }
-  if (action !== "department_list" && action !== "admin_class_search") {
+  if (action !== "department_list" && action !== "admin_class_search" && action !== "instructor_search" && action !== "room_search") {
     return { error: "INVALID_SEARCH_RECIPE" };
   }
   if (Object.keys(raw).some(key => !["action", "departmentId", "departmentName", "grade", "keyword"].includes(key))) {
@@ -114,6 +110,9 @@ export function parseExternalSearchRecipe(value: unknown): ExternalSearchRecipe 
     (grade !== "" && !/^(?:19|20)\d{2}$/.test(grade))
   ) return { error: "INVALID_SEARCH_RECIPE" };
   if (action === "department_list" && (departmentId || departmentName || grade || keyword)) {
+    return { error: "INVALID_SEARCH_RECIPE" };
+  }
+  if ((action === "instructor_search" || action === "room_search") && (departmentId || departmentName || grade || !keyword)) {
     return { error: "INVALID_SEARCH_RECIPE" };
   }
   return { action, departmentId, departmentName, grade, keyword };
@@ -143,7 +142,7 @@ export function parseExternalSearchArgs(
       : { action: "teaching_class_search", courseId: raw.courseId, courseName: raw.courseName, expectedSessionId: raw.expectedSessionId });
     return "error" in parsed ? { error: "INVALID_REQUEST" } : parsed;
   }
-  if (raw.sourceType !== "department" && raw.sourceType !== "admin_class") {
+  if (raw.sourceType !== "department" && raw.sourceType !== "admin_class" && raw.sourceType !== "instructor" && raw.sourceType !== "room") {
     return { error: "INVALID_REQUEST" };
   }
   const departmentId = optionalString(raw.departmentId);
@@ -171,6 +170,10 @@ export function parseExternalSearchArgs(
 
   if (raw.sourceType === "department") {
     return { action: "department_list", departmentId: "", departmentName: "", grade: "", keyword: "" };
+  }
+  if (raw.sourceType === "instructor" || raw.sourceType === "room") {
+    if (departmentId || departmentName || grade || !keyword) return { error: "INVALID_REQUEST" };
+    return { action: raw.sourceType === "instructor" ? "instructor_search" : "room_search", departmentId: "", departmentName: "", grade: "", keyword };
   }
   return { action: "admin_class_search", departmentId, departmentName, grade, keyword };
 }
@@ -235,7 +238,10 @@ export function parseExternalSearchResult(
   }
   const truncated = root.truncated || root.items.length > ITEM_LIMIT;
   if (expectedSourceType === "course") {
-    const course = parseSession(root.course);
+    const rawCourse = root.course as Record<string, unknown> | undefined;
+    const courseId = rawCourse && boundedText(rawCourse.id, 100);
+    const courseName = rawCourse && boundedText(rawCourse.name, 200);
+    const course = courseId && courseName ? { id: courseId, name: courseName } : null;
     if (!course) return { error: "SCHEMA_INVALID" };
     return { contractVersion: 1, sourceType: "course", session, course, items, truncated };
   }

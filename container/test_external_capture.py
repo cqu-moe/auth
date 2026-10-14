@@ -29,6 +29,16 @@ def fixed_recipe():
     }
 
 
+def instructor_recipe():
+    return {
+        "action": "instructor_capture",
+        "sourceType": "instructor",
+        "targetId": "teacher-1",
+        "targetName": "张三",
+        "expectedSessionId": "",
+    }
+
+
 def valid_result():
     return {
         "contractVersion": 1,
@@ -46,6 +56,29 @@ def valid_result():
                 "teachingWeek": "110",
                 "period": "101",
                 "assignTeachingObject": [{"adminClassId": "class-1"}],
+            }],
+            "maxSection": 12,
+        },
+    }
+
+
+def valid_instructor_result():
+    return {
+        "contractVersion": 1,
+        "sourceType": "instructor",
+        "target": {"id": "teacher-1", "name": "张三"},
+        "session": {"id": "session-current", "name": "2026秋", "beginDate": "2026-09-07"},
+        "timetable": {
+            "classTimetableVOList": [{
+                "courseName": "高等数学",
+                "instructorName": "张三",
+                "roomName": "D101",
+                "position": "1",
+                "campusName": "A校区",
+                "weekDay": 1,
+                "teachingWeek": "110",
+                "period": "101",
+                "instructorIdList": ["teacher-other", "teacher-1"],
             }],
             "maxSection": 12,
         },
@@ -116,6 +149,21 @@ class ExternalCaptureTestCase(AioHTTPTestCase):
         assert properties["operation"] == "external_capture"
         assert properties["business_outcome"] == "success"
         assert properties["http_outcome"] == "success"
+
+    async def test_fixed_instructor_recipe_reaches_browser_action_and_result_is_rebuilt(self):
+        async def fake_capture(state, recipe):
+            assert state == {"cookies": [], "origins": []}
+            assert recipe == instructor_recipe()
+            return valid_instructor_result()
+
+        server.cqu_external_capture.external_capture = fake_capture
+        response = await self.client.post("/external-capture", json={
+            "state": {"cookies": [], "origins": []},
+            **instructor_recipe(),
+        })
+        assert response.status == 200
+        assert await response.json() == {"ok": True, **valid_instructor_result()}
+        assert "SECRET" not in await response.text()
 
 
 PAGE_HTML = """<!doctype html><html><body>
@@ -395,3 +443,264 @@ def test_real_browser_rejects_term_change_during_capture(monkeypatch, tmp_path):
     with pytest.raises(Exception) as raised:
         run_real_browser(monkeypatch, tmp_path, change_session_after_capture=True)
     assert getattr(raised.value, "code", None) == "CURRENT_SESSION_CHANGED"
+
+
+INSTRUCTOR_CAPTURE_HTML = """<!doctype html><html><body>
+  <main aria-label="排课管理">
+    <div class="ant-select ant-select-disabled" aria-label="学期"><div class="ant-select-selection-item">2026年秋</div></div>
+    <div><span>查询范围：</span><div class="ant-select" data-control="range"><div class="ant-select-selection-item">行政班</div></div></div>
+    <div class="ant-select"><span class="ant-select-selection__choice"><span class="ant-select-selection__choice__content">旧目标</span><span class="ant-select-selection__choice__remove">×</span></span></div>
+    <div class="target-control"><div class="ant-select"><div class="ant-select-selection__placeholder">请输入教师姓名或工号</div><input class="ant-input ant-select-search__field" data-control="keyword" placeholder="请输入教师姓名或工号" value=""></div></div>
+  </main><script>
+    window.range = '行政班';
+    window.termTouched = false;
+    window.targetCleared = false;
+    document.querySelector('.ant-select-selection__choice__remove').onclick = () => {
+      window.targetCleared = true;
+      document.querySelector('.ant-select-selection__choice').remove();
+    };
+    document.querySelector('[aria-label="学期"]').addEventListener('click', () => { window.termTouched = true; });
+    document.querySelector('[data-control="range"]').addEventListener('click', () => {
+      const list = document.createElement('div');
+      list.className = 'ant-select-dropdown';
+      const option = document.createElement('div');
+      option.className = 'ant-select-item-option';
+      option.textContent = '教师';
+      option.onclick = () => {
+        window.range = '教师';
+        document.querySelector('[data-control="range"] .ant-select-selection-item').textContent = '教师';
+        list.remove();
+      };
+      list.append(option);
+      document.body.append(list);
+    });
+    document.querySelector('[data-control="keyword"]').addEventListener('input', async event => {
+      if (window.range !== '教师') return;
+      fetch('/api/timetable/class/timetable/instructor/table-detail?sessionId=session-current', {
+        method: 'POST', credentials: 'include', body: JSON.stringify(['teacher-old'])
+      });
+      const query = new URLSearchParams({nameOrCode: event.target.value, limitNum: '50', deptId: ''});
+      const response = await fetch('/api/timetable/instructor/filter?' + query);
+      const items = await response.json();
+      const list = document.createElement('div');
+      list.className = 'ant-select-dropdown';
+      list.setAttribute('role', 'listbox');
+      for (const item of items) {
+        const option = document.createElement('div');
+        option.className = 'ant-select-item-option';
+        option.setAttribute('role', 'option');
+        option.dataset.value = item.id;
+        option.title = item.name;
+        option.textContent = item.name;
+        option.onclick = () => {
+          fetch('/api/timetable/class/timetable/instructor/table-detail?sessionId=session-current', {
+            method: 'POST', credentials: 'include', body: JSON.stringify([item.id])
+          });
+        };
+        list.append(option);
+      }
+      document.body.append(list);
+    });
+  </script></body></html>"""
+
+
+async def start_instructor_capture_site(*, table_body=None, search_items=None, expose_identity=True, source_type="instructor"):
+    supplied_items = search_items
+    if search_items is None:
+        search_items = [
+            {"id": "teacher-other", "name": "张三", "code": "10002", "departmentName": "电气工程学院", "campusName": "A校区", "mobilePhone": "SECRET"},
+            {"id": "teacher-1", "name": "张三", "code": "10001", "departmentName": "电气工程学院", "campusName": "A校区", "mobilePhone": "SECRET"},
+        ]
+    default_table = {
+        "classTimetableVOList": [{
+            "courseName": "高等数学", "instructorName": "张三", "roomName": "D101",
+            "position": "1", "campusName": "A校区", "weekDay": 1, "teachingWeek": "110",
+            "period": "101", "mobilePhone": "SECRET",
+            "instructorIdList": ["teacher-other", "teacher-1"],
+        }],
+        "maxSection": 12,
+    }
+    html = INSTRUCTOR_CAPTURE_HTML
+    search_path = "/api/timetable/instructor/filter"
+    table_path = "/api/timetable/class/timetable/instructor/table-detail"
+    if source_type == "room":
+        search_items = supplied_items if supplied_items is not None else [{"id": "room-1", "name": "D101", "buildingName": "教学楼", "campusName": "A校区"}]
+        html = html.replace("教师", "教室").replace("姓名或工号", "名称").replace("nameOrCode", "roomName").replace("/api/timetable/instructor/filter", "/api/resourceapi/room/roomName-filter").replace("/instructor/table-detail", "/room/table-detail").replace("teacher-old", "room-old")
+        search_path = "/api/resourceapi/room/roomName-filter"
+        table_path = "/api/timetable/class/timetable/room/table-detail"
+    app = web.Application()
+    calls = {"search": [], "table": []}
+
+    async def page(_request):
+        return web.Response(text=html if expose_identity else html.replace("option.dataset.value = item.id;", ""), content_type="text/html")
+
+    async def session_info(_request):
+        return web.json_response({
+            "curSessionId": "session-current",
+            "sessionFinder": [{"id": "session-current", "name": "2026秋"}],
+        })
+
+    async def session_list(_request):
+        return web.json_response({
+            "sessionVOList": [{
+                "id": "session-current", "year": "2026", "term": "秋", "beginDate": "2026-09-07",
+            }],
+        })
+
+    async def search(request):
+        calls["search"].append({
+            "keyword": request.query.get("nameOrCode") or request.query.get("roomName"),
+            "limit": request.query.get("limitNum"),
+        })
+        return web.json_response(search_items)
+
+    async def table(request):
+        body = await request.text()
+        calls["table"].append(body)
+        if body != ('["room-1"]' if source_type == "room" else '["teacher-1"]'):
+            await asyncio.sleep(0.75)
+            return web.json_response({
+                "classTimetableVOList": [{
+                    "courseName": "旧数据",
+                    "instructorIdList": ["teacher-old"],
+                }],
+                "maxSection": 12,
+            })
+        await asyncio.sleep(0.9)
+        return web.json_response(default_table if table_body is None else table_body)
+
+    app.router.add_get("/", page)
+    app.router.add_get("/api/resourceapi/session/info-detail", session_info)
+    app.router.add_get("/api/resourceapi/session/list", session_list)
+    app.router.add_get(search_path, search)
+    app.router.add_post(table_path, table)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    address = site._server.sockets[0].getsockname()
+    return runner, f"http://{address[0]}:{address[1]}", calls
+
+
+def test_real_browser_instructor_capture_selects_exact_id_and_sanitizes(monkeypatch, tmp_path):
+    async def run():
+        import cqu_external_capture
+        runner, origin, calls = await start_instructor_capture_site()
+        monkeypatch.setenv("CQU_CDP_RUNTIME_DIR", str(tmp_path))
+        monkeypatch.setattr(cqu_external_capture, "ALL_COURSE_URL", origin + "/")
+        try:
+            async with chromium_session.ChromiumSession() as browser:
+                await browser.navigate(origin + "/", timeout_s=5)
+                result = await cqu_external_capture.capture_instructor(browser, instructor_recipe())
+                term_touched = await browser.evaluate("window.termTouched")
+                target_cleared = await browser.evaluate("window.targetCleared")
+        finally:
+            await runner.cleanup()
+        assert result == valid_instructor_result()
+        assert calls["search"] == [{"keyword": "张三", "limit": "50"}]
+        assert calls["table"] == ['["teacher-old"]', '["teacher-1"]']
+        assert term_touched is False
+        assert target_cleared is True
+        assert "SECRET" not in json.dumps(result, ensure_ascii=False)
+
+    asyncio.run(run())
+
+
+def test_real_browser_accepts_valid_empty_instructor_timetable(monkeypatch, tmp_path):
+    async def run():
+        import cqu_external_capture
+        runner, origin, _calls = await start_instructor_capture_site(
+            table_body={"classTimetableVOList": [], "maxSection": 12},
+        )
+        monkeypatch.setenv("CQU_CDP_RUNTIME_DIR", str(tmp_path))
+        monkeypatch.setattr(cqu_external_capture, "ALL_COURSE_URL", origin + "/")
+        try:
+            async with chromium_session.ChromiumSession() as browser:
+                await browser.navigate(origin + "/", timeout_s=5)
+                result = await cqu_external_capture.capture_instructor(browser, instructor_recipe())
+        finally:
+            await runner.cleanup()
+        assert result == {
+            **valid_instructor_result(),
+            "timetable": {"classTimetableVOList": [], "maxSection": 12},
+        }
+
+    asyncio.run(run())
+
+
+def test_real_browser_same_name_without_visible_identity_fails_without_selecting(monkeypatch, tmp_path):
+    async def run():
+        import cqu_external_capture
+        runner, origin, calls = await start_instructor_capture_site(expose_identity=False)
+        monkeypatch.setenv("CQU_CDP_RUNTIME_DIR", str(tmp_path))
+        try:
+            async with chromium_session.ChromiumSession() as browser:
+                await browser.navigate(origin + "/", timeout_s=5)
+                with pytest.raises(cqu_external_capture.ExternalCaptureTransientError) as raised:
+                    await cqu_external_capture.capture_instructor(browser, instructor_recipe())
+                assert raised.value.code == "AMBIGUOUS_TARGET"
+                assert '["teacher-1"]' not in calls["table"]
+                assert '["teacher-other"]' not in calls["table"]
+        finally:
+            await runner.cleanup()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("case", ["partial", "empty", "activity_only", "unknown", "malformed", "missing", "wrong_owner"])
+def test_real_browser_room_capture_validates_ownership_and_extra_activity_arrays(monkeypatch, tmp_path, case):
+    async def run():
+        import cqu_external_capture
+        table = {"classTimetableVOList": [{"courseName": "高等数学", "weekDay": 1, "teachingWeek": "110", "period": "101", "roomId": "room-1"}], "maxSection": 12, "roomExamTimeTableVOList": [{"privateField": "SECRET"}], "tempActivityTimetableVOList": [{}, {}]}
+        if case == "empty":
+            table = {"classTimetableVOList": [], "maxSection": 12, "roomExamTimeTableVOList": [], "tempActivityTimetableVOList": []}
+        elif case == "activity_only":
+            table["classTimetableVOList"] = []
+        elif case == "missing":
+            del table["roomExamTimeTableVOList"]
+        elif case == "unknown":
+            table["unknownBusinessRows"] = []
+        elif case == "malformed":
+            table["tempActivityTimetableVOList"] = {}
+        elif case == "wrong_owner":
+            table["classTimetableVOList"][0]["roomId"] = "room-other"
+        runner, origin, calls = await start_instructor_capture_site(source_type="room", table_body=table)
+        monkeypatch.setenv("CQU_CDP_RUNTIME_DIR", str(tmp_path))
+        monkeypatch.setattr(cqu_external_capture, "ALL_COURSE_URL", origin + "/")
+        recipe = {"action": "room_capture", "sourceType": "room", "targetId": "room-1", "targetName": "D101", "expectedSessionId": "session-current"}
+        try:
+            if case in {"unknown", "malformed", "missing", "wrong_owner"}:
+                with pytest.raises(cqu_external_capture.ExternalCaptureTransientError) as raised:
+                    await cqu_external_capture.external_capture({"cookies": [], "origins": []}, recipe)
+                assert raised.value.code == "SCHEMA_INVALID"
+            else:
+                result = await cqu_external_capture.external_capture({"cookies": [], "origins": []}, recipe)
+                assert result["sourceType"] == "room"
+                assert result["target"]["id"] == "room-1"
+                assert result["timetable"] == {"classTimetableVOList": table["classTimetableVOList"], "maxSection": 12, "unverifiedItemCount": 0 if case == "empty" else 3}
+                assert calls["table"] == ['["room-old"]', '["room-1"]']
+                assert "SECRET" not in json.dumps(result)
+        finally:
+            await runner.cleanup()
+    asyncio.run(run())
+
+
+def test_real_browser_room_search_projects_candidates_and_marks_50_as_truncated(monkeypatch, tmp_path):
+    async def run():
+        import cqu_external_search
+        items = [{"id": f"room-{index}", "name": f"D{index}", "buildingName": "教学楼", "campusName": "A校区", "privateField": "SECRET"} for index in range(50)]
+        runner, origin, calls = await start_instructor_capture_site(source_type="room", search_items=items)
+        monkeypatch.setenv("CQU_CDP_RUNTIME_DIR", str(tmp_path))
+        monkeypatch.setattr(cqu_external_search, "ALL_COURSE_URL", origin + "/")
+        monkeypatch.setattr(cqu_external_search, "SESSION_INFO_URL", origin + "/api/resourceapi/session/info-detail")
+        monkeypatch.setattr(cqu_external_search, "SESSION_LIST_URL", origin + "/api/resourceapi/session/list")
+        try:
+            result = await cqu_external_search.external_search({"cookies": [], "origins": []}, {"action": "room_search", "keyword": "D", "departmentId": "", "departmentName": "", "grade": ""})
+            assert result["sourceType"] == "room"
+            assert result["items"][0] == {"id": "room-0", "name": "D0", "extra": "教学楼 / A校区"}
+            assert len(result["items"]) == 50
+            assert result["truncated"] is True
+            assert calls["search"] == [{"keyword": "D", "limit": "50"}]
+            assert "SECRET" not in json.dumps(result)
+        finally:
+            await runner.cleanup()
+    asyncio.run(run())

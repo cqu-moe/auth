@@ -132,6 +132,73 @@ it("dispatches one fixed admin-class capture and returns only whitelisted busine
   expect(JSON.stringify(result)).not.toContain("SECRET");
 });
 
+it("dispatches one fixed instructor capture and preserves only exact-ID ownership", async () => {
+  const f = await fixture();
+  f.fetch.mockImplementationOnce(async () => Response.json({
+    ok: true,
+    contractVersion: 1,
+    sourceType: "instructor",
+    target: { id: "teacher-1", name: "张三" },
+    session: { id: "session-current", name: "2026秋", beginDate: "2026-09-07" },
+    timetable: {
+      classTimetableVOList: [{
+        courseName: "高等数学",
+        instructorName: "张三",
+        roomName: "D101",
+        position: "1",
+        campusName: "A校区",
+        weekDay: 1,
+        teachingWeek: "110",
+        period: "101",
+        instructorIdList: ["teacher-other", "teacher-1"],
+        mobilePhone: "SECRET",
+      }],
+      maxSection: 12,
+    },
+    state: { cookies: ["SECRET"] },
+  }));
+
+  const result = await f.rpc.cquExternalCapture({
+    ...f.args,
+    sourceType: "instructor",
+    targetId: "teacher-1",
+    targetName: "张三",
+    expectedSessionId: "session-current",
+    deadlineAt: Date.now() + 90_000,
+  });
+
+  expect(result).toEqual({
+    contractVersion: 1,
+    sourceType: "instructor",
+    target: { id: "teacher-1", name: "张三" },
+    session: { id: "session-current", name: "2026秋", beginDate: "2026-09-07" },
+    timetable: {
+      classTimetableVOList: [{
+        courseName: "高等数学",
+        instructorName: "张三",
+        roomName: "D101",
+        position: "1",
+        campusName: "A校区",
+        weekDay: 1,
+        teachingWeek: "110",
+        period: "101",
+        instructorIdList: ["teacher-other", "teacher-1"],
+      }],
+      maxSection: 12,
+    },
+  });
+  const request = f.fetch.mock.calls[0][0];
+  await expect(request.clone().json()).resolves.toEqual({
+    action: "instructor_capture",
+    sourceType: "instructor",
+    targetId: "teacher-1",
+    targetName: "张三",
+    expectedSessionId: "session-current",
+    deadlineAt: expect.any(Number),
+  });
+  expect(JSON.stringify(result)).not.toContain("SECRET");
+});
+
 it("rejects transport controls and unsupported sources before browser dispatch", async () => {
   const f = await fixture();
   await expect(f.rpc.cquExternalCapture({
@@ -237,4 +304,35 @@ it("carries a teaching-class parent through capture and strips unknown row field
     timetable: { classTimetableVOList: [{ classId: "class-1", courseName: "高等数学", exprProjectName: "项目一", weekDay: 2 }], maxSection: 12 } });
   await expect(f.fetch.mock.calls[0][0].clone().json()).resolves.toEqual({ action: "teaching_class_capture", sourceType: "course", targetId: "class-1", targetName: "高等数学01班", courseId: "course-1", courseName: "高等数学", expectedSessionId: "session-current", deadlineAt: expect.any(Number) });
   await expect(f.rpc.cquExternalCapture({ ...args, courseName: undefined })).resolves.toEqual({ error: "INVALID_REQUEST" });
+});
+
+it("dispatches room search and capture while preserving partial-count and exact room ownership", async () => {
+  const f = await fixture({ rpcMethods: ["cquExternalSearch", "cquExternalCapture"] });
+  f.fetch.mockImplementationOnce(async () => Response.json({
+    ok: true, contractVersion: 1, sourceType: "room",
+    session: { id: "session-current", name: "2026秋" },
+    items: [{ id: "room-1", name: "D101", extra: "教学楼 / A校区", privateField: "SECRET" }], truncated: true,
+  }));
+  await expect(f.rpc.cquExternalSearch({ ...f.args, sourceType: "room", keyword: "D101" })).resolves.toEqual({
+    contractVersion: 1, sourceType: "room", session: { id: "session-current", name: "2026秋" },
+    items: [{ id: "room-1", name: "D101", extra: "教学楼 / A校区" }], truncated: true,
+  });
+  await expect(f.fetch.mock.calls[0][0].clone().json()).resolves.toMatchObject({ action: "room_search", keyword: "D101" });
+  const payload = {
+    contractVersion: 1, sourceType: "room", target: { id: "room-1", name: "D101" },
+    session: { id: "session-current", name: "2026秋", beginDate: "2026-09-07" },
+    timetable: { classTimetableVOList: [{ roomId: "room-1", courseName: "数学", teachingWeek: "110", period: "101", weekDay: 1 }], maxSection: 12, unverifiedItemCount: 3 },
+  };
+  const args = { ...f.args, sourceType: "room" as const, targetId: "room-1", targetName: "D101", expectedSessionId: "session-current" };
+  f.fetch.mockImplementationOnce(async () => Response.json({ ok: true, ...payload }));
+  await expect(f.rpc.cquExternalCapture(args)).resolves.toEqual(payload);
+  await expect(f.fetch.mock.calls[1][0].clone().json()).resolves.toMatchObject({ action: "room_capture", targetId: "room-1" });
+  for (const timetable of [
+    { ...payload.timetable, unverifiedItemCount: -1 },
+    { ...payload.timetable, unverifiedItemCount: undefined },
+    { ...payload.timetable, classTimetableVOList: [{ roomId: "room-other" }] },
+  ]) {
+    f.fetch.mockImplementationOnce(async () => Response.json({ ok: true, ...payload, timetable }));
+    await expect(f.rpc.cquExternalCapture(args)).resolves.toEqual({ error: "SCHEMA_INVALID" });
+  }
 });

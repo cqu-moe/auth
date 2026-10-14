@@ -125,6 +125,64 @@ it("dispatches a fixed admin-class recipe and returns only the typed search cont
   expect(overflowing.truncated).toBe(true);
 });
 
+it("dispatches a fixed instructor recipe and returns only the typed search contract", async () => {
+  const f = await fixture();
+  f.fetch.mockImplementationOnce(async () => Response.json({
+    ok: true,
+    contractVersion: 1,
+    sourceType: "instructor",
+    session: { id: "session-current", name: "2026秋" },
+    items: [
+      { id: "teacher-1", name: "张三", extra: "10001 / 电气工程学院 / A校区" },
+    ],
+    truncated: false,
+    browserState: { cookie: "SECRET", localStorage: "SECRET" },
+  }));
+
+  const deadlineAt = Date.now() + 90_000;
+  const result = await f.rpc.cquExternalSearch({
+    ...f.args,
+    sourceType: "instructor",
+    keyword: "张",
+    deadlineAt,
+  });
+
+  expect(result).toEqual({
+    contractVersion: 1,
+    sourceType: "instructor",
+    session: { id: "session-current", name: "2026秋" },
+    items: [{ id: "teacher-1", name: "张三", extra: "10001 / 电气工程学院 / A校区" }],
+    truncated: false,
+  });
+  const request = f.fetch.mock.calls[0][0];
+  expect(new URL(request.url).searchParams.get("deadlineAt")).toBe(String(deadlineAt));
+  await expect(request.clone().json()).resolves.toEqual({
+    action: "instructor_search",
+    departmentId: "",
+    departmentName: "",
+    grade: "",
+    keyword: "张",
+  });
+  expect(JSON.stringify(result)).not.toContain("SECRET");
+
+  await expect(f.rpc.cquExternalSearch({
+    ...f.args,
+    sourceType: "instructor",
+    departmentId: "dept-1",
+    departmentName: "电气工程学院",
+    grade: "2026",
+    keyword: "张",
+  } as unknown as Parameters<typeof f.rpc.cquExternalSearch>[0]))
+    .resolves.toEqual({ error: "INVALID_REQUEST" });
+  await expect(f.rpc.cquExternalSearch({
+    ...f.args,
+    sourceType: "instructor",
+    keyword: "",
+  } as unknown as Parameters<typeof f.rpc.cquExternalSearch>[0]))
+    .resolves.toEqual({ error: "INVALID_REQUEST" });
+  expect(f.fetch).toHaveBeenCalledTimes(1);
+});
+
 it("rejects unsupported sources and malformed filters before browser dispatch", async () => {
   const f = await fixture();
   await expect(f.rpc.cquExternalSearch({
