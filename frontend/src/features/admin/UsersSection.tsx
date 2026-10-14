@@ -19,7 +19,13 @@ import {
 } from "@cqu-moe/ui";
 import MenuSelect from "../../components/MenuSelect";
 import { EntitlementMatrix } from "../../components/EntitlementFields";
-import { buildItems, formFromItems, type EntitlementForm, type EntitlementItem } from "../../components/entitlement-form";
+import {
+  buildItems,
+  formFromItems,
+  validateEntitlementForm,
+  type EntitlementForm,
+  type EntitlementItem,
+} from "../../components/entitlement-form";
 import { USER_ROLE_OPTIONS } from "../../../../shared/user-roles";
 import { adminFetch } from "../../lib/api/admin";
 import { authClient } from "../../lib/auth-client";
@@ -385,6 +391,11 @@ export function EntitlementPanel({
   const handleSave = async () => {
     setError("");
     setSuccess("");
+    const invalid = validateEntitlementForm(form);
+    if (invalid) {
+      setError(invalid);
+      return;
+    }
     setSaving(true);
     try {
       const res = await adminFetch(`/admin/users/${user.id}/entitlements`, {
@@ -450,7 +461,7 @@ export function EntitlementPanel({
       footer={
         !initLoading ? (
           <>
-            <p className="mr-auto text-xs text-muted-foreground">勾选/填值即授权;留空数量表示无限。保存为整组替换。</p>
+            <p className="mr-auto text-xs text-muted-foreground">开关与配额按行授权；外部配额请选择未授予、无限或指定数值。保存为整组替换。</p>
             <Button variant="outline" onClick={onClose} disabled={saving}>
               取消
             </Button>

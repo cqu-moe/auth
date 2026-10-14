@@ -10,6 +10,7 @@ import {
   submit,
 } from "../../lib/api/quicklogin.testbots";
 import { EntitlementPanel } from "./UsersSection";
+import { EntitlementsSection } from "./EntitlementsSection";
 
 const mocks = vi.hoisted(() => ({
   adminFetch: vi.fn(),
@@ -85,6 +86,59 @@ afterEach(async () => {
 });
 
 describe("admin QuickLogin quota integration", () => {
+  it("keeps an optional numeric entitlement editable after clearing and rejects an empty save", async () => {
+    mocks.adminFetch.mockImplementation(async (path: string) => {
+      if (path.endsWith("/entitlements")) {
+        return Response.json({
+          data: [
+            { subsystem: "calendar", capability: "sync", value: "1" },
+            { subsystem: "calendar", capability: "external", value: "1" },
+            { subsystem: "calendar", capability: "sync_interval", value: "" },
+            { subsystem: "calendar", capability: "manual_refresh", value: "" },
+            { subsystem: "calendar", capability: "external_sync_interval", value: "30" },
+            { subsystem: "calendar", capability: "external_manual_refresh", value: "7" },
+          ],
+        });
+      }
+      if (path === "/admin/entitlement-presets") {
+        return Response.json({ data: [] });
+      }
+      throw new Error(`unexpected admin path: ${path}`);
+    });
+    await renderUi(createElement(EntitlementPanel, {
+      user: {
+        id: "user-a",
+        name: "测试用户",
+        email: "user-a@example.com",
+        role: "user",
+        banned: false,
+        createdAt: "2026-09-12T00:00:00.000Z",
+      },
+      canEditQuota: true,
+      onClose: () => undefined,
+    }));
+    const input = document.querySelector('[aria-label="外部自动同步间隔数值"]');
+    if (!(input instanceof HTMLInputElement)) throw new Error("missing external interval input");
+
+    await setInputValue(input, "");
+    expect(document.contains(input)).toBe(true);
+    expect(input.value).toBe("");
+    await click(button(document, "保存"));
+    expect(document.body.textContent).toContain("请填写外部自动同步间隔数值");
+    expect(mocks.adminFetch.mock.calls.every(([, init]) => init?.method !== "PUT")).toBe(true);
+
+    await setInputValue(input, "20");
+    expect(input.value).toBe("20");
+    await click(button(document, "保存"));
+    const save = mocks.adminFetch.mock.calls.find(([, init]) => init?.method === "PUT");
+    expect(save).toBeDefined();
+    expect(JSON.parse(String(save?.[1]?.body))).toMatchObject({
+      items: expect.arrayContaining([
+        { subsystem: "calendar", capability: "external_sync_interval", value: "20" },
+      ]),
+    });
+  });
+
   it("updates only quota and preserves local entitlement edits when apply completes", async () => {
     const apply = deferred<{
       masterEnabled: boolean;
@@ -134,5 +188,32 @@ describe("admin QuickLogin quota integration", () => {
     expect(document.querySelector('[aria-label="快捷登录设备额度当前值"]')?.textContent)
       .toContain("3 台");
     expect(mocks.adminFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("hides manual-only external entitlements from preset editing", async () => {
+    mocks.adminFetch.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === "/admin/entitlement-presets" && (!init || init.method === "GET")) {
+        return Response.json({ data: [] });
+      }
+      if (path === "/admin/entitlement-default") {
+        return Response.json({ data: { preset: null } });
+      }
+      if (path === "/admin/entitlement-presets/manual-only" && init?.method === "PUT") {
+        return Response.json({ data: { name: "manual-only", items: [] } });
+      }
+      throw new Error(`unexpected admin path: ${path}`);
+    });
+    await renderUi(createElement(EntitlementsSection));
+    await click(button(document, "新建预设"));
+    expect(document.body.textContent).not.toContain("外部自动同步间隔");
+    expect(document.body.textContent).not.toContain("外部每日手动刷新上限");
+
+    const name = document.querySelector("#preset-name");
+    if (!(name instanceof HTMLInputElement)) throw new Error("missing preset name");
+    await setInputValue(name, "manual-only");
+    await click(button(document, "保存"));
+    const save = mocks.adminFetch.mock.calls.find(([, init]) => init?.method === "PUT");
+    expect(save).toBeDefined();
+    expect(JSON.parse(String(save?.[1]?.body))).toEqual({ items: [] });
   });
 });

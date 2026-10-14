@@ -1,13 +1,35 @@
 import { drizzle } from "drizzle-orm/d1";
 import { eq, sql } from "drizzle-orm";
 import { entitlementConfig, entitlementPreset, userEntitlement } from "../db/schema";
-import { CAPABILITIES, PRESETS, SUBSYSTEMS, type Subsystem } from "../../shared/capabilities";
+import {
+  CAPABILITIES,
+  PRESETS,
+  SUBSYSTEMS,
+  type CapDef,
+  type Subsystem,
+} from "../../shared/capabilities";
 import { assertGenericEntitlementWriteAllowed } from "./quicklogin/quota-admin";
 
 type Row = { subsystem: string; capability: string; value: string };
-export type Caps = Record<string, Record<string, boolean | number | null>>;
+export type Caps = Record<string, Record<string, boolean | number | null | undefined>>;
 // schedule 离线消费的形状(只 calendar 片;见 issue #7 / AuthService.getCaps)。
 export type CalendarCaps = Caps["calendar"];
+
+function finiteQuota(value: string | undefined): number | null {
+  return value && /^\d+$/.test(value) && Number.isSafeInteger(Number(value))
+    ? Number(value)
+    : null;
+}
+
+function optionalQuota(
+  value: string | undefined,
+  allowUnlimited: boolean
+): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === "") return allowUnlimited ? null : undefined;
+  const parsed = finiteQuota(value);
+  return parsed === null ? undefined : parsed;
+}
 
 export function rowsToCaps(rows: Row[], only?: Subsystem): Caps {
   const subs = (only ? [only] : SUBSYSTEMS) as Subsystem[];
@@ -20,16 +42,16 @@ export function rowsToCaps(rows: Row[], only?: Subsystem): Caps {
       if (sub === "feed" && key === "sub_limit") continue;
       const row = rows.find((r) => r.subsystem === sub && r.capability === key);
       if (def.type === "flag") out[sub][key] = row?.value === "1";
-      else
+      else if (def.optional) {
+        out[sub][key] = optionalQuota(row?.value, def.allowUnlimited === true);
+      } else {
         // quota:仅接受纯非负整数串(`^\d+$`)且在 JS 安全整数范围内,否则视为未设(null=无限)。
         // 仅 `^\d+$` 不够:任意长数字串(如 30 位)会被 Number() 解析成 Infinity/失精浮点,
         // 下游把超出真实值的数字当配额 → 配额绕过。写侧(validateEntitlementItems)现已拒
         // 存溢出值,故此处 null 兜底只为防御脏行/历史遗留数据。
-        out[sub][key] =
-          row && /^\d+$/.test(row.value) && Number.isSafeInteger(Number(row.value))
-            ? Number(row.value)
-            : null;
+        out[sub][key] = finiteQuota(row?.value);
     }
+  }
   }
   return out;
 }
@@ -68,6 +90,13 @@ export function subsystemForAccessToken(info: {
 
 type Item = { subsystem: string; capability: string; value: string };
 
+export function isManualOnlyEntitlementItem(item: Item): boolean {
+  const def = (CAPABILITIES as Record<string, Record<string, CapDef>>)[
+    item.subsystem
+  ]?.[item.capability];
+  return def?.manualOnly === true;
+}
+
 /**
  * 校验 admin 提交的 entitlement 写入项(整组替换/预设套用前置)。
  * 全部合法返回 null,否则返回首个非法项的中文错误描述。一项合法当且仅当:
@@ -88,9 +117,7 @@ export function validateEntitlementItems(items: Item[]): string | null {
   const seen = new Set<string>();
   for (const item of items) {
     const { subsystem, capability, value } = item ?? {};
-    const subDefs = (CAPABILITIES as Record<string, Record<string, { type: string }>>)[
-      subsystem
-    ];
+    const subDefs = (CAPABILITIES as Record<string, Record<string, CapDef>>)[subsystem];
     if (!subDefs) return `未知子系统：${subsystem}`;
     const def = subDefs[capability];
     if (!def) return `未知能力：${subsystem}.${capability}`;
@@ -99,6 +126,22 @@ export function validateEntitlementItems(items: Item[]): string | null {
         return `能力 ${subsystem}.${capability} 是开关,值必须为 "1"(撤销请删除该行),收到：${value}`;
       }
     } else {
+      const amount = value === "" ? null : Number(value);
+      if (
+        value === "" &&
+        def.optional === true &&
+        def.allowUnlimited !== true
+      ) {
+        return `能力 ${subsystem}.${capability} 是配额,值必须是非负整数,收到：${value}`;
+      }
+      if (
+        amount !== null &&
+        def.minimum !== undefined &&
+        amount < def.minimum &&
+        !(def.zeroAllowed && amount === 0)
+      ) {
+        return `能力 ${subsystem}.${capability} 不能小于 ${def.minimum}（0 另表示关闭），收到：${value}`;
+      }
       // quota:非负整数串(且在 JS 安全整数范围内) 或 ""(无限)。
       // 仅 /^\d+$/ 会放过任意长数字串,存下后 rowsToCaps 解析成 Infinity/失精 → 配额绕过。
       // 这里在写侧就拒掉溢出值,从源头杜绝。
@@ -310,6 +353,7 @@ export async function applyPresetEntitlements(
 ): Promise<number> {
   const items = await getPresetItems(db, name);
   if (!items || items.length === 0) return 0;
+  if (items.some(isManualOnlyEntitlementItem)) return 0;
   assertGenericEntitlementWriteAllowed(items);
   await drizzle(db)
     .insert(userEntitlement)
