@@ -1,4 +1,4 @@
-import { useState, FormEvent } from "react";
+import { useState, useRef, FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ActionButton, Button, Alert, AlertDescription, Input, Label } from "@cqu-moe/ui";
 import AuthLayout from "../components/AuthLayout";
@@ -21,32 +21,42 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const submitting = useRef(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (submitting.current) return;
+    if (!email.trim() || !password) {
+      setError("请输入邮箱和密码");
+      return;
+    }
+    submitting.current = true;
     setError("");
     setLoading(true);
-
-    const { data, error } = await authClient.signIn.email({ email, password });
-
-    setLoading(false);
-
-    if (error) {
-      setError(error.message ?? "登录失败，请检查邮箱和密码");
-    } else {
+    try {
+      const { data, error } = await authClient.signIn.email({ email: email.trim(), password });
+      if (error) {
+        setError(error.message ?? "登录失败，请检查邮箱和密码");
+        return;
+      }
       const destination = getLoginNavigationDestination(data, postLoginRedirect);
       if (!destination) return;
       await refetchSession();
-      if (isExternalHttpTarget(destination)) {
-        window.location.assign(destination);
-        return;
-      }
-      navigate(destination, { replace: true });
+      if (isExternalHttpTarget(destination)) window.location.assign(destination);
+      else navigate(destination, { replace: true });
+    } catch {
+      setError("网络连接失败，请检查网络后重试");
+    } finally {
+      submitting.current = false;
+      setLoading(false);
     }
   };
 
   const loginWithPasskey = async () => {
-    setLoading(true); setError("");
+    if (submitting.current) return;
+    submitting.current = true;
+    setLoading(true);
+    setError("");
     try {
       const { data, error } = await authClient.signIn.passkey();
       if (error) { setError("Passkey 登录未完成，请重试或使用密码登录"); return; }
@@ -56,7 +66,7 @@ export default function Login() {
       if (isExternalHttpTarget(destination)) window.location.assign(destination);
       else navigate(destination, { replace: true });
     } catch { setError("Passkey 登录未完成，请重试"); }
-    finally { setLoading(false); }
+    finally { submitting.current = false; setLoading(false); }
   };
 
   return (
@@ -64,9 +74,9 @@ export default function Login() {
       title="欢迎回来"
       description={scheduleSource ? "继续使用重庆大学课表" : "登录你的账户，继续使用校园服务。"}
     >
-      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+      <form onSubmit={handleSubmit} className="space-y-4" aria-busy={loading}>
         {error && (
-          <Alert variant="destructive">
+          <Alert variant="destructive" id="login-error">
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
@@ -79,6 +89,8 @@ export default function Login() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
+            readOnly={loading}
+            aria-describedby={error ? "login-error" : undefined}
             autoComplete="email"
             placeholder="your@email.com"
             autoCapitalize="none"
@@ -103,6 +115,8 @@ export default function Login() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
+            readOnly={loading}
+            aria-describedby={error ? "login-error" : undefined}
             autoComplete="current-password"
             placeholder="输入密码"
           />

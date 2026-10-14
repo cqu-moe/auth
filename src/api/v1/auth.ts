@@ -1,10 +1,57 @@
 import { expireLegacyAuthCookies } from "../../services/auth-cookies";
 import { inheritAuthResetRevision } from "../../services/auth-reset-revision";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { createAuth } from "../../auth";
 import { handleInvitationSignup } from "../../services/registration-invitations";
 import type { HonoEnv } from "../../types";
 import { AUTH_OPERATIONS } from "../auth-operations.generated";
+import {
+  captureAuthFlowFinished,
+  captureAuthFlowStarted,
+} from "../../lib/posthog";
+import {
+  authFlowDescriptor,
+  classifyAuthFlowResponse,
+  readResponseShape,
+  responseUserId,
+  type AuthFlowDescriptor,
+} from "./auth-telemetry";
+
+async function finishAuthFlowTelemetry(
+  c: Context<HonoEnv>,
+  descriptor: AuthFlowDescriptor,
+  operationId: string | null,
+  startedAt: number,
+  response: Response,
+  auth: ReturnType<typeof createAuth>
+): Promise<void> {
+  if (!descriptor.finish || !operationId) return;
+  const payload = await readResponseShape(response);
+  let distinctId: string | undefined;
+  if (descriptor.flow === "login") {
+    distinctId = responseUserId(payload);
+  } else {
+    try {
+      const session = await auth.api.getSession({ headers: c.req.raw.headers });
+      const userId = (session?.user as { id?: unknown } | undefined)?.id;
+      if (typeof userId === "string" && userId) distinctId = userId;
+    } catch {
+      // Authentication telemetry must not turn a session lookup into a business failure.
+    }
+  }
+  captureAuthFlowFinished(
+    c,
+    descriptor.flow,
+    operationId,
+    classifyAuthFlowResponse(descriptor, response, payload),
+    {
+      operation: descriptor.operation,
+      stage: descriptor.stage,
+      method: c.req.method,
+    },
+    { durationMs: Date.now() - startedAt, distinctId }
+  );
+}
 
 export function createAuthApi() {
   const router = new Hono<HonoEnv>();
@@ -26,14 +73,60 @@ export function createAuthApi() {
       const request = new Request(publicUrl, c.req.raw);
       inheritAuthResetRevision(c.env.DATABASE, c.req.raw, request);
       const auth = createAuth(c.env, request);
-      if (operation.path === "/sign-up/email") {
-        return handleInvitationSignup(
-          request,
-          c.env.DATABASE,
-          (forwarded) => auth.handler(forwarded)
-        );
+      const descriptor = authFlowDescriptor(operation.method, operation.path);
+      const operationId = descriptor
+        ? captureAuthFlowStarted(c, descriptor.flow, {
+          operation: descriptor.operation,
+          stage: descriptor.stage,
+          method: c.req.method,
+        })
+        : null;
+      const startedAt = Date.now();
+      let response: Response;
+      try {
+        if (operation.path === "/sign-up/email") {
+          response = await handleInvitationSignup(
+            request,
+            c.env.DATABASE,
+            (forwarded) => auth.handler(forwarded)
+          );
+        } else {
+          response = await auth.handler(request);
+        }
+      } catch (error) {
+        if (descriptor) {
+          captureAuthFlowFinished(
+            c,
+            descriptor.flow,
+            operationId,
+            "failure",
+            {
+              operation: descriptor.operation,
+              stage: descriptor.stage,
+              method: c.req.method,
+              error_code: "AUTH_HANDLER_ERROR",
+            },
+            { durationMs: Date.now() - startedAt }
+          );
+        }
+        throw error;
       }
-      return auth.handler(request);
+      if (descriptor) {
+        const completion = finishAuthFlowTelemetry(
+          c,
+          descriptor,
+          operationId,
+          startedAt,
+          response,
+          auth
+        ).catch(() => undefined);
+        try {
+          c.executionCtx.waitUntil(completion);
+        } catch {
+          void completion;
+        }
+      }
+      return response;
     });
   }
 

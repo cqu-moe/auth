@@ -1,0 +1,57 @@
+.quicklogin-device {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--space-3);
+  row-gap: var(--space-3);
+  align-items: start;
+  padding-block: var(--space-5);
+}
+
+.quicklogin-device:first-child {
+  padding-top: 0;
+}
+
+.quicklogin-device:last-child {
+  padding-bottom: 0;
+}
+
+.quicklogin-device-info {
+  grid-column: 1;
+  min-width: 0;
+}
+
+.quicklogin-device-name {
+  overflow-wrap: anywhere;
+}
+
+.quicklogin-device-action {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  justify-self: start;
+}
+
+.quicklogin-device-action:empty {
+  display: none;
+}
+
+.quicklogin-device-menu {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+}
+
+@media (min-width: 640px) {
+  .quicklogin-device {
+    grid-template-columns: minmax(0, 1fr) auto var(--space-12);
+    align-items: center;
+  }
+
+  .quicklogin-device-action {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .quicklogin-device-menu {
+    grid-column: 3;
+  }
+}

@@ -178,14 +178,7 @@ code {
   font-size: var(--text-xs);
   color: var(--muted-foreground);
 }
-.otp-input {
-  text-align: center;
-  font-family: var(--font-mono);
-  font-size: var(--text-xl);
-  font-weight: 600;
-  letter-spacing: 0.4em;
-  font-variant-numeric: tabular-nums;
-}
+
 
 /* ── 状态徽章 ── */
 .badge {
@@ -328,4 +321,29 @@ li[data-step-state='active'] .step-label {
   .animate-spin {
     animation: none;
   }
+}
+
+/* Session checks share quiet, delayed feedback; navigation is never held for animation. */
+.session-pending {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: var(--space-6);
+}
+.session-pending-feedback {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+}
+
+/* Keep short authentication forms usable with the software keyboard open. */
+@media (max-width: 767px) {
+  .auth-main {
+    padding-block: var(--space-6);
+    align-items: start;
+  }
+  .auth-wrap { gap: var(--space-5); }
+  .auth-footer { padding-bottom: max(var(--space-4), env(safe-area-inset-bottom)); }
 }
