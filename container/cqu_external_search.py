@@ -52,7 +52,7 @@ SESSION_INFO_URL = "https://my.cqu.edu.cn/api/resourceapi/session/info-detail"
 SESSION_LIST_URL = "https://my.cqu.edu.cn/api/resourceapi/session/list"
 DEPARTMENT_LIST_URL = "https://my.cqu.edu.cn/api/resourceapi/department/list"
 
-ADMIN_CLASS_ACTION_JS = """async ({ departmentName, grade, keyword }) => {
+ADMIN_CLASS_FILTER_ACTION_JS = """async ({ departmentName, grade }) => {
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const visible = element => !!element && element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
   const click = element => {
@@ -65,7 +65,8 @@ ADMIN_CLASS_ACTION_JS = """async ({ departmentName, grade, keyword }) => {
     element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   };
   const containerFor = text => {
-    for (const label of document.querySelectorAll('label')) {
+    for (const label of document.querySelectorAll('label,span')) {
+      if (label.tagName === 'SPAN' && label.children.length) continue;
       if (label.textContent.trim().replace(/[:：]\\s*$/, '') !== text) continue;
       const item = label.closest('.ant-form-item,.ant-row');
       return item?.querySelector('.ant-select') || label.nextElementSibling?.querySelector('.ant-select')
@@ -80,7 +81,7 @@ ADMIN_CLASS_ACTION_JS = """async ({ departmentName, grade, keyword }) => {
     if (!control) throw new Error('control missing: ' + label);
     if (!wanted) {
       const clear = control.querySelector('.ant-select-clear,.ant-select-selection__clear');
-      if (clear) click(clear);
+      if (clear && visible(clear)) click(clear);
       return;
     }
     click(control.querySelector('.ant-select-selector') || control);
@@ -95,16 +96,11 @@ ADMIN_CLASS_ACTION_JS = """async ({ departmentName, grade, keyword }) => {
     }
     throw new Error('option missing: ' + wanted);
   }
-  async function setKeyword(value) {
-    const item = [...document.querySelectorAll('.ant-form-item,.ant-row')].find(element =>
-      element.textContent?.trim().startsWith('班级名称'));
-    const input = item?.querySelector('input') || document.querySelector('input[placeholder*="班级"]');
-    if (!input) throw new Error('keyword control missing');
-    input.focus();
-    input.value = value;
-    input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-  }
+  const selectedText = label => {
+    const control = containerFor(label);
+    return (control?.querySelector('.ant-select-selection-item,.ant-select-selection-selected-value')?.textContent || '').trim();
+  };
+  const normalizeEmpty = text => ['', '全部', '全部学院'].includes(text) ? '' : text;
 
   await choose('查询范围', '行政班');
   await choose('学院', departmentName || '');
@@ -112,58 +108,134 @@ ADMIN_CLASS_ACTION_JS = """async ({ departmentName, grade, keyword }) => {
   for (const label of ['校区', '层次']) {
     const control = containerFor(label);
     const clear = control?.querySelector('.ant-select-clear,.ant-select-selection__clear');
-    if (clear) click(clear);
+    if (clear && visible(clear)) click(clear);
   }
-  await setKeyword(keyword);
-  const buttons = [...document.querySelectorAll('button')].filter(button => visible(button));
-  const submit = buttons.find(button => button.textContent.trim() === '查询');
-  if (!submit) throw new Error('query button missing');
-  click(submit);
-  return true;
+  return {
+    department: normalizeEmpty(selectedText('学院')),
+    grade: normalizeEmpty(selectedText('年级')),
+  };
 }"""
+
+ADMIN_CLASS_KEYWORD_ACTION_JS = """async ({ keyword }) => {
+  const visible = element => !!element && element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+  const label = [...document.querySelectorAll('label,span')].find(element =>
+    (element.tagName === 'LABEL' || element.children.length === 0)
+    && element.textContent?.trim().replace(/[:：]\\s*$/, '').startsWith('班级名称'));
+  const placeholder = [...document.querySelectorAll('.ant-select-selection__placeholder')]
+    .find(element => element.textContent?.includes('行政班名字快速查询'));
+  const item = label?.closest('.ant-form-item,.ant-row') || label?.parentElement
+    || placeholder?.closest('.ant-select')?.parentElement;
+  const input = item?.querySelector('input')
+    || placeholder?.closest('.ant-select')?.querySelector('input')
+    || document.querySelector('input[placeholder*="班级"],input[placeholder*="行政班"]');
+  if (!input || !visible(input)) throw new Error('keyword control missing');
+  input.focus();
+  input.value = keyword;
+  input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: keyword }));
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  return input.value;
+}"""
+
+
+def _is_expected_search_request(request, expected_origin: str, filters: dict) -> bool:
+    parsed = urllib.parse.urlsplit(getattr(request, "url", ""))
+    response_origin = f"{parsed.scheme}://{parsed.netloc}"
+    if response_origin != expected_origin or parsed.path != ADMIN_SEARCH_MARKER:
+        return False
+    if getattr(request, "method", "").upper() != "POST":
+        return False
+
+    query = urllib.parse.parse_qs(parsed.query)
+    expected_grade = filters.get("grade", "")
+    for name in ("grade", "gradeId"):
+        if name in query and query[name] != [expected_grade]:
+            return False
+    expected_keyword = filters.get("keyword", "")
+    for name in ("className", "adminClassName", "keyword"):
+        if name in query and query[name] != [expected_keyword]:
+            return False
+
+    post_data = getattr(request, "post_data", None)
+    if not isinstance(post_data, str):
+        return False
+    try:
+        body = json.loads(post_data)
+    except Exception:
+        return False
+    if not isinstance(body, list):
+        return False
+    return body == [] if not filters.get("departmentName", "") else len(body) > 0
 
 
 async def perform_admin_class_search(page, filters: dict) -> dict:
     """Drive visible controls and capture only the admin-class business response."""
-    captured: dict[str, dict] = {}
+    captures: list[dict] = []
     expected_page_url = urllib.parse.urlsplit(page.url)
     expected_origin = f"{expected_page_url.scheme}://{expected_page_url.netloc}"
-    latest: dict[str, object] = {}
-    tasks: set[asyncio.Task] = []
+    accepted_requests: dict[int, object] = {}
+    tasks: set[asyncio.Task] = set()
     closed = False
+    submit_started = False
+
+    def on_request(request) -> None:
+        if closed or not submit_started:
+            return
+        if _is_expected_search_request(request, expected_origin, filters):
+            accepted_requests[id(request)] = request
 
     def on_response(response) -> None:
         if closed:
             return
-        parsed = urllib.parse.urlsplit(getattr(response, "url", ""))
-        response_origin = f"{parsed.scheme}://{parsed.netloc}"
-        if response_origin != expected_origin or parsed.path != ADMIN_SEARCH_MARKER:
+        request = getattr(response, "request", None)
+        if id(request) not in accepted_requests:
             return
-        latest["response"] = response
-        captured.clear()
-        tasks.append(asyncio.create_task(_read_search_response(response, captured)))
+        tasks.add(asyncio.create_task(_read_search_response(response, captures)))
 
     async def close_collector() -> None:
         nonlocal closed
         closed = True
+        for task in tuple(tasks):
+            if not task.done():
+                task.cancel()
         if tasks:
-            await asyncio.wait(tasks, timeout=0.5)
+            await asyncio.gather(*tasks, return_exceptions=True)
 
-    page.on_response(on_response)
     try:
         outcome = await page.evaluate("""async (args) => {
-          try { return { ok: true, value: await (""" + ADMIN_CLASS_ACTION_JS + """)(args) }; }
-          catch (error) { return { ok: false, error: error && error.message ? error.message : 'action failed' }; }
+          try { return { ok: true, value: await (""" + ADMIN_CLASS_FILTER_ACTION_JS + """)(args) }; }
+          catch (error) { return { ok: false, error: error ? String(error.message || error) : 'action failed' }; }
         }""", {
             "departmentName": filters.get("departmentName", ""),
             "grade": filters.get("grade", ""),
-            "keyword": filters.get("keyword", ""),
         })
         if not isinstance(outcome, dict) or outcome.get("ok") is not True:
-            raise RuntimeError(outcome.get("error", "admin-class action failed") if isinstance(outcome, dict) else "admin-class action failed")
+            raise RuntimeError(str(outcome.get("error", "admin-class action failed")) if isinstance(outcome, dict) else "admin-class action failed")
+        visibleFilters = outcome.get("value")
+        expectedFilters = {
+            "department": filters.get("departmentName", ""),
+            "grade": filters.get("grade", ""),
+        }
+        if visibleFilters != expectedFilters:
+            raise RuntimeError("admin-class filters did not settle")
+
+        page.on_request(on_request)
+        page.on_response(on_response)
+        submit_started = True
+        keywordOutcome = await page.evaluate("""async (args) => {
+          try { return { ok: true, value: await (""" + ADMIN_CLASS_KEYWORD_ACTION_JS + """)(args) }; }
+          catch (error) { return { ok: false, error: error ? String(error.message || error) : 'action failed' }; }
+        }""", {"keyword": filters.get("keyword", "")})
+        if (
+            not isinstance(keywordOutcome, dict) or keywordOutcome.get("ok") is not True
+            or keywordOutcome.get("value") != filters.get("keyword", "")
+        ):
+            raise RuntimeError(
+                str(keywordOutcome.get("error", "admin-class keyword failed"))
+                if isinstance(keywordOutcome, dict) else "admin-class keyword failed"
+            )
         deadline = asyncio.get_running_loop().time() + 12
         while asyncio.get_running_loop().time() < deadline:
-            capture = captured
+            capture = captures[0] if captures else {}
             status = capture.get("status", 0)
             if status == 403:
                 raise ExternalSearchTransientError("PAGE_PERMISSION_DENIED")
@@ -181,14 +253,16 @@ async def perform_admin_class_search(page, filters: dict) -> dict:
         await close_collector()
 
 
-async def _read_search_response(response, captured: dict) -> None:
+async def _read_search_response(response, captures: list[dict]) -> None:
     try:
-        captured["status"] = getattr(response, "status", 0)
-        captured["body"] = await response.text()
+        captures.append({
+            "status": getattr(response, "status", 0),
+            "body": await response.text(),
+        })
     except asyncio.CancelledError:
         raise
     except Exception:
-        captured.clear()
+        return
 
 
 def _json_body(entry: dict, code: str) -> object:

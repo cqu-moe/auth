@@ -7,17 +7,30 @@ import {
   type CapDef,
   type Subsystem,
 } from "../../../shared/capabilities";
-import { SUBSYSTEM_LABELS, type EntitlementForm } from "./entitlement-form";
+import MenuSelect from "./MenuSelect";
+import {
+  SUBSYSTEM_LABELS,
+  type EntitlementForm,
+  type OptionalQuotaState,
+} from "./entitlement-form";
 
 export function EntitlementMatrix({
   form,
   onChange,
   quickloginPolicyReadOnly = false,
+  manualOnlyHidden = false,
 }: {
   form: EntitlementForm;
   onChange: (next: EntitlementForm) => void;
   quickloginPolicyReadOnly?: boolean;
+  manualOnlyHidden?: boolean;
 }) {
+  type OptionalQuotaOption = {
+    value: OptionalQuotaState;
+    label: string;
+    hint?: string;
+  };
+
   const setFlag = (key: string, flag: boolean) =>
     onChange({ ...form, [key]: { ...form[key], flag } });
   const setQuota = (key: string, quota: string) =>
@@ -25,6 +38,21 @@ export function EntitlementMatrix({
     onChange({
       ...form,
       [key]: { ...form[key], quota: quota.replace(/[^\d]/g, "") },
+    });
+  const setOptionalNumber = (key: string, quota: string) => {
+    const digits = quota.replace(/[^\d]/g, "");
+    onChange({
+      ...form,
+      [key]: { optionalQuota: "number", quota: digits },
+    });
+  };
+  const setOptionalState = (key: string, state: OptionalQuotaState) =>
+    onChange({
+      ...form,
+      [key]:
+        state === "number"
+          ? { optionalQuota: "number", quota: form[key]?.quota ?? "" }
+          : { optionalQuota: state },
     });
 
   return (
@@ -43,6 +71,7 @@ export function EntitlementMatrix({
               {Object.keys(caps).map((capability) => {
                 const def = caps[capability];
                 const key = `${subsystem}.${capability}`;
+                if (def.manualOnly && manualOnlyHidden) return null;
                 if (
                   quickloginPolicyReadOnly &&
                   (key === "cqu.quicklogin_device_limit" || key === "cqu.quicklogin")
@@ -84,6 +113,54 @@ export function EntitlementMatrix({
                         {capability}
                       </span>
                     </label>
+                  );
+                }
+                if (def.optional) {
+                  const state = form[key]?.optionalQuota ?? "unset";
+                  const options: OptionalQuotaOption[] = [
+                    { value: "unset", label: "未授予" },
+                    ...(def.allowUnlimited
+                      ? [{
+                          value: "unlimited" as const,
+                          label: "无限",
+                          hint: "明确授权不限次数",
+                        }]
+                      : []),
+                    { value: "number", label: "指定数值" },
+                  ];
+                  return (
+                    <div key={key} className="flex flex-wrap items-center gap-3 rounded-lg p-2">
+                      <span className="text-sm text-foreground">{def.label}</span>
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {capability}
+                      </span>
+                      <div className="ml-auto flex items-center gap-1.5">
+                        <MenuSelect
+                          value={state}
+                          options={options}
+                          onChange={(next) => setOptionalState(key, next)}
+                          aria-label={`${def.label}授权状态`}
+                          size="sm"
+                        />
+                        {state === "number" && (
+                          <Input
+                            type="number"
+                            min={def.zeroAllowed ? 0 : def.minimum ?? 0}
+                            inputMode="numeric"
+                            value={form[key]?.quota ?? ""}
+                            onChange={(e) => setOptionalNumber(key, e.target.value)}
+                            className="w-24"
+                            aria-label={`${def.label}数值`}
+                          />
+                        )}
+                        {def.unit && state !== "unset" && (
+                          <span className="text-xs text-muted-foreground">{def.unit}</span>
+                        )}
+                      </div>
+                      {def.hint && (
+                        <p className="basis-full text-xs text-muted-foreground">{def.hint}</p>
+                      )}
+                    </div>
                   );
                 }
                 // quota:数字输入框,空=无限。

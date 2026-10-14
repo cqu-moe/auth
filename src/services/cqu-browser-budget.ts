@@ -9,6 +9,9 @@ export const CONTAINER_BROWSER_DEADLINE_MS = 210_000;
 /** 课表采集允许 5 分钟浏览器工作，另给排队、清理和 DO 收尾留足余量。 */
 export const CONTAINER_HARVEST_DEADLINE_MS = 380_000;
 
+/** 外部搜索保持在浏览器 API 单请求上限内，并预留 DO/浏览器清理时间。 */
+export const CONTAINER_EXTERNAL_SEARCH_DEADLINE_MS = 90_000;
+
 /** DO 在截止时间前预留的处理/清理余量。 */
 export const BROWSER_CLEANUP_MARGIN_MS = 20_000;
 

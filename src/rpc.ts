@@ -403,6 +403,7 @@ export class AuthService extends WorkerEntrypoint<Env> {
     const doUrl = new URL("https://do/external-search");
     doUrl.searchParams.set("clientId", args.clientId);
     doUrl.searchParams.set("source", "rpc");
+    if (typeof args.deadlineAt === "number") doUrl.searchParams.set("deadlineAt", String(args.deadlineAt));
     const resp = await stub.fetch(new Request(doUrl.toString(), {
       method: "POST",
       body: JSON.stringify(recipe),

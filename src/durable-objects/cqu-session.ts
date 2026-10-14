@@ -34,6 +34,7 @@ import {
   BROWSER_CLEANUP_MARGIN_MS,
   BROWSER_INVOCATION_BUDGET_MS,
   CONTAINER_BROWSER_DEADLINE_MS,
+  CONTAINER_EXTERNAL_SEARCH_DEADLINE_MS,
   CONTAINER_HARVEST_DEADLINE_MS,
   remainingBrowserBudget,
   resolveBrowserDeadline,
@@ -575,11 +576,13 @@ export class CquSessionDO extends DurableObject<Env> {
           const clientId = url.searchParams.get("clientId") || null;
           const rawSource = url.searchParams.get("source");
           const source = rawSource === "route" || rawSource === "rpc" ? rawSource : "unknown";
+          const rawDeadlineAt = url.searchParams.get("deadlineAt");
           const recipe = await request.json<unknown>();
           const result = await this.externalSearch({
             recipe,
             clientId,
             source,
+            deadlineAt: rawDeadlineAt === null ? undefined : Number(rawDeadlineAt),
           });
           return Response.json(result);
         }
@@ -1271,6 +1274,7 @@ export class CquSessionDO extends DurableObject<Env> {
     recipe: unknown;
     clientId: string | null;
     source: string;
+    deadlineAt?: number;
   }): Promise<Record<string, unknown>> {
     const recipe = parseExternalSearchRecipe(arg.recipe);
     if ("error" in recipe) {
@@ -1315,8 +1319,8 @@ export class CquSessionDO extends DurableObject<Env> {
     let outcome = "INTERNAL_ERROR";
     try {
       const budget = this.browserOperationBudget(
-        resolveBrowserDeadline(undefined, now),
-        CONTAINER_HARVEST_DEADLINE_MS
+        resolveBrowserDeadline(arg.deadlineAt, now),
+        CONTAINER_EXTERNAL_SEARCH_DEADLINE_MS
       );
       const requestBody: Record<string, unknown> = {
         state: sourceSession.storageState,

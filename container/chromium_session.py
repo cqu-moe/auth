@@ -242,12 +242,14 @@ def seed_origins(state: dict | None) -> dict:
 
 
 class NetworkResponse:
-    def __init__(self, cdp, params):
+    def __init__(self, cdp, params, request=None):
         data = params["response"]
         self.url = data["url"]
         self.status = int(data["status"])
         self.headers = {key.lower(): str(value) for key, value in data.get("headers", {}).items()}
-        self.request = SimpleNamespace(resource_type=params.get("type", "Other").lower())
+        self.request = request if request is not None else SimpleNamespace(
+            resource_type=params.get("type", "Other").lower()
+        )
         self.request_id = params["requestId"]
         self._cdp = cdp
         self._finished = asyncio.Event()
@@ -294,6 +296,7 @@ class ChromiumSession:
         self._storage = {origin: dict(items) for origin, items in seed_origins(seed_state).items()}
         self._requests = []
         self._responses = []
+        self._network_requests = {}
         self._bodies = {}
         self._tasks = set()
         self._navigation = asyncio.Event()
@@ -365,12 +368,23 @@ class ChromiumSession:
         for name, value in redirect.get("headers", {}).items():
             if name.lower() == "location":
                 self._remember_ticket(value)
-        request = SimpleNamespace(url=url, resource_type=params.get("type", "Other").lower())
+        wire_request = params.get("request", {})
+        request = SimpleNamespace(
+            url=url,
+            method=wire_request.get("method", ""),
+            post_data=wire_request.get("postData"),
+            resource_type=params.get("type", "Other").lower(),
+        )
+        self._network_requests[params["requestId"]] = request
         for callback in self._requests:
             callback(request)
 
     def _on_response(self, params):
-        response = NetworkResponse(self.cdp, params)
+        response = NetworkResponse(
+            self.cdp,
+            params,
+            self._network_requests.get(params["requestId"]),
+        )
         self._bodies[response.request_id] = response
         self._remember_ticket(response.url)
         self._remember_ticket(response.headers.get("location", ""))
