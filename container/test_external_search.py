@@ -95,6 +95,20 @@ class ExternalSearchTestCase(AioHTTPTestCase):
         assert body["items"] == [{"id": "teacher-1", "name": "张三", "extra": "10001 / 电气工程学院 / A校区"}]
         assert body["truncated"] is True
 
+    async def test_fixed_room_and_laboratory_recipes_keep_canonical_candidate_names(self):
+        for source_type in ("room", "laboratory"):
+            async def fake_search(state, recipe):
+                assert recipe["action"] == source_type + "_search"
+                return {"contractVersion": 1, "sourceType": source_type,
+                    "session": {"id": "session-current", "name": "2026秋"},
+                    "items": [{"id": "room-1", "name": "实验室101", "extra": "实验楼", "privateField": "SECRET"}], "truncated": False}
+            server.cqu_external_search.external_search = fake_search
+            response = await self.client.post("/external-search", json={"state": {"cookies": [], "origins": []}, "action": source_type + "_search", "keyword": "101"})
+            assert response.status == 200
+            body = await response.json()
+            assert body["sourceType"] == source_type
+            assert body["items"] == [{"id": "room-1", "name": "实验室101", "extra": "实验楼"}]
+
     async def test_external_search_reports_bounded_business_telemetry(self):
         async def fake_search(state, recipe):
             return {

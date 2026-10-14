@@ -8,7 +8,11 @@ import urllib.parse
 import browser_profile
 from chromium_session import ChromiumSession
 from cqu_data_harvest import StageTrace, is_expired_harvest, run_serial_inpage_gets
-from cqu_external_search import perform_admin_class_search, perform_instructor_search, perform_room_search
+from cqu_external_search import (
+    ExternalSearchRecipeError, ExternalSearchTransientError,
+    perform_admin_class_search, perform_instructor_search,
+    perform_room_search, perform_laboratory_search,
+)
 
 
 ALLOWED_RECIPE_KEYS = frozenset({
@@ -24,11 +28,13 @@ CAPTURE_ACTIONS = {
     "admin_class": "admin_class_capture",
     "instructor": "instructor_capture",
     "room": "room_capture",
+    "laboratory": "laboratory_capture",
 }
 CAPTURE_TABLE_MARKERS = {
     "admin_class": ADMIN_TABLE_MARKER,
     "instructor": INSTRUCTOR_TABLE_MARKER,
     "room": "/api/timetable/class/timetable/room/table-detail",
+    "laboratory": "/api/timetable/class/timetable/room/table-detail",
 }
 
 
@@ -107,7 +113,7 @@ CLEAR_SELECTED_TARGETS_JS = """async () => {
     element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   };
   const removals = [...document.querySelectorAll(
-    '.ant-select-selection__choice__remove,.ant-select-selection__choice-remove'
+    '.ant-select-selection__choice__remove,.ant-select-selection__choice-remove,.ant-select-selection-item-remove'
   )].filter(visible);
   for (const removal of removals) click(removal);
   return removals.length;
@@ -241,10 +247,11 @@ def _search_target(value: object, recipe: dict) -> None:
         raise ExternalCaptureTransientError("SCHEMA_INVALID")
     by_name = []
     by_id = []
+    name_key = {"admin_class": "className", "instructor": "name", "room": "name", "laboratory": "roomName"}[recipe["sourceType"]]
     for item in value:
         if not isinstance(item, dict):
             raise ExternalCaptureTransientError("SCHEMA_INVALID")
-        name = item.get("className") if recipe["sourceType"] == "admin_class" else item.get("name")
+        name = item.get(name_key)
         if str(item.get("id", "")) == recipe["targetId"]:
             by_id.append(item)
         if name == recipe["targetName"]:
@@ -253,14 +260,14 @@ def _search_target(value: object, recipe: dict) -> None:
         raise ExternalCaptureTransientError("AMBIGUOUS_TARGET")
     if len(by_id) > 1:
         raise ExternalCaptureTransientError("AMBIGUOUS_TARGET")
-    if len(by_id) != 1 or by_id[0].get("className" if recipe["sourceType"] == "admin_class" else "name") != recipe["targetName"]:
+    if len(by_id) != 1 or by_id[0].get(name_key) != recipe["targetName"]:
         raise ExternalCaptureTransientError("TARGET_NOT_FOUND")
     if recipe["sourceType"] == "admin_class" and len(by_name) != 1:
         raise ExternalCaptureTransientError("AMBIGUOUS_TARGET" if by_name else "TARGET_NOT_FOUND")
 
 
 def _sanitized_timetable(value: object, target_id: str, source_type: str = "admin_class", sanitized: bool = False) -> dict:
-    room = source_type == "room"
+    room = source_type in {"room", "laboratory"}
     allowed_arrays = {"classTimetableVOList"} | ({"roomExamTimeTableVOList", "tempActivityTimetableVOList"} if room and not sanitized else set())
     if not isinstance(value, dict) or any(isinstance(item, list) and key not in allowed_arrays for key, item in value.items()):
         raise ExternalCaptureTransientError("SCHEMA_INVALID")
@@ -354,15 +361,7 @@ async def _clear_selected_targets(page) -> None:
         raise ExternalCaptureTransientError("CAPTURE_TRANSIENT") from None
 
 
-async def capture_admin_class(page, recipe: dict) -> dict:
-    return await _capture_target(page, recipe)
-
-
-async def capture_instructor(page, recipe: dict) -> dict:
-    return await _capture_target(page, recipe)
-
-
-async def _capture_target(page, recipe: dict) -> dict:
+async def capture_timetable(page, recipe: dict) -> dict:
     """Search normally, select the exact ID, and capture the current table response."""
     trace = StageTrace()
     entries: list[dict] = []
@@ -382,10 +381,21 @@ async def _capture_target(page, recipe: dict) -> dict:
         raise ExternalCaptureTransientError("CURRENT_SESSION_CHANGED")
 
     await _clear_selected_targets(page)
-    search_action = {"instructor": perform_instructor_search, "room": perform_room_search, "admin_class": perform_admin_class_search}[recipe["sourceType"]]
-    search = await search_action(page, {
-        "departmentId": "", "departmentName": "", "grade": "", "keyword": recipe["targetName"],
-    })
+    search_action = {"instructor": perform_instructor_search, "room": perform_room_search, "laboratory": perform_laboratory_search, "admin_class": perform_admin_class_search}[recipe["sourceType"]]
+    try:
+        search = await search_action(page, {
+            "departmentId": "", "departmentName": "", "grade": "", "keyword": recipe["targetName"],
+        })
+    except ExternalSearchTransientError as error:
+        code = {
+            "SEARCH_CAPTURE_TIMEOUT": "CAPTURE_MISSING",
+            "SEARCH_REQUEST_HUNG": "CAPTURE_BODY_TIMEOUT",
+            "SEARCH_BODY_TIMEOUT": "CAPTURE_BODY_TIMEOUT",
+            "SEARCH_API_REJECTED": "CAPTURE_API_REJECTED",
+        }.get(error.code, error.code if error.code in ERROR_STATUS else "CAPTURE_TRANSIENT")
+        raise ExternalCaptureTransientError(code) from None
+    except ExternalSearchRecipeError:
+        raise ExternalCaptureTransientError("SCHEMA_INVALID") from None
     _search_target(_json_entry(search, "CAPTURE_API_REJECTED"), recipe)
 
     captures: list[dict] = []
@@ -494,4 +504,4 @@ async def external_capture(state: dict, recipe: dict) -> dict:
             raise ExternalCaptureTransientError("APP_READY_TIMEOUT") from None
         if is_expired_harvest({}, await browser.content(), browser.url):
             raise ExternalCaptureTransientError("TGT_EXPIRED")
-        return sanitize_external_capture_result(await capture_admin_class(browser, recipe))
+        return sanitize_external_capture_result(await capture_timetable(browser, recipe))

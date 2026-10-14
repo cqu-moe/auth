@@ -330,7 +330,7 @@ def run_real_browser(monkeypatch, tmp_path, table_marker=None, recipe=None, **si
         try:
             async with chromium_session.ChromiumSession() as browser:
                 await browser.navigate(origin + "/", timeout_s=5)
-                result = await cqu_external_capture.capture_admin_class(browser, recipe or fixed_recipe())
+                result = await cqu_external_capture.capture_timetable(browser, recipe or fixed_recipe())
                 term_touched = await browser.evaluate("window.termTouched")
                 target_cleared = await browser.evaluate("window.targetCleared")
                 return result, calls, term_touched, target_cleared
@@ -504,7 +504,7 @@ INSTRUCTOR_CAPTURE_HTML = """<!doctype html><html><body>
   </script></body></html>"""
 
 
-async def start_instructor_capture_site(*, table_body=None, search_items=None, expose_identity=True, source_type="instructor"):
+async def start_instructor_capture_site(*, table_body=None, search_items=None, expose_identity=True, source_type="instructor", search_status=200):
     supplied_items = search_items
     if search_items is None:
         search_items = [
@@ -527,6 +527,14 @@ async def start_instructor_capture_site(*, table_body=None, search_items=None, e
         search_items = supplied_items if supplied_items is not None else [{"id": "room-1", "name": "D101", "buildingName": "教学楼", "campusName": "A校区"}]
         html = html.replace("教师", "教室").replace("姓名或工号", "名称").replace("nameOrCode", "roomName").replace("/api/timetable/instructor/filter", "/api/resourceapi/room/roomName-filter").replace("/instructor/table-detail", "/room/table-detail").replace("teacher-old", "room-old")
         search_path = "/api/resourceapi/room/roomName-filter"
+        table_path = "/api/timetable/class/timetable/room/table-detail"
+    if source_type == "laboratory":
+        search_items = supplied_items if supplied_items is not None else [{"id": "room-1", "roomName": "实验室101", "buildingName": "实验楼", "campusName": "B校区"}]
+        html = INSTRUCTOR_CAPTURE_HTML.replace("教师", "实验室").replace("姓名或工号", "名称").replace("nameOrCode", "roomName").replace("/api/timetable/instructor/filter", "/api/timetable/course/LaboratoryId-filter").replace("/instructor/table-detail", "/room/table-detail").replace("teacher-old", "room-old").replace("item.name", "item.roomName")
+        html = html.replace('<main aria-label="排课管理">', '<main aria-label="排课管理"><div><span>实验中心：</span><div class="ant-select"><span class="ant-select-selection-item">旧中心</span><span class="ant-select-clear" data-control="center-clear">×</span></div></div>')
+        html = html.replace("window.range = '行政班';", "window.range = '行政班'; window.centerId = 'center-old'; document.querySelector('[data-control=center-clear]').onclick = () => { window.centerId = ''; };")
+        html = html.replace("const response = await fetch", "if (window.centerId) query.set('laboratoryId', window.centerId); const response = await fetch")
+        search_path = "/api/timetable/course/LaboratoryId-filter"
         table_path = "/api/timetable/class/timetable/room/table-detail"
     app = web.Application()
     calls = {"search": [], "table": []}
@@ -551,13 +559,14 @@ async def start_instructor_capture_site(*, table_body=None, search_items=None, e
         calls["search"].append({
             "keyword": request.query.get("nameOrCode") or request.query.get("roomName"),
             "limit": request.query.get("limitNum"),
+            **({"center": request.query.get("laboratoryId")} if source_type == "laboratory" else {}),
         })
-        return web.json_response(search_items)
+        return web.json_response(search_items, status=search_status)
 
     async def table(request):
         body = await request.text()
         calls["table"].append(body)
-        if body != ('["room-1"]' if source_type == "room" else '["teacher-1"]'):
+        if body != ('["room-1"]' if source_type in {"room", "laboratory"} else '["teacher-1"]'):
             await asyncio.sleep(0.75)
             return web.json_response({
                 "classTimetableVOList": [{
@@ -591,7 +600,7 @@ def test_real_browser_instructor_capture_selects_exact_id_and_sanitizes(monkeypa
         try:
             async with chromium_session.ChromiumSession() as browser:
                 await browser.navigate(origin + "/", timeout_s=5)
-                result = await cqu_external_capture.capture_instructor(browser, instructor_recipe())
+                result = await cqu_external_capture.capture_timetable(browser, instructor_recipe())
                 term_touched = await browser.evaluate("window.termTouched")
                 target_cleared = await browser.evaluate("window.targetCleared")
         finally:
@@ -617,7 +626,7 @@ def test_real_browser_accepts_valid_empty_instructor_timetable(monkeypatch, tmp_
         try:
             async with chromium_session.ChromiumSession() as browser:
                 await browser.navigate(origin + "/", timeout_s=5)
-                result = await cqu_external_capture.capture_instructor(browser, instructor_recipe())
+                result = await cqu_external_capture.capture_timetable(browser, instructor_recipe())
         finally:
             await runner.cleanup()
         assert result == {
@@ -637,7 +646,7 @@ def test_real_browser_same_name_without_visible_identity_fails_without_selecting
             async with chromium_session.ChromiumSession() as browser:
                 await browser.navigate(origin + "/", timeout_s=5)
                 with pytest.raises(cqu_external_capture.ExternalCaptureTransientError) as raised:
-                    await cqu_external_capture.capture_instructor(browser, instructor_recipe())
+                    await cqu_external_capture.capture_timetable(browser, instructor_recipe())
                 assert raised.value.code == "AMBIGUOUS_TARGET"
                 assert '["teacher-1"]' not in calls["table"]
                 assert '["teacher-other"]' not in calls["table"]
@@ -646,8 +655,9 @@ def test_real_browser_same_name_without_visible_identity_fails_without_selecting
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("source_type", ["room", "laboratory"])
 @pytest.mark.parametrize("case", ["partial", "empty", "activity_only", "unknown", "malformed", "missing", "wrong_owner"])
-def test_real_browser_room_capture_validates_ownership_and_extra_activity_arrays(monkeypatch, tmp_path, case):
+def test_real_browser_room_capture_validates_ownership_and_extra_activity_arrays(monkeypatch, tmp_path, case, source_type):
     async def run():
         import cqu_external_capture
         table = {"classTimetableVOList": [{"courseName": "高等数学", "weekDay": 1, "teachingWeek": "110", "period": "101", "roomId": "room-1"}], "maxSection": 12, "roomExamTimeTableVOList": [{"privateField": "SECRET"}], "tempActivityTimetableVOList": [{}, {}]}
@@ -663,10 +673,16 @@ def test_real_browser_room_capture_validates_ownership_and_extra_activity_arrays
             table["tempActivityTimetableVOList"] = {}
         elif case == "wrong_owner":
             table["classTimetableVOList"][0]["roomId"] = "room-other"
-        runner, origin, calls = await start_instructor_capture_site(source_type="room", table_body=table)
+        if source_type == "laboratory":
+            for row in table["classTimetableVOList"]:
+                row["exprProjectName"] = "电路实验"
+        name_key = "roomName" if source_type == "laboratory" else "name"
+        name = "实验室101" if source_type == "laboratory" else "D101"
+        candidates = [{"id": "room-other", name_key: name}, {"id": "room-1", name_key: name}]
+        runner, origin, calls = await start_instructor_capture_site(source_type=source_type, table_body=table, search_items=candidates)
         monkeypatch.setenv("CQU_CDP_RUNTIME_DIR", str(tmp_path))
         monkeypatch.setattr(cqu_external_capture, "ALL_COURSE_URL", origin + "/")
-        recipe = {"action": "room_capture", "sourceType": "room", "targetId": "room-1", "targetName": "D101", "expectedSessionId": "session-current"}
+        recipe = {"action": source_type + "_capture", "sourceType": source_type, "targetId": "room-1", "targetName": "D101" if source_type == "room" else "实验室101", "expectedSessionId": "session-current"}
         try:
             if case in {"unknown", "malformed", "missing", "wrong_owner"}:
                 with pytest.raises(cqu_external_capture.ExternalCaptureTransientError) as raised:
@@ -674,7 +690,7 @@ def test_real_browser_room_capture_validates_ownership_and_extra_activity_arrays
                 assert raised.value.code == "SCHEMA_INVALID"
             else:
                 result = await cqu_external_capture.external_capture({"cookies": [], "origins": []}, recipe)
-                assert result["sourceType"] == "room"
+                assert result["sourceType"] == source_type
                 assert result["target"]["id"] == "room-1"
                 assert result["timetable"] == {"classTimetableVOList": table["classTimetableVOList"], "maxSection": 12, "unverifiedItemCount": 0 if case == "empty" else 3}
                 assert calls["table"] == ['["room-old"]', '["room-1"]']
@@ -684,23 +700,43 @@ def test_real_browser_room_capture_validates_ownership_and_extra_activity_arrays
     asyncio.run(run())
 
 
-def test_real_browser_room_search_projects_candidates_and_marks_50_as_truncated(monkeypatch, tmp_path):
+@pytest.mark.parametrize("source_type", ["room", "laboratory"])
+def test_real_browser_room_search_projects_candidates_and_marks_50_as_truncated(monkeypatch, tmp_path, source_type):
     async def run():
         import cqu_external_search
         items = [{"id": f"room-{index}", "name": f"D{index}", "buildingName": "教学楼", "campusName": "A校区", "privateField": "SECRET"} for index in range(50)]
-        runner, origin, calls = await start_instructor_capture_site(source_type="room", search_items=items)
+        if source_type == "laboratory":
+            items = [{"id": item["id"], "roomName": item["name"], "buildingName": item["buildingName"], "campusName": item["campusName"], "privateField": "SECRET"} for item in items]
+        runner, origin, calls = await start_instructor_capture_site(source_type=source_type, search_items=items)
         monkeypatch.setenv("CQU_CDP_RUNTIME_DIR", str(tmp_path))
         monkeypatch.setattr(cqu_external_search, "ALL_COURSE_URL", origin + "/")
         monkeypatch.setattr(cqu_external_search, "SESSION_INFO_URL", origin + "/api/resourceapi/session/info-detail")
         monkeypatch.setattr(cqu_external_search, "SESSION_LIST_URL", origin + "/api/resourceapi/session/list")
         try:
-            result = await cqu_external_search.external_search({"cookies": [], "origins": []}, {"action": "room_search", "keyword": "D", "departmentId": "", "departmentName": "", "grade": ""})
-            assert result["sourceType"] == "room"
+            result = await cqu_external_search.external_search({"cookies": [], "origins": []}, {"action": source_type + "_search", "keyword": "D", "departmentId": "", "departmentName": "", "grade": ""})
+            assert result["sourceType"] == source_type
             assert result["items"][0] == {"id": "room-0", "name": "D0", "extra": "教学楼 / A校区"}
             assert len(result["items"]) == 50
             assert result["truncated"] is True
-            assert calls["search"] == [{"keyword": "D", "limit": "50"}]
+            assert calls["search"] == [{"keyword": "D", "limit": "50", **({"center": None} if source_type == "laboratory" else {})}]
             assert "SECRET" not in json.dumps(result)
+        finally:
+            await runner.cleanup()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("source_type", ["instructor", "room", "laboratory"])
+def test_real_browser_capture_keeps_search_permission_failure(monkeypatch, tmp_path, source_type):
+    async def run():
+        import cqu_external_capture
+        runner, origin, calls = await start_instructor_capture_site(source_type=source_type, search_status=403)
+        monkeypatch.setenv("CQU_CDP_RUNTIME_DIR", str(tmp_path))
+        monkeypatch.setattr(cqu_external_capture, "ALL_COURSE_URL", origin + "/")
+        try:
+            with pytest.raises(cqu_external_capture.ExternalCaptureTransientError) as raised:
+                await cqu_external_capture.external_capture({"cookies": [], "origins": []}, {"action": source_type + "_capture", "sourceType": source_type, "targetId": "teacher-1" if source_type == "instructor" else "room-1", "targetName": "张三" if source_type == "instructor" else "D101" if source_type == "room" else "实验室101", "expectedSessionId": "session-current"})
+            assert raised.value.code == "PAGE_PERMISSION_DENIED"
+            assert all(body in ('["teacher-old"]', '["room-old"]') for body in calls["table"])
         finally:
             await runner.cleanup()
     asyncio.run(run())
