@@ -301,11 +301,16 @@ def test_admin_class_action_distinguishes_page_permission_denied(monkeypatch, tm
     asyncio.run(run())
 
 
-async def start_instructor_site(search_status=200, page_delay_ms=0):
+async def start_instructor_site(search_status=200, page_delay_ms=0, bootstrap_reload=False):
     app = __import__("aiohttp", fromlist=["web"]).web.Application()
     calls = []
 
     async def page(_request):
+        if bootstrap_reload and _request.query.get("ready") != "1":
+            return __import__("aiohttp", fromlist=["web"]).web.Response(
+                text='<!doctype html><script>setTimeout(() => location.replace("/?ready=1"), 300)</script>',
+                content_type="text/html",
+            )
         html = """<!doctype html><html><body>
           <main aria-label="排课管理">
             <div class="ant-select ant-select-disabled" aria-label="学期"><div class="ant-select-selection-item">2026年秋</div></div>
@@ -381,7 +386,7 @@ async def start_instructor_site(search_status=200, page_delay_ms=0):
 
 def test_instructor_action_uses_visible_page_controls_and_safe_projection(monkeypatch, tmp_path):
     async def run():
-        runner, origin, calls = await start_instructor_site(page_delay_ms=1500)
+        runner, origin, calls = await start_instructor_site(page_delay_ms=1500, bootstrap_reload=True)
         monkeypatch.setenv("CQU_CDP_RUNTIME_DIR", str(tmp_path))
         monkeypatch.setattr(cqu_external_search, "ALL_COURSE_URL", origin + "/")
         monkeypatch.setattr(cqu_external_search, "SESSION_INFO_URL", origin + "/api/resourceapi/session/info-detail")
