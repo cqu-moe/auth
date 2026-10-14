@@ -9,7 +9,14 @@ import {
 } from "@cqu-moe/ui";
 import MenuSelect from "../../components/MenuSelect";
 import { EntitlementMatrix } from "../../components/EntitlementFields";
-import { buildItems, formFromItems, summarizeItems, type EntitlementForm, type EntitlementItem } from "../../components/entitlement-form";
+import {
+  buildItems,
+  formFromItems,
+  summarizeItems,
+  validateEntitlementForm,
+  type EntitlementForm,
+  type EntitlementItem,
+} from "../../components/entitlement-form";
 import { adminFetch } from "../../lib/api/admin";
 import { FieldLabel, Modal } from "./ui";
 
@@ -53,6 +60,11 @@ function PresetEditor({
     const trimmed = presetName.trim();
     if (!trimmed) {
       setError("请填写预设名称");
+      return;
+    }
+    const invalid = validateEntitlementForm(form);
+    if (invalid) {
+      setError(invalid);
       return;
     }
     setError("");
@@ -122,6 +134,7 @@ function PresetEditor({
           form={form}
           onChange={setForm}
           quickloginPolicyReadOnly
+          manualOnlyHidden
         />
       </div>
     </Modal>
