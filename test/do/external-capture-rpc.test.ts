@@ -336,3 +336,19 @@ it.each(["room", "laboratory"] as const)("dispatches %s search and capture with 
     await expect(f.rpc.cquExternalCapture(args)).resolves.toEqual({ error: "SCHEMA_INVALID" });
   }
 });
+
+// The real DO catch handler returns human-readable error plus a machine code.
+it.each([
+  ["BROWSER_BUSY", 503],
+  ["SESSION_INACTIVE", 409],
+  ["CURRENT_SESSION_CHANGED", 409],
+] as const)("preserves DO %s instead of forwarding its human-readable error", async (code, status) => {
+  const f = await fixture();
+  f.fetch.mockImplementationOnce(async () => Response.json({
+    error: "upstream detail that must not become a public error code",
+    code,
+  }, { status }));
+  await expect(f.rpc.cquExternalCapture({
+    ...f.args, sourceType: "instructor", targetId: "teacher-1", targetName: "张三", expectedSessionId: "session-current",
+  })).resolves.toEqual({ error: code });
+});

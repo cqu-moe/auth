@@ -422,7 +422,7 @@ export class AuthService extends WorkerEntrypoint<Env> {
     const body = await resp.json<unknown>().catch(() => null);
     if (!resp.ok || typeof body !== "object" || body === null || (body as { ok?: unknown }).ok !== true) {
       const code = typeof body === "object" && body !== null
-        ? (body as { error?: unknown; code?: unknown }).error ?? (body as { code?: unknown }).code
+        ? (body as { code?: unknown }).code ?? (body as { error?: unknown }).error
         : undefined;
       return { error: typeof code === "string" ? code : "SEARCH_FAILED" };
     }
@@ -469,7 +469,7 @@ export class AuthService extends WorkerEntrypoint<Env> {
     const body = await resp.json<unknown>().catch(() => null);
     if (!resp.ok || typeof body !== "object" || body === null || (body as { ok?: unknown }).ok !== true) {
       const code = typeof body === "object" && body !== null
-        ? (body as { error?: unknown; code?: unknown }).error ?? (body as { code?: unknown }).code
+        ? (body as { code?: unknown }).code ?? (body as { error?: unknown }).error
         : undefined;
       return { error: typeof code === "string" ? code : "CAPTURE_TRANSIENT" };
     }

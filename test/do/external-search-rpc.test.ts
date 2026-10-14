@@ -255,3 +255,19 @@ it("binds teaching-class results to the requested course and term", async () => 
   }));
   await expect(f.rpc.cquExternalSearch(args)).resolves.toEqual({ error: "SCHEMA_INVALID" });
 });
+
+// The real DO catch handler returns human-readable error plus a machine code.
+it.each([
+  ["BROWSER_BUSY", 503],
+  ["SESSION_INACTIVE", 409],
+  ["CURRENT_SESSION_CHANGED", 409],
+] as const)("preserves DO %s instead of forwarding its human-readable error", async (code, status) => {
+  const f = await fixture();
+  f.fetch.mockImplementationOnce(async () => Response.json({
+    error: "upstream detail that must not become a public error code",
+    code,
+  }, { status }));
+  await expect(f.rpc.cquExternalSearch({
+    ...f.args, sourceType: "instructor", keyword: "张三",
+  })).resolves.toEqual({ error: code });
+});
