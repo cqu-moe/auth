@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { classifyNodeExternalCaptureResponse } from "./cqu-node-protocol";
 import { fetchBrowser, type BrowserRoute } from "./cqu-browser-routing";
 
 describe("fetchBrowser transport", () => {
@@ -84,6 +85,43 @@ describe("fetchBrowser transport", () => {
     expect(response.status).toBe(503);
     expect(await response.text()).toBe("capacity");
     expect(busyFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["SCHEMA_INVALID", "CURRENT_SESSION_CHANGED"])(
+    "returns external-capture contract error %s from a capacity response",
+    async (error) => {
+      const captureFetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ ok: false, error }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        })
+      );
+      const env = makeEnv(captureFetch);
+      const response = await fetchBrowser(
+        env as never,
+        cfRoute,
+        new Request("http://cqu-login.internal/external-capture", { method: "POST" })
+      );
+
+      expect(response.status).toBe(503);
+      await expect(response.json()).resolves.toEqual({ ok: false, error });
+      expect(captureFetch).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it("leaves external-capture platform capacity responses to the residual classifier", async () => {
+    const env = makeEnv(vi.fn().mockResolvedValue(new Response("capacity", { status: 503 })));
+    const response = await fetchBrowser(
+      env as never,
+      cfRoute,
+      new Request("http://cqu-login.internal/external-capture", { method: "POST" })
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.clone().text()).resolves.toBe("capacity");
+    expect(
+      classifyNodeExternalCaptureResponse(response.status, await response.json().catch(() => null))
+    ).toEqual({ kind: "transient", code: "CAPTURE_TRANSIENT" });
   });
 
   it("treats a 429 platform response as capacity pressure", async () => {
