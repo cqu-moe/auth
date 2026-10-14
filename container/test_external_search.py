@@ -4,8 +4,9 @@ import os
 import sys
 import asyncio
 import urllib.parse
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
+from posthog_client import POSTHOG_CLIENT_KEY
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -19,7 +20,9 @@ import cqu_external_search
 
 class ExternalSearchTestCase(AioHTTPTestCase):
     async def get_application(self):
-        return server.build_app()
+        app = server.build_app()
+        app[POSTHOG_CLIENT_KEY] = Mock()
+        return app
 
     def setUp(self):
         super().setUp()
@@ -60,6 +63,28 @@ class ExternalSearchTestCase(AioHTTPTestCase):
         assert body["ok"] is True
         assert body["items"] == [{"id": "class-1", "name": "电气1班", "extra": "2026级"}]
         assert body["truncated"] is True
+
+    async def test_external_search_reports_bounded_business_telemetry(self):
+        async def fake_search(state, recipe):
+            return {
+                "contractVersion": 1,
+                "sourceType": "department",
+                "session": {"id": "session-current", "name": "2026秋"},
+                "departments": [{"id": "dept-1", "name": "电气工程学院"}],
+            }
+
+        server.cqu_external_search.external_search = fake_search
+        response = await self.client.post("/external-search", json={
+            "state": {"cookies": [], "origins": []},
+            "action": "department_list",
+        })
+        assert response.status == 200
+        client = self.client.app[POSTHOG_CLIENT_KEY]
+        client.capture.assert_called_once()
+        properties = client.capture.call_args.kwargs["properties"]
+        assert properties["operation"] == "external_search"
+        assert properties["business_outcome"] == "success"
+        assert properties["http_outcome"] == "success"
 
     async def test_transport_overrides_are_rejected_before_browser_action(self):
         async def unreachable(*_args, **_kwargs):

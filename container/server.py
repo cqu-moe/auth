@@ -1080,24 +1080,30 @@ async def external_search_handler(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except Exception:
+        mark_business_outcome("failure", "INVALID_REQUEST")
         return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
     if not isinstance(body, dict) or not isinstance(body.get("state"), dict):
+        mark_business_outcome("failure", "INVALID_REQUEST")
         return web.json_response({"ok": False, "error": "missing required field: state (object)"}, status=400)
 
     try:
         operation_timeout_ms = parse_operation_timeout_ms(body)
     except InvalidOperationTimeout as error:
+        mark_business_outcome("failure", "INVALID_TIMEOUT")
         return web.json_response({"ok": False, "error": str(error)}, status=400)
     if operation_timeout_ms is None and browser_profile.CLOUDFLARE_PROFILE:
+        mark_business_outcome("failure", "INVALID_TIMEOUT")
         return web.json_response({"ok": False, "error": "operationTimeoutMs is required"}, status=400)
     try:
         recipe = cqu_external_search.parse_external_search_recipe(body)
     except cqu_external_search.ExternalSearchRecipeError:
+        mark_business_outcome("failure", "RECIPE_NOT_ALLOWED")
         return web.json_response({"ok": False, "error": "recipe not allowed"}, status=400)
 
     try:
         job_acquired = await acquire_browser_job()
     except BrowserBusyError:
+        mark_business_outcome("failure", "BROWSER_BUSY")
         return web.json_response({"ok": False, "error": "BROWSER_BUSY"}, status=503)
     try:
         result = await run_bounded(
@@ -1105,11 +1111,14 @@ async def external_search_handler(request: web.Request) -> web.Response:
             operation_timeout_ms,
         )
         typed = cqu_external_search.sanitize_external_search_result(result)
+        mark_business_outcome("success")
         return web.json_response({"ok": True, **typed})
     except BrowserDeadlineExceeded:
+        mark_business_outcome("failure", "BROWSER_DEADLINE")
         return web.json_response({"ok": False, "error": "BROWSER_DEADLINE"}, status=503)
     except cqu_external_search.ExternalSearchTransientError as error:
         code = error.code
+        mark_business_outcome("failure", code)
         return web.json_response({"ok": False, "error": code}, status=cqu_external_search.ERROR_STATUS[code])
     except Exception as error:
         safe_capture_exception(
@@ -1117,6 +1126,7 @@ async def external_search_handler(request: web.Request) -> web.Response:
             error,
             {"operation": "external_search", "error_code": "SEARCH_TRANSIENT"},
         )
+        mark_business_outcome("failure", "SEARCH_TRANSIENT")
         return web.json_response({"ok": False, "error": "SEARCH_TRANSIENT"}, status=503)
     finally:
         release_browser_job(job_acquired)
