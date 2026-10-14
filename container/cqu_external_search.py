@@ -682,6 +682,34 @@ def sanitize_external_search_result(value: object) -> dict:
     return typed
 
 
+EXTERNAL_APP_READY_JS = """async () => {
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    const label = [...document.querySelectorAll('label,span')].find(element =>
+      (element.tagName === 'LABEL' || element.children.length === 0)
+      && element.textContent.trim().replace(/[:：]\\s*$/, '') === '查询范围');
+    const control = label?.closest('.ant-form-item,.ant-row')?.querySelector('.ant-select')
+      || label?.nextElementSibling?.querySelector('.ant-select')
+      || (label?.nextElementSibling?.classList?.contains('ant-select') && label.nextElementSibling)
+      || label?.parentElement?.querySelector('.ant-select');
+    if (control && !control.classList.contains('ant-select-disabled')
+        && control.checkVisibility({checkOpacity:true, checkVisibilityCSS:true})) return true;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  return false;
+}"""
+
+
+async def wait_for_external_app(page) -> None:
+    """Metadata APIs can be ready before the SPA has mounted its query controls."""
+    try:
+        ready = await page.evaluate(EXTERNAL_APP_READY_JS, {})
+    except Exception:
+        raise ExternalSearchTransientError("APP_READY_TIMEOUT") from None
+    if ready is not True:
+        raise ExternalSearchTransientError("APP_READY_TIMEOUT")
+
+
 async def external_search(state: dict, recipe: dict) -> dict:
     """Run one fixed action in the user's hydrated AllCourseSchedule browser session."""
     if recipe.get("action") not in {"department_list", "admin_class_search", "instructor_search", "room_search", "laboratory_search", "course_catalog_search", "teaching_class_search"}:
@@ -698,6 +726,7 @@ async def external_search(state: dict, recipe: dict) -> dict:
             raise ExternalSearchTransientError("APP_READY_TIMEOUT") from None
         if is_expired_harvest({}, await browser.content(), browser.url):
             raise ExternalSearchTransientError("TGT_EXPIRED")
+        await wait_for_external_app(browser)
 
         if recipe["action"] in {"course_catalog_search", "teaching_class_search"}:
             from cqu_course_teaching import search_course_catalog, search_teaching_classes

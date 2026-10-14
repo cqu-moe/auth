@@ -11,7 +11,7 @@ from cqu_data_harvest import StageTrace, is_expired_harvest, run_serial_inpage_g
 from cqu_external_search import (
     ExternalSearchRecipeError, ExternalSearchTransientError,
     perform_admin_class_search, perform_instructor_search,
-    perform_room_search, perform_laboratory_search,
+    perform_room_search, perform_laboratory_search, wait_for_external_app,
 )
 
 
@@ -518,6 +518,10 @@ async def external_capture(state: dict, recipe: dict) -> dict:
             raise ExternalCaptureTransientError("APP_READY_TIMEOUT") from None
         if is_expired_harvest({}, await browser.content(), browser.url):
             raise ExternalCaptureTransientError("TGT_EXPIRED")
+        try:
+            await wait_for_external_app(browser)
+        except ExternalSearchTransientError as error:
+            raise ExternalCaptureTransientError(error.code) from None
         if recipe["action"] == "teaching_class_capture":
             from cqu_course_teaching import capture_teaching_class
             return sanitize_external_capture_result(await capture_teaching_class(browser, recipe))
