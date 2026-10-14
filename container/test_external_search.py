@@ -301,12 +301,12 @@ def test_admin_class_action_distinguishes_page_permission_denied(monkeypatch, tm
     asyncio.run(run())
 
 
-async def start_instructor_site(search_status=200):
+async def start_instructor_site(search_status=200, page_delay_ms=0):
     app = __import__("aiohttp", fromlist=["web"]).web.Application()
     calls = []
 
     async def page(_request):
-        return __import__("aiohttp", fromlist=["web"]).web.Response(text="""<!doctype html><html><body>
+        html = """<!doctype html><html><body>
           <main aria-label="排课管理">
             <div class="ant-select ant-select-disabled" aria-label="学期"><div class="ant-select-selection-item">2026年秋</div></div>
             <div><span>查询范围：</span><div class="ant-select" data-control="range"><div class="ant-select-selection-item">行政班</div></div></div>
@@ -335,7 +335,12 @@ async def start_instructor_site(search_status=200):
               fetch('/api/timetable/instructor/filter?' + query);
             });
             fetch('/api/timetable/instructor/filter?stale=1');
-          </script></body></html>""", content_type="text/html")
+          </script></body></html>"""
+        if page_delay_ms:
+            html = html.replace('<main aria-label="排课管理">', '<template id="delayed-controls"><main aria-label="排课管理">')
+            html = html.replace('</main><script>', '</main></template><script>setTimeout(() => { const template = document.getElementById("delayed-controls"); template.replaceWith(template.content);')
+            html = html.replace('</script>', '}, ' + str(page_delay_ms) + ');</script>')
+        return __import__("aiohttp", fromlist=["web"]).web.Response(text=html, content_type="text/html")
 
     async def search(request):
         calls.append({"nameOrCode": request.query.get("nameOrCode"), "limit": request.query.get("limitNum")})
@@ -376,7 +381,7 @@ async def start_instructor_site(search_status=200):
 
 def test_instructor_action_uses_visible_page_controls_and_safe_projection(monkeypatch, tmp_path):
     async def run():
-        runner, origin, calls = await start_instructor_site()
+        runner, origin, calls = await start_instructor_site(page_delay_ms=1500)
         monkeypatch.setenv("CQU_CDP_RUNTIME_DIR", str(tmp_path))
         monkeypatch.setattr(cqu_external_search, "ALL_COURSE_URL", origin + "/")
         monkeypatch.setattr(cqu_external_search, "SESSION_INFO_URL", origin + "/api/resourceapi/session/info-detail")
