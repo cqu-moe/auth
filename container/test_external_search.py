@@ -301,7 +301,7 @@ def test_admin_class_action_distinguishes_page_permission_denied(monkeypatch, tm
     asyncio.run(run())
 
 
-async def start_instructor_site(search_status=200, page_delay_ms=0, bootstrap_reload=False):
+async def start_instructor_site(search_status=200, page_delay_ms=0, bootstrap_reload=False, bootstrap_script_delay_s=0):
     app = __import__("aiohttp", fromlist=["web"]).web.Application()
     calls = []
 
@@ -341,6 +341,8 @@ async def start_instructor_site(search_status=200, page_delay_ms=0, bootstrap_re
             });
             fetch('/api/timetable/instructor/filter?stale=1');
           </script></body></html>"""
+        if bootstrap_script_delay_s:
+            html = html.replace('<html><body>', '<html><head><script src="/bootstrap.js"></script></head><body>')
         if page_delay_ms:
             html = html.replace('<main aria-label="排课管理">', '<template id="delayed-controls"><main aria-label="排课管理">')
             html = html.replace('</main><script>', '</main></template><script>setTimeout(() => { const template = document.getElementById("delayed-controls"); template.replaceWith(template.content);')
@@ -367,7 +369,12 @@ async def start_instructor_site(search_status=200, page_delay_ms=0, bootstrap_re
             for index in range(50)
         ], status=search_status)
 
+    async def bootstrap(_request):
+        await asyncio.sleep(bootstrap_script_delay_s)
+        return __import__("aiohttp", fromlist=["web"]).web.Response(text="", content_type="application/javascript")
+
     app.router.add_get("/", page)
+    app.router.add_get("/bootstrap.js", bootstrap)
     app.router.add_get("/api/resourceapi/session/info-detail", lambda _request: __import__("aiohttp", fromlist=["web"]).web.json_response({
         "curSessionId": "session-current",
         "sessionFinder": [{"id": "session-current", "name": "2026秋"}],
@@ -386,7 +393,10 @@ async def start_instructor_site(search_status=200, page_delay_ms=0, bootstrap_re
 
 def test_instructor_action_uses_visible_page_controls_and_safe_projection(monkeypatch, tmp_path):
     async def run():
-        runner, origin, calls = await start_instructor_site(page_delay_ms=1500, bootstrap_reload=True)
+        runner, origin, calls = await start_instructor_site(
+            page_delay_ms=1500, bootstrap_reload=True, bootstrap_script_delay_s=16,
+        )
+        monkeypatch.setattr(cqu_external_search.browser_profile, "CLOUDFLARE_PROFILE", True)
         monkeypatch.setenv("CQU_CDP_RUNTIME_DIR", str(tmp_path))
         monkeypatch.setattr(cqu_external_search, "ALL_COURSE_URL", origin + "/")
         monkeypatch.setattr(cqu_external_search, "SESSION_INFO_URL", origin + "/api/resourceapi/session/info-detail")

@@ -705,7 +705,9 @@ EXTERNAL_APP_READY_JS = """() => {
 async def wait_for_external_app(page) -> None:
     """Poll across bootstrap navigation; an in-page promise dies on a reload."""
     started = asyncio.get_running_loop().time()
-    deadline = started + 15
+    # A hydrated cloud browser still loads the school's login/bootstrap documents.
+    # Keep this within the caller's existing 90-second search operation budget.
+    deadline = started + (60 if browser_profile.CLOUDFLARE_PROFILE else 15)
     context_errors = 0
     attempts = 0
     last_error = "none"
