@@ -29,6 +29,8 @@ import cqu_login_cdp as cqu_login  # 裸 CDP 登录器；避免 Patchright 注�
 import cqu_keepalive  # 国内节点浏览器水化探活, 暴露 probe_session_browser(...)
 import cqu_ticket_browser  # 浏览器水化取 ST(过瑞数 JS 挑战), 暴露 fetch_service_ticket_browser(...)
 import cqu_data_harvest  # 浏览器 organic harvest(navigate+capture+in-page fetch), 暴露 harvest(...)
+import cqu_external_search
+import cqu_external_capture
 from qg_proxy import acquire_qg_proxy, QgExtractError, should_use_proxy  # 青果代理 + 灰度门(/run 登录仍用)
 from posthog_client import (
     POSTHOG_CLIENT_KEY,
@@ -98,6 +100,8 @@ NODE_CAPABILITIES = [
     "code-permit",
     "reusable-code",
     "data-harvest",
+    "external-search-v1",
+    "external-capture-v1",
     "browser-route-v1",
     "operation-deadline-v1",
     "raw-cdp-login-v1",
@@ -1073,6 +1077,126 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
         release_browser_job(job_acquired)
 
 
+async def external_search_handler(request: web.Request) -> web.Response:
+    """POST /external-search {state, action, business filters} -> typed search payload."""
+    try:
+        body = await request.json()
+    except Exception:
+        mark_business_outcome("failure", "INVALID_REQUEST")
+        return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
+    if not isinstance(body, dict) or not isinstance(body.get("state"), dict):
+        mark_business_outcome("failure", "INVALID_REQUEST")
+        return web.json_response({"ok": False, "error": "missing required field: state (object)"}, status=400)
+
+    try:
+        operation_timeout_ms = parse_operation_timeout_ms(body)
+    except InvalidOperationTimeout as error:
+        mark_business_outcome("failure", "INVALID_TIMEOUT")
+        return web.json_response({"ok": False, "error": str(error)}, status=400)
+    if operation_timeout_ms is None and browser_profile.CLOUDFLARE_PROFILE:
+        mark_business_outcome("failure", "INVALID_TIMEOUT")
+        return web.json_response({"ok": False, "error": "operationTimeoutMs is required"}, status=400)
+    try:
+        recipe = cqu_external_search.parse_external_search_recipe(body)
+    except cqu_external_search.ExternalSearchRecipeError:
+        mark_business_outcome("failure", "RECIPE_NOT_ALLOWED")
+        return web.json_response({"ok": False, "error": "recipe not allowed"}, status=400)
+
+    try:
+        job_acquired = await acquire_browser_job()
+    except BrowserBusyError:
+        mark_business_outcome("failure", "BROWSER_BUSY")
+        return web.json_response({"ok": False, "error": "BROWSER_BUSY"}, status=503)
+    try:
+        result = await run_bounded(
+            cqu_external_search.external_search(body["state"], recipe),
+            operation_timeout_ms,
+        )
+        typed = cqu_external_search.sanitize_external_search_result(result)
+        mark_business_outcome("success")
+        return web.json_response({"ok": True, **typed})
+    except BrowserDeadlineExceeded:
+        mark_business_outcome("failure", "BROWSER_DEADLINE")
+        return web.json_response({"ok": False, "error": "BROWSER_DEADLINE"}, status=503)
+    except cqu_external_search.ExternalSearchTransientError as error:
+        code = error.code
+        mark_business_outcome("failure", code)
+        return web.json_response({"ok": False, "error": code}, status=cqu_external_search.ERROR_STATUS[code])
+    except Exception as error:
+        safe_capture_exception(
+            request.app.get(POSTHOG_CLIENT_KEY),
+            error,
+            {"operation": "external_search", "error_code": "SEARCH_TRANSIENT"},
+        )
+        mark_business_outcome("failure", "SEARCH_TRANSIENT")
+        return web.json_response({"ok": False, "error": "SEARCH_TRANSIENT"}, status=503)
+    finally:
+        release_browser_job(job_acquired)
+
+
+async def external_capture_handler(request: web.Request) -> web.Response:
+    """POST /external-capture {state, fixed business target} -> typed capture."""
+    try:
+        body = await request.json()
+    except Exception:
+        mark_business_outcome("failure", "INVALID_REQUEST")
+        return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
+    if not isinstance(body, dict) or not isinstance(body.get("state"), dict):
+        mark_business_outcome("failure", "INVALID_REQUEST")
+        return web.json_response(
+            {"ok": False, "error": "missing required field: state (object)"}, status=400
+        )
+
+    try:
+        operation_timeout_ms = parse_operation_timeout_ms(body)
+    except InvalidOperationTimeout as error:
+        mark_business_outcome("failure", "INVALID_TIMEOUT")
+        return web.json_response({"ok": False, "error": str(error)}, status=400)
+    if operation_timeout_ms is None and browser_profile.CLOUDFLARE_PROFILE:
+        mark_business_outcome("failure", "INVALID_TIMEOUT")
+        return web.json_response(
+            {"ok": False, "error": "operationTimeoutMs is required"}, status=400
+        )
+    try:
+        recipe = cqu_external_capture.parse_external_capture_recipe(body)
+    except cqu_external_capture.ExternalCaptureRecipeError:
+        mark_business_outcome("failure", "RECIPE_NOT_ALLOWED")
+        return web.json_response({"ok": False, "error": "recipe not allowed"}, status=400)
+
+    try:
+        job_acquired = await acquire_browser_job()
+    except BrowserBusyError:
+        mark_business_outcome("failure", "BROWSER_BUSY")
+        return web.json_response({"ok": False, "error": "BROWSER_BUSY"}, status=503)
+    try:
+        result = await run_bounded(
+            cqu_external_capture.external_capture(body["state"], recipe),
+            operation_timeout_ms,
+        )
+        typed = cqu_external_capture.sanitize_external_capture_result(result)
+        mark_business_outcome("success")
+        return web.json_response({"ok": True, **typed})
+    except BrowserDeadlineExceeded:
+        mark_business_outcome("failure", "BROWSER_DEADLINE")
+        return web.json_response({"ok": False, "error": "BROWSER_DEADLINE"}, status=503)
+    except cqu_external_capture.ExternalCaptureTransientError as error:
+        mark_business_outcome("failure", error.code)
+        return web.json_response(
+            {"ok": False, "error": error.code},
+            status=cqu_external_capture.ERROR_STATUS[error.code],
+        )
+    except Exception as error:
+        safe_capture_exception(
+            request.app.get(POSTHOG_CLIENT_KEY),
+            error,
+            {"operation": "external_capture", "error_code": "CAPTURE_TRANSIENT"},
+        )
+        mark_business_outcome("failure", "CAPTURE_TRANSIENT")
+        return web.json_response({"ok": False, "error": "CAPTURE_TRANSIENT"}, status=503)
+    finally:
+        release_browser_job(job_acquired)
+
+
 async def health_handler(_request: web.Request) -> web.Response:
     return web.json_response(
         {
@@ -1102,6 +1226,8 @@ def build_app() -> web.Application:
         web.post("/service-ticket", service_ticket_handler),
         web.post("/keepalive", keepalive_handler),
         web.post("/data-harvest", data_harvest_handler),
+        web.post("/external-search", external_search_handler),
+        web.post("/external-capture", external_capture_handler),
         # CF Containers 默认探测 /ping 判断实例就绪。
         web.get("/ping", health_handler),
         web.get("/health", health_handler),

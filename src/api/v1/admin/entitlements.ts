@@ -8,6 +8,7 @@ import {
   deletePreset,
   getDefaultPresetName,
   getPresetItems,
+  isManualOnlyEntitlementItem,
   listPresets,
   setDefaultPresetName,
   upsertPreset,
@@ -108,6 +109,9 @@ export function createAdminEntitlementsApi() {
     if (!items) return problem(c, "UNKNOWN_PRESET", "未知预设", 400);
     const invalid = validateEntitlementItems(items);
     if (invalid) return problem(c, "INVALID_PRESET", `预设数据已失效：${invalid}`, 409);
+    if (items.some(isManualOnlyEntitlementItem)) {
+      return problem(c, "MANUAL_ONLY_ENTITLEMENT", "外部课表权益不能通过预设授予", 409);
+    }
     const policyError = rejectQuickloginPolicyWrite(c, items);
     if (policyError) return policyError;
     if (!items.length) return c.json({ data: { applied: 0 } });
@@ -154,6 +158,9 @@ export function createAdminEntitlementsApi() {
     const items = body.items as Item[];
     const invalid = validateEntitlementItems(items);
     if (invalid) return problem(c, "INVALID_ENTITLEMENTS", invalid, 400);
+    if (items.some(isManualOnlyEntitlementItem)) {
+      return problem(c, "MANUAL_ONLY_ENTITLEMENT", "外部课表权益不能加入预设", 400);
+    }
     const policyError = rejectQuickloginPolicyWrite(c, items);
     if (policyError) return policyError;
     await upsertPreset(c.env.DATABASE, name, items);
@@ -179,6 +186,9 @@ export function createAdminEntitlementsApi() {
     if (preset !== null) {
       const items = await getPresetItems(c.env.DATABASE, preset);
       if (!items) return problem(c, "UNKNOWN_PRESET", "未知预设", 400);
+      if (items.some(isManualOnlyEntitlementItem)) {
+        return problem(c, "MANUAL_ONLY_ENTITLEMENT", "包含外部课表权益的预设不能设为默认", 400);
+      }
       const policyError = rejectQuickloginPolicyWrite(c, items);
       if (policyError) return policyError;
     }

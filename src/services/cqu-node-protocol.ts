@@ -225,6 +225,105 @@ export function classifyNodeHarvestResponse(
   };
 }
 
+export interface NodeExternalSearchBody {
+  ok?: boolean;
+  contractVersion?: unknown;
+  sourceType?: unknown;
+  session?: unknown;
+  departments?: unknown;
+  course?: unknown;
+  items?: unknown;
+  truncated?: unknown;
+  error?: string;
+  diagnostics?: Record<string, unknown>;
+}
+
+const EXTERNAL_SEARCH_ERROR_CODES = new Set([
+  "CURRENT_SESSION_CHANGED", "TARGET_NOT_FOUND", "AMBIGUOUS_TARGET", "SCHEMA_INVALID", "CAPTURE_MISSING", "CAPTURE_API_REJECTED", "CAPTURE_BODY_TIMEOUT",
+  "APP_READY_TIMEOUT",
+  "SEARCH_CAPTURE_TIMEOUT",
+  "SEARCH_REQUEST_HUNG",
+  "SEARCH_BODY_TIMEOUT",
+  "SEARCH_API_REJECTED",
+  "WAF_CHALLENGE",
+  "PAGE_PERMISSION_DENIED",
+  "SEARCH_TRANSIENT",
+  "BROWSER_BUSY",
+  "BROWSER_DEADLINE",
+  "TGT_EXPIRED",
+]);
+
+export interface NodeExternalSearchClassification {
+  kind: "ok" | "expired" | "instance_replaced" | "transient";
+  code?: string;
+  body?: NodeExternalSearchBody;
+}
+
+export function classifyNodeExternalSearchResponse(
+  status: number,
+  body: NodeExternalSearchBody | null
+): NodeExternalSearchClassification {
+  if (status === 409 && body?.error === "BROWSER_INSTANCE_REPLACED") {
+    return { kind: "instance_replaced" };
+  }
+  if (status === 409 && body?.error === "TGT_EXPIRED") return { kind: "expired", code: "TGT_EXPIRED" };
+  if (body === null) return { kind: "transient", code: "SEARCH_TRANSIENT" };
+  if (status >= 200 && status < 300 && body.ok === true) return { kind: "ok", body };
+  const error = typeof body.error === "string" && EXTERNAL_SEARCH_ERROR_CODES.has(body.error)
+    ? body.error : "SEARCH_TRANSIENT";
+  return { kind: "transient", code: error };
+}
+
+export interface NodeExternalCaptureBody {
+  ok?: boolean;
+  contractVersion?: unknown;
+  sourceType?: unknown;
+  target?: unknown;
+  course?: unknown;
+  session?: unknown;
+  timetable?: unknown;
+  error?: string;
+  diagnostics?: Record<string, unknown>;
+}
+
+const EXTERNAL_CAPTURE_ERROR_CODES = new Set([
+  "APP_READY_TIMEOUT",
+  "TARGET_NOT_FOUND",
+  "AMBIGUOUS_TARGET",
+  "CURRENT_SESSION_CHANGED",
+  "CAPTURE_MISSING",
+  "CAPTURE_API_REJECTED",
+  "CAPTURE_BODY_TIMEOUT",
+  "WAF_CHALLENGE",
+  "SCHEMA_INVALID",
+  "CAPTURE_TRANSIENT",
+  "BROWSER_BUSY",
+  "BROWSER_DEADLINE",
+  "TGT_EXPIRED",
+  "PAGE_PERMISSION_DENIED",
+]);
+
+export interface NodeExternalCaptureClassification {
+  kind: "ok" | "expired" | "instance_replaced" | "transient";
+  code?: string;
+  body?: NodeExternalCaptureBody;
+}
+
+export function classifyNodeExternalCaptureResponse(
+  status: number,
+  body: NodeExternalCaptureBody | null
+): NodeExternalCaptureClassification {
+  if (status === 409 && body?.error === "BROWSER_INSTANCE_REPLACED") {
+    return { kind: "instance_replaced" };
+  }
+  if (status === 409 && body?.error === "TGT_EXPIRED") return { kind: "expired", code: "TGT_EXPIRED" };
+  if (body === null) return { kind: "transient", code: "CAPTURE_TRANSIENT" };
+  if (status >= 200 && status < 300 && body.ok === true) return { kind: "ok", body };
+  const error = typeof body.error === "string" && EXTERNAL_CAPTURE_ERROR_CODES.has(body.error)
+    ? body.error : "CAPTURE_TRANSIENT";
+  return { kind: "transient", code: error };
+}
+
 /**
  * 把分类结果落成 DO 既有语义: ok → 返回 ticket; expired → CquSsoError("TGT_EXPIRED");
  * transient → CquSsoError("WAF_CHALLENGE")。统一在此抛, 让 mintServiceTicketViaNode 只调一处。

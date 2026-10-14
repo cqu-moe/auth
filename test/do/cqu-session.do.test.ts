@@ -2797,3 +2797,253 @@ describe("data-harvest action", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 });
+
+describe("external-search action", () => {
+  const recipe = {
+    action: "admin_class_search",
+    departmentId: "",
+    departmentName: "",
+    grade: "2026",
+    keyword: "电气",
+  };
+  const typedResult = {
+    ok: true,
+    contractVersion: 1,
+    sourceType: "admin_class",
+    session: { id: "session-current", name: "2026秋" },
+    items: [{ id: "class-1", name: "电气1班", extra: "2026级" }],
+    truncated: true,
+  };
+
+  async function postSearch(stub: DurableObjectStub, body: unknown = recipe) {
+    return stub.fetch("http://do/external-search?clientId=calendar&source=rpc", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("returns the typed browser result and records one real browser action", async () => {
+    const stub = freshStub("external-search-ok");
+    await seedSession(stub, { status: "active" });
+    let received: Record<string, unknown> | null = null;
+    spyBrowserFetch({
+      "/external-search": async (request) => {
+        received = await request.json() as Record<string, unknown>;
+        return Response.json(typedResult);
+      },
+    });
+
+    const res = await postSearch(stub);
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual(typedResult);
+    expect(received).toMatchObject(recipe);
+    expect(typeof received?.["operationTimeoutMs"]).toBe("number");
+    expect(received?.["operationTimeoutMs"]).toBeLessThanOrEqual(90_000);
+    expect(await readStMintLog(stub)).toHaveLength(1);
+  });
+
+  it("rejects malformed fixed recipes before browser dispatch or accounting", async () => {
+    const stub = freshStub("external-search-invalid");
+    await seedSession(stub, { status: "active" });
+    const spy = spyBrowserFetch({ "/external-search": async () => Response.json({}) });
+
+    const res = await postSearch(stub, { ...recipe, url: "https://example.com" });
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ code: "INVALID_SEARCH_RECIPE" });
+    expect(spy).not.toHaveBeenCalled();
+    expect(await readStMintLog(stub)).toHaveLength(0);
+  });
+
+  it("maps browser session expiry without echoing raw diagnostics", async () => {
+    const stub = freshStub("external-search-expired");
+    await seedSession(stub, { status: "active" });
+    spyBrowserFetch({
+      "/external-search": async () => Response.json(
+        { ok: false, error: "TGT_EXPIRED", diagnostics: { cookie: "SECRET" } },
+        { status: 409 },
+      ),
+    });
+
+    const res = await postSearch(stub);
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body).toMatchObject({ code: "TGT_EXPIRED" });
+    expect(JSON.stringify(body)).not.toContain("SECRET");
+  });
+
+  it("maps school page permission denial without echoing raw diagnostics", async () => {
+    const stub = freshStub("external-search-forbidden");
+    await seedSession(stub, { status: "active" });
+    spyBrowserFetch({
+      "/external-search": async () => Response.json(
+        { ok: false, error: "PAGE_PERMISSION_DENIED", diagnostics: { cookie: "SECRET" } },
+        { status: 403 },
+      ),
+    });
+
+    const res = await postSearch(stub);
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body).toMatchObject({ code: "PAGE_PERMISSION_DENIED" });
+    expect(JSON.stringify(body)).not.toContain("SECRET");
+  });
+});
+
+describe("external-capture action", () => {
+  const recipe = {
+    action: "admin_class_capture",
+    sourceType: "admin_class",
+    targetId: "class-1",
+    targetName: "电气工程2026-01班",
+    expectedSessionId: "",
+  };
+  const typedResult = {
+    ok: true,
+    contractVersion: 1,
+    sourceType: "admin_class",
+    target: { id: "class-1", name: "电气工程2026-01班" },
+    session: { id: "session-current", name: "2026秋", beginDate: "2026-09-07" },
+    timetable: {
+      classTimetableVOList: [{
+        courseName: "高等数学",
+        assignTeachingObject: [{ adminClassId: "class-1" }],
+      }],
+      maxSection: 12,
+    },
+  };
+
+  async function postCapture(stub: DurableObjectStub, body: unknown = recipe) {
+    return stub.fetch("http://do/external-capture?clientId=calendar&source=rpc", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("dispatches one bounded browser action and returns the typed capture", async () => {
+    const stub = freshStub("external-capture-ok");
+    await seedSession(stub, { status: "active" });
+    let received: Record<string, unknown> | null = null;
+    spyBrowserFetch({
+      "/external-capture": async (request) => {
+        received = await request.json() as Record<string, unknown>;
+        return Response.json(typedResult);
+      },
+    });
+
+    const res = await postCapture(stub, { ...recipe, deadlineAt: Date.now() + 90_000 });
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual(typedResult);
+    expect(received).toMatchObject(recipe);
+    expect(received).not.toHaveProperty("deadlineAt");
+    expect(typeof received?.["operationTimeoutMs"]).toBe("number");
+    expect(received?.["operationTimeoutMs"]).toBeLessThanOrEqual(70_000);
+    expect(received?.["state"]).toEqual(validStorageState());
+    expect(await readStMintLog(stub)).toHaveLength(1);
+  });
+
+  it("rejects transport overrides before browser dispatch or accounting", async () => {
+    const stub = freshStub("external-capture-invalid");
+    await seedSession(stub, { status: "active" });
+    const spy = spyBrowserFetch({ "/external-capture": async () => Response.json({}) });
+
+    const res = await postCapture(stub, { ...recipe, selector: "#target" });
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ code: "INVALID_CAPTURE_RECIPE" });
+    expect(spy).not.toHaveBeenCalled();
+    expect(await readStMintLog(stub)).toHaveLength(0);
+  });
+
+  it("maps expiry and permission failures without echoing raw diagnostics", async () => {
+    const expired = freshStub("external-capture-expired");
+    await seedSession(expired, { status: "active" });
+    spyBrowserFetch({
+      "/external-capture": async () => Response.json(
+        { ok: false, error: "TGT_EXPIRED", diagnostics: { cookie: "SECRET" } },
+        { status: 409 },
+      ),
+    });
+    const expiredRes = await postCapture(expired);
+    expect(expiredRes.status).toBe(409);
+    await expect(expiredRes.json()).resolves.toMatchObject({ code: "TGT_EXPIRED" });
+    expect(await readStatus(expired)).toBe("expired");
+
+    const denied = freshStub("external-capture-denied");
+    await seedSession(denied, { status: "active" });
+    spyBrowserFetch({
+      "/external-capture": async () => Response.json(
+        { ok: false, error: "PAGE_PERMISSION_DENIED", diagnostics: { bearer: "SECRET" } },
+        { status: 403 },
+      ),
+    });
+    const deniedRes = await postCapture(denied);
+    expect(deniedRes.status).toBe(403);
+    const body = await deniedRes.json();
+    expect(body).toMatchObject({ code: "PAGE_PERMISSION_DENIED" });
+    expect(JSON.stringify(body)).not.toContain("SECRET");
+    expect(await readStatus(denied)).toBe("active");
+  });
+
+  it("rejects overlapping same-user captures as BROWSER_BUSY", async () => {
+    const stub = freshStub("external-capture-single-flight");
+    await seedSession(stub, { status: "active" });
+    let release!: (value: void) => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const spy = spyBrowserFetch({
+      "/external-capture": async () => {
+        await gate;
+        return Response.json(typedResult);
+      },
+    });
+
+    const first = postCapture(stub);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const second = await postCapture(stub);
+    expect(second.status).toBe(503);
+    await expect(second.json()).resolves.toMatchObject({ code: "BROWSER_BUSY" });
+    release();
+    expect((await first).status).toBe(200);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["AMBIGUOUS_TARGET", "CURRENT_SESSION_CHANGED"])("keeps the login active for business conflict %s", async code => {
+    const stub = freshStub(`external-capture-${code}`);
+    await seedSession(stub, { status: "active" });
+    spyBrowserFetch({ "/external-capture": async () => Response.json({ ok: false, error: code }, { status: 409 }) });
+    const response = await postCapture(stub);
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ code });
+    expect(await readStatus(stub)).toBe("active");
+  });
+
+  it("serializes search against an in-flight capture for the same user", async () => {
+    const stub = freshStub("external-browser-shared-flight");
+    await seedSession(stub, { status: "active" });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    spyBrowserFetch({ "/external-capture": async () => { await gate; return Response.json(typedResult); } });
+    const capture = postCapture(stub);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const search = await stub.fetch("http://do/external-search?clientId=calendar&source=rpc", {
+      method: "POST", body: JSON.stringify({ action: "departments", sourceType: "admin_class" }),
+    });
+    expect(search.status).toBe(503);
+    await expect(search.json()).resolves.toMatchObject({ code: "BROWSER_BUSY" });
+    release();
+    expect((await capture).status).toBe(200);
+  });
+
+  it("does not return browser data after the binding changes", async () => {
+    const stub = freshStub("external-capture-binding-changed");
+    await seedSession(stub, { status: "active" });
+    spyBrowserFetch({
+      "/external-capture": async () => {
+        await env.DATABASE.prepare("UPDATE cqu_bind_addresses SET status = 'deleting' WHERE user_id = 'u1'").run();
+        return Response.json(typedResult);
+      },
+    });
+
+    const res = await postCapture(stub);
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ code: "SESSION_INACTIVE" });
+  });
+});
