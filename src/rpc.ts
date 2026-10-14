@@ -426,7 +426,12 @@ export class AuthService extends WorkerEntrypoint<Env> {
         : undefined;
       return { error: typeof code === "string" ? code : "SEARCH_FAILED" };
     }
-    return parseExternalSearchResult(body, args.sourceType);
+    const result = parseExternalSearchResult(body, args.sourceType);
+    if (!("error" in result) && result.sourceType === "course" &&
+      (result.course.id !== args.courseId || result.course.name !== args.courseName || result.session.id !== args.expectedSessionId)) {
+      return { error: "SCHEMA_INVALID" };
+    }
+    return result;
   }
 
   /** Capture only a fixed current-term admin-class business target. */

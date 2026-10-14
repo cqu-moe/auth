@@ -1,6 +1,6 @@
 /** Typed external AllCourseSchedule search contract (T02/T06–T08). */
 
-export type ExternalSearchSourceType = "department" | "admin_class" | "instructor" | "room" | "laboratory";
+export type ExternalSearchSourceType = "department" | "admin_class" | "course_catalog" | "course" | "instructor" | "room" | "laboratory";
 
 export interface CquExternalSearchArgs {
   clientId: string;
@@ -12,6 +12,9 @@ export interface CquExternalSearchArgs {
   departmentName?: string;
   grade?: string;
   keyword?: string;
+  courseId?: string;
+  courseName?: string;
+  expectedSessionId?: string;
   deadlineAt?: number;
 }
 
@@ -41,13 +44,26 @@ export type CquExternalSearchResult =
     }
   | {
       contractVersion: 1;
-      sourceType: "admin_class" | "instructor" | "room" | "laboratory";
+      sourceType: "admin_class" | "course_catalog" | "instructor" | "room" | "laboratory";
       session: ExternalSearchSession;
+      items: ExternalSearchItem[];
+      truncated: boolean;
+    }
+  | {
+      contractVersion: 1;
+      sourceType: "course";
+      session: ExternalSearchSession;
+      course: { id: string; name: string };
       items: ExternalSearchItem[];
       truncated: boolean;
     };
 
-export interface ExternalSearchRecipe {
+export type CourseSearchRecipe =
+  | { action: "course_catalog_search"; keyword: string }
+  | { action: "teaching_class_search"; courseId: string; courseName: string; expectedSessionId: string };
+export type ExternalSearchRecipe = AdminSearchRecipe | CourseSearchRecipe;
+
+export interface AdminSearchRecipe {
   action: "department_list" | "admin_class_search" | "instructor_search" | "room_search" | "laboratory_search";
   departmentId: string;
   departmentName: string;
@@ -65,6 +81,16 @@ export function parseExternalSearchRecipe(value: unknown): ExternalSearchRecipe 
   if (typeof value !== "object" || value === null) return { error: "INVALID_SEARCH_RECIPE" };
   const raw = value as Record<string, unknown>;
   const action = raw.action;
+  if (action === "course_catalog_search" || action === "teaching_class_search") {
+    const keys = action === "course_catalog_search" ? ["action", "keyword"] : ["action", "courseId", "courseName", "expectedSessionId"];
+    if (Object.keys(raw).some(key => !keys.includes(key))) return { error: "INVALID_SEARCH_RECIPE" };
+    if (action === "course_catalog_search") {
+      const keyword = boundedText(raw.keyword, 100);
+      return keyword ? { action, keyword } : { error: "INVALID_SEARCH_RECIPE" };
+    }
+    const courseId = boundedText(raw.courseId, 100), courseName = boundedText(raw.courseName), expectedSessionId = boundedText(raw.expectedSessionId, 100);
+    return courseId && courseName && expectedSessionId ? { action, courseId, courseName, expectedSessionId } : { error: "INVALID_SEARCH_RECIPE" };
+  }
   if (action !== "department_list" && action !== "admin_class_search" && action !== "instructor_search" && action !== "room_search" && action !== "laboratory_search") {
     return { error: "INVALID_SEARCH_RECIPE" };
   }
@@ -106,6 +132,16 @@ export function parseExternalSearchArgs(
 ): ExternalSearchRecipe | { error: "INVALID_REQUEST" } {
   if (typeof args !== "object" || args === null) return { error: "INVALID_REQUEST" };
   const raw = args as Record<string, unknown>;
+  if (raw.sourceType === "course_catalog" || raw.sourceType === "course") {
+    const common = ["clientId", "clientSecret", "userId", "sourceType", "deadlineAt"];
+    const keys = raw.sourceType === "course_catalog" ? [...common, "keyword"] : [...common, "courseId", "courseName", "expectedSessionId"];
+    if (Object.keys(raw).some(key => !keys.includes(key))) return { error: "INVALID_REQUEST" };
+    if (raw.deadlineAt !== undefined && !Number.isSafeInteger(raw.deadlineAt)) return { error: "INVALID_REQUEST" };
+    const parsed = parseExternalSearchRecipe(raw.sourceType === "course_catalog"
+      ? { action: "course_catalog_search", keyword: raw.keyword }
+      : { action: "teaching_class_search", courseId: raw.courseId, courseName: raw.courseName, expectedSessionId: raw.expectedSessionId });
+    return "error" in parsed ? { error: "INVALID_REQUEST" } : parsed;
+  }
   if (raw.sourceType !== "department" && raw.sourceType !== "admin_class" && raw.sourceType !== "instructor" && raw.sourceType !== "room" && raw.sourceType !== "laboratory") {
     return { error: "INVALID_REQUEST" };
   }
@@ -200,11 +236,14 @@ export function parseExternalSearchResult(
     if (!item) return { error: "SCHEMA_INVALID" };
     items.push(item);
   }
-  return {
-    contractVersion: 1,
-    sourceType: expectedSourceType,
-    session,
-    items,
-    truncated: root.truncated || root.items.length > ITEM_LIMIT,
-  };
+  const truncated = root.truncated || root.items.length > ITEM_LIMIT;
+  if (expectedSourceType === "course") {
+    const rawCourse = root.course as Record<string, unknown> | undefined;
+    const courseId = rawCourse && boundedText(rawCourse.id, 100);
+    const courseName = rawCourse && boundedText(rawCourse.name, 200);
+    const course = courseId && courseName ? { id: courseId, name: courseName } : null;
+    if (!course) return { error: "SCHEMA_INVALID" };
+    return { contractVersion: 1, sourceType: "course", session, course, items, truncated };
+  }
+  return { contractVersion: 1, sourceType: expectedSourceType, session, items, truncated };
 }

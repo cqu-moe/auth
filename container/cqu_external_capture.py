@@ -121,6 +121,9 @@ CLEAR_SELECTED_TARGETS_JS = """async () => {
 
 
 def parse_external_capture_recipe(body: dict) -> dict:
+    if isinstance(body, dict) and body.get("action") == "teaching_class_capture":
+        from cqu_course_teaching import parse_course_recipe
+        return parse_course_recipe(body)
     if not isinstance(body, dict):
         raise ExternalCaptureRecipeError("recipe must be an object")
     unknown = set(body) - ALLOWED_BODY_KEYS
@@ -470,6 +473,17 @@ async def capture_timetable(page, recipe: dict) -> dict:
 
 def sanitize_external_capture_result(value: object) -> dict:
     """Rebuild the result allowlist before it crosses the container boundary."""
+    if isinstance(value, dict) and value.get("contractVersion") == 1 and value.get("sourceType") == "course":
+        from cqu_course_teaching import sanitize_course_timetable
+        target, session, course = value.get("target"), value.get("session"), value.get("course")
+        if not all(isinstance(x, dict) for x in (target, session, course)):
+            raise ExternalCaptureRecipeError("invalid course result")
+        target_id = _required_text(target.get("id"), 100)
+        return {"contractVersion": 1, "sourceType": "course",
+                "target": {"id": target_id, "name": _required_text(target.get("name"), 200)},
+                "course": {"id": _required_text(course.get("id"), 100), "name": _required_text(course.get("name"), 200)},
+                "session": {"id": _required_text(session.get("id"), 100), "name": _required_text(session.get("name"), 100), "beginDate": _required_text(session.get("beginDate"), 10)},
+                "timetable": sanitize_course_timetable(value.get("timetable"), target_id)}
     if not isinstance(value, dict) or value.get("contractVersion") != 1 or value.get("sourceType") not in CAPTURE_ACTIONS:
         raise ExternalCaptureRecipeError("capture result contract is invalid")
     target = value.get("target")
@@ -504,4 +518,7 @@ async def external_capture(state: dict, recipe: dict) -> dict:
             raise ExternalCaptureTransientError("APP_READY_TIMEOUT") from None
         if is_expired_harvest({}, await browser.content(), browser.url):
             raise ExternalCaptureTransientError("TGT_EXPIRED")
+        if recipe["action"] == "teaching_class_capture":
+            from cqu_course_teaching import capture_teaching_class
+            return sanitize_external_capture_result(await capture_teaching_class(browser, recipe))
         return sanitize_external_capture_result(await capture_timetable(browser, recipe))

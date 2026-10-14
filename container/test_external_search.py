@@ -406,3 +406,18 @@ def test_instructor_action_uses_visible_page_controls_and_safe_projection(monkey
             await runner.cleanup()
 
     asyncio.run(run())
+
+
+def test_real_browser_course_catalog_remains_reachable_at_shared_search_entry(monkeypatch, tmp_path):
+    from test_course_teaching import start_site
+    async def run():
+        runner, origin, _calls = await start_site()
+        monkeypatch.setenv("CQU_CDP_RUNTIME_DIR", str(tmp_path))
+        monkeypatch.setattr(cqu_external_search, "ALL_COURSE_URL", origin + "/")
+        try:
+            result = await cqu_external_search.external_search({"cookies": [], "origins": []}, {"action": "course_catalog_search", "keyword": "高等"})
+            assert result["sourceType"] == "course_catalog"
+            assert [item["id"] for item in result["items"]] == ["course-other", "course-1"]
+        finally:
+            await runner.cleanup()
+    asyncio.run(run())

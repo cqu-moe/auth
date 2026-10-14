@@ -243,3 +243,15 @@ it("requires method approval, external entitlement and an active school binding"
   })).resolves.toEqual({ error: "NO_CQU_BINDING" });
   expect(bound.fetch).not.toHaveBeenCalled();
 });
+
+it("binds teaching-class results to the requested course and term", async () => {
+  const f = await fixture();
+  const args = { ...f.args, sourceType: "course" as const, courseId: "course-1", courseName: "高等数学", expectedSessionId: "session-current" };
+  f.fetch.mockImplementation(async () => Response.json({
+    ok: true, contractVersion: 1, sourceType: "course",
+    course: { id: "course-other", name: "其他课程" },
+    session: { id: "session-current", name: "2026秋" },
+    items: [], truncated: false,
+  }));
+  await expect(f.rpc.cquExternalSearch(args)).resolves.toEqual({ error: "SCHEMA_INVALID" });
+});
