@@ -1,7 +1,7 @@
 /** Typed external AllCourseSchedule capture contract (T03/T06). */
 
-export type ExternalCaptureSourceType = "admin_class" | "instructor";
-export type ExternalCaptureAction = "admin_class_capture" | "instructor_capture";
+export type ExternalCaptureSourceType = "admin_class" | "instructor" | "room";
+export type ExternalCaptureAction = "admin_class_capture" | "instructor_capture" | "room_capture";
 
 export interface CquExternalCaptureArgs {
   clientId: string;
@@ -46,7 +46,8 @@ export interface InstructorCaptureTimetableRow extends ExternalCaptureTimetableC
 
 export type ExternalCaptureTimetableRow =
   | AdminClassCaptureTimetableRow
-  | InstructorCaptureTimetableRow;
+  | InstructorCaptureTimetableRow
+  | (ExternalCaptureTimetableContent & { roomId: string });
 
 export interface CquExternalCaptureResult {
   contractVersion: 1;
@@ -56,6 +57,7 @@ export interface CquExternalCaptureResult {
   timetable: {
     classTimetableVOList: ExternalCaptureTimetableRow[];
     maxSection: number;
+    unverifiedItemCount?: number;
   };
 }
 
@@ -97,7 +99,7 @@ export function parseExternalCaptureArgs(
   if (typeof args !== "object" || args === null) return { error: "INVALID_REQUEST" };
   const raw = args as Record<string, unknown>;
   if (Object.keys(raw).some(key => !ARG_KEYS.has(key))) return { error: "INVALID_REQUEST" };
-  if (raw.sourceType !== "admin_class" && raw.sourceType !== "instructor") {
+  if (raw.sourceType !== "admin_class" && raw.sourceType !== "instructor" && raw.sourceType !== "room") {
     return { error: "INVALID_REQUEST" };
   }
   const targetId = boundedText(raw.targetId, 100);
@@ -107,7 +109,7 @@ export function parseExternalCaptureArgs(
   if (raw.courseId !== undefined) return { error: "INVALID_REQUEST" };
   const sourceType = raw.sourceType;
   const recipe = parseExternalCaptureRecipe({
-    action: sourceType === "admin_class" ? "admin_class_capture" : "instructor_capture",
+    action: sourceType === "admin_class" ? "admin_class_capture" : sourceType === "instructor" ? "instructor_capture" : "room_capture",
     sourceType,
     targetId,
     targetName,
@@ -125,10 +127,10 @@ export function parseExternalCaptureRecipe(
     return { error: "INVALID_CAPTURE_RECIPE" };
   }
   const sourceType = raw.sourceType;
-  if (sourceType !== "admin_class" && sourceType !== "instructor") return { error: "INVALID_CAPTURE_RECIPE" };
+  if (sourceType !== "admin_class" && sourceType !== "instructor" && sourceType !== "room") return { error: "INVALID_CAPTURE_RECIPE" };
   const expectedAction = sourceType === "admin_class"
     ? "admin_class_capture"
-    : "instructor_capture";
+    : sourceType === "instructor" ? "instructor_capture" : "room_capture";
   if (raw.action !== expectedAction) {
     return { error: "INVALID_CAPTURE_RECIPE" };
   }
@@ -190,6 +192,10 @@ function parseRow(
     }
     if (!assignTeachingObject.some(assignment => assignment.adminClassId === targetId)) return null;
     ownership = { assignTeachingObject };
+  } else if (sourceType === "room") {
+    const roomId = boundedText(raw.roomId, 100);
+    if (roomId !== targetId) return null;
+    ownership = { roomId };
   } else {
     if (Object.entries(raw).some(([key, value]) => Array.isArray(value) && key !== "instructorIdList")) {
       return null;
@@ -244,6 +250,8 @@ export function parseExternalCaptureResult(
   for (const object of [root, root.target, root.session, timetable]) {
     if (Object.entries(object as Record<string, unknown>).some(([key, value]) => Array.isArray(value) && !(object === timetable && key === "classTimetableVOList"))) return { error: "SCHEMA_INVALID" };
   }
+  const unverifiedItemCount = (timetable as Record<string, unknown>).unverifiedItemCount;
+  if (expected.sourceType === "room" && (typeof unverifiedItemCount !== "number" || !Number.isSafeInteger(unverifiedItemCount) || unverifiedItemCount < 0 || unverifiedItemCount > 100000)) return { error: "SCHEMA_INVALID" };
   if (expected.expectedSessionId && expected.expectedSessionId !== session.id) return { error: "SCHEMA_INVALID" };
   const rows: ExternalCaptureTimetableRow[] = [];
   for (const row of rawRows) {
@@ -256,6 +264,6 @@ export function parseExternalCaptureResult(
     sourceType: expected.sourceType,
     target,
     session,
-    timetable: { classTimetableVOList: rows, maxSection },
+    timetable: { classTimetableVOList: rows, maxSection, ...(expected.sourceType === "room" ? { unverifiedItemCount: unverifiedItemCount as number } : {}) },
   };
 }

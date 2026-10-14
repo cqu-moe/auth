@@ -504,7 +504,8 @@ INSTRUCTOR_CAPTURE_HTML = """<!doctype html><html><body>
   </script></body></html>"""
 
 
-async def start_instructor_capture_site(*, table_body=None, search_items=None, expose_identity=True):
+async def start_instructor_capture_site(*, table_body=None, search_items=None, expose_identity=True, source_type="instructor"):
+    supplied_items = search_items
     if search_items is None:
         search_items = [
             {"id": "teacher-other", "name": "张三", "code": "10002", "departmentName": "电气工程学院", "campusName": "A校区", "mobilePhone": "SECRET"},
@@ -519,11 +520,19 @@ async def start_instructor_capture_site(*, table_body=None, search_items=None, e
         }],
         "maxSection": 12,
     }
+    html = INSTRUCTOR_CAPTURE_HTML
+    search_path = "/api/timetable/instructor/filter"
+    table_path = "/api/timetable/class/timetable/instructor/table-detail"
+    if source_type == "room":
+        search_items = supplied_items if supplied_items is not None else [{"id": "room-1", "name": "D101", "buildingName": "教学楼", "campusName": "A校区"}]
+        html = html.replace("教师", "教室").replace("姓名或工号", "名称").replace("nameOrCode", "roomName").replace("/api/timetable/instructor/filter", "/api/resourceapi/room/roomName-filter").replace("/instructor/table-detail", "/room/table-detail").replace("teacher-old", "room-old")
+        search_path = "/api/resourceapi/room/roomName-filter"
+        table_path = "/api/timetable/class/timetable/room/table-detail"
     app = web.Application()
     calls = {"search": [], "table": []}
 
     async def page(_request):
-        return web.Response(text=INSTRUCTOR_CAPTURE_HTML if expose_identity else INSTRUCTOR_CAPTURE_HTML.replace("option.dataset.value = item.id;", ""), content_type="text/html")
+        return web.Response(text=html if expose_identity else html.replace("option.dataset.value = item.id;", ""), content_type="text/html")
 
     async def session_info(_request):
         return web.json_response({
@@ -540,7 +549,7 @@ async def start_instructor_capture_site(*, table_body=None, search_items=None, e
 
     async def search(request):
         calls["search"].append({
-            "keyword": request.query.get("nameOrCode"),
+            "keyword": request.query.get("nameOrCode") or request.query.get("roomName"),
             "limit": request.query.get("limitNum"),
         })
         return web.json_response(search_items)
@@ -548,7 +557,7 @@ async def start_instructor_capture_site(*, table_body=None, search_items=None, e
     async def table(request):
         body = await request.text()
         calls["table"].append(body)
-        if body != '["teacher-1"]':
+        if body != ('["room-1"]' if source_type == "room" else '["teacher-1"]'):
             await asyncio.sleep(0.75)
             return web.json_response({
                 "classTimetableVOList": [{
@@ -563,8 +572,8 @@ async def start_instructor_capture_site(*, table_body=None, search_items=None, e
     app.router.add_get("/", page)
     app.router.add_get("/api/resourceapi/session/info-detail", session_info)
     app.router.add_get("/api/resourceapi/session/list", session_list)
-    app.router.add_get("/api/timetable/instructor/filter", search)
-    app.router.add_post("/api/timetable/class/timetable/instructor/table-detail", table)
+    app.router.add_get(search_path, search)
+    app.router.add_post(table_path, table)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
@@ -632,6 +641,66 @@ def test_real_browser_same_name_without_visible_identity_fails_without_selecting
                 assert raised.value.code == "AMBIGUOUS_TARGET"
                 assert '["teacher-1"]' not in calls["table"]
                 assert '["teacher-other"]' not in calls["table"]
+        finally:
+            await runner.cleanup()
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("case", ["partial", "empty", "activity_only", "unknown", "malformed", "missing", "wrong_owner"])
+def test_real_browser_room_capture_validates_ownership_and_extra_activity_arrays(monkeypatch, tmp_path, case):
+    async def run():
+        import cqu_external_capture
+        table = {"classTimetableVOList": [{"courseName": "高等数学", "weekDay": 1, "teachingWeek": "110", "period": "101", "roomId": "room-1"}], "maxSection": 12, "roomExamTimeTableVOList": [{"privateField": "SECRET"}], "tempActivityTimetableVOList": [{}, {}]}
+        if case == "empty":
+            table = {"classTimetableVOList": [], "maxSection": 12, "roomExamTimeTableVOList": [], "tempActivityTimetableVOList": []}
+        elif case == "activity_only":
+            table["classTimetableVOList"] = []
+        elif case == "missing":
+            del table["roomExamTimeTableVOList"]
+        elif case == "unknown":
+            table["unknownBusinessRows"] = []
+        elif case == "malformed":
+            table["tempActivityTimetableVOList"] = {}
+        elif case == "wrong_owner":
+            table["classTimetableVOList"][0]["roomId"] = "room-other"
+        runner, origin, calls = await start_instructor_capture_site(source_type="room", table_body=table)
+        monkeypatch.setenv("CQU_CDP_RUNTIME_DIR", str(tmp_path))
+        monkeypatch.setattr(cqu_external_capture, "ALL_COURSE_URL", origin + "/")
+        recipe = {"action": "room_capture", "sourceType": "room", "targetId": "room-1", "targetName": "D101", "expectedSessionId": "session-current"}
+        try:
+            if case in {"unknown", "malformed", "missing", "wrong_owner"}:
+                with pytest.raises(cqu_external_capture.ExternalCaptureTransientError) as raised:
+                    await cqu_external_capture.external_capture({"cookies": [], "origins": []}, recipe)
+                assert raised.value.code == "SCHEMA_INVALID"
+            else:
+                result = await cqu_external_capture.external_capture({"cookies": [], "origins": []}, recipe)
+                assert result["sourceType"] == "room"
+                assert result["target"]["id"] == "room-1"
+                assert result["timetable"] == {"classTimetableVOList": table["classTimetableVOList"], "maxSection": 12, "unverifiedItemCount": 0 if case == "empty" else 3}
+                assert calls["table"] == ['["room-old"]', '["room-1"]']
+                assert "SECRET" not in json.dumps(result)
+        finally:
+            await runner.cleanup()
+    asyncio.run(run())
+
+
+def test_real_browser_room_search_projects_candidates_and_marks_50_as_truncated(monkeypatch, tmp_path):
+    async def run():
+        import cqu_external_search
+        items = [{"id": f"room-{index}", "name": f"D{index}", "buildingName": "教学楼", "campusName": "A校区", "privateField": "SECRET"} for index in range(50)]
+        runner, origin, calls = await start_instructor_capture_site(source_type="room", search_items=items)
+        monkeypatch.setenv("CQU_CDP_RUNTIME_DIR", str(tmp_path))
+        monkeypatch.setattr(cqu_external_search, "ALL_COURSE_URL", origin + "/")
+        monkeypatch.setattr(cqu_external_search, "SESSION_INFO_URL", origin + "/api/resourceapi/session/info-detail")
+        monkeypatch.setattr(cqu_external_search, "SESSION_LIST_URL", origin + "/api/resourceapi/session/list")
+        try:
+            result = await cqu_external_search.external_search({"cookies": [], "origins": []}, {"action": "room_search", "keyword": "D", "departmentId": "", "departmentName": "", "grade": ""})
+            assert result["sourceType"] == "room"
+            assert result["items"][0] == {"id": "room-0", "name": "D0", "extra": "教学楼 / A校区"}
+            assert len(result["items"]) == 50
+            assert result["truncated"] is True
+            assert calls["search"] == [{"keyword": "D", "limit": "50"}]
+            assert "SECRET" not in json.dumps(result)
         finally:
             await runner.cleanup()
     asyncio.run(run())

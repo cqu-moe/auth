@@ -234,10 +234,10 @@ def _is_expected_search_request(request, expected_origin: str, filters: dict) ->
     return body == [] if not filters.get("departmentName", "") else len(body) > 0
 
 
-def _is_expected_instructor_request(request, expected_origin: str, keyword: str) -> bool:
+def _is_expected_keyword_request(request, expected_origin: str, marker: str) -> bool:
     parsed = urllib.parse.urlsplit(getattr(request, "url", ""))
     response_origin = f"{parsed.scheme}://{parsed.netloc}"
-    if response_origin != expected_origin or parsed.path != INSTRUCTOR_SEARCH_MARKER:
+    if response_origin != expected_origin or parsed.path != marker:
         return False
     if getattr(request, "method", "").upper() != "GET":
         return False
@@ -353,7 +353,19 @@ async def _read_search_response(response, captures: list[dict], instructor: bool
 
 
 async def perform_instructor_search(page, filters: dict) -> dict:
+    return await _perform_keyword_search(page, filters, "instructor")
+
+
+async def perform_room_search(page, filters: dict) -> dict:
+    return await _perform_keyword_search(page, filters, "room")
+
+
+async def _perform_keyword_search(page, filters: dict, source_type: str) -> dict:
     """Drive visible teacher controls and capture only the candidate response."""
+    label = "教师" if source_type == "instructor" else "教室"
+    marker = INSTRUCTOR_SEARCH_MARKER if source_type == "instructor" else "/api/resourceapi/room/roomName-filter"
+    filter_js = INSTRUCTOR_FILTER_ACTION_JS.replace("教师", label).replace("工号", "教室") if source_type == "room" else INSTRUCTOR_FILTER_ACTION_JS
+    keyword_js = INSTRUCTOR_KEYWORD_ACTION_JS.replace("教师", label).replace("工号", "教室") if source_type == "room" else INSTRUCTOR_KEYWORD_ACTION_JS
     captures: list[dict] = []
     expected_page_url = urllib.parse.urlsplit(page.url)
     expected_origin = f"{expected_page_url.scheme}://{expected_page_url.netloc}"
@@ -365,7 +377,7 @@ async def perform_instructor_search(page, filters: dict) -> dict:
     def on_request(request) -> None:
         if closed or not submit_started:
             return
-        if _is_expected_instructor_request(request, expected_origin, filters.get("keyword", "")):
+        if _is_expected_keyword_request(request, expected_origin, marker):
             accepted_requests[id(request)] = request
 
     def on_response(response) -> None:
@@ -374,7 +386,7 @@ async def perform_instructor_search(page, filters: dict) -> dict:
         request = getattr(response, "request", None)
         if id(request) not in accepted_requests:
             return
-        tasks.add(asyncio.create_task(_read_search_response(response, captures, instructor=True)))
+        tasks.add(asyncio.create_task(_read_search_response(response, captures, instructor=source_type == "instructor")))
 
     async def close_collector() -> None:
         nonlocal closed
@@ -387,10 +399,10 @@ async def perform_instructor_search(page, filters: dict) -> dict:
 
     try:
         outcome = await page.evaluate("""async () => {
-          try { return { ok: true, value: await (""" + INSTRUCTOR_FILTER_ACTION_JS + """)() }; }
+          try { return { ok: true, value: await (""" + filter_js + """)() }; }
           catch (error) { return { ok: false, error: error ? String(error.message || error) : 'action failed' }; }
         }""", {})
-        if not isinstance(outcome, dict) or outcome.get("ok") is not True or outcome.get("value") != "教师":
+        if not isinstance(outcome, dict) or outcome.get("ok") is not True or outcome.get("value") != label:
             raise RuntimeError(
                 str(outcome.get("error", "instructor filter action failed"))
                 if isinstance(outcome, dict) else "instructor filter action failed"
@@ -400,7 +412,7 @@ async def perform_instructor_search(page, filters: dict) -> dict:
         page.on_response(on_response)
         submit_started = True
         keyword_outcome = await page.evaluate("""async (args) => {
-          try { return { ok: true, value: await (""" + INSTRUCTOR_KEYWORD_ACTION_JS + """)(args) }; }
+          try { return { ok: true, value: await (""" + keyword_js + """)(args) }; }
           catch (error) { return { ok: false, error: error ? String(error.message || error) : 'action failed' }; }
         }""", {"keyword": filters.get("keyword", "")})
         if (
@@ -522,6 +534,18 @@ def _instructor_items(value: object) -> tuple[list[dict], bool]:
     return items, len(value) >= 50
 
 
+
+def _room_items(value: object) -> tuple[list[dict], bool]:
+    if not isinstance(value, list):
+        raise ExternalSearchTransientError("SEARCH_API_REJECTED")
+    items = []
+    for item in value[:50]:
+        if not isinstance(item, dict):
+            raise ExternalSearchTransientError("SEARCH_API_REJECTED")
+        items.append({"id": _typed_text(item.get("id")), "name": _typed_text(item.get("name")),
+            "extra": " / ".join(part for part in (item.get("buildingName"), item.get("campusName"), item.get("roomTypeName")) if isinstance(part, str) and part)})
+    return items, len(value) >= 50
+
 def parse_external_search_recipe(body: dict) -> dict:
     if not isinstance(body, dict):
         raise ExternalSearchRecipeError("recipe must be an object")
@@ -529,7 +553,7 @@ def parse_external_search_recipe(body: dict) -> dict:
     if unknown:
         raise ExternalSearchRecipeError("recipe contains unsupported transport fields")
     action = body.get("action")
-    if action not in {"department_list", "admin_class_search", "instructor_search"}:
+    if action not in {"department_list", "admin_class_search", "instructor_search", "room_search"}:
         raise ExternalSearchRecipeError("unsupported action")
 
     department_id = body.get("departmentId", "")
@@ -546,7 +570,7 @@ def parse_external_search_recipe(body: dict) -> dict:
         raise ExternalSearchRecipeError("invalid grade")
     if action == "department_list" and (department_id or department_name or grade or keyword):
         raise ExternalSearchRecipeError("department list accepts no filters")
-    if action == "instructor_search" and (department_id or department_name or grade or not keyword):
+    if action in {"instructor_search", "room_search"} and (department_id or department_name or grade or not keyword):
         raise ExternalSearchRecipeError("instructor search accepts only a keyword")
     return {
         "action": action,
@@ -587,7 +611,7 @@ def sanitize_external_search_result(value: object) -> dict:
         raise ExternalSearchRecipeError("search result must be an object")
     source_type = value.get("sourceType")
     session = value.get("session")
-    if value.get("contractVersion") != 1 or source_type not in {"department", "admin_class", "instructor"}:
+    if value.get("contractVersion") != 1 or source_type not in {"department", "admin_class", "instructor", "room"}:
         raise ExternalSearchRecipeError("search result contract is invalid")
     if not isinstance(session, dict):
         raise ExternalSearchRecipeError("search session is invalid")
@@ -622,7 +646,7 @@ def sanitize_external_search_result(value: object) -> dict:
 
 async def external_search(state: dict, recipe: dict) -> dict:
     """Run one fixed action in the user's hydrated AllCourseSchedule browser session."""
-    if recipe.get("action") not in {"department_list", "admin_class_search", "instructor_search"}:
+    if recipe.get("action") not in {"department_list", "admin_class_search", "instructor_search", "room_search"}:
         raise ExternalSearchRecipeError("unsupported action")
     browser = ChromiumSession(seed_state=state)
     async with browser:
@@ -656,14 +680,15 @@ async def external_search(state: dict, recipe: dict) -> dict:
                 "departments": _department_nodes(_json_body(entries[2], "SEARCH_API_REJECTED")),
             }
 
-        if recipe["action"] == "instructor_search":
-            capture = await perform_instructor_search(browser, recipe)
+        if recipe["action"] in {"instructor_search", "room_search"}:
+            source_type = "instructor" if recipe["action"] == "instructor_search" else "room"
+            action = perform_instructor_search if source_type == "instructor" else perform_room_search
+            capture = await action(browser, recipe)
             try:
                 raw = json.loads(capture["body"])
             except Exception:
                 raise ExternalSearchTransientError("SEARCH_BODY_TIMEOUT") from None
-            items, truncated = _instructor_items(raw)
-            source_type = "instructor"
+            items, truncated = _instructor_items(raw) if source_type == "instructor" else _room_items(raw)
         else:
             capture = await perform_admin_class_search(browser, recipe)
             try:
