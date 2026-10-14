@@ -139,7 +139,7 @@ def class_rows():
     ]
 
 
-async def start_site(*, catalog_status=200, class_status=200, expr_body=None, course_body=None, omit_expr=False, projects=None, wrong_class_body=False, wrong_project_body=False, rewrite_query=False):
+async def start_site(*, catalog_status=200, catalog_envelope=None, class_status=200, expr_body=None, course_body=None, omit_expr=False, projects=None, wrong_class_body=False, wrong_project_body=False, rewrite_query=False):
     app = web.Application()
     calls = {"catalog": [], "classes": [], "expr": [], "course": []}
 
@@ -177,7 +177,7 @@ async def start_site(*, catalog_status=200, class_status=200, expr_body=None, co
             "sessionId": request.query.get("sessionId"),
         })
         return web.json_response(
-            {"status": 200, "data": course_rows()},
+            {**({"status": "success", "code": None, "ok": True} if catalog_envelope is None else catalog_envelope), "data": course_rows()},
             status=catalog_status,
         )
 
@@ -263,6 +263,20 @@ def test_real_chromium_catalog_search_is_typed_and_request_correlated(monkeypatc
     }]
     assert term_touched is False
     assert "SECRET" not in str(result)
+
+
+@pytest.mark.parametrize("envelope", [
+    {"status": "error", "code": None, "ok": True},
+    {"status": "success", "code": None, "ok": False},
+    {"status": 200, "code": None, "ok": True},
+    {"status": "success", "code": "BUSINESS_ERROR", "ok": True},
+])
+def test_real_chromium_rejects_unsuccessful_catalog_envelopes(monkeypatch, tmp_path, envelope):
+    with pytest.raises(Exception) as raised:
+        run_browser(monkeypatch, tmp_path,
+            lambda browser: cqu_course_teaching.search_course_catalog(browser, catalog_recipe()),
+            catalog_envelope=envelope, rewrite_query=True)
+    assert raised.value.code == "SCHEMA_INVALID"
 
 
 @pytest.mark.parametrize("rewrite_query", [False, True], ids=["plaintext", "rewritten"])

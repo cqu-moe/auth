@@ -202,7 +202,9 @@ def matcher(page, rules):
 
 
 def catalog_rows(value):
-    if not isinstance(value,dict) or value.get('status') != 200 or not isinstance(value.get('data'),list):
+    if (not isinstance(value, dict) or value.get('status') != 'success'
+            or value.get('ok') is not True or value.get('code') is not None
+            or not isinstance(value.get('data'), list)):
         raise ExternalCaptureTransientError('SCHEMA_INVALID')
     return value['data']
 
