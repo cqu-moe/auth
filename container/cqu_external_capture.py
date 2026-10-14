@@ -8,7 +8,7 @@ import urllib.parse
 import browser_profile
 from chromium_session import ChromiumSession
 from cqu_data_harvest import StageTrace, is_expired_harvest, run_serial_inpage_gets
-from cqu_external_search import perform_admin_class_search, perform_instructor_search
+from cqu_external_search import perform_admin_class_search, perform_instructor_search, perform_room_search
 
 
 ALLOWED_RECIPE_KEYS = frozenset({
@@ -23,10 +23,12 @@ INSTRUCTOR_TABLE_MARKER = "/api/timetable/class/timetable/instructor/table-detai
 CAPTURE_ACTIONS = {
     "admin_class": "admin_class_capture",
     "instructor": "instructor_capture",
+    "room": "room_capture",
 }
 CAPTURE_TABLE_MARKERS = {
     "admin_class": ADMIN_TABLE_MARKER,
     "instructor": INSTRUCTOR_TABLE_MARKER,
+    "room": "/api/timetable/class/timetable/room/table-detail",
 }
 
 
@@ -162,7 +164,7 @@ def _is_expected_capture_request(
 ) -> bool:
     parsed = urllib.parse.urlsplit(getattr(request, "url", ""))
     response_origin = f"{parsed.scheme}://{parsed.netloc}"
-    if response_origin != expected_origin or parsed.path != (ADMIN_TABLE_MARKER if source_type == "admin_class" else INSTRUCTOR_TABLE_MARKER):
+    if response_origin != expected_origin or parsed.path != (ADMIN_TABLE_MARKER if source_type == "admin_class" else INSTRUCTOR_TABLE_MARKER if source_type == "instructor" else CAPTURE_TABLE_MARKERS[source_type]):
         return False
     if getattr(request, "method", "").upper() != "POST":
         return False
@@ -257,18 +259,36 @@ def _search_target(value: object, recipe: dict) -> None:
         raise ExternalCaptureTransientError("AMBIGUOUS_TARGET" if by_name else "TARGET_NOT_FOUND")
 
 
-def _sanitized_timetable(value: object, target_id: str, source_type: str = "admin_class") -> dict:
-    if not isinstance(value, dict) or any(isinstance(item, list) and key != "classTimetableVOList" for key, item in value.items()):
+def _sanitized_timetable(value: object, target_id: str, source_type: str = "admin_class", sanitized: bool = False) -> dict:
+    room = source_type == "room"
+    allowed_arrays = {"classTimetableVOList"} | ({"roomExamTimeTableVOList", "tempActivityTimetableVOList"} if room and not sanitized else set())
+    if not isinstance(value, dict) or any(isinstance(item, list) and key not in allowed_arrays for key, item in value.items()):
         raise ExternalCaptureTransientError("SCHEMA_INVALID")
     rows = value.get("classTimetableVOList")
     max_section = value.get("maxSection")
     if not isinstance(rows, list) or type(max_section) is not int or not 1 <= max_section <= 14:
         raise ExternalCaptureTransientError("SCHEMA_INVALID")
+    count = 0
+    if room:
+        if sanitized:
+            count = value.get("unverifiedItemCount")
+        else:
+            extras = [value.get(key) for key in ("roomExamTimeTableVOList", "tempActivityTimetableVOList")]
+            if any(not isinstance(items, list) for items in extras):
+                raise ExternalCaptureTransientError("SCHEMA_INVALID")
+            count = sum(len(items) for items in extras)
+        if type(count) is not int or not 0 <= count <= 100000:
+            raise ExternalCaptureTransientError("SCHEMA_INVALID")
     result = []
     for row in rows:
         if not isinstance(row, dict):
             raise ExternalCaptureTransientError("SCHEMA_INVALID")
-        if source_type == "instructor":
+        if room:
+            room_id = _required_text(row.get("roomId"), 100)
+            if room_id != target_id:
+                raise ExternalCaptureTransientError("SCHEMA_INVALID")
+            ownership = {"roomId": room_id}
+        elif source_type == "instructor":
             ids = row.get("instructorIdList")
             if not isinstance(ids, list) or not ids:
                 raise ExternalCaptureTransientError("SCHEMA_INVALID")
@@ -308,7 +328,7 @@ def _sanitized_timetable(value: object, target_id: str, source_type: str = "admi
             typed = {}
         typed.update(ownership)
         result.append(typed)
-    return {"classTimetableVOList": result, "maxSection": max_section}
+    return {"classTimetableVOList": result, "maxSection": max_section, **({"unverifiedItemCount": count} if room else {})}
 
 
 async def _select_target(page, recipe: dict) -> None:
@@ -362,7 +382,7 @@ async def _capture_target(page, recipe: dict) -> dict:
         raise ExternalCaptureTransientError("CURRENT_SESSION_CHANGED")
 
     await _clear_selected_targets(page)
-    search_action = perform_instructor_search if recipe["sourceType"] == "instructor" else perform_admin_class_search
+    search_action = {"instructor": perform_instructor_search, "room": perform_room_search, "admin_class": perform_admin_class_search}[recipe["sourceType"]]
     search = await search_action(page, {
         "departmentId": "", "departmentName": "", "grade": "", "keyword": recipe["targetName"],
     })
@@ -456,7 +476,7 @@ def sanitize_external_capture_result(value: object) -> dict:
             "name": _required_text(session.get("name"), 100),
             "beginDate": _required_text(session.get("beginDate"), 10),
         },
-        "timetable": _sanitized_timetable(value.get("timetable"), target_id, value["sourceType"]),
+        "timetable": _sanitized_timetable(value.get("timetable"), target_id, value["sourceType"], sanitized=True),
     }
 
 

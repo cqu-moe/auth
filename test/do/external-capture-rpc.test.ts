@@ -289,3 +289,35 @@ it("requires method approval, external entitlement and an active school binding"
   })).resolves.toEqual({ error: "NO_CQU_BINDING" });
   expect(bound.fetch).not.toHaveBeenCalled();
 });
+
+
+it("dispatches room search and capture while preserving partial-count and exact room ownership", async () => {
+  const f = await fixture({ rpcMethods: ["cquExternalSearch", "cquExternalCapture"] });
+  f.fetch.mockImplementationOnce(async () => Response.json({
+    ok: true, contractVersion: 1, sourceType: "room",
+    session: { id: "session-current", name: "2026秋" },
+    items: [{ id: "room-1", name: "D101", extra: "教学楼 / A校区", privateField: "SECRET" }], truncated: true,
+  }));
+  await expect(f.rpc.cquExternalSearch({ ...f.args, sourceType: "room", keyword: "D101" })).resolves.toEqual({
+    contractVersion: 1, sourceType: "room", session: { id: "session-current", name: "2026秋" },
+    items: [{ id: "room-1", name: "D101", extra: "教学楼 / A校区" }], truncated: true,
+  });
+  await expect(f.fetch.mock.calls[0][0].clone().json()).resolves.toMatchObject({ action: "room_search", keyword: "D101" });
+  const payload = {
+    contractVersion: 1, sourceType: "room", target: { id: "room-1", name: "D101" },
+    session: { id: "session-current", name: "2026秋", beginDate: "2026-09-07" },
+    timetable: { classTimetableVOList: [{ roomId: "room-1", courseName: "数学", teachingWeek: "110", period: "101", weekDay: 1 }], maxSection: 12, unverifiedItemCount: 3 },
+  };
+  const args = { ...f.args, sourceType: "room" as const, targetId: "room-1", targetName: "D101", expectedSessionId: "session-current" };
+  f.fetch.mockImplementationOnce(async () => Response.json({ ok: true, ...payload }));
+  await expect(f.rpc.cquExternalCapture(args)).resolves.toEqual(payload);
+  await expect(f.fetch.mock.calls[1][0].clone().json()).resolves.toMatchObject({ action: "room_capture", targetId: "room-1" });
+  for (const timetable of [
+    { ...payload.timetable, unverifiedItemCount: -1 },
+    { ...payload.timetable, unverifiedItemCount: undefined },
+    { ...payload.timetable, classTimetableVOList: [{ roomId: "room-other" }] },
+  ]) {
+    f.fetch.mockImplementationOnce(async () => Response.json({ ok: true, ...payload, timetable }));
+    await expect(f.rpc.cquExternalCapture(args)).resolves.toEqual({ error: "SCHEMA_INVALID" });
+  }
+});
