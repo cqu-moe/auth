@@ -137,16 +137,17 @@ async def start_action_site(search_status=200, search_body=None):
         return __import__("aiohttp", fromlist=["web"]).web.Response(text="""<!doctype html><html><body>
           <main aria-label="排课管理">
             <div class="ant-select ant-select-disabled" aria-label="学期"><div class="ant-select-selection-item">2026年秋</div></div>
-            <div class="ant-form-item"><label>查询范围</label><div class="ant-select" data-control="range"><div class="ant-select-selection-item">教师</div></div></div>
-            <div class="ant-form-item"><label>学院</label><div class="ant-select" data-control="department"><div class="ant-select-selection-item">电气工程学院</div><span class="ant-select-clear">×</span></div></div>
-            <div class="ant-form-item"><label>年级</label><div class="ant-select" data-control="grade"><div class="ant-select-selection-item">2025</div><span class="ant-select-clear">×</span></div></div>
-            <label>班级名称</label><input class="ant-input" data-control="keyword" placeholder="请输入班级名称" value="">
+            <div><span>查询范围：</span><div class="ant-select" data-control="range"><div class="ant-select-selection-item">教师</div></div></div>
+            <div><span>学院：</span><div class="ant-select" data-control="department"><div class="ant-select-selection-item">全部</div><span class="ant-select-clear" style="display:none">×</span></div></div>
+            <div><span>年级：</span><div class="ant-select" data-control="grade"><div class="ant-select-selection-item">2025</div><span class="ant-select-clear">×</span></div></div>
+            <div class="keyword-control"><div class="ant-select"><div class="ant-select-selection__placeholder">请输入行政班名字快速查询</div><input class="ant-input ant-select-search__field" data-control="keyword" value=""></div></div>
             <button type="button">查询</button>
           </main><script>
-            window.filters = {department: 'dept-ee', grade: '2025', keyword: ''};
+            window.filters = {department: '', grade: '2025', keyword: ''};
             window.termTouched = false;
             document.querySelector('[aria-label="学期"]').addEventListener('click', () => { window.termTouched = true; });
             for (const control of document.querySelectorAll('.ant-select')) {
+              if (control.closest('.keyword-control')) continue;
               control.addEventListener('click', event => {
                 if (control.closest('[aria-label="学期"]')) return;
                 const name = control.dataset.control;
@@ -174,16 +175,14 @@ async def start_action_site(search_status=200, search_body=None):
             }
             document.querySelector('[data-control="keyword"]').addEventListener('input', event => {
               window.filters.keyword = event.target.value;
-            });
-            fetch('/api/timetable/admin-class/dept-admin-classes?stale=1', {
-              method: 'POST', credentials: 'include', body: JSON.stringify(['stale-dept'])
-            });
-            document.querySelector('button').onclick = () => {
               const query = new URLSearchParams({grade: window.filters.grade, className: window.filters.keyword});
               fetch('/api/timetable/admin-class/dept-admin-classes?' + query, {
                 method: 'POST', credentials: 'include', body: JSON.stringify(window.filters.department ? [window.filters.department] : [])
               });
-            };
+            });
+            fetch('/api/timetable/admin-class/dept-admin-classes?stale=1', {
+              method: 'POST', credentials: 'include', body: JSON.stringify([])
+            });
           </script></body></html>""", content_type="text/html")
 
     async def search(request):
@@ -225,7 +224,7 @@ def test_admin_class_action_uses_visible_page_controls(monkeypatch, tmp_path):
                 assert '"class-1"' in capture["body"]
                 assert await browser.evaluate("window.termTouched") is False
                 assert len(calls) == 2
-                assert calls[0]["body"] == '["stale-dept"]'
+                assert calls[0]["body"] == "[]"
                 assert calls[-1] == {
                     "body": "[]", "grade": "2026", "keyword": "电气",
                 }
