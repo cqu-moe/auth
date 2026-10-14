@@ -21,6 +21,12 @@ import {
   type CquExternalSearchArgs,
   type CquExternalSearchResult,
 } from "./services/cqu-external-search";
+import {
+  parseExternalCaptureArgs,
+  parseExternalCaptureResult,
+  type CquExternalCaptureArgs,
+  type CquExternalCaptureResult,
+} from "./services/cqu-external-capture";
 import { resolveBrowserDeadline } from "./services/cqu-browser-budget";
 import { CquSsoError } from "./services/cqu-sso";
 import {
@@ -105,7 +111,12 @@ export class AuthService extends WorkerEntrypoint<Env> {
    * or per-user OAuth tokens are minted by these methods. */
   private async authorizeService(
     args: { clientId: string; clientSecret: string; userId: string },
-    method: "getCaps" | "getCquTicket" | "cquHarvest" | "cquExternalSearch"
+    method:
+      | "getCaps"
+      | "getCquTicket"
+      | "cquHarvest"
+      | "cquExternalSearch"
+      | "cquExternalCapture"
   ): Promise<{ subsystem: string } | { error: string }> {
     const finish = (result: { subsystem: string } | { error: string }) => {
       console.info(JSON.stringify({ event: "auth.rpc.request", clientId: args.clientId,
@@ -416,5 +427,47 @@ export class AuthService extends WorkerEntrypoint<Env> {
       return { error: typeof code === "string" ? code : "SEARCH_FAILED" };
     }
     return parseExternalSearchResult(body, args.sourceType);
+  }
+
+  /** Capture only a fixed current-term admin-class business target. */
+  async cquExternalCapture(
+    args: CquExternalCaptureArgs
+  ): Promise<CquExternalCaptureResult | { error: string }> {
+    const recipe = parseExternalCaptureArgs(args);
+    if ("error" in recipe) return recipe;
+    let deadlineAt: number;
+    try {
+      deadlineAt = resolveBrowserDeadline(args.deadlineAt, Date.now());
+    } catch (error) {
+      return {
+        error: error instanceof CquSsoError ? error.code : "INVALID_BROWSER_DEADLINE",
+      };
+    }
+
+    const authorization = await this.authorizeService(args, "cquExternalCapture");
+    if ("error" in authorization) return authorization;
+    const caps = await resolveCapsForRpc(this.env.DATABASE, args.userId);
+    if (authorization.subsystem !== "calendar" || caps?.calendar.external !== true) {
+      return { error: "FORBIDDEN" };
+    }
+    if (!(await this.hasSchoolBinding(args.userId))) return { error: "NO_CQU_BINDING" };
+
+    const doId = this.env.CQU_SESSION.idFromName(args.userId);
+    const stub = this.env.CQU_SESSION.get(doId);
+    const doUrl = new URL("https://do/external-capture");
+    doUrl.searchParams.set("clientId", args.clientId);
+    doUrl.searchParams.set("source", "rpc");
+    const resp = await stub.fetch(new Request(doUrl.toString(), {
+      method: "POST",
+      body: JSON.stringify({ ...recipe, deadlineAt }),
+    }));
+    const body = await resp.json<unknown>().catch(() => null);
+    if (!resp.ok || typeof body !== "object" || body === null || (body as { ok?: unknown }).ok !== true) {
+      const code = typeof body === "object" && body !== null
+        ? (body as { error?: unknown; code?: unknown }).error ?? (body as { code?: unknown }).code
+        : undefined;
+      return { error: typeof code === "string" ? code : "CAPTURE_TRANSIENT" };
+    }
+    return parseExternalCaptureResult(body, recipe);
   }
 }
