@@ -199,10 +199,20 @@ INSTRUCTOR_FILTER_ACTION_JS = """async () => {
 
 INSTRUCTOR_KEYWORD_ACTION_JS = """async ({ keyword }) => {
   const visible = element => !!element && element.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
-  const input = [...document.querySelectorAll('input')]
+  // Ant Design Vue 1 renders its hint beside the input, not in input.placeholder.
+  const placeholder = [...document.querySelectorAll('.ant-select-selection__placeholder')]
+    .find(element => element.textContent?.includes('教师') || element.textContent?.includes('工号'));
+  const control = placeholder?.closest('.ant-select');
+  const input = control?.querySelector('input') || [...document.querySelectorAll('input')]
     .filter(element => element.placeholder?.includes('教师') || element.placeholder?.includes('工号'))
     .find(visible);
   if (!input) throw new Error('keyword control missing');
+  if (!visible(input) && visible(control)) {
+    control.click();
+    const deadline = Date.now() + 1000;
+    while (!visible(input) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  if (!visible(input)) throw new Error('keyword control not visible');
   input.focus();
   input.value = keyword;
   input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: keyword }));

@@ -42,9 +42,10 @@ PAGE_HTML = """<!doctype html><html><body>
   <main aria-label="排课管理">
     <div class="ant-select ant-select-disabled" aria-label="学期"><div class="ant-select-selection-item">2026年秋</div></div>
     <div><span>查询范围：</span><div class="ant-select" data-control="range"><div class="ant-select-selection-item">教师</div></div></div>
-    <div class="target-control"><div class="ant-select"><span class="ant-select-selection__placeholder">请输入目标快速查询</span><input data-control="keyword"></div></div>
+    <div class="target-control"><div class="ant-select"><span class="ant-select-selection__placeholder">请输入课程名称/课程代码查询班号</span><input data-control="keyword" style="display:none"></div></div>
   </main><script>
     window.state = {range: '教师', keyword: '', selectedCourse: null};
+    document.querySelector('.target-control .ant-select').onclick = () => { setTimeout(() => { document.querySelector('[data-control="keyword"]').style.display = ''; }, 20); };
     window.termTouched = false;
     document.querySelector('[aria-label="学期"]').onclick = () => { window.termTouched = true; };
     document.querySelector('[data-control="range"]').onclick = () => {

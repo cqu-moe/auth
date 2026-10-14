@@ -310,7 +310,7 @@ async def start_instructor_site(search_status=200):
           <main aria-label="排课管理">
             <div class="ant-select ant-select-disabled" aria-label="学期"><div class="ant-select-selection-item">2026年秋</div></div>
             <div><span>查询范围：</span><div class="ant-select" data-control="range"><div class="ant-select-selection-item">行政班</div></div></div>
-            <div class="target-control"><div class="ant-select"><div class="ant-select-selection__placeholder">请输入教师姓名或工号</div><input class="ant-input ant-select-search__field" data-control="keyword" placeholder="请输入教师姓名或工号" value=""></div></div>
+            <div class="target-control"><div class="ant-select"><div class="ant-select-selection__placeholder">请输入教师姓名或工号</div><input class="ant-input ant-select-search__field" data-control="keyword" value=""></div></div>
           </main><script>
             window.termTouched = false;
             window.range = '行政班';
