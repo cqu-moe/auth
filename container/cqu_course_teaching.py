@@ -176,7 +176,13 @@ def matcher(page, rules):
             return None
         query = urllib.parse.parse_qs(url.query,keep_blank_values=True)
         for key,(path,method,params,body) in rules.items():
-            if url.path != path or getattr(request,'method','').upper() != method or query != params:
+            if url.path != path or getattr(request,'method','').upper() != method:
+                continue
+            # The school rewrites the whole query into one opaque transport value.
+            # Correlate only requests started by the fixed UI action; parent/term
+            # checks and POST-body ownership remain mandatory. Never decode or reuse it.
+            rewritten = set(query) == {'CAqWHAeT'} and len(query['CAqWHAeT']) == 1 and bool(query['CAqWHAeT'][0])
+            if query != params and not rewritten:
                 continue
             if method == 'POST':
                 try:

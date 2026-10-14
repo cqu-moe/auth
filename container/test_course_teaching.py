@@ -139,12 +139,21 @@ def class_rows():
     ]
 
 
-async def start_site(*, catalog_status=200, class_status=200, expr_body=None, course_body=None, omit_expr=False, projects=None, wrong_class_body=False, wrong_project_body=False):
+async def start_site(*, catalog_status=200, class_status=200, expr_body=None, course_body=None, omit_expr=False, projects=None, wrong_class_body=False, wrong_project_body=False, rewrite_query=False):
     app = web.Application()
     calls = {"catalog": [], "classes": [], "expr": [], "course": []}
 
     async def page(_request):
         html = PAGE_HTML
+        if rewrite_query:
+            html = html.replace('<main aria-label="排课管理">', """<script>
+              const fetchOriginal = window.fetch;
+              window.fetch = (input, options) => {
+                const url = new URL(input, location.href);
+                if (url.pathname.startsWith('/api/timetable/')) url.search = '?CAqWHAeT=fixture-only';
+                return fetchOriginal(url.href, options);
+              };
+            </script><main aria-label="排课管理">""")
         if omit_expr:
             html = html.replace("fetch('/api/timetable/class/timetable/expr-prj/table-detail?sessionId=session-current', {", "fetch('/ignored', {")
         if wrong_class_body:
@@ -234,11 +243,13 @@ def run_browser(monkeypatch, tmp_path, action, **site_kwargs):
     return asyncio.run(run())
 
 
-def test_real_chromium_catalog_search_is_typed_and_request_correlated(monkeypatch, tmp_path):
+@pytest.mark.parametrize("rewrite_query", [False, True], ids=["plaintext", "rewritten"])
+def test_real_chromium_catalog_search_is_typed_and_request_correlated(monkeypatch, tmp_path, rewrite_query):
     result, calls, term_touched = run_browser(
         monkeypatch,
         tmp_path,
         lambda browser: cqu_course_teaching.search_course_catalog(browser, catalog_recipe()),
+        rewrite_query=rewrite_query,
     )
     assert result == {
         "contractVersion": 1,
@@ -248,17 +259,19 @@ def test_real_chromium_catalog_search_is_typed_and_request_correlated(monkeypatc
         "truncated": False,
     }
     assert calls["catalog"] == [{
-        "keyword": "高等数学", "pageSize": "50", "sessionId": "session-current",
+        "keyword": None if rewrite_query else "高等数学", "pageSize": None if rewrite_query else "50", "sessionId": None if rewrite_query else "session-current",
     }]
     assert term_touched is False
     assert "SECRET" not in str(result)
 
 
-def test_real_chromium_teaching_search_requires_course_and_current_session(monkeypatch, tmp_path):
+@pytest.mark.parametrize("rewrite_query", [False, True], ids=["plaintext", "rewritten"])
+def test_real_chromium_teaching_search_requires_course_and_current_session(monkeypatch, tmp_path, rewrite_query):
     result, calls, term_touched = run_browser(
         monkeypatch,
         tmp_path,
         lambda browser: cqu_course_teaching.search_teaching_classes(browser, class_recipe()),
+        rewrite_query=rewrite_query,
     )
     assert result == {
         "contractVersion": 1,
@@ -268,7 +281,7 @@ def test_real_chromium_teaching_search_requires_course_and_current_session(monke
         "items": [{"id": "class-other", "name": "高等数学02班", "extra": "02班 / 其他教师"}, {"id": "class-1", "name": "高等数学01班", "extra": "01班 / 主讲教师"}],
         "truncated": False,
     }
-    assert calls["classes"] == [{"courseId": "course-1", "sessionId": "session-current"}]
+    assert calls["classes"] == [{"courseId": None if rewrite_query else "course-1", "sessionId": None if rewrite_query else "session-current"}]
     assert term_touched is False
     assert "SECRET" not in str(result)
 
@@ -278,11 +291,13 @@ def test_real_chromium_teaching_search_requires_course_and_current_session(monke
     assert getattr(raised.value, "code", None) == "CURRENT_SESSION_CHANGED"
 
 
-def test_real_chromium_capture_requires_both_responses_and_filters_mixed_classes(monkeypatch, tmp_path):
+@pytest.mark.parametrize("rewrite_query", [False, True], ids=["plaintext", "rewritten"])
+def test_real_chromium_capture_requires_both_responses_and_filters_mixed_classes(monkeypatch, tmp_path, rewrite_query):
     result, calls, term_touched = run_browser(
         monkeypatch,
         tmp_path,
         lambda browser: cqu_course_teaching.capture_teaching_class(browser, capture_recipe()),
+        rewrite_query=rewrite_query,
     )
     assert result == {
         "contractVersion": 1,
@@ -369,11 +384,12 @@ def test_real_chromium_project_finder_ids_bind_nonempty_post_and_empty_response(
 
 
 @pytest.mark.parametrize('override', ['wrong_class_body', 'wrong_project_body'])
-def test_real_chromium_rejects_posts_unrelated_to_captured_finder_ids(monkeypatch, tmp_path, override):
+@pytest.mark.parametrize('rewrite_query', [False, True], ids=['plaintext', 'rewritten'])
+def test_real_chromium_rejects_posts_unrelated_to_captured_finder_ids(monkeypatch, tmp_path, override, rewrite_query):
     with pytest.raises(Exception) as raised:
         run_browser(monkeypatch, tmp_path,
             lambda browser: cqu_course_teaching.capture_teaching_class(browser, capture_recipe()),
-            projects=[{'id':'project-a'}], **{override:True})
+            projects=[{'id':'project-a'}], rewrite_query=rewrite_query, **{override:True})
     assert raised.value.code == 'SCHEMA_INVALID'
 
 
