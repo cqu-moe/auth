@@ -15,6 +15,12 @@ import { oauthClientCquScopes } from "./db/schema";
 import { getCquBinding, type CquBindStatus } from "./services/cqu-binding";
 import { requiredScopeForTarget } from "./services/required-scope";
 import type { HarvestCapture, HarvestFetch } from "./services/cqu-node-protocol";
+import {
+  parseExternalSearchArgs,
+  parseExternalSearchResult,
+  type CquExternalSearchArgs,
+  type CquExternalSearchResult,
+} from "./services/cqu-external-search";
 import { resolveBrowserDeadline } from "./services/cqu-browser-budget";
 import { CquSsoError } from "./services/cqu-sso";
 import {
@@ -99,7 +105,7 @@ export class AuthService extends WorkerEntrypoint<Env> {
    * or per-user OAuth tokens are minted by these methods. */
   private async authorizeService(
     args: { clientId: string; clientSecret: string; userId: string },
-    method: "getCaps" | "getCquTicket" | "cquHarvest"
+    method: "getCaps" | "getCquTicket" | "cquHarvest" | "cquExternalSearch"
   ): Promise<{ subsystem: string } | { error: string }> {
     const finish = (result: { subsystem: string } | { error: string }) => {
       console.info(JSON.stringify({ event: "auth.rpc.request", clientId: args.clientId,
@@ -375,5 +381,39 @@ export class AuthService extends WorkerEntrypoint<Env> {
       return { error: err.code ?? "HARVEST_FAILED" };
     }
     return resp.json<{ captures: HarvestCapture[]; fetches: HarvestFetch[] }>();
+  }
+
+  /** Search only through fixed AllCourseSchedule recipes; transport details are never caller-controlled. */
+  async cquExternalSearch(
+    args: CquExternalSearchArgs
+  ): Promise<CquExternalSearchResult | { error: string }> {
+    const recipe = parseExternalSearchArgs(args);
+    if ("error" in recipe) return recipe;
+
+    const authorization = await this.authorizeService(args, "cquExternalSearch");
+    if ("error" in authorization) return authorization;
+    const caps = await resolveCapsForRpc(this.env.DATABASE, args.userId);
+    if (authorization.subsystem !== "calendar" || caps?.calendar.external !== true) {
+      return { error: "FORBIDDEN" };
+    }
+    if (!(await this.hasSchoolBinding(args.userId))) return { error: "NO_CQU_BINDING" };
+
+    const doId = this.env.CQU_SESSION.idFromName(args.userId);
+    const stub = this.env.CQU_SESSION.get(doId);
+    const doUrl = new URL("https://do/external-search");
+    doUrl.searchParams.set("clientId", args.clientId);
+    doUrl.searchParams.set("source", "rpc");
+    const resp = await stub.fetch(new Request(doUrl.toString(), {
+      method: "POST",
+      body: JSON.stringify(recipe),
+    }));
+    const body = await resp.json<unknown>().catch(() => null);
+    if (!resp.ok || typeof body !== "object" || body === null || (body as { ok?: unknown }).ok !== true) {
+      const code = typeof body === "object" && body !== null
+        ? (body as { error?: unknown; code?: unknown }).error ?? (body as { code?: unknown }).code
+        : undefined;
+      return { error: typeof code === "string" ? code : "SEARCH_FAILED" };
+    }
+    return parseExternalSearchResult(body, args.sourceType);
   }
 }

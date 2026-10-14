@@ -77,11 +77,17 @@ import {
   shouldAbandonKeepaliveWriteback,
   buildStMintAudit,
   classifyNodeHarvestResponse,
+  classifyNodeExternalSearchResponse,
   type NodeTicketBody,
   type NodeHarvestBody,
+  type NodeExternalSearchBody,
   type HarvestCapture,
   type HarvestFetch,
 } from "../services/cqu-node-protocol";
+import {
+  parseExternalSearchRecipe,
+  type ExternalSearchRecipe,
+} from "../services/cqu-external-search";
 import type { Env } from "../types";
 import type {
   DeviceLoginRequest,
@@ -562,6 +568,18 @@ export class CquSessionDO extends DurableObject<Env> {
             clientId,
             source,
             deadlineAt: recipe.deadlineAt,
+          });
+          return Response.json(result);
+        }
+        case "external-search": {
+          const clientId = url.searchParams.get("clientId") || null;
+          const rawSource = url.searchParams.get("source");
+          const source = rawSource === "route" || rawSource === "rpc" ? rawSource : "unknown";
+          const recipe = await request.json<unknown>();
+          const result = await this.externalSearch({
+            recipe,
+            clientId,
+            source,
           });
           return Response.json(result);
         }
@@ -1247,6 +1265,112 @@ export class CquSessionDO extends DurableObject<Env> {
       throw new CquSsoError(c.code ?? "HARVEST_TRANSIENT", `browser /data-harvest ${c.detail ?? "transient"}`);
     }
     return { captures: c.captures ?? [], fetches: c.fetches ?? [], state: c.state };
+  }
+
+  private async externalSearch(arg: {
+    recipe: unknown;
+    clientId: string | null;
+    source: string;
+  }): Promise<Record<string, unknown>> {
+    const recipe = parseExternalSearchRecipe(arg.recipe);
+    if ("error" in recipe) {
+      throw new CquSsoError("INVALID_SEARCH_RECIPE", "external search recipe is not allowed");
+    }
+    if (!(await this.reconcileBinding())) {
+      throw new CquSsoError("SESSION_INACTIVE", "CQU binding inactive");
+    }
+    const status = await this.getStatus();
+    if (!this.state) throw new CquSsoError("SESSION_INACTIVE", "CQU session not active");
+    const sessionState = this.state;
+    if (status !== "active") {
+      if (status === "needs_reauth") throw new CquSsoError("NEEDS_REAUTH", "CQU session needs re-auth");
+      if (status === "expired" || status === "relogging" || status === "binding") {
+        await this.enqueueRecoveryWorkflow(sessionState.userId);
+      }
+      throw new CquSsoError("SESSION_INACTIVE", "CQU session not active");
+    }
+    if (!sessionState.storageState) {
+      await this.setStatus("expired");
+      await this.scheduleSessionAlarm(Date.now());
+      throw new CquSsoError("SESSION_INACTIVE", "CQU session needs re-login (no storage state)");
+    }
+
+    const now = Date.now();
+    const stored = (await this.ctx.storage.get<StMintRecord[]>("stMintLog")) ?? [];
+    const pruned = pruneStMintLog(stored, now, ST_MINT_RATE_WINDOW_MS);
+    if (stMintThrottled(pruned, arg.clientId, MAX_ST_MINTS_PER_USER, MAX_ST_MINTS_PER_CLIENT)) {
+      throw new CquSsoError("RATE_LIMITED", "取数过于频繁,请稍后再试");
+    }
+
+    sessionState.lastRequestedAt = now;
+    await this.putStateGuarded(sessionState);
+    pruned.push({ ts: now, clientId: arg.clientId, host: "my.cqu.edu.cn", broad: false });
+    try {
+      await this.ctx.storage.put("stMintLog", pruned);
+    } catch (error) {
+      console.error(`[CquSession] stMintLog put failed (external search degraded): ${errMsg(error)}`);
+    }
+
+    const sourceSession = structuredClone(sessionState);
+    let outcome = "INTERNAL_ERROR";
+    try {
+      const budget = this.browserOperationBudget(
+        resolveBrowserDeadline(undefined, now),
+        CONTAINER_HARVEST_DEADLINE_MS
+      );
+      const requestBody: Record<string, unknown> = {
+        state: sourceSession.storageState,
+        ...(recipe as ExternalSearchRecipe),
+      };
+      if (budget.operationTimeoutMs) requestBody.operationTimeoutMs = budget.operationTimeoutMs;
+      let response: Response;
+      try {
+        response = await fetchBrowser(
+          this.env,
+          this.currentBrowserRoute(),
+          new Request("http://cqu-login.internal/external-search", {
+            method: "POST",
+            body: JSON.stringify(requestBody),
+            signal: AbortSignal.timeout(budget.fetchTimeoutMs),
+          })
+        );
+      } catch (error) {
+        if (error instanceof CquSsoError && STABLE_BROWSER_CODES.has(error.code)) throw error;
+        throw new CquSsoError("SEARCH_TRANSIENT", "browser /external-search fetch failed");
+      }
+      const body = await response.json<NodeExternalSearchBody>().catch(() => null);
+      const classified = classifyNodeExternalSearchResponse(response.status, body);
+      if (classified.kind === "instance_replaced") {
+        throw new CquSsoError("BROWSER_INSTANCE_REPLACED", "browser instance replaced during search");
+      }
+      if (classified.kind === "expired") {
+        await this.markSessionExpired(sourceSession);
+        throw new CquSsoError("TGT_EXPIRED", "CQU session expired during search");
+      }
+      if (classified.kind === "transient") {
+        throw new CquSsoError(classified.code ?? "SEARCH_TRANSIENT", "browser external search failed");
+      }
+      if (!(await this.reconcileBinding()) || await this.getStatus() !== "active") {
+        throw new CquSsoError("SESSION_INACTIVE", "CQU binding changed during search");
+      }
+      outcome = "ok";
+      return body as Record<string, unknown>;
+    } catch (error) {
+      outcome = error instanceof CquSsoError ? error.code : "INTERNAL_ERROR";
+      throw error;
+    } finally {
+      console.log(JSON.stringify({
+        ...buildStMintAudit({
+          userId: sessionState.userId,
+          clientId: arg.clientId,
+          host: "my.cqu.edu.cn",
+          broad: false,
+          source: arg.source,
+          ts: now,
+        }),
+        outcome,
+      }));
+    }
   }
 
   private async markSessionExpired(source: SessionState): Promise<boolean> {

@@ -14,8 +14,10 @@ const CODE_TO_STATUS: Record<string, number> = {
   // organic harvest 的 host 越界(navUrl/fetch.url 非精确 my.cqu.edu.cn): 同 INVALID_SERVICE_URL
   // 一类客户端输入错误 → 400, 而非 fallback 500(伪装成服务器崩溃)。
   INVALID_HARVEST_URL: 400,
+  INVALID_SEARCH_RECIPE: 400,
   UNKNOWN_SERVICE: 400,
   QUICKLOGIN_NOT_ENABLED: 403,
+  PAGE_PERMISSION_DENIED: 403,
   SESSION_INACTIVE: 409,
   NEEDS_REAUTH: 409,
   // TGT 过期:会话失效但可经重登自愈,同 SESSION_INACTIVE/NEEDS_REAUTH 一类回 409,
@@ -30,6 +32,11 @@ const CODE_TO_STATUS: Record<string, number> = {
   TABLE_REQUEST_HUNG: 504,
   TABLE_BODY_TIMEOUT: 504,
   TABLE_API_REJECTED: 502,
+  SEARCH_CAPTURE_TIMEOUT: 503,
+  SEARCH_REQUEST_HUNG: 504,
+  SEARCH_BODY_TIMEOUT: 504,
+  SEARCH_API_REJECTED: 502,
+  SEARCH_TRANSIENT: 503,
   // 浏览器容量/实例替换/截止时间:瞬态基础设施状态,保留旧会话 → 503。
   BROWSER_BUSY: 503,
   BROWSER_INSTANCE_REPLACED: 503,

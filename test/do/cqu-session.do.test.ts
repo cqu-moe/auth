@@ -2797,3 +2797,93 @@ describe("data-harvest action", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 });
+
+describe("external-search action", () => {
+  const recipe = {
+    action: "admin_class_search",
+    departmentId: "",
+    departmentName: "",
+    grade: "2026",
+    keyword: "电气",
+  };
+  const typedResult = {
+    ok: true,
+    contractVersion: 1,
+    sourceType: "admin_class",
+    session: { id: "session-current", name: "2026秋" },
+    items: [{ id: "class-1", name: "电气1班", extra: "2026级" }],
+    truncated: true,
+  };
+
+  async function postSearch(stub: DurableObjectStub, body: unknown = recipe) {
+    return stub.fetch("http://do/external-search?clientId=calendar&source=rpc", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("returns the typed browser result and records one real browser action", async () => {
+    const stub = freshStub("external-search-ok");
+    await seedSession(stub, { status: "active" });
+    let received: Record<string, unknown> | null = null;
+    spyBrowserFetch({
+      "/external-search": async (request) => {
+        received = await request.json() as Record<string, unknown>;
+        return Response.json(typedResult);
+      },
+    });
+
+    const res = await postSearch(stub);
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual(typedResult);
+    expect(received).toMatchObject(recipe);
+    expect(typeof received?.["operationTimeoutMs"]).toBe("number");
+    expect(await readStMintLog(stub)).toHaveLength(1);
+  });
+
+  it("rejects malformed fixed recipes before browser dispatch or accounting", async () => {
+    const stub = freshStub("external-search-invalid");
+    await seedSession(stub, { status: "active" });
+    const spy = spyBrowserFetch({ "/external-search": async () => Response.json({}) });
+
+    const res = await postSearch(stub, { ...recipe, url: "https://example.com" });
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ code: "INVALID_SEARCH_RECIPE" });
+    expect(spy).not.toHaveBeenCalled();
+    expect(await readStMintLog(stub)).toHaveLength(0);
+  });
+
+  it("maps browser session expiry without echoing raw diagnostics", async () => {
+    const stub = freshStub("external-search-expired");
+    await seedSession(stub, { status: "active" });
+    spyBrowserFetch({
+      "/external-search": async () => Response.json(
+        { ok: false, error: "TGT_EXPIRED", diagnostics: { cookie: "SECRET" } },
+        { status: 409 },
+      ),
+    });
+
+    const res = await postSearch(stub);
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body).toMatchObject({ code: "TGT_EXPIRED" });
+    expect(JSON.stringify(body)).not.toContain("SECRET");
+  });
+
+  it("maps school page permission denial without echoing raw diagnostics", async () => {
+    const stub = freshStub("external-search-forbidden");
+    await seedSession(stub, { status: "active" });
+    spyBrowserFetch({
+      "/external-search": async () => Response.json(
+        { ok: false, error: "PAGE_PERMISSION_DENIED", diagnostics: { cookie: "SECRET" } },
+        { status: 403 },
+      ),
+    });
+
+    const res = await postSearch(stub);
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body).toMatchObject({ code: "PAGE_PERMISSION_DENIED" });
+    expect(JSON.stringify(body)).not.toContain("SECRET");
+  });
+});

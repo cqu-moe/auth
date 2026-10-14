@@ -29,6 +29,7 @@ import cqu_login_cdp as cqu_login  # 裸 CDP 登录器；避免 Patchright 注�
 import cqu_keepalive  # 国内节点浏览器水化探活, 暴露 probe_session_browser(...)
 import cqu_ticket_browser  # 浏览器水化取 ST(过瑞数 JS 挑战), 暴露 fetch_service_ticket_browser(...)
 import cqu_data_harvest  # 浏览器 organic harvest(navigate+capture+in-page fetch), 暴露 harvest(...)
+import cqu_external_search
 from qg_proxy import acquire_qg_proxy, QgExtractError, should_use_proxy  # 青果代理 + 灰度门(/run 登录仍用)
 from posthog_client import (
     POSTHOG_CLIENT_KEY,
@@ -96,6 +97,7 @@ NODE_CAPABILITIES = [
     "code-permit",
     "reusable-code",
     "data-harvest",
+    "external-search-v1",
     "browser-route-v1",
     "operation-deadline-v1",
     "raw-cdp-login-v1",
@@ -1028,6 +1030,53 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
         release_browser_job(job_acquired)
 
 
+async def external_search_handler(request: web.Request) -> web.Response:
+    """POST /external-search {state, action, business filters} -> typed search payload."""
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
+    if not isinstance(body, dict) or not isinstance(body.get("state"), dict):
+        return web.json_response({"ok": False, "error": "missing required field: state (object)"}, status=400)
+
+    try:
+        operation_timeout_ms = parse_operation_timeout_ms(body)
+    except InvalidOperationTimeout as error:
+        return web.json_response({"ok": False, "error": str(error)}, status=400)
+    if operation_timeout_ms is None and browser_profile.CLOUDFLARE_PROFILE:
+        return web.json_response({"ok": False, "error": "operationTimeoutMs is required"}, status=400)
+    try:
+        recipe = cqu_external_search.parse_external_search_recipe(body)
+    except cqu_external_search.ExternalSearchRecipeError:
+        return web.json_response({"ok": False, "error": "recipe not allowed"}, status=400)
+
+    try:
+        job_acquired = await acquire_browser_job()
+    except BrowserBusyError:
+        return web.json_response({"ok": False, "error": "BROWSER_BUSY"}, status=503)
+    try:
+        result = await run_bounded(
+            cqu_external_search.external_search(body["state"], recipe),
+            operation_timeout_ms,
+        )
+        typed = cqu_external_search.sanitize_external_search_result(result)
+        return web.json_response({"ok": True, **typed})
+    except BrowserDeadlineExceeded:
+        return web.json_response({"ok": False, "error": "BROWSER_DEADLINE"}, status=503)
+    except cqu_external_search.ExternalSearchTransientError as error:
+        code = error.code
+        return web.json_response({"ok": False, "error": code}, status=cqu_external_search.ERROR_STATUS[code])
+    except Exception as error:
+        safe_capture_exception(
+            request.app.get(POSTHOG_CLIENT_KEY),
+            error,
+            {"operation": "external_search", "error_code": "SEARCH_TRANSIENT"},
+        )
+        return web.json_response({"ok": False, "error": "SEARCH_TRANSIENT"}, status=503)
+    finally:
+        release_browser_job(job_acquired)
+
+
 async def health_handler(_request: web.Request) -> web.Response:
     return web.json_response(
         {
@@ -1057,6 +1106,7 @@ def build_app() -> web.Application:
         web.post("/service-ticket", service_ticket_handler),
         web.post("/keepalive", keepalive_handler),
         web.post("/data-harvest", data_harvest_handler),
+        web.post("/external-search", external_search_handler),
         # CF Containers 默认探测 /ping 判断实例就绪。
         web.get("/ping", health_handler),
         web.get("/health", health_handler),
