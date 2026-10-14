@@ -79,9 +79,11 @@ import {
   buildStMintAudit,
   classifyNodeHarvestResponse,
   classifyNodeExternalSearchResponse,
+  classifyNodeExternalCaptureResponse,
   type NodeTicketBody,
   type NodeHarvestBody,
   type NodeExternalSearchBody,
+  type NodeExternalCaptureBody,
   type HarvestCapture,
   type HarvestFetch,
 } from "../services/cqu-node-protocol";
@@ -89,6 +91,10 @@ import {
   parseExternalSearchRecipe,
   type ExternalSearchRecipe,
 } from "../services/cqu-external-search";
+import {
+  parseExternalCaptureRecipe,
+  type ExternalCaptureRecipe,
+} from "../services/cqu-external-capture";
 import type { Env } from "../types";
 import type {
   DeviceLoginRequest,
@@ -284,6 +290,7 @@ export class CquSessionDO extends DurableObject<Env> {
   // 全部浏览器出站均经 CF 容器 stub;此直连客户端仅作历史回滚窗口保留。
   private ssoClient = new CquSsoClient();
   private quickloginFlights = new Map<string, Promise<DeviceLoginResult>>();
+  private externalBrowserFlight: Promise<Record<string, unknown>> | null = null;
   private recoveryFlight: Promise<void> | null = null;
   private workflowStartFlight: Promise<void> | null = null;
   private retiredAtrustCleanupComplete = false;
@@ -583,6 +590,22 @@ export class CquSessionDO extends DurableObject<Env> {
             clientId,
             source,
             deadlineAt: rawDeadlineAt === null ? undefined : Number(rawDeadlineAt),
+          });
+          return Response.json(result);
+        }
+        case "external-capture": {
+          const clientId = url.searchParams.get("clientId") || null;
+          const rawSource = url.searchParams.get("source");
+          const source = rawSource === "route" || rawSource === "rpc" ? rawSource : "unknown";
+          const body = await request.json<ExternalCaptureRecipe & {
+            deadlineAt?: number;
+          }>();
+          const { deadlineAt, ...recipe } = body;
+          const result = await this.externalCapture({
+            recipe,
+            clientId,
+            source,
+            deadlineAt,
           });
           return Response.json(result);
         }
@@ -1271,6 +1294,20 @@ export class CquSessionDO extends DurableObject<Env> {
   }
 
   private async externalSearch(arg: {
+    recipe: unknown; clientId: string | null; source: string; deadlineAt?: number;
+  }): Promise<Record<string, unknown>> {
+    return this.runExternalBrowser(() => this.performExternalSearch(arg));
+  }
+
+  private async runExternalBrowser(operation: () => Promise<Record<string, unknown>>): Promise<Record<string, unknown>> {
+    if (this.externalBrowserFlight) throw new CquSsoError("BROWSER_BUSY", "external browser action already running for user");
+    const flight = operation();
+    this.externalBrowserFlight = flight;
+    try { return await flight; }
+    finally { if (this.externalBrowserFlight === flight) this.externalBrowserFlight = null; }
+  }
+
+  private async performExternalSearch(arg: {
     recipe: unknown;
     clientId: string | null;
     source: string;
@@ -1316,6 +1353,7 @@ export class CquSessionDO extends DurableObject<Env> {
     }
 
     const sourceSession = structuredClone(sessionState);
+    const sourceBindingRevision = await this.ctx.storage.get<number>("bindingRevision");
     let outcome = "INTERNAL_ERROR";
     try {
       const budget = this.browserOperationBudget(
@@ -1354,7 +1392,9 @@ export class CquSessionDO extends DurableObject<Env> {
       if (classified.kind === "transient") {
         throw new CquSsoError(classified.code ?? "SEARCH_TRANSIENT", "browser external search failed");
       }
-      if (!(await this.reconcileBinding()) || await this.getStatus() !== "active") {
+      if (!(await this.reconcileBinding()) || await this.getStatus() !== "active"
+        || sourceBindingRevision !== await this.ctx.storage.get<number>("bindingRevision")
+        || this.state?.studentId !== sourceSession.studentId) {
         throw new CquSsoError("SESSION_INACTIVE", "CQU binding changed during search");
       }
       outcome = "ok";
@@ -1397,6 +1437,123 @@ export class CquSessionDO extends DurableObject<Env> {
     this.state = expired;
     await this.enqueueRecoveryWorkflow(expired.userId);
     return true;
+  }
+
+  private async externalCapture(arg: {
+    recipe: unknown;
+    clientId: string | null;
+    source: string;
+    deadlineAt?: number;
+  }): Promise<Record<string, unknown>> {
+    const recipe = parseExternalCaptureRecipe(arg.recipe);
+    if ("error" in recipe) {
+      throw new CquSsoError("INVALID_CAPTURE_RECIPE", "external capture recipe is not allowed");
+    }
+    return this.runExternalBrowser(() => this.performExternalCapture(recipe, arg.clientId, arg.source, arg.deadlineAt));
+  }
+
+  private async performExternalCapture(
+    recipe: ExternalCaptureRecipe,
+    clientId: string | null,
+    source: string,
+    deadlineAtValue?: number
+  ): Promise<Record<string, unknown>> {
+    if (!(await this.reconcileBinding())) {
+      throw new CquSsoError("SESSION_INACTIVE", "CQU binding inactive");
+    }
+    const status = await this.getStatus();
+    if (!this.state) throw new CquSsoError("SESSION_INACTIVE", "CQU session not active");
+    const sessionState = this.state;
+    if (status !== "active") {
+      if (status === "needs_reauth") throw new CquSsoError("NEEDS_REAUTH", "CQU session needs re-auth");
+      if (status === "expired" || status === "relogging" || status === "binding") {
+        await this.enqueueRecoveryWorkflow(sessionState.userId);
+      }
+      throw new CquSsoError("SESSION_INACTIVE", "CQU session not active");
+    }
+    if (!sessionState.storageState) {
+      await this.setStatus("expired");
+      await this.scheduleSessionAlarm(Date.now());
+      throw new CquSsoError("SESSION_INACTIVE", "CQU session needs re-login (no storage state)");
+    }
+
+    const now = Date.now();
+    const deadlineAt = resolveBrowserDeadline(deadlineAtValue, now);
+    const stored = (await this.ctx.storage.get<StMintRecord[]>("stMintLog")) ?? [];
+    const pruned = pruneStMintLog(stored, now, ST_MINT_RATE_WINDOW_MS);
+    if (stMintThrottled(pruned, clientId, MAX_ST_MINTS_PER_USER, MAX_ST_MINTS_PER_CLIENT)) {
+      throw new CquSsoError("RATE_LIMITED", "取数过于频繁,请稍后再试");
+    }
+
+    sessionState.lastRequestedAt = now;
+    await this.putStateGuarded(sessionState);
+    pruned.push({ ts: now, clientId, host: "my.cqu.edu.cn", broad: false });
+    try {
+      await this.ctx.storage.put("stMintLog", pruned);
+    } catch (error) {
+      console.error(`[CquSession] stMintLog put failed (external capture degraded): ${errMsg(error)}`);
+    }
+
+    const sourceSession = structuredClone(sessionState);
+    const sourceBindingRevision = await this.ctx.storage.get<number>("bindingRevision");
+    let outcome = "INTERNAL_ERROR";
+    try {
+      const budget = this.browserOperationBudget(deadlineAt, CONTAINER_HARVEST_DEADLINE_MS);
+      const requestBody: Record<string, unknown> = {
+        state: sourceSession.storageState,
+        ...recipe,
+      };
+      if (budget.operationTimeoutMs) requestBody.operationTimeoutMs = budget.operationTimeoutMs;
+      let response: Response;
+      try {
+        response = await fetchBrowser(
+          this.env,
+          this.currentBrowserRoute(),
+          new Request("http://cqu-login.internal/external-capture", {
+            method: "POST",
+            body: JSON.stringify(requestBody),
+            signal: AbortSignal.timeout(budget.fetchTimeoutMs),
+          })
+        );
+      } catch (error) {
+        if (error instanceof CquSsoError && STABLE_BROWSER_CODES.has(error.code)) throw error;
+        throw new CquSsoError("CAPTURE_TRANSIENT", "browser /external-capture fetch failed");
+      }
+      const body = await response.json<NodeExternalCaptureBody>().catch(() => null);
+      const classified = classifyNodeExternalCaptureResponse(response.status, body);
+      if (classified.kind === "instance_replaced") {
+        throw new CquSsoError("BROWSER_INSTANCE_REPLACED", "browser instance replaced during capture");
+      }
+      if (classified.kind === "expired") {
+        await this.markSessionExpired(sourceSession);
+        throw new CquSsoError("TGT_EXPIRED", "CQU session expired during capture");
+      }
+      if (classified.kind === "transient") {
+        throw new CquSsoError(classified.code ?? "CAPTURE_TRANSIENT", "browser external capture failed");
+      }
+      if (!(await this.reconcileBinding()) || await this.getStatus() !== "active"
+        || sourceBindingRevision !== await this.ctx.storage.get<number>("bindingRevision")
+        || this.state?.studentId !== sourceSession.studentId) {
+        throw new CquSsoError("SESSION_INACTIVE", "CQU binding changed during capture");
+      }
+      outcome = "ok";
+      return body as Record<string, unknown>;
+    } catch (error) {
+      outcome = error instanceof CquSsoError ? error.code : "INTERNAL_ERROR";
+      throw error;
+    } finally {
+      console.log(JSON.stringify({
+        ...buildStMintAudit({
+          userId: sessionState.userId,
+          clientId,
+          host: "my.cqu.edu.cn",
+          broad: false,
+          source,
+          ts: now,
+        }),
+        outcome,
+      }));
+    }
   }
 
   /**
