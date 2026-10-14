@@ -35,12 +35,19 @@ RANGE_JS = """async () => {
   }
   return false;
 }"""
-INPUT_JS = """({keyword}) => {
+INPUT_JS = """async ({keyword}) => {
+  const visible = e => e && e.checkVisibility({checkOpacity:true,checkVisibilityCSS:true});
   const placeholder = [...document.querySelectorAll('.ant-select-selection__placeholder')]
-    .find(e => e.textContent.includes('快速查询'));
-  const input = placeholder?.closest('.ant-select')?.querySelector('input')
-    || document.querySelector('input[placeholder*="课程"]');
-  if (!input || !input.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})) return false;
+    .find(e => e.textContent.includes('课程名称') || e.textContent.includes('课程代码'));
+  const control = placeholder?.closest('.ant-select');
+  const input = control?.querySelector('input') || document.querySelector('input[placeholder*="课程"]');
+  if (!input) return false;
+  if (!visible(input) && visible(control)) {
+    control.click();
+    const deadline = Date.now() + 1000;
+    while (!visible(input) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  if (!visible(input)) return false;
   input.focus();
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;
   setter.call(input,keyword);
