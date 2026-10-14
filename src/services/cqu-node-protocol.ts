@@ -231,6 +231,7 @@ export interface NodeExternalSearchBody {
   sourceType?: unknown;
   session?: unknown;
   departments?: unknown;
+  course?: unknown;
   items?: unknown;
   truncated?: unknown;
   error?: string;
@@ -238,6 +239,7 @@ export interface NodeExternalSearchBody {
 }
 
 const EXTERNAL_SEARCH_ERROR_CODES = new Set([
+  "CURRENT_SESSION_CHANGED", "TARGET_NOT_FOUND", "AMBIGUOUS_TARGET", "SCHEMA_INVALID", "CAPTURE_MISSING", "CAPTURE_API_REJECTED", "CAPTURE_BODY_TIMEOUT",
   "APP_READY_TIMEOUT",
   "SEARCH_CAPTURE_TIMEOUT",
   "SEARCH_REQUEST_HUNG",
@@ -264,7 +266,7 @@ export function classifyNodeExternalSearchResponse(
   if (status === 409 && body?.error === "BROWSER_INSTANCE_REPLACED") {
     return { kind: "instance_replaced" };
   }
-  if (status === 409) return { kind: "expired", code: "TGT_EXPIRED" };
+  if (status === 409 && body?.error === "TGT_EXPIRED") return { kind: "expired", code: "TGT_EXPIRED" };
   if (body === null) return { kind: "transient", code: "SEARCH_TRANSIENT" };
   if (status >= 200 && status < 300 && body.ok === true) return { kind: "ok", body };
   const error = typeof body.error === "string" && EXTERNAL_SEARCH_ERROR_CODES.has(body.error)
@@ -277,6 +279,7 @@ export interface NodeExternalCaptureBody {
   contractVersion?: unknown;
   sourceType?: unknown;
   target?: unknown;
+  course?: unknown;
   session?: unknown;
   timetable?: unknown;
   error?: string;

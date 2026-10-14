@@ -222,3 +222,19 @@ it("requires method approval, external entitlement and an active school binding"
   })).resolves.toEqual({ error: "NO_CQU_BINDING" });
   expect(bound.fetch).not.toHaveBeenCalled();
 });
+
+it("carries a teaching-class parent through capture and strips unknown row fields", async () => {
+  const f = await fixture();
+  const args = { ...f.args, sourceType: "course" as const, targetId: "class-1", targetName: "高等数学01班", courseId: "course-1", courseName: "高等数学", expectedSessionId: "session-current" };
+  f.fetch.mockImplementation(async () => Response.json({
+    ok: true, contractVersion: 1, sourceType: "course", target: { id: "class-1", name: "高等数学01班" },
+    course: { id: "course-1", name: "高等数学" }, session: { id: "session-current", name: "2026秋", beginDate: "2026-09-07" },
+    timetable: { classTimetableVOList: [{ classId: "class-1", courseName: "高等数学", exprProjectName: "项目一", weekDay: 2, secret: "SECRET" }], maxSection: 12 },
+  }));
+  const result = await f.rpc.cquExternalCapture(args);
+  expect(result).toEqual({ contractVersion: 1, sourceType: "course", target: { id: "class-1", name: "高等数学01班" },
+    course: { id: "course-1", name: "高等数学" }, session: { id: "session-current", name: "2026秋", beginDate: "2026-09-07" },
+    timetable: { classTimetableVOList: [{ classId: "class-1", courseName: "高等数学", exprProjectName: "项目一", weekDay: 2 }], maxSection: 12 } });
+  await expect(f.fetch.mock.calls[0][0].clone().json()).resolves.toEqual({ action: "teaching_class_capture", sourceType: "course", targetId: "class-1", targetName: "高等数学01班", courseId: "course-1", courseName: "高等数学", expectedSessionId: "session-current", deadlineAt: expect.any(Number) });
+  await expect(f.rpc.cquExternalCapture({ ...args, courseName: undefined })).resolves.toEqual({ error: "INVALID_REQUEST" });
+});

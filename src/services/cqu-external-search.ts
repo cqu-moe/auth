@@ -1,6 +1,6 @@
 /** Typed external AllCourseSchedule search contract (T02: departments + admin classes). */
 
-export type ExternalSearchSourceType = "department" | "admin_class";
+export type ExternalSearchSourceType = "department" | "admin_class" | "course_catalog" | "course";
 
 export interface CquExternalSearchArgs {
   clientId: string;
@@ -12,6 +12,9 @@ export interface CquExternalSearchArgs {
   departmentName?: string;
   grade?: string;
   keyword?: string;
+  courseId?: string;
+  courseName?: string;
+  expectedSessionId?: string;
   deadlineAt?: number;
 }
 
@@ -41,13 +44,30 @@ export type CquExternalSearchResult =
     }
   | {
       contractVersion: 1;
-      sourceType: "admin_class";
+      sourceType: "admin_class" | "course_catalog";
       session: ExternalSearchSession;
+      items: ExternalSearchItem[];
+      truncated: boolean;
+    }
+  | {
+      contractVersion: 1;
+      sourceType: "course";
+      session: ExternalSearchSession;
+      course: { id: string; name: string };
       items: ExternalSearchItem[];
       truncated: boolean;
     };
 
-export interface ExternalSearchRecipe {
+export interface CourseSearchRecipe {
+  action: "course_catalog_search" | "teaching_class_search";
+  keyword?: string;
+  courseId?: string;
+  courseName?: string;
+  expectedSessionId?: string;
+}
+export type ExternalSearchRecipe = AdminSearchRecipe | CourseSearchRecipe;
+
+export interface AdminSearchRecipe {
   action: "department_list" | "admin_class_search";
   departmentId: string;
   departmentName: string;
@@ -65,6 +85,16 @@ export function parseExternalSearchRecipe(value: unknown): ExternalSearchRecipe 
   if (typeof value !== "object" || value === null) return { error: "INVALID_SEARCH_RECIPE" };
   const raw = value as Record<string, unknown>;
   const action = raw.action;
+  if (action === "course_catalog_search" || action === "teaching_class_search") {
+    const keys = action === "course_catalog_search" ? ["action", "keyword"] : ["action", "courseId", "courseName", "expectedSessionId"];
+    if (Object.keys(raw).some(key => !keys.includes(key))) return { error: "INVALID_SEARCH_RECIPE" };
+    if (action === "course_catalog_search") {
+      const keyword = boundedText(raw.keyword, 100);
+      return keyword ? { action, keyword } : { error: "INVALID_SEARCH_RECIPE" };
+    }
+    const courseId = boundedText(raw.courseId, 100), courseName = boundedText(raw.courseName), expectedSessionId = boundedText(raw.expectedSessionId, 100);
+    return courseId && courseName && expectedSessionId ? { action, courseId, courseName, expectedSessionId } : { error: "INVALID_SEARCH_RECIPE" };
+  }
   if (action !== "department_list" && action !== "admin_class_search") {
     return { error: "INVALID_SEARCH_RECIPE" };
   }
@@ -103,6 +133,16 @@ export function parseExternalSearchArgs(
 ): ExternalSearchRecipe | { error: "INVALID_REQUEST" } {
   if (typeof args !== "object" || args === null) return { error: "INVALID_REQUEST" };
   const raw = args as Record<string, unknown>;
+  if (raw.sourceType === "course_catalog" || raw.sourceType === "course") {
+    const common = ["clientId", "clientSecret", "userId", "sourceType", "deadlineAt"];
+    const keys = raw.sourceType === "course_catalog" ? [...common, "keyword"] : [...common, "courseId", "courseName", "expectedSessionId"];
+    if (Object.keys(raw).some(key => !keys.includes(key))) return { error: "INVALID_REQUEST" };
+    if (raw.deadlineAt !== undefined && !Number.isSafeInteger(raw.deadlineAt)) return { error: "INVALID_REQUEST" };
+    const parsed = parseExternalSearchRecipe(raw.sourceType === "course_catalog"
+      ? { action: "course_catalog_search", keyword: raw.keyword }
+      : { action: "teaching_class_search", courseId: raw.courseId, courseName: raw.courseName, expectedSessionId: raw.expectedSessionId });
+    return "error" in parsed ? { error: "INVALID_REQUEST" } : parsed;
+  }
   if (raw.sourceType !== "department" && raw.sourceType !== "admin_class") {
     return { error: "INVALID_REQUEST" };
   }
@@ -193,11 +233,11 @@ export function parseExternalSearchResult(
     if (!item) return { error: "SCHEMA_INVALID" };
     items.push(item);
   }
-  return {
-    contractVersion: 1,
-    sourceType: "admin_class",
-    session,
-    items,
-    truncated: root.truncated || root.items.length > ITEM_LIMIT,
-  };
+  const truncated = root.truncated || root.items.length > ITEM_LIMIT;
+  if (expectedSourceType === "course") {
+    const course = parseSession(root.course);
+    if (!course) return { error: "SCHEMA_INVALID" };
+    return { contractVersion: 1, sourceType: "course", session, course, items, truncated };
+  }
+  return { contractVersion: 1, sourceType: expectedSourceType, session, items, truncated };
 }

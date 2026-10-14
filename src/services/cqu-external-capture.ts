@@ -1,6 +1,6 @@
 /** Typed external AllCourseSchedule capture contract (T03: admin classes). */
 
-export type ExternalCaptureSourceType = "admin_class";
+export type ExternalCaptureSourceType = "admin_class" | "course";
 
 export interface CquExternalCaptureArgs {
   clientId: string;
@@ -12,11 +12,14 @@ export interface CquExternalCaptureArgs {
   expectedSessionId?: string;
   /** Reserved for the future teaching-class recipe; admin classes cannot set it. */
   courseId?: string;
+  courseName?: string;
   deadlineAt?: number;
 }
 
 export interface ExternalCaptureRecipe {
-  action: "admin_class_capture";
+  action: "admin_class_capture" | "teaching_class_capture";
+  courseId?: string;
+  courseName?: string;
   sourceType: ExternalCaptureSourceType;
   targetId: string;
   targetName: string;
@@ -33,11 +36,13 @@ export interface ExternalCaptureTimetableRow {
   teachingWeek?: string;
   period?: string;
   exprProjectName?: string;
-  assignTeachingObject: Array<{ adminClassId: string }>;
+  classId?: string;
+  assignTeachingObject?: Array<{ adminClassId: string }>;
 }
 
 export interface CquExternalCaptureResult {
   contractVersion: 1;
+  course?: { id: string; name: string };
   sourceType: ExternalCaptureSourceType;
   target: { id: string; name: string };
   session: { id: string; name: string; beginDate: string };
@@ -56,9 +61,12 @@ const ARG_KEYS = new Set([
   "targetName",
   "expectedSessionId",
   "courseId",
+  "courseName",
   "deadlineAt",
 ]);
 const RECIPE_KEYS = new Set([
+  "courseId",
+  "courseName",
   "action",
   "sourceType",
   "targetId",
@@ -85,12 +93,16 @@ export function parseExternalCaptureArgs(
   if (typeof args !== "object" || args === null) return { error: "INVALID_REQUEST" };
   const raw = args as Record<string, unknown>;
   if (Object.keys(raw).some(key => !ARG_KEYS.has(key))) return { error: "INVALID_REQUEST" };
-  if (raw.sourceType !== "admin_class") return { error: "INVALID_REQUEST" };
+  if (raw.sourceType !== "admin_class" && raw.sourceType !== "course") return { error: "INVALID_REQUEST" };
   const targetId = boundedText(raw.targetId, 100);
   const targetName = boundedText(raw.targetName);
   const expectedSessionId = boundedOptionalText(raw.expectedSessionId, 100);
   if (!targetId || !targetName || expectedSessionId === null) return { error: "INVALID_REQUEST" };
-  if (raw.courseId !== undefined) return { error: "INVALID_REQUEST" };
+  if (raw.sourceType === "course") {
+    const parsed = parseExternalCaptureRecipe({ action: "teaching_class_capture", sourceType: "course", targetId, targetName, expectedSessionId, courseId: raw.courseId, courseName: raw.courseName });
+    return "error" in parsed ? { error: "INVALID_REQUEST" } : parsed;
+  }
+  if (raw.courseId !== undefined || raw.courseName !== undefined) return { error: "INVALID_REQUEST" };
   const recipe = parseExternalCaptureRecipe({
     action: "admin_class_capture",
     sourceType: "admin_class",
@@ -109,6 +121,15 @@ export function parseExternalCaptureRecipe(
   if (Object.keys(raw).some(key => !RECIPE_KEYS.has(key))) {
     return { error: "INVALID_CAPTURE_RECIPE" };
   }
+  if (raw.action === "teaching_class_capture" && raw.sourceType === "course") {
+    const targetId = boundedText(raw.targetId, 100), targetName = boundedText(raw.targetName);
+    const courseId = boundedText(raw.courseId, 100), courseName = boundedText(raw.courseName);
+    const expectedSessionId = boundedText(raw.expectedSessionId, 100);
+    return targetId && targetName && courseId && courseName && expectedSessionId
+      ? { action: "teaching_class_capture", sourceType: "course", targetId, targetName, courseId, courseName, expectedSessionId }
+      : { error: "INVALID_CAPTURE_RECIPE" };
+  }
+  if (raw.courseId !== undefined || raw.courseName !== undefined) return { error: "INVALID_CAPTURE_RECIPE" };
   if (raw.action !== "admin_class_capture" || raw.sourceType !== "admin_class") {
     return { error: "INVALID_CAPTURE_RECIPE" };
   }
@@ -150,9 +171,23 @@ function parseSession(value: unknown): CquExternalCaptureResult["session"] | nul
   return { id, name, beginDate };
 }
 
-function parseRow(value: unknown, targetId: string): ExternalCaptureTimetableRow | null {
+function parseRow(value: unknown, targetId: string, sourceType: ExternalCaptureSourceType): ExternalCaptureTimetableRow | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
+  if (sourceType === "course") {
+    if (boundedText(raw.classId, 100) !== targetId) return null;
+    const row: ExternalCaptureTimetableRow = { classId: targetId };
+    for (const key of ["courseName", "instructorName", "roomName", "position", "campusName", "teachingWeek", "period", "exprProjectName"] as const) {
+      if (raw[key] !== undefined && raw[key] !== null && raw[key] !== "" && boundedText(raw[key], 500) === null) return { classId: targetId };
+      const text = optionalText(raw[key]);
+      if (text !== undefined) row[key] = text;
+    }
+    if (raw.weekDay !== undefined && raw.weekDay !== null) {
+      if (typeof raw.weekDay !== "number" || !Number.isSafeInteger(raw.weekDay) || raw.weekDay < 1 || raw.weekDay > 7) return { classId: targetId };
+      row.weekDay = raw.weekDay;
+    }
+    return row;
+  }
   const assignments = raw.assignTeachingObject;
   if (!Array.isArray(assignments) || assignments.length === 0) return null;
   const assignTeachingObject: Array<{ adminClassId: string }> = [];
@@ -205,11 +240,18 @@ export function parseExternalCaptureResult(
   if (expected.expectedSessionId && expected.expectedSessionId !== session.id) return { error: "SCHEMA_INVALID" };
   const rows: ExternalCaptureTimetableRow[] = [];
   for (const row of rawRows) {
-    const parsed = parseRow(row, expected.targetId);
+    const parsed = parseRow(row, expected.targetId, expected.sourceType);
     if (!parsed) return { error: "SCHEMA_INVALID" };
     rows.push(parsed);
   }
+  let course: { id: string; name: string } | undefined;
+  if (expected.sourceType === "course") {
+    const raw = root.course as Record<string, unknown> | undefined;
+    if (!raw || boundedText(raw.id, 100) !== expected.courseId || boundedText(raw.name) !== expected.courseName) return { error: "SCHEMA_INVALID" };
+    course = { id: expected.courseId!, name: expected.courseName! };
+  }
   return {
+    ...(course ? { course } : {}),
     contractVersion: 1,
     sourceType: expected.sourceType,
     target,

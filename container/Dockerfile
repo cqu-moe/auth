@@ -49,7 +49,7 @@ RUN curl --fail --location --retry 3 \
     && rm /tmp/chrome.zip
 ENV CQU_CHROMIUM_EXECUTABLE=/opt/chrome/chrome-linux64/chrome
 
-COPY server.py posthog_client.py browser_profile.py chromium_session.py cqu_login.py cqu_login_cdp.py qg_proxy.py cqu_ticket_browser.py cqu_keepalive.py cqu_data_harvest.py cqu_external_search.py cqu_external_capture.py ./
+COPY server.py posthog_client.py browser_profile.py chromium_session.py cqu_login.py cqu_login_cdp.py qg_proxy.py cqu_ticket_browser.py cqu_keepalive.py cqu_data_harvest.py cqu_external_search.py cqu_external_capture.py cqu_course_teaching.py ./
 
 EXPOSE 8080
 # tini 作 PID 1(-- 后接真实命令): 转发信号 + reap 临时 chromium 的孤儿/僵尸进程。

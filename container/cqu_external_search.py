@@ -33,6 +33,13 @@ class ExternalSearchTransientError(RuntimeError):
 
 
 ERROR_STATUS = {
+    "CURRENT_SESSION_CHANGED": 409,
+    "SCHEMA_INVALID": 502,
+    "TARGET_NOT_FOUND": 404,
+    "AMBIGUOUS_TARGET": 409,
+    "CAPTURE_MISSING": 503,
+    "CAPTURE_API_REJECTED": 502,
+    "CAPTURE_BODY_TIMEOUT": 504,
     "APP_READY_TIMEOUT": 503,
     "SEARCH_CAPTURE_TIMEOUT": 503,
     "SEARCH_REQUEST_HUNG": 504,
@@ -339,6 +346,13 @@ def _admin_items(value: object) -> tuple[list[dict], bool]:
 
 
 def parse_external_search_recipe(body: dict) -> dict:
+    if isinstance(body, dict) and body.get("action") in {"course_catalog_search", "teaching_class_search"}:
+        from cqu_course_teaching import parse_course_recipe
+        from cqu_external_capture import ExternalCaptureRecipeError
+        try:
+            return parse_course_recipe(body)
+        except ExternalCaptureRecipeError:
+            raise ExternalSearchRecipeError("invalid course recipe") from None
     if not isinstance(body, dict):
         raise ExternalSearchRecipeError("recipe must be an object")
     unknown = set(body) - ALLOWED_BODY_KEYS
@@ -401,7 +415,7 @@ def sanitize_external_search_result(value: object) -> dict:
         raise ExternalSearchRecipeError("search result must be an object")
     source_type = value.get("sourceType")
     session = value.get("session")
-    if value.get("contractVersion") != 1 or source_type not in {"department", "admin_class"}:
+    if value.get("contractVersion") != 1 or source_type not in {"department", "admin_class", "course_catalog", "course"}:
         raise ExternalSearchRecipeError("search result contract is invalid")
     if not isinstance(session, dict):
         raise ExternalSearchRecipeError("search session is invalid")
@@ -429,6 +443,11 @@ def sanitize_external_search_result(value: object) -> dict:
             "name": _typed_text(item.get("name")),
             "extra": item.get("extra") if isinstance(item.get("extra"), str) and item["extra"] else "",
         })
+    if source_type == "course":
+        course = value.get("course")
+        if not isinstance(course, dict):
+            raise ExternalSearchRecipeError("course context missing")
+        typed["course"] = {"id": _typed_text(course.get("id")), "name": _typed_text(course.get("name"))}
     typed["items"] = typed_items
     typed["truncated"] = bool(truncated or len(items) > 200)
     return typed
@@ -449,6 +468,14 @@ async def external_search(state: dict, recipe: dict) -> dict:
         if is_expired_harvest({}, await browser.content(), browser.url):
             raise ExternalSearchTransientError("TGT_EXPIRED")
 
+        if recipe["action"] in {"course_catalog_search", "teaching_class_search"}:
+            from cqu_course_teaching import search_course_catalog, search_teaching_classes
+            from cqu_external_capture import ExternalCaptureTransientError
+            try:
+                action = search_course_catalog if recipe["action"] == "course_catalog_search" else search_teaching_classes
+                return await action(browser, recipe)
+            except ExternalCaptureTransientError as error:
+                raise ExternalSearchTransientError(error.code) from None
         trace = StageTrace()
         fixed_fetches = [
             {"method": "GET", "url": SESSION_INFO_URL},
