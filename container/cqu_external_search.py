@@ -696,6 +696,9 @@ EXTERNAL_APP_READY_JS = """() => {
   return {
     ready: !!control && !disabled && visible,
     documentState: document.readyState,
+    pageKind: location.pathname === '/tt/AllCourseSchedule' ? 'all_course'
+      : ['/tt/login', '/tt/token-index', '/tt/cas'].includes(location.pathname) ? 'school_bootstrap'
+      : location.pathname === '/authserver/login' ? 'cas_login' : 'other',
     rangeLabel: !!label, rangeControl: !!control, disabled, visible,
     selectCount: Math.min(document.querySelectorAll('.ant-select').length, 1000),
   };
@@ -705,7 +708,9 @@ EXTERNAL_APP_READY_JS = """() => {
 async def wait_for_external_app(page) -> None:
     """Poll across bootstrap navigation; an in-page promise dies on a reload."""
     started = asyncio.get_running_loop().time()
-    deadline = started + 15
+    # A hydrated cloud browser still loads the school's login/bootstrap documents.
+    # Keep this within the caller's existing 90-second search operation budget.
+    deadline = started + (60 if browser_profile.CLOUDFLARE_PROFILE else 15)
     context_errors = 0
     attempts = 0
     last_error = "none"
@@ -721,6 +726,10 @@ async def wait_for_external_app(page) -> None:
                 )}
                 state = probe.get("documentState")
                 last_probe["documentState"] = state if isinstance(state, str) and state in {"loading", "interactive", "complete"} else "unknown"
+                page_kind = probe.get("pageKind")
+                last_probe["pageKind"] = page_kind if isinstance(page_kind, str) and page_kind in {
+                    "all_course", "school_bootstrap", "cas_login", "other",
+                } else "unknown"
                 count = probe.get("selectCount")
                 last_probe["selectCount"] = min(max(count, 0), 1000) if isinstance(count, int) else 0
                 if last_probe["ready"]:
@@ -747,7 +756,7 @@ async def wait_for_external_app(page) -> None:
         json.dumps({
             "elapsedMs": round((asyncio.get_running_loop().time() - started) * 1000),
             "attempts": attempts, "contextErrors": context_errors,
-            "lastError": last_error, "pageKind": page_kind,
+            "lastError": last_error, "lastDocumentKind": page_kind,
             "expired": expired, "lastProbe": last_probe,
         }, sort_keys=True, separators=(",", ":")),
     )
