@@ -110,7 +110,10 @@ export function parseExternalSearchArgs(
   const departmentName = optionalString(raw.departmentName);
   const grade = optionalString(raw.grade);
   const keyword = optionalString(raw.keyword);
-  if (departmentId === null || departmentName === null || grade === null || keyword === null) {
+  if (
+    departmentId === null || departmentName === null || grade === null || keyword === null ||
+    raw.deadlineAt !== undefined && !Number.isSafeInteger(raw.deadlineAt)
+  ) {
     return { error: "INVALID_REQUEST" };
   }
   if (keyword.length > 100) return { error: "INVALID_REQUEST" };

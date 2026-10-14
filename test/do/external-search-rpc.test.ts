@@ -70,9 +70,11 @@ async function fixture(options?: { rpcMethods?: string[]; external?: boolean }) 
 
 it("dispatches a fixed admin-class recipe and returns only the typed search contract", async () => {
   const f = await fixture();
+  const deadlineAt = Date.now() + 60_000;
   const result = await f.rpc.cquExternalSearch({
     ...f.args,
     sourceType: "admin_class",
+    deadlineAt,
     departmentId: "",
     departmentName: "电气工程学院",
     grade: "2026",
@@ -92,6 +94,7 @@ it("dispatches a fixed admin-class recipe and returns only the typed search cont
   const request = f.fetch.mock.calls[0][0];
   expect(new URL(request.url).pathname).toBe("/external-search");
   expect(request.method).toBe("POST");
+  expect(new URL(request.url).searchParams.get("deadlineAt")).toBe(String(deadlineAt));
   await expect(request.clone().json()).resolves.toEqual({
     action: "admin_class_search",
     departmentId: "",

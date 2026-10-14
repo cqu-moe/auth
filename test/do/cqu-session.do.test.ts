@@ -2838,6 +2838,7 @@ describe("external-search action", () => {
     await expect(res.json()).resolves.toEqual(typedResult);
     expect(received).toMatchObject(recipe);
     expect(typeof received?.["operationTimeoutMs"]).toBe("number");
+    expect(received?.["operationTimeoutMs"]).toBeLessThanOrEqual(90_000);
     expect(await readStMintLog(stub)).toHaveLength(1);
   });
 

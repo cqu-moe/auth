@@ -139,7 +139,7 @@ async def start_action_site(search_status=200, search_body=None):
             <div class="ant-select ant-select-disabled" aria-label="学期"><div class="ant-select-selection-item">2026年秋</div></div>
             <div class="ant-form-item"><label>查询范围</label><div class="ant-select" data-control="range"><div class="ant-select-selection-item">教师</div></div></div>
             <div class="ant-form-item"><label>学院</label><div class="ant-select" data-control="department"><div class="ant-select-selection-item">电气工程学院</div><span class="ant-select-clear">×</span></div></div>
-            <div class="ant-form-item"><label>年级</label><div class="ant-select" data-control="grade"><div class="ant-select-selection-item">2025</div></div></div>
+            <div class="ant-form-item"><label>年级</label><div class="ant-select" data-control="grade"><div class="ant-select-selection-item">2025</div><span class="ant-select-clear">×</span></div></div>
             <label>班级名称</label><input class="ant-input" data-control="keyword" placeholder="请输入班级名称" value="">
             <button type="button">查询</button>
           </main><script>
@@ -150,6 +150,11 @@ async def start_action_site(search_status=200, search_body=None):
               control.addEventListener('click', event => {
                 if (control.closest('[aria-label="学期"]')) return;
                 const name = control.dataset.control;
+                if (event.target.closest('.ant-select-clear')) {
+                  window.filters[name] = '';
+                  control.querySelector('.ant-select-selection-item').textContent = '全部';
+                  return;
+                }
                 const options = {range: ['行政班'], department: ['电气工程学院'], grade: ['2025', '2026']};
                 const list = document.createElement('div');
                 list.className = 'ant-select-dropdown';
@@ -167,13 +172,11 @@ async def start_action_site(search_status=200, search_body=None):
                 if (!event.target.closest('.ant-select-clear')) document.body.append(list);
               });
             }
-            document.querySelector('.ant-select-clear').onclick = event => {
-              event.stopPropagation();
-              window.filters.department = '';
-              document.querySelector('[data-control="department"] .ant-select-selection-item').textContent = '全部';
-            };
             document.querySelector('[data-control="keyword"]').addEventListener('input', event => {
               window.filters.keyword = event.target.value;
+            });
+            fetch('/api/timetable/admin-class/dept-admin-classes?stale=1', {
+              method: 'POST', credentials: 'include', body: JSON.stringify(['stale-dept'])
             });
             document.querySelector('button').onclick = () => {
               const query = new URLSearchParams({grade: window.filters.grade, className: window.filters.keyword});
@@ -189,6 +192,11 @@ async def start_action_site(search_status=200, search_body=None):
             "grade": request.query.get("grade"),
             "keyword": request.query.get("className"),
         })
+        if request.query.get("stale") == "1":
+            await asyncio.sleep(0.25)
+            return __import__("aiohttp", fromlist=["web"]).web.json_response([
+                {"id": "class-stale", "className": "旧查询班级", "departmentName": "旧学院", "grade": "2025", "personNumber": 1}
+            ])
         return __import__("aiohttp", fromlist=["web"]).web.json_response(search_body if search_body is not None else [
             {"id": "class-1", "className": "电气1班", "departmentName": "电气工程学院", "grade": "2026", "personNumber": 30}
         ], status=search_status)
@@ -216,9 +224,11 @@ def test_admin_class_action_uses_visible_page_controls(monkeypatch, tmp_path):
                 assert capture["status"] == 200
                 assert '"class-1"' in capture["body"]
                 assert await browser.evaluate("window.termTouched") is False
-                assert calls == [{
+                assert len(calls) == 2
+                assert calls[0]["body"] == '["stale-dept"]'
+                assert calls[-1] == {
                     "body": "[]", "grade": "2026", "keyword": "电气",
-                }]
+                }
         finally:
             await runner.cleanup()
 
