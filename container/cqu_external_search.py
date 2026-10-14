@@ -7,6 +7,7 @@ those details and this module owns the fixed UI recipe.
 import re
 import asyncio
 import json
+import logging
 import urllib.parse
 
 import browser_profile
@@ -682,32 +683,45 @@ def sanitize_external_search_result(value: object) -> dict:
     return typed
 
 
-EXTERNAL_APP_READY_JS = """async () => {
-  const deadline = Date.now() + 15000;
-  while (Date.now() < deadline) {
-    const label = [...document.querySelectorAll('label,span')].find(element =>
-      (element.tagName === 'LABEL' || element.children.length === 0)
-      && element.textContent.trim().replace(/[:：]\\s*$/, '') === '查询范围');
-    const control = label?.closest('.ant-form-item,.ant-row')?.querySelector('.ant-select')
-      || label?.nextElementSibling?.querySelector('.ant-select')
-      || (label?.nextElementSibling?.classList?.contains('ant-select') && label.nextElementSibling)
-      || label?.parentElement?.querySelector('.ant-select');
-    if (control && !control.classList.contains('ant-select-disabled')
-        && control.checkVisibility({checkOpacity:true, checkVisibilityCSS:true})) return true;
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-  return false;
+EXTERNAL_APP_READY_JS = """() => {
+  const label = [...document.querySelectorAll('label,span')].find(element =>
+    (element.tagName === 'LABEL' || element.children.length === 0)
+    && element.textContent.trim().replace(/[:：]\\s*$/, '') === '查询范围');
+  const control = label?.closest('.ant-form-item,.ant-row')?.querySelector('.ant-select')
+    || label?.nextElementSibling?.querySelector('.ant-select')
+    || (label?.nextElementSibling?.classList?.contains('ant-select') && label.nextElementSibling)
+    || label?.parentElement?.querySelector('.ant-select');
+  return !!control && !control.classList.contains('ant-select-disabled')
+    && control.checkVisibility({checkOpacity:true, checkVisibilityCSS:true});
 }"""
 
 
 async def wait_for_external_app(page) -> None:
-    """Metadata APIs can be ready before the SPA has mounted its query controls."""
+    """Poll across bootstrap navigation; an in-page promise dies on a reload."""
+    started = asyncio.get_running_loop().time()
+    deadline = started + 15
+    context_errors = 0
+    while (remaining := deadline - asyncio.get_running_loop().time()) > 0:
+        try:
+            if await asyncio.wait_for(page.evaluate(EXTERNAL_APP_READY_JS, {}), remaining) is True:
+                return
+        except Exception:
+            # Startup redirects replace the execution context. Recheck the new
+            # document within the same deadline rather than failing the search.
+            context_errors += 1
+        await page.pause(100)
+    expired = False
     try:
-        ready = await page.evaluate(EXTERNAL_APP_READY_JS, {})
+        content = await asyncio.wait_for(page.content(), 1)
+        expired = is_expired_harvest({}, content, page.url)
     except Exception:
-        raise ExternalSearchTransientError("APP_READY_TIMEOUT") from None
-    if ready is not True:
-        raise ExternalSearchTransientError("APP_READY_TIMEOUT")
+        pass
+    # Fixed values only: never log the document, URL, cookies, or browser state.
+    logging.getLogger(__name__).warning(
+        "external-page readiness timeout (elapsed_ms=%d context_errors=%d expired=%s)",
+        round((asyncio.get_running_loop().time() - started) * 1000), context_errors, expired,
+    )
+    raise ExternalSearchTransientError("TGT_EXPIRED" if expired else "APP_READY_TIMEOUT")
 
 
 async def external_search(state: dict, recipe: dict) -> dict:
