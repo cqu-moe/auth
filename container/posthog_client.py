@@ -17,6 +17,7 @@ BROWSER_OPERATIONS = {
     "/service-ticket": "ticket",
     "/keepalive": "keepalive",
     "/data-harvest": "harvest",
+    "/external-search": "external_search",
 }
 REDACTED = "[redacted]"
 EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
