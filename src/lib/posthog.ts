@@ -6,6 +6,7 @@ type TelemetryEnv = {
   POSTHOG_PROJECT_TOKEN?: string;
   POSTHOG_HOST?: string;
   ENVIRONMENT?: string;
+  POSTHOG_ENABLED?: string;
   RELEASE?: string;
 };
 
@@ -14,6 +15,41 @@ type Lifecycle = {
 };
 
 const REDACTED = "[redacted]";
+const PROPERTY_ALLOWLIST = new Set([
+  "telemetry_version",
+  "is_test",
+  "$exception_list",
+  "product",
+  "surface",
+  "environment",
+  "release",
+  "actor_type",
+  "trigger",
+  "flow",
+  "operation",
+  "stage",
+  "outcome",
+  "no_op",
+  "duration_ms",
+  "end_to_end_duration_ms",
+  "duration_basis",
+  "error_code",
+  "warning_code",
+  "request_id",
+  "method",
+  "route",
+  "component",
+  "operation_id",
+  "$process_person_profile",
+  "$exception_type",
+  "$exception_level",
+  "$exception_is_synthetic",
+  "$exception_timestamp",
+  "$level",
+  "$lib",
+  "$lib_version",
+  "$sdk",
+]);
 const EMAIL = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 const LABELED_SECRET = /\b(dpop|password|cookie|authorization|token|student_?id|email|otp|code|ticket)\s*[:=]\s*[^\s,;&]+/gi;
 const BEARER = /\b(?:Bearer|DPoP)\s+[^\s,;&]+/gi;
@@ -77,35 +113,42 @@ function sanitizeValue(value: unknown, key = ""): unknown {
       ? sanitizeUrl(value)
       : redactText(value);
   }
-  if (Array.isArray(value)) return value.map((item) => sanitizeValue(item));
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([childKey, childValue]) => [
-        childKey,
-        sanitizeValue(childValue, childKey),
-      ])
-    );
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "boolean" || value === null) return value;
+  if (Array.isArray(value)) {
+    return value.slice(0, 20).map((item) => sanitizeValue(item, key));
   }
-  return value;
+  return REDACTED;
 }
 
 export function sanitizePostHogProperties(
   properties: Record<string, unknown>
 ): Record<string, unknown> {
-  return sanitizeValue(properties) as Record<string, unknown>;
+  return Object.fromEntries(
+    Object.entries(properties)
+      .filter(([key]) => PROPERTY_ALLOWLIST.has(key))
+      .map(([key, value]) => [key, key === "$exception_list" ? [{ type: "Error", value: "Worker error", mechanism: { type: "generic", handled: true } }] : sanitizeValue(value, key)])
+  );
+}
+
+function boundedExceptionClass(error: unknown): string {
+  const source = error instanceof Error ? error.name : "Error";
+  const normalized = source.replace(/[^A-Za-z0-9_$]/g, "");
+  return /^[A-Z][A-Za-z0-9_$]{0,63}$/.test(normalized) ? normalized : "Error";
 }
 
 function sanitizedError(error: unknown): Error {
-  if (!(error instanceof Error)) return new Error(redactText(String(error)));
-  const safe = new Error(redactText(error.message));
-  safe.name = error.name;
-  if (error.stack) safe.stack = redactText(error.stack);
+  // The original message and stack must never reach the SDK transport. Raw text
+  // redaction is not used as the privacy boundary for exception payloads.
+  const safe = new Error(REDACTED);
+  safe.name = boundedExceptionClass(error);
+  safe.stack = "";
   return safe;
 }
 
 function createClient(env: TelemetryEnv): PostHog | null {
   const token = env.POSTHOG_PROJECT_TOKEN?.trim();
-  if (!token) return null;
+  if (!token || !isWorkerTelemetryConfigured(env)) return null;
   return new PostHog(token, {
     host: env.POSTHOG_HOST?.trim() || "https://p.cqu.moe",
     flushAt: 1,
@@ -118,7 +161,7 @@ function createClient(env: TelemetryEnv): PostHog | null {
       if (!event) return null;
       return {
         ...event,
-        properties: sanitizePostHogProperties(event.properties ?? {}),
+        properties: { ...sanitizePostHogProperties(event.properties ?? {}), $geoip_disable: true },
       };
     },
   });
@@ -134,11 +177,21 @@ function finish(client: PostHog, lifecycle?: Lifecycle): void {
 }
 
 function baseProperties(env: TelemetryEnv): Record<string, unknown> {
+  const environment = env.ENVIRONMENT === "production" || env.ENVIRONMENT === "test"
+    ? env.ENVIRONMENT
+    : "development";
   return {
-    service: "auth-worker",
-    environment: env.ENVIRONMENT || "development",
+    telemetry_version: 2,
+    product: "auth",
+    surface: "worker",
+    environment,
     release: env.RELEASE || "development",
+    ...(environment !== "production" ? { is_test: true } : {}),
   };
+}
+
+export function isWorkerTelemetryConfigured(env: TelemetryEnv): boolean {
+  return Boolean(env.POSTHOG_PROJECT_TOKEN?.trim()) && (env.POSTHOG_ENABLED === "true" || env.ENVIRONMENT === "production");
 }
 
 export function captureWorkerEvent(
@@ -197,6 +250,65 @@ export function captureHonoException(
   });
 }
 
+type AuthFlow = "login" | "binding" | "authorization";
+
+function captureAuthFlow(
+  c: Context<HonoEnv>,
+  event: "auth_flow_started" | "auth_flow_finished",
+  flow: AuthFlow,
+  properties: Record<string, unknown>,
+  distinctId?: string
+): void {
+  captureHonoEvent(
+    c,
+    event,
+    distinctId ?? crypto.randomUUID(),
+    {
+      actor_type: distinctId ? "user" : "system",
+      trigger: "user",
+      flow,
+      ...properties,
+      ...(distinctId ? {} : { $process_person_profile: false }),
+    }
+  );
+}
+
+export function captureAuthFlowStarted(
+  c: Context<HonoEnv>,
+  flow: AuthFlow,
+  properties: Record<string, unknown>,
+  distinctId?: string
+): string | null {
+  if (!isWorkerTelemetryConfigured(c.env)) return null;
+  const operationId = crypto.randomUUID();
+  captureAuthFlow(c, "auth_flow_started", flow, { operation_id: operationId, ...properties }, distinctId);
+  return operationId;
+}
+
+export function captureAuthFlowFinished(
+  c: Context<HonoEnv>,
+  flow: AuthFlow,
+  operationId: string | null,
+  outcome: "success" | "failure" | "partial" | "canceled" | "needs_input" | "unverified",
+  properties: Record<string, unknown>,
+  options: { durationMs?: number; distinctId?: string } = {}
+): void {
+  if (!isWorkerTelemetryConfigured(c.env) || !operationId) return;
+  captureAuthFlow(
+    c,
+    "auth_flow_finished",
+    flow,
+    {
+      operation_id: operationId,
+      outcome,
+      ...(options.durationMs === undefined ? {} : { duration_ms: options.durationMs }),
+      ...(options.durationMs === undefined ? {} : { duration_basis: "request" }),
+      ...properties,
+    },
+    options.distinctId
+  );
+}
+
 function lifecycleFromContext(c: Context<HonoEnv>): Lifecycle | undefined {
   try {
     return c.executionCtx;
@@ -211,5 +323,5 @@ export function captureHonoEvent(
   distinctId: string,
   properties: Record<string, unknown>
 ): void {
-  captureWorkerEvent(c.env, lifecycleFromContext(c), event, distinctId, properties);
+  captureWorkerEvent(c.env, lifecycleFromContext(c), event, distinctId, { ...properties, ...(c.req.header("x-cqu-telemetry-test") === "1" ? { is_test: true } : {}) });
 }

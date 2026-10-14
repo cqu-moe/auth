@@ -1,4 +1,4 @@
-import { useState, useEffect, FormEvent } from "react";
+import { useState, useEffect, FormEvent, useRef } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ActionButton, Alert, AlertDescription, Input, Label } from "@cqu-moe/ui";
 import AuthLayout from "../components/AuthLayout";
@@ -42,11 +42,24 @@ export default function Register() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<{
+    name?: string;
+    email?: string;
+    password?: string;
+    confirm?: string;
+    code?: string;
+  }>({});
+  const nameRef = useRef<HTMLInputElement>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+  const confirmPasswordRef = useRef<HTMLInputElement>(null);
+  const invitationCodeRef = useRef<HTMLInputElement>(null);
+  const submittingRef = useRef(false);
   const strength = getPasswordStrength(password);
   // 邀请码是否必填由管理台「注册政策」控制;默认按必填渲染(与后端缺省一致),
   // 拉到设置后再放宽为选填。
   const [invitationRequired, setInvitationRequired] = useState(true);
-  const confirmInvalid = Boolean(confirmPassword) && confirmPassword !== password;
+  const invitationCodePattern = "[A-HJ-NP-Z2-9]{8}";
 
   useEffect(() => {
     getRegistrationSettings()
@@ -62,42 +75,67 @@ export default function Register() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current) return;
+
     setError("");
+    const nextFieldErrors: typeof fieldErrors = {};
+    if (!name.trim()) nextFieldErrors.name = "请输入昵称";
+    if (!emailRef.current?.validity.valid) nextFieldErrors.email = "请输入有效的邮箱地址";
+    if (password.length < 8) nextFieldErrors.password = "密码至少需要 8 个字符";
+    if (password !== confirmPassword) nextFieldErrors.confirm = "两次输入的密码不一致";
+    if ((invitationRequired || code) && !new RegExp(invitationCodePattern).test(code)) {
+      nextFieldErrors.code = code ? "邀请码格式不正确" : "请输入邀请码";
+    }
+    setFieldErrors(nextFieldErrors);
 
-    if (password !== confirmPassword) {
-      setError("两次输入的密码不一致");
+    if (nextFieldErrors.name) {
+      nameRef.current?.focus();
+      return;
+    } else if (nextFieldErrors.email) {
+      emailRef.current?.focus();
+      return;
+    } else if (nextFieldErrors.password) {
+      passwordRef.current?.focus();
+      return;
+    } else if (nextFieldErrors.confirm) {
+      confirmPasswordRef.current?.focus();
+      return;
+    } else if (nextFieldErrors.code) {
+      invitationCodeRef.current?.focus();
       return;
     }
 
-    if (password.length < 8) {
-      setError("密码至少需要 8 个字符");
-      return;
-    }
-
+    submittingRef.current = true;
     setLoading(true);
-    const signup = {
-      email,
-      password,
-      name,
-      code,
-    } as Parameters<
-      typeof authClient.signUp.email
-    >[0] & { code: string };
-    const { data, error } = await authClient.signUp.email(signup);
-    setLoading(false);
+    try {
+      const signup = {
+        email,
+        password,
+        name,
+        code,
+      } as Parameters<
+        typeof authClient.signUp.email
+      >[0] & { code: string };
+      const { data, error } = await authClient.signUp.email(signup);
 
-    if (error) {
-      setError(error.message ?? "注册失败，请稍后重试");
-    } else {
-      const destination = getPostAuthNavigationDestination(
-        data?.user.emailVerified === true,
-        postLoginRedirect
-      );
-      if (isExternalHttpTarget(destination)) {
-        window.location.assign(destination);
-        return;
+      if (error) {
+        setError(error.message ?? "注册失败，请稍后重试");
+      } else {
+        const destination = getPostAuthNavigationDestination(
+          data?.user.emailVerified === true,
+          postLoginRedirect
+        );
+        if (isExternalHttpTarget(destination)) {
+          window.location.assign(destination);
+          return;
+        }
+        navigate(destination, { replace: true });
       }
-      navigate(destination, { replace: true });
+    } catch {
+      setError("网络错误，请稍后重试");
+    } finally {
+      submittingRef.current = false;
+      setLoading(false);
     }
   };
 
@@ -106,7 +144,7 @@ export default function Register() {
       title="创建账号"
       description={scheduleSource ? "继续使用重庆大学课表" : "一个账号，连接你的校园服务。"}
     >
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
@@ -117,42 +155,97 @@ export default function Register() {
           <Label htmlFor="name">昵称</Label>
           <Input
             id="name"
+            ref={nameRef}
             type="text"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => {
+              setName(e.target.value);
+              if (fieldErrors.name && e.target.value.trim()) {
+                setFieldErrors((errors) => ({ ...errors, name: undefined }));
+              }
+            }}
+            onBlur={() => {
+              if (!name.trim()) setFieldErrors((errors) => ({ ...errors, name: "请输入昵称" }));
+            }}
             required
             autoComplete="name"
             placeholder="您的昵称"
+            aria-invalid={fieldErrors.name ? true : undefined}
+            aria-describedby={fieldErrors.name ? "name-error" : undefined}
           />
+          {fieldErrors.name && (
+            <p id="name-error" className="field-error" role="alert">
+              {fieldErrors.name}
+            </p>
+          )}
         </div>
 
         <div className="field">
           <Label htmlFor="email">邮箱</Label>
           <Input
             id="email"
+            ref={emailRef}
             type="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              if (fieldErrors.email && e.target.validity.valid) {
+                setFieldErrors((errors) => ({ ...errors, email: undefined }));
+              }
+            }}
+            onBlur={() => {
+              if (!emailRef.current?.validity.valid) {
+                setFieldErrors((errors) => ({ ...errors, email: "请输入有效的邮箱地址" }));
+              }
+            }}
             required
             autoComplete="email"
             autoCapitalize="none"
             spellCheck={false}
             inputMode="email"
             placeholder="your@email.com"
+            aria-invalid={fieldErrors.email ? true : undefined}
+            aria-describedby={fieldErrors.email ? "email-error" : undefined}
           />
+          {fieldErrors.email && (
+            <p id="email-error" className="field-error" role="alert">
+              {fieldErrors.email}
+            </p>
+          )}
         </div>
 
         <div className="field">
           <Label htmlFor="password">密码</Label>
           <Input
             id="password"
+            ref={passwordRef}
             type="password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              if (fieldErrors.password && e.target.value.length >= 8) {
+                setFieldErrors((errors) => ({ ...errors, password: undefined }));
+              }
+              if (fieldErrors.confirm && e.target.value === confirmPassword) {
+                setFieldErrors((errors) => ({ ...errors, confirm: undefined }));
+              }
+            }}
+            onBlur={() => {
+              if (password.length < 8) {
+                setFieldErrors((errors) => ({ ...errors, password: "密码至少需要 8 个字符" }));
+              }
+            }}
             required
             autoComplete="new-password"
             placeholder="至少 8 个字符"
+            aria-invalid={fieldErrors.password ? true : undefined}
+            aria-describedby={fieldErrors.password ? "password-error" : undefined}
           />
+          {fieldErrors.password && (
+            <p id="password-error" className="field-error" role="alert">
+              {fieldErrors.password}
+            </p>
+          )}
           {password && (
             <div>
               <div className="flex gap-1" aria-hidden="true">
@@ -174,18 +267,29 @@ export default function Register() {
           <Label htmlFor="confirmPassword">确认密码</Label>
           <Input
             id="confirmPassword"
+            ref={confirmPasswordRef}
             type="password"
             value={confirmPassword}
-            onChange={(e) => setConfirmPassword(e.target.value)}
+            onChange={(e) => {
+              setConfirmPassword(e.target.value);
+              if (fieldErrors.confirm && e.target.value === password) {
+                setFieldErrors((errors) => ({ ...errors, confirm: undefined }));
+              }
+            }}
+            onBlur={() => {
+              if (confirmPassword !== password) {
+                setFieldErrors((errors) => ({ ...errors, confirm: "两次输入的密码不一致" }));
+              }
+            }}
             required
             autoComplete="new-password"
-            aria-invalid={confirmInvalid || undefined}
-            aria-describedby={confirmInvalid ? "confirm-password-error" : undefined}
+            aria-invalid={fieldErrors.confirm ? true : undefined}
+            aria-describedby={fieldErrors.confirm ? "confirm-password-error" : undefined}
             placeholder="再次输入密码"
           />
-          {confirmInvalid && (
+          {fieldErrors.confirm && (
             <p id="confirm-password-error" className="field-error" role="alert">
-              两次密码不一致
+              {fieldErrors.confirm}
             </p>
           )}
         </div>
@@ -199,24 +303,51 @@ export default function Register() {
           </Label>
           <Input
             id="invitationCode"
+            ref={invitationCodeRef}
             type="text"
             value={code}
-            onChange={(e) => setCode(e.target.value.trim().toUpperCase().slice(0, 8))}
+            onChange={(e) => {
+              const nextCode = e.target.value.trim().toUpperCase().slice(0, 8);
+              setCode(nextCode);
+              if (
+                fieldErrors.code &&
+                ((!invitationRequired && !nextCode) || new RegExp(invitationCodePattern).test(nextCode))
+              ) {
+                setFieldErrors((errors) => ({ ...errors, code: undefined }));
+              }
+            }}
+            onBlur={() => {
+              if ((invitationRequired || code) && !new RegExp(invitationCodePattern).test(code)) {
+                setFieldErrors((errors) => ({
+                  ...errors,
+                  code: code ? "邀请码格式不正确" : "请输入邀请码",
+                }));
+              }
+            }}
             required={invitationRequired}
             minLength={invitationRequired ? 8 : 0}
             maxLength={8}
-            pattern={invitationRequired ? "[A-HJ-NP-Z2-9]{8}" : "([A-HJ-NP-Z2-9]{8})?"}
+            pattern={invitationRequired ? invitationCodePattern : `(${invitationCodePattern})?`}
             autoComplete="one-time-code"
             spellCheck={false}
             className="font-mono tracking-widest uppercase"
             placeholder={invitationRequired ? "请输入邀请码" : "请输入邀请码，可留空"}
+            aria-invalid={fieldErrors.code ? true : undefined}
+            aria-describedby={fieldErrors.code ? "invitation-code-error" : undefined}
           />
+          {fieldErrors.code && (
+            <p id="invitation-code-error" className="field-error" role="alert">
+              {fieldErrors.code}
+            </p>
+          )}
         </div>
 
         <ActionButton
           type="submit"
           className="w-full"
-          state={loading ? "loading" : error ? "error" : "idle"}
+          state={
+            loading ? "loading" : error || Object.values(fieldErrors).some(Boolean) ? "error" : "idle"
+          }
           labels={{
             idle: "注册",
             loading: "注册中…",

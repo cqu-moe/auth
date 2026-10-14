@@ -35,6 +35,7 @@ from posthog_client import (
     POSTHOG_CLIENT_KEY,
     create_posthog_client,
     flush_posthog,
+    mark_business_outcome,
     posthog_exception_middleware,
     safe_capture_exception,
 )
@@ -88,6 +89,7 @@ def normalize_login_failure(error: object) -> dict:
 
 def login_failure_response(error: object, status: int = 500) -> web.Response:
     payload = normalize_login_failure(error)
+    mark_business_outcome("failure", payload["errorCode"])
     log.warning("run terminal phase=%s errorCode=%s", payload["phase"], payload["errorCode"])
     return web.json_response(payload, status=status)
 
@@ -438,6 +440,7 @@ async def run_handler(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except Exception:
+        mark_business_outcome("failure", "INVALID_REQUEST")
         return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
 
     student_id = body.get("studentId")
@@ -446,6 +449,7 @@ async def run_handler(request: web.Request) -> web.Response:
     method = body.get("method", "mail")
     session = body.get("session") or "default"
     if not (student_id and password and service):
+        mark_business_outcome("failure", "INVALID_REQUEST")
         return web.json_response(
             {"ok": False, "error": "missing required field: studentId/password/service"},
             status=400,
@@ -454,16 +458,20 @@ async def run_handler(request: web.Request) -> web.Response:
     try:
         seed_state = parse_seed_state(body)
     except ValueError as error:
+        mark_business_outcome("failure", "INVALID_SEED")
         return web.json_response({"ok": False, "error": str(error)}, status=400)
 
     boot_guard = boot_guard_response(request)
     if boot_guard is not None:
+        mark_business_outcome("failure", "BOOT_GUARD")
         return boot_guard
     try:
         operation_timeout_ms = parse_operation_timeout_ms(body)
     except InvalidOperationTimeout as error:
+        mark_business_outcome("failure", "INVALID_TIMEOUT")
         return web.json_response({"ok": False, "error": str(error)}, status=400)
     if operation_timeout_ms is None and browser_profile.CLOUDFLARE_PROFILE:
+        mark_business_outcome("failure", "INVALID_TIMEOUT")
         return web.json_response(
             {"ok": False, "error": "operationTimeoutMs is required"}, status=400
         )
@@ -476,14 +484,17 @@ async def run_handler(request: web.Request) -> web.Response:
     canonical_service = is_allowed_service_url(service)
     if canonical_service is None:
         log.warning("run rejected serviceUrl (host not allowed)")
+        mark_business_outcome("failure", "SERVICE_NOT_ALLOWED")
         return web.json_response({"ok": False, "error": "service not allowed"}, status=400)
     service = canonical_service
 
     token_rejection = _login_token_rejection(session)
     if token_rejection is not None:
+        mark_business_outcome("failure", "LOGIN_RETIRED")
         return token_rejection
     run_task = asyncio.current_task()
     if run_task is None:
+        mark_business_outcome("failure", "LOGIN_TASK_UNAVAILABLE")
         return web.json_response({"ok": False, "error": "LOGIN_TASK_UNAVAILABLE"}, status=503)
     LOGIN_RUNS[session] = {
         "task": run_task,
@@ -500,6 +511,7 @@ async def run_handler(request: web.Request) -> web.Response:
         try:
             proxy = await acquire_qg_proxy("login")
         except QgExtractError as e:
+            mark_business_outcome("failure", "CONTAINER_UNAVAILABLE")
             return login_failure_response("CONTAINER_UNAVAILABLE", status=502)
 
     # 单任务互斥在所有参数/boot 校验之后、Event 注册之前:被拒请求不创建任何
@@ -509,6 +521,7 @@ async def run_handler(request: web.Request) -> web.Response:
         job_acquired = await acquire_browser_job()
     except BrowserBusyError:
         log.warning("run busy (another heavy browser job holds this instance)")
+        mark_business_outcome("failure", "BROWSER_BUSY")
         return login_failure_response("BROWSER_BUSY", status=503)
 
     ev = asyncio.Event()
@@ -606,6 +619,7 @@ async def run_handler(request: web.Request) -> web.Response:
         )
         # ticket 是 bearer 凭据, 不入日志(session 不是凭据可留); 对齐 DO 审计「绝不记录 ticket/cookies/密码」。
         log.info("run ok")
+        mark_business_outcome("success")
         return web.json_response({"ok": True, **result})
     except BrowserDeadlineExceeded:
         # operationTimeoutMs 预算耗尽:内层协程已被取消,其 finally 已关浏览器;
@@ -806,11 +820,13 @@ async def service_ticket_handler(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except Exception:
+        mark_business_outcome("failure", "INVALID_REQUEST")
         return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
 
     service_url = body.get("serviceUrl")
     state = body.get("state")
     if not service_url or not isinstance(state, dict):
+        mark_business_outcome("failure", "INVALID_REQUEST")
         return web.json_response(
             {"ok": False, "error": "missing required field: serviceUrl/state (object)"},
             status=400,
@@ -822,13 +838,16 @@ async def service_ticket_handler(request: web.Request) -> web.Response:
     canonical_url = is_allowed_service_url(service_url)
     if canonical_url is None:
         log.warning("service-ticket rejected serviceUrl (host not allowed)")
+        mark_business_outcome("failure", "SERVICE_NOT_ALLOWED")
         return web.json_response({"ok": False, "error": "serviceUrl not allowed"}, status=400)
 
     try:
         operation_timeout_ms = parse_operation_timeout_ms(body)
     except InvalidOperationTimeout as error:
+        mark_business_outcome("failure", "INVALID_TIMEOUT")
         return web.json_response({"ok": False, "error": str(error)}, status=400)
     if operation_timeout_ms is None and browser_profile.CLOUDFLARE_PROFILE:
+        mark_business_outcome("failure", "INVALID_TIMEOUT")
         return web.json_response(
             {"ok": False, "error": "operationTimeoutMs is required"}, status=400
         )
@@ -838,6 +857,7 @@ async def service_ticket_handler(request: web.Request) -> web.Response:
         job_acquired = await acquire_browser_job()
     except BrowserBusyError:
         log.warning("service-ticket busy (another heavy browser job holds this instance)")
+        mark_business_outcome("failure", "BROWSER_BUSY")
         return web.json_response({"ok": False, "error": "BROWSER_BUSY"}, status=503)
 
     try:
@@ -847,9 +867,11 @@ async def service_ticket_handler(request: web.Request) -> web.Response:
         )
         # ST 是 bearer 凭据, 只记长度供诊断, 绝不打值。
         log.info("service-ticket ok (len=%d)", len(ticket))
+        mark_business_outcome("success")
         return web.json_response({"ok": True, "ticket": ticket})
     except BrowserDeadlineExceeded:
         log.warning("service-ticket deadline exceeded (operationTimeoutMs=%d)", operation_timeout_ms or -1)
+        mark_business_outcome("failure", "BROWSER_DEADLINE")
         return web.json_response(
             {"ok": False, "error": "BROWSER_DEADLINE"}, status=503
         )
@@ -859,6 +881,7 @@ async def service_ticket_handler(request: web.Request) -> web.Response:
         # 类型名, 不回 str(e): patchright 抛的异常 message 可能含 cookie/state 明文, 经 200/409/502
         # body 透传到 route 客户端 + log 落 CF observability(下游只截断不脱敏, 救不了)。日志同理只记类型名。
         log.warning("service-ticket expired: %s", type(e).__name__)
+        mark_business_outcome("failure", "SESSION_EXPIRED")
         return web.json_response({"ok": False, "error": type(e).__name__}, status=409)
     except Exception as e:  # noqa: BLE001 - NoTicketError/浏览器崩/超时 → 502 瞬态, 让上游退避
         safe_capture_exception(
@@ -869,6 +892,7 @@ async def service_ticket_handler(request: web.Request) -> web.Response:
         # 同上脱敏: error/log 只记 type(e).__name__, 不拼 str(e)(防 cookie/state 明文外泄)。
         # 状态码语义(502)不变 → DO 据状态码分类, 不依赖 body 文案。
         log.warning("service-ticket transient: %s", type(e).__name__)
+        mark_business_outcome("failure", "SERVICE_TICKET_TRANSIENT")
         return web.json_response({"ok": False, "error": type(e).__name__}, status=502)
     finally:
         release_browser_job(job_acquired)
@@ -883,17 +907,21 @@ async def keepalive_handler(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except Exception:
+        mark_business_outcome("failure", "INVALID_REQUEST")
         return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
     state = body.get("state")
     if not isinstance(state, dict):
+        mark_business_outcome("failure", "INVALID_REQUEST")
         return web.json_response(
             {"ok": False, "error": "missing required field: state (object)"}, status=400)
 
     try:
         operation_timeout_ms = parse_operation_timeout_ms(body)
     except InvalidOperationTimeout as error:
+        mark_business_outcome("failure", "INVALID_TIMEOUT")
         return web.json_response({"ok": False, "error": str(error)}, status=400)
     if operation_timeout_ms is None and browser_profile.CLOUDFLARE_PROFILE:
+        mark_business_outcome("failure", "INVALID_TIMEOUT")
         return web.json_response(
             {"ok": False, "error": "operationTimeoutMs is required"}, status=400
         )
@@ -903,6 +931,7 @@ async def keepalive_handler(request: web.Request) -> web.Response:
         job_acquired = await acquire_browser_job()
     except BrowserBusyError:
         log.warning("keepalive busy (another heavy browser job holds this instance)")
+        mark_business_outcome("failure", "BROWSER_BUSY")
         return web.json_response({"ok": False, "error": "BROWSER_BUSY"}, status=503)
     try:
         result = await run_bounded(
@@ -911,6 +940,7 @@ async def keepalive_handler(request: web.Request) -> web.Response:
     except BrowserDeadlineExceeded:
         # deadline 是稳定瞬态基础设施错误,不能被下面的 unreachable 兜底吞成 200。
         log.warning("keepalive deadline exceeded (operationTimeoutMs=%d)", operation_timeout_ms or -1)
+        mark_business_outcome("failure", "BROWSER_DEADLINE")
         return web.json_response(
             {"ok": False, "error": "BROWSER_DEADLINE"}, status=503
         )
@@ -928,6 +958,10 @@ async def keepalive_handler(request: web.Request) -> web.Response:
     finally:
         release_browser_job(job_acquired)
     log.info("keepalive status=%s detail=%s", result["status"], (result.get("detail", "") or "")[:80])
+    mark_business_outcome(
+        "success" if result["status"] == "alive" else "failure",
+        result["status"].upper(),
+    )
     return web.json_response({"ok": True, **result})
 
 
@@ -944,10 +978,12 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
     try:
         body = await request.json()
     except Exception:
+        mark_business_outcome("failure", "INVALID_REQUEST")
         return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
 
     state = body.get("state")
     if not isinstance(state, dict):
+        mark_business_outcome("failure", "INVALID_REQUEST")
         return web.json_response(
             {"ok": False, "error": "missing required field: state (object)"}, status=400)
 
@@ -957,13 +993,16 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
         recipe = cqu_data_harvest.parse_harvest_recipe(body)
     except cqu_data_harvest.HarvestRecipeError:
         log.warning("data-harvest rejected recipe (host/shape not allowed)")
+        mark_business_outcome("failure", "RECIPE_NOT_ALLOWED")
         return web.json_response({"ok": False, "error": "recipe not allowed"}, status=400)
 
     try:
         operation_timeout_ms = parse_operation_timeout_ms(body)
     except InvalidOperationTimeout as error:
+        mark_business_outcome("failure", "INVALID_TIMEOUT")
         return web.json_response({"ok": False, "error": str(error)}, status=400)
     if operation_timeout_ms is None and browser_profile.CLOUDFLARE_PROFILE:
+        mark_business_outcome("failure", "INVALID_TIMEOUT")
         return web.json_response(
             {"ok": False, "error": "operationTimeoutMs is required"}, status=400
         )
@@ -973,6 +1012,7 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
         job_acquired = await acquire_browser_job()
     except BrowserBusyError:
         log.warning("data-harvest busy (another heavy browser job holds this instance)")
+        mark_business_outcome("failure", "BROWSER_BUSY")
         return web.json_response({"ok": False, "error": "BROWSER_BUSY"}, status=503)
 
     try:
@@ -988,10 +1028,12 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
                  json.dumps(diagnostics, sort_keys=True, separators=(",", ":")))
         if "diagnostics" in result:
             result = {**result, "diagnostics": diagnostics}
+        mark_business_outcome("success")
         return web.json_response({"ok": True, **result})
     except BrowserDeadlineExceeded:
         # 稳定 deadline 码优先于 harvest 业务分类,绝不能被包装成 HARVEST_TRANSIENT。
         log.warning("data-harvest deadline exceeded (operationTimeoutMs=%d)", operation_timeout_ms or -1)
+        mark_business_outcome("failure", "BROWSER_DEADLINE")
         return web.json_response(
             {"ok": False, "error": "BROWSER_DEADLINE"}, status=503
         )
@@ -1000,6 +1042,7 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
         # (镜像 /service-ticket 的 ExpiredError→409)。DO classifyNodeHarvestResponse 据 409 判
         # TGT_EXPIRED → setAlarm 触发重登; 否则 harvest 静默返回空数据, 会话永不自愈。
         log.warning("data-harvest expired (session redirected to CAS login) → 409")
+        mark_business_outcome("failure", "SESSION_EXPIRED")
         return web.json_response({"ok": False, "error": "TGT_EXPIRED"}, status=409)
     except cqu_data_harvest.HarvestTransientError as e:
         # Exception diagnostics are untrusted at this handler boundary. Rebuild them
@@ -1014,6 +1057,7 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
         code = getattr(e, "code", None)
         if not isinstance(code, str) or code not in cqu_data_harvest.HARVEST_ERROR_STATUS:
             code = "HARVEST_TRANSIENT"
+        mark_business_outcome("failure", code)
         return web.json_response(
             {"ok": False, "error": code, "diagnostics": diagnostics},
             status=cqu_data_harvest.HARVEST_ERROR_STATUS[code],
@@ -1025,6 +1069,7 @@ async def data_harvest_handler(request: web.Request) -> web.Response:
             {"operation": "data_harvest", "error_code": "HARVEST_TRANSIENT"},
         )
         log.warning("data-harvest transient: %s", type(e).__name__)
+        mark_business_outcome("failure", "HARVEST_TRANSIENT")
         return web.json_response({"ok": False, "error": "HARVEST_TRANSIENT"}, status=503)
     finally:
         release_browser_job(job_acquired)

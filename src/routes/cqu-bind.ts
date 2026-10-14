@@ -10,7 +10,7 @@ import { getCquBinding } from "../services/cqu-binding";
 import { requireSession } from "../middleware/authentication";
 import { JsonBodyError, parseJsonBody } from "../api/validation";
 import { CquCredentialsBody, CreateCquBindingBody } from "../api/v1/cqu-binding.schema";
-import { captureHonoEvent, captureHonoException } from "../lib/posthog";
+import { captureAuthFlowFinished, captureAuthFlowStarted } from "../lib/posthog";
 
 // CQU 绑定资源路由（RESTful 重构）。
 //
@@ -149,6 +149,15 @@ cquBinding.get("/", async (c) => {
 cquBinding.put("/credentials", async (c) => {
   const user = c.get("user") as { id: string };
   const startedAt = Date.now();
+  const flowProperties = { operation: "credentials", stage: "credentials", method: "PUT" };
+  const operationId = captureAuthFlowStarted(c, "binding", flowProperties, user.id);
+  const finish = (
+    outcome: "success" | "failure" | "needs_input",
+    errorCode?: string
+  ) => captureAuthFlowFinished(c, "binding", operationId, outcome, {
+    ...flowProperties,
+    ...(errorCode ? { error_code: errorCode } : {}),
+  }, { durationMs: Date.now() - startedAt, distinctId: user.id });
 
   // #5: 畸形 JSON body 不应裸 500，统一返回 400 INVALID_BODY。
   let body: { studentId: string; password: string };
@@ -156,6 +165,7 @@ cquBinding.put("/credentials", async (c) => {
     body = await parseJsonBody(c.req.raw, CquCredentialsBody);
   } catch (error) {
     if (!(error instanceof JsonBodyError)) throw error;
+    finish("failure", error.code);
     return errorResponse(c, error.code, error.code === "UNSUPPORTED_MEDIA_TYPE"
       ? "仅支持 JSON 请求体" : "请求体无效", error.status);
   }
@@ -169,9 +179,11 @@ cquBinding.put("/credentials", async (c) => {
     .where(eq(cquBindAddresses.userId, user.id))
     .get();
   if (bind?.status === "deleting" || bind?.status === "revoked") {
+    finish("failure", "BINDING_UNAVAILABLE");
     return errorResponse(c, "BINDING_UNAVAILABLE", "绑定已停用或正在解绑", 409);
   }
   if (!bind) {
+    finish("failure", "NO_BIND_ADDRESS");
     return errorResponse(c, "NO_BIND_ADDRESS", "先获取绑定地址", 400);
   }
 
@@ -209,6 +221,7 @@ cquBinding.put("/credentials", async (c) => {
   if (!initResult.success) {
     // DO 未成功时尚未写 D1，现有凭据与绑定状态保持原样。
     const inFlight = initResult.code === "CQU_LOGIN_IN_FLIGHT";
+    finish("failure", inFlight ? "CQU_LOGIN_IN_FLIGHT" : "CQU_LOGIN_FAILED");
     return errorResponse(
       c,
       inFlight ? "CQU_LOGIN_IN_FLIGHT" : "CQU_LOGIN_FAILED",
@@ -235,6 +248,7 @@ cquBinding.put("/credentials", async (c) => {
         .bind(user.id, bind.token),
     ]);
     if (!writes[0].meta.changes || !writes[1].meta.changes) {
+      finish("failure", "BINDING_UNAVAILABLE");
       return errorResponse(c, "BINDING_UNAVAILABLE", "绑定已停用或正在解绑", 409);
     }
   } catch (err) {
@@ -242,7 +256,7 @@ cquBinding.put("/credentials", async (c) => {
       userId: user.id,
       err,
     });
-    captureHonoException(err, c, { component: "cqu-binding", error_code: "BIND_ACTIVATE_FAILED" });
+    finish("failure", "BIND_ACTIVATE_FAILED");
     return errorResponse(
       c,
       "BIND_ACTIVATE_FAILED",
@@ -251,10 +265,7 @@ cquBinding.put("/credentials", async (c) => {
     );
   }
 
-  captureHonoEvent(c, "cqu_binding_completed", user.id, {
-    outcome: "success",
-    duration_ms: Date.now() - startedAt,
-  });
+  finish("success");
 
   return c.json({ success: true, studentId });
 });

@@ -1,8 +1,9 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AlertCircle, Mail } from "lucide-react";
-import { ActionButton, Button, Input, Label } from "@cqu-moe/ui";
+import { ActionButton, Button, Label } from "@cqu-moe/ui";
 import AuthLayout from "../components/AuthLayout";
+import { VerificationCodeInput } from "../components/VerificationCodeInput";
 import { authClient } from "../lib/auth-client";
 import { completeEmailVerification } from "../lib/email-verification-flow";
 import {
@@ -25,10 +26,16 @@ export default function VerifyEmail() {
   const [sendStatus, setSendStatus] = useState<SendStatus>("idle");
   const [verificationError, setVerificationError] = useState("");
   const [sendError, setSendError] = useState("");
+  const [signOutError, setSignOutError] = useState("");
+  const [signingOut, setSigningOut] = useState(false);
+  const verifyingRef = useRef(false);
+  const sendingRef = useRef(false);
+  const signingOutRef = useRef(false);
   const user = session?.user as { email?: string } | undefined;
 
   const handleVerify = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (verifyingRef.current) return;
     const code = normalizeOtp(otp);
     if (code.length !== 6) {
       setVerificationError("输入邮件中的 6 位数字验证码");
@@ -40,38 +47,46 @@ export default function VerifyEmail() {
     }
 
     setVerificationError("");
+    verifyingRef.current = true;
     setVerifying(true);
-    const authError = await completeEmailVerification(
-      {
-        verifyEmail: (input) => authClient.emailOtp.verifyEmail(input),
-        refreshSession: () => refetchSession(),
-      },
-      user.email,
-      code
-    );
-    setVerifying(false);
-
-    if (authError) {
-      setVerificationError(
-        mapAuthError(
-          authError.code,
-          authError.message ?? "邮箱验证码验证失败，请重新输入"
-        )
+    try {
+      const authError = await completeEmailVerification(
+        {
+          verifyEmail: (input) => authClient.emailOtp.verifyEmail(input),
+          refreshSession: () => refetchSession(),
+        },
+        user.email,
+        code
       );
-      return;
-    }
 
-    const destination = postLoginRedirect ?? "/settings";
-    if (isExternalHttpTarget(destination)) {
-      window.location.replace(destination);
-      return;
+      if (authError) {
+        setVerificationError(
+          mapAuthError(
+            authError.code,
+            authError.message ?? "邮箱验证码验证失败，请重新输入"
+          )
+        );
+        return;
+      }
+
+      const destination = postLoginRedirect ?? "/settings";
+      if (isExternalHttpTarget(destination)) {
+        window.location.replace(destination);
+        return;
+      }
+      navigate(destination, { replace: true });
+    } catch {
+      setVerificationError("网络错误，请检查连接后重试");
+    } finally {
+      verifyingRef.current = false;
+      setVerifying(false);
     }
-    navigate(destination, { replace: true });
   };
 
   useEffect(() => refetchOnReturn(() => refetchSession()), [refetchSession]);
 
   const handleResend = async () => {
+    if (verifyingRef.current || sendingRef.current) return;
     if (!user?.email) {
       setSendStatus("error");
       setSendError("无法读取当前登录邮箱，请退出后重新登录");
@@ -80,23 +95,43 @@ export default function VerifyEmail() {
 
     setSendStatus("sending");
     setSendError("");
-    const { error: authError } = await authClient.emailOtp.sendVerificationOtp({
-      email: user.email,
-      type: "email-verification",
-    });
+    sendingRef.current = true;
+    try {
+      const { error: authError } = await authClient.emailOtp.sendVerificationOtp({
+        email: user.email,
+        type: "email-verification",
+      });
 
-    if (authError) {
+      if (authError) {
+        setSendStatus("error");
+        setSendError(mapAuthError(authError.code, authError.message ?? "验证码发送失败，请稍后重试"));
+        return;
+      }
+
+      setSendStatus("sent");
+    } catch {
       setSendStatus("error");
-      setSendError(mapAuthError(authError.code, authError.message ?? "验证码发送失败，请稍后重试"));
-      return;
+      setSendError("网络错误，请检查连接后重试");
+    } finally {
+      sendingRef.current = false;
+      setSendStatus(current => current === "sending" ? "idle" : current);
     }
-
-    setSendStatus("sent");
   };
 
   const handleSignOut = async () => {
-    await authClient.signOut();
-    navigate(withRedirectParam("/login", postLoginRedirect), { replace: true });
+    if (signingOutRef.current) return;
+    signingOutRef.current = true;
+    setSigningOut(true);
+    setSignOutError("");
+    try {
+      await authClient.signOut();
+      navigate(withRedirectParam("/login", postLoginRedirect), { replace: true });
+    } catch {
+      setSignOutError("退出失败，请检查网络后重试");
+    } finally {
+      signingOutRef.current = false;
+      setSigningOut(false);
+    }
   };
 
   return (
@@ -116,28 +151,19 @@ export default function VerifyEmail() {
       <form onSubmit={handleVerify} className="space-y-4" aria-busy={verifying} noValidate>
         <div className="field">
           <Label htmlFor="email-verification-otp">六位验证码</Label>
-          <Input
+          <VerificationCodeInput
             id="email-verification-otp"
             name="otp"
-            type="text"
             value={otp}
-            onChange={(event) => setOtp(normalizeOtp(event.target.value))}
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            pattern="[0-9]*"
-            maxLength={6}
-            required
+            onChange={(value) => {
+              setOtp(value);
+              setVerificationError("");
+            }}
             disabled={verifying}
-            spellCheck={false}
-            enterKeyHint="done"
             aria-invalid={Boolean(verificationError)}
             aria-describedby={
               verificationError ? "email-verification-error" : "email-verification-help"
             }
-            data-lpignore="true"
-            data-1p-ignore
-            className="otp-input"
-            placeholder="000000"
           />
           {!verificationError && (
             <p id="email-verification-help" className="field-hint">
@@ -155,7 +181,7 @@ export default function VerifyEmail() {
         <ActionButton
           type="submit"
           className="w-full"
-          disabled={sendStatus === "sending"}
+          disabled={sendStatus === "sending" || verifying}
           state={verifying ? "loading" : verificationError ? "error" : "idle"}
           labels={{
             idle: "验证并继续",
@@ -188,13 +214,19 @@ export default function VerifyEmail() {
         )}
       </div>
 
+      {signOutError && (
+        <p className="mt-2 text-center text-sm text-destructive" role="alert">
+          {signOutError}
+        </p>
+      )}
+
       <div className="mt-5 border-t border-border pt-3 text-center">
         <Button
           type="button"
           variant="ghost"
           size="sm"
           onClick={() => void handleSignOut()}
-          disabled={verifying || sendStatus === "sending"}
+          disabled={verifying || sendStatus === "sending" || signingOut}
         >
           退出当前账户
         </Button>

@@ -28,7 +28,7 @@ vi.mock("../lib/auth-client", () => ({
   },
 }));
 
-vi.mock("../lib/posthog", () => ({ syncPostHogIdentity: vi.fn(), syncPostHogReplay: vi.fn() }));
+vi.mock("../lib/posthog", () => ({ syncPostHogIdentity: vi.fn(), syncPostHogReplay: vi.fn(), capturePostHogSessionReady: vi.fn() }));
 
 let container: HTMLDivElement;
 let root: Root;

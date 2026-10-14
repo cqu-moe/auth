@@ -23237,10 +23237,14 @@
       "QuickloginV3RegistrationResponse": {
         "type": "object",
         "required": [
+          "centralUserId",
           "deviceId",
           "snapshot"
         ],
         "properties": {
+          "centralUserId": {
+            "type": "string"
+          },
           "deviceId": {
             "type": "string"
           },
@@ -23295,10 +23299,14 @@
       "QuickloginV3ReconcileResponse": {
         "type": "object",
         "required": [
+          "centralUserId",
           "snapshot",
           "receiptAck"
         ],
         "properties": {
+          "centralUserId": {
+            "type": "string"
+          },
           "snapshot": {
             "$ref": "#/components/schemas/QuickloginV3DeviceSnapshot"
           },
