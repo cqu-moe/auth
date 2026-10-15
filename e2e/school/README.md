@@ -154,6 +154,13 @@ school hosts/port 443, `/fixture/{cert.pem,key.pem}`, and the control server on
 profiles/chromeProcesses) plus `/mail` (drain generated `{code}` messages).
 `holdMail` is an optional control used by the support's delayed-mail regression.
 The image's cleanup evidence includes the SHA256 of the supplied school file.
+
+Cleanup also owns workerd's separate egress proxy containers. Their names are
+recorded from the actual per-run Durable Object IDs before dispatch, and their
+image is checked before removal. Both business and proxy object IDs must be
+absent after shutdown; scanning only the fixture image misses these proxies.
+The evidence reports `proxyObjectsRemoved` and the removed proxy IDs. Earlier
+reports without this field prove fixture cleanup only, not interceptor cleanup.
 Never put an Auth/browser/Workflow replacement into that external fixture.
 
 The private caller proves Auth's actual RPC transport; consuming repositories
