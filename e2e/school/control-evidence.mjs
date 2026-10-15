@@ -25,8 +25,9 @@ export async function checkSchoolControl(name,{dir,meta}) {
   assert.equal(meta.cleanup,'passed');
   assert.equal(meta.resources.directoryRemoved,true);
   if(name==='zero') {
-    assert.equal(meta.stage,'scenarios');
-    assert.equal(meta.failure?.stage,'scenarios');
+    // Older receipts label the missing report as scenarios; current ones name it explicitly.
+    assert.ok(['scenarios','framework-report'].includes(meta.stage));
+    assert.equal(meta.failure?.stage,meta.stage);
     assert.equal(meta.failure?.name,'Error');
     assert.match(meta.failure.message,/^ENOENT: no such file or directory, open '.*\/mobile\/report\.json'$/);
     await assert.rejects(readFile(join(dir,'report.json')),{code:'ENOENT'});
