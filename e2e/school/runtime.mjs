@@ -4,7 +4,6 @@ import { randomUUID, createHash } from 'node:crypto';
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { join,resolve } from 'node:path';
-import { platform as osPlatform, release } from 'node:os';
 import { startAuth } from '../runtime.mjs';
 import { prepareAccount } from '../prepare-account.mjs';
 import { prepareSchoolAdmin } from './admin.mjs';
@@ -15,10 +14,6 @@ const pause = ms => new Promise(r=>setTimeout(r,ms));
 const describeError = error => error instanceof AggregateError
   ? `${error.message}: ${error.errors.map(describeError).join('; ')}`
   : `${error?.name ?? 'Error'}: ${error?.message ?? String(error)}`;
-const readOptionalSysctl = path => {
-  try { return readFileSync(path,'utf8').trim(); }
-  catch { return null; }
-};
 const containerEgressImage = process.env.MINIFLARE_CONTAINER_EGRESS_IMAGE
   ?? 'cloudflare/proxy-everything:3cb1195@sha256:0ef6716c52430096900b150d84a3302057d6cd2319dae7987128c85d0733e3c8';
 const imageExists = ref => {
@@ -61,7 +56,7 @@ export async function startSchoolAuth(options = {}) {
       body === undefined ? {} : {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
     if (!response.ok) {
       const detail = (await response.text()).slice(0,500);
-      throw new Error(`School fixture transport failed (${response.status})${detail ? `: ${detail}` : ''}`);
+      throw new Error(`School fixture transport failed (${response.status})${detail ? `: ${redactDiagnostic(detail)}` : ''}`);
     }
     return response.json();
   }
@@ -147,7 +142,7 @@ export async function startSchoolAuth(options = {}) {
             value = await admin.entitlement(userId,input.enabled);
           } else throw new Error('Unknown school control');
           res.setHeader('content-type','application/json');res.end(JSON.stringify(value));
-        } catch(error) {res.writeHead(500,{'content-type':'application/json'}).end(JSON.stringify({error:describeError(error)}));}
+        } catch(error) {res.writeHead(500,{'content-type':'application/json'}).end(JSON.stringify({error:redactDiagnostic(describeError(error))}));}
       });
       await new Promise(r=>control.listen(0,'127.0.0.1',r));
       async function deliver() {
@@ -184,45 +179,6 @@ export async function startSchoolAuth(options = {}) {
     async close() {
       if (control?.listening) await new Promise((r,j)=>control.close(e=>e?j(e):r()));
       const remaining = docker(['ps','-aq','--filter',`ancestor=${image}`]);
-      const containerDiagnostics = remaining ? remaining.split('\n').map(id => ({
-        id,
-        name:docker(['inspect','--format','{{.Name}}',id]),
-        state:JSON.parse(docker(['inspect','--format','{{json .State}}',id])),
-        entrypoint:JSON.parse(docker(['inspect','--format','{{json .Config.Entrypoint}}',id])),
-        command:JSON.parse(docker(['inspect','--format','{{json .Config.Cmd}}',id])),
-        networkMode:docker(['inspect','--format','{{.HostConfig.NetworkMode}}',id]),
-        networks:JSON.parse(docker(['inspect','--format','{{json .NetworkSettings.Networks}}',id])),
-        logs:redactDiagnostic(docker(['logs','--tail','200',id])),
-      })) : [];
-      const proxyDiagnostics = process.env.AUTH_SCHOOL_CONTAINER_DIAGNOSTICS
-        ? docker(['ps','-aq','--filter','name=workerd-auth-e2e-CquLoginContainer-']).split('\n')
-          .filter(Boolean).map(id => {
-            const hostConfig=JSON.parse(docker(['inspect','--format','{{json .HostConfig}}',id]));
-            return {
-              id,
-              name:docker(['inspect','--format','{{.Name}}',id]),
-              image:docker(['inspect','--format','{{.Config.Image}}',id]),
-              state:JSON.parse(docker(['inspect','--format','{{json .State}}',id])),
-              hostConfig:{
-                privileged:hostConfig.Privileged,
-                capAdd:hostConfig.CapAdd,
-                devices:hostConfig.Devices,
-                securityOpt:hostConfig.SecurityOpt,
-                sysctls:hostConfig.Sysctls,
-                networkMode:hostConfig.NetworkMode,
-                portBindings:hostConfig.PortBindings,
-              },
-              networks:JSON.parse(docker(['inspect','--format','{{json .NetworkSettings.Networks}}',id])),
-              logs:redactDiagnostic(docker(['logs','--tail','200',id])),
-            };
-          })
-        : [];
-      const networkDiagnostics = process.env.AUTH_SCHOOL_CONTAINER_DIAGNOSTICS && osPlatform() === 'linux' ? {
-        kernel:release(),
-        srcValidMark:readOptionalSysctl('/proc/sys/net/ipv4/conf/all/src_valid_mark'),
-        rpFilter:readOptionalSysctl('/proc/sys/net/ipv4/conf/all/rp_filter'),
-        devconfInheritInitNet:readOptionalSysctl('/proc/sys/net/core/devconf_inherit_init_net'),
-      } : undefined;
       // The local engine stops instances but can retain exited Docker objects.
       // Reclaim only this run's unique image, then independently check absence.
       if (remaining) {
@@ -231,8 +187,8 @@ export async function startSchoolAuth(options = {}) {
       if (docker(['ps','-aq','--filter',`ancestor=${image}`])) throw new Error('School container cleanup failed');
       docker(['image','rm',image]);
       if (errors.length) throw new Error(`School cleanup/transport failed: ${[...new Set(errors)].join('; ')}`);
-      return {containerObjectsRemoved:true,fixtureImageRemoved:true,imageId,base,fixtureHash,runtimeLog,
-        containerDiagnostics,proxyDiagnostics,networkDiagnostics};
+      return {containerObjectsRemoved:true,fixtureImageRemoved:true,imageId,base,fixtureHash,
+        runtimeLog:runtimeLog.map(redactDiagnostic)};
     },
   };
   runtime = await startAuth({...options,platform});
