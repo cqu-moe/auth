@@ -19,6 +19,12 @@ const readOptionalSysctl = path => {
   try { return readFileSync(path,'utf8').trim(); }
   catch { return null; }
 };
+const containerEgressImage = process.env.MINIFLARE_CONTAINER_EGRESS_IMAGE
+  ?? 'cloudflare/proxy-everything:3cb1195@sha256:0ef6716c52430096900b150d84a3302057d6cd2319dae7987128c85d0733e3c8';
+const imageExists = ref => {
+  try { docker(['image','inspect',ref]); return true; }
+  catch { return false; }
+};
 
 export async function startSchoolAuth(options = {}) {
   const commit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
@@ -30,6 +36,12 @@ export async function startSchoolAuth(options = {}) {
   const runId = randomUUID();
   const image = `auth-school-fixture:${runId}`;
   const base=browserBase();
+  const rawDockerSocket=process.env.AUTH_SCHOOL_DOCKER_SOCKET || docker(['context','inspect','--format','{{.Endpoints.docker.Host}}']).replace(/^unix:\/\//,'');
+  const dockerSocket=rawDockerSocket.startsWith('/') ? `unix://${rawDockerSocket}` : rawDockerSocket;
+  // workerd reports a cold local Docker image cache only as "Container failed
+  // to start". Materialize the pinned interceptor before building this run's
+  // disposable fixture image so startup failures remain fixture failures.
+  if (!imageExists(containerEgressImage)) docker(['pull',containerEgressImage]);
   const secrets = new Set(['School-synthetic-123!','Synthetic-only-123!','synthetic-rpc-secret']);
   const users = new Map();
   const used = new Set();
@@ -42,8 +54,6 @@ export async function startSchoolAuth(options = {}) {
   docker(['build','--platform','linux/amd64','--build-context',`school-fixture=${fixtureDirectory}`,
     '--build-arg',`BASE=${base}`,'--build-arg',`RUN_ID=${runId}`,'-t',image,'-f','e2e/school/Dockerfile','.']);
   const imageId=docker(['image','inspect','--format','{{.Id}}',image]);
-  const rawDockerSocket=process.env.AUTH_SCHOOL_DOCKER_SOCKET || docker(['context','inspect','--format','{{.Endpoints.docker.Host}}']).replace(/^unix:\/\//,'');
-  const dockerSocket=rawDockerSocket.startsWith('/') ? `unix://${rawDockerSocket}` : rawDockerSocket;
   async function school(userId, path, body) {
     used.add(userId);
     const ns = await mf.getDurableObjectNamespace('CQU_LOGIN','auth-e2e');
@@ -89,7 +99,7 @@ export async function startSchoolAuth(options = {}) {
             });
           }
         },
-        containerEngine:{localDocker:{socketPath:dockerSocket}},
+        containerEngine:{localDocker:{socketPath:dockerSocket,containerEgressInterceptorImage:containerEgressImage}},
         durableObjectsPersist:join(dir,'do'), workflowsPersist:join(dir,'workflows'),
         workers:[{
           ...base,
