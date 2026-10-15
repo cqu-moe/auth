@@ -50,10 +50,44 @@ jobs:
         with:
           persist-credentials: false
       - run: bash scripts/test-container.sh
+  browser:
+    name: Built Auth registration and session E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      E2E_TELEMETRY_DISABLED: '1'
+      DO_NOT_TRACK: '1'
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '22.22.3'
+          cache: npm
+      - run: npm ci
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      - run: npx --no-install e2e-web install chromium --with-deps
+      - run: npm run test:e2e
+      - run: node e2e/account-smoke.mjs
+      - run: node e2e/self-check.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: auth-browser-${{ github.sha }}
+          path: .e2e/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
   ci:
     name: CI
     if: always()
-    needs: [test, container]
+    needs: [test, container, browser]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -61,7 +95,8 @@ jobs:
         env:
           TEST_RESULT: ${{ needs.test.result }}
           CONTAINER_RESULT: ${{ needs.container.result }}
-        run: test "$TEST_RESULT" = success && test "$CONTAINER_RESULT" = success
+          BROWSER_RESULT: ${{ needs.browser.result }}
+        run: test "$TEST_RESULT" = success && test "$CONTAINER_RESULT" = success && test "$BROWSER_RESULT" = success
   release:
     name: Versioned build archive
     if: startsWith(github.ref, 'refs/tags/v')

@@ -18,7 +18,9 @@
     "check:boundaries": "tsx scripts/check-boundaries.ts",
     "lint:api": "redocly lint --config .redocly.yaml docs/api/openapi.json docs/api/cloudflare.openapi.json",
     "db:migrate:local": "wrangler d1 migrations apply auth-cqu-moe-db --local",
-    "build:frontend": "pnpm --dir frontend run build"
+    "build:frontend": "pnpm --dir frontend run build",
+    "test:e2e": "npm run typecheck:e2e && VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build && node e2e/run.mjs",
+    "typecheck:e2e": "tsc -p e2e/tsconfig.json"
   },
   "repository": {
     "type": "git",
@@ -48,11 +50,14 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.16.9",
     "@cloudflare/workers-types": "^4.20260523.1",
+    "@e2e-dev/web": "0.15.0",
     "@levischuck/tiny-cbor": "0.2.11",
     "@redocly/cli": "2.52.1",
     "@types/node": "^25.9.1",
     "drizzle-kit": "^0.31.10",
+    "e2e": "0.21.0",
     "jsdom": "28.1.0",
+    "miniflare": "4.20260521.0",
     "oauth4webapi": "^3.8.8",
     "openapi-typescript": "7.13.0",
     "tsx": "4.23.13",

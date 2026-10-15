@@ -1,0 +1,6 @@
+{
+  "name": "auth-e2e-build",
+  "main": "../src/index.ts",
+  "compatibility_date": "2026-05-01",
+  "compatibility_flags": ["nodejs_compat"]
+}
