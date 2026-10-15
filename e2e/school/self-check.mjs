@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {mkdir,readFile,readdir} from 'node:fs/promises';
+import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
+import {checkSchoolControl} from './control-evidence.mjs';
 
 const root=`.e2e/school-negative-${Date.now()}`;
 await mkdir(root,{recursive:true});
+const controls=[];
 async function run(name,args,extra={}) {
   const dir=join(root,name);
   const child=spawn(process.execPath,['e2e/school/run.mjs',...args],{stdio:'inherit',env:{PATH:process.env.PATH,TMPDIR:process.env.TMPDIR,
@@ -13,24 +15,11 @@ async function run(name,args,extra={}) {
   const code=await new Promise((r,j)=>{child.on('error',j);child.on('exit',r);});
   assert.equal(code,1,`${name} unexpectedly succeeded`);
   const meta=JSON.parse(await readFile(join(dir,'mobile/runtime.json'),'utf8'));
-  assert.equal(meta.result,'failed');
-  return {dir,meta};
+  await checkSchoolControl(name,{dir:join(dir,'mobile'),meta});
+  controls.push({name,innerExit:code,result:'passed',runtime:join(dir,'mobile/runtime.json'),cleanup:meta.cleanup});
 }
-const negative=await run('assertion',['--grep','^school binding'],{AUTH_SCHOOL_BREAK_ASSERTION:'1'});
-assert.equal(negative.meta.cleanup,'passed');
-assert.equal(negative.meta.resources.directoryRemoved,true);
-const report=JSON.parse(await readFile(join(negative.dir,'mobile/report.json'),'utf8'));
-assert.equal(report.run.summary.failed,1);
-assert.equal(report.run.summary.executed,1);
-async function countScreenshots(dir) {
-  let total=0;
-  for(const item of await readdir(dir,{withFileTypes:true})) total+=item.isDirectory()?await countScreenshots(join(dir,item.name)):Number(item.name.endsWith('.png'));
-  return total;
-}
-assert.ok(await countScreenshots(negative.dir),'No pre-secret failure screenshot retained');
-const empty=await run('zero',['--grep','^AUTH03_ZERO_SELECTION$']);
-assert.equal(empty.meta.cleanup,'passed');
-const startup=await run('pin',[],{AUTH_E2E_EXPECT_COMMIT:'AUTH03_WRONG_COMMIT'});
-assert.equal(startup.meta.failure.stage,'startup');
-assert.equal(startup.meta.cleanup,'not-started');
+await run('assertion',['--grep','^school binding'],{AUTH_SCHOOL_BREAK_ASSERTION:'1'});
+await run('zero',['--grep','^AUTH03_ZERO_SELECTION$']);
+await run('pin',[],{AUTH_E2E_EXPECT_COMMIT:'AUTH03_WRONG_COMMIT'});
+await writeFile(join(root,'controls.json'),JSON.stringify({result:'passed',controls},null,2)+'\n');
 console.log(`School negative controls passed; evidence: ${root}`);

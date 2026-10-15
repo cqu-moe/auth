@@ -219,3 +219,11 @@ wrong commit. Failures after Secret fills retain sanitized text traces and
 observations; the framework's screenshot suppression remains enabled. The CI
 aggregate requires the school job, two complete fresh invocations, consumer
 smoke and negative controls. Remote CI is distinct from local equivalent runs.
+
+The self-check accepts only the exact mobile school-binding test's single
+`ASSERTION_FAILED` at the deliberately wrong pre-secret heading, with no run,
+secondary, artifact or cleanup errors. Zero selection must retain the actual
+`NO_TESTS` collection error and no executed tests; wrong pin must fail with the
+exact commit-mismatch error before allocating resources. A different failing
+journey or startup error is not a successful negative control. The final
+`controls.json` receipt is written only after all three checks pass.
