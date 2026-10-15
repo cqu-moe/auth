@@ -38,6 +38,8 @@ for (const variant of ['desktop', 'mobile']) {
   const group = result.runtime.groups[0];
   assert.equal(group.resources.directoryRemoved, true);
   assert.equal(group.resources.platform.containerObjectsRemoved, true);
+  assert.equal(group.resources.platform.proxyObjectsRemoved, true);
+  assert.equal(group.proxyReadback.absent, true);
   assert.equal(group.resources.platform.fixtureImageRemoved, true);
   assert.equal(group.browser.profileRemoved, true);
   assert.deepEqual(group.errors, [{ name: 'Error', message: 'OAuth journey failed (exit 1)' }]);
@@ -52,6 +54,8 @@ const cleanupGroup = cleanup.runtime.groups[0];
 assert.equal(cleanupGroup.runnerExitCode, 0, 'Native e2e no longer reproduces the passed/cleanup-failed bug; review this control');
 assert.equal(cleanupGroup.summary.passed, 1);
 assert.equal(cleanup.runtime.cleanup, 'passed');
+assert.equal(cleanupGroup.resources.platform.proxyObjectsRemoved, true);
+assert.equal(cleanupGroup.proxyReadback.absent, true);
 assert.equal(cleanupGroup.browser.profileRemoved, true);
 assert.match(cleanupGroup.errors[0].message, /selected attempt cleanup failed/);
 const native = JSON.parse(await readFile(join(cleanup.dir, cleanupGroup.report), 'utf8'));

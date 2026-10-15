@@ -43,6 +43,11 @@ async function appJson(path: string, init: RequestInit = {}) {
   return response.json();
 }
 async function background(email: string) { return control('/directory', { email }); }
+async function expectBackgroundCourses(email: string) {
+  const result = await background(email);
+  expect(result.error ?? null).toBe(null);
+  expect(result.items).toEqual(courses);
+}
 const surface = () => surfaceOf(authWebEngine)!;
 async function signInUi({ app, screen, browser }: Journey, account: ReturnType<typeof credentials.user>) {
   await app.open('/login');
@@ -156,7 +161,7 @@ test('OAuth S256 authorization, DPoP, refresh and one-device revocation preserve
   expect(await appJson('/refresh-result/two?replay=1', { method: 'POST' })).toEqual({
     refreshed: true, rotated: true, oldRefreshRejected: true, status: 200,
   });
-  expect((await background(account.username)).items).toEqual(courses);
+  await expectBackgroundCourses(account.username);
   await unbind(context);
 });
 
@@ -176,7 +181,7 @@ test('password change, administrator recovery and all-device logout each revoke 
   await browser.locator('#change-password-form button[type="submit"]').click();
   await expect(screen.getByText('密码已更新')).toBeVisible();
   await ended(context, 'password-device');
-  expect((await background(account.username)).items).toEqual(courses);
+  await expectBackgroundCourses(account.username);
 
   await authorize(context, changed, 'recovery-device');
   await device(context, 'recovery-device');
@@ -185,7 +190,7 @@ test('password change, administrator recovery and all-device logout each revoke 
   await ended(context, 'recovery-device');
   await app.open('/settings');
   await expect(browser).toHaveURL(/login/);
-  expect((await background(account.username)).items).toEqual(courses);
+  await expectBackgroundCourses(account.username);
 
   const recoveredAccount = credentials.user('oauthRecovered');
   await authorize(context, recoveredAccount, 'logout-device');
@@ -196,7 +201,7 @@ test('password change, administrator recovery and all-device logout each revoke 
   await screen.getByRole('button', '退出全部设备（包括当前设备）').click();
   await expect(browser).toHaveURL(/login/);
   await ended(context, 'logout-device');
-  expect((await background(account.username)).items).toEqual(courses);
+  await expectBackgroundCourses(account.username);
 
   await authorize(context, recoveredAccount, 'ban-device');
   await device(context, 'ban-device');
@@ -204,7 +209,7 @@ test('password change, administrator recovery and all-device logout each revoke 
   await ended(context, 'ban-device');
   expect(await background(account.username)).toEqual({ error: 'FORBIDDEN' });
   await control('/ban', { email: account.username, banned: false });
-  expect((await background(account.username)).items).toEqual(courses);
+  await expectBackgroundCourses(account.username);
   await authorize(context, recoveredAccount, 'unbind-device');
   await device(context, 'unbind-device');
   await unbind(context);

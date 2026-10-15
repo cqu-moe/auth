@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { relative, resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -39,6 +39,19 @@ async function childRun(argv, childEnv, logPath) {
     if (logPath) await writeFile(logPath, stdout + stderr);
     return { code, stdout, stderr };
   } finally { process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', stop); }
+}
+function readRemovedProxies(platform) {
+  const ids = platform.removedProxyIds;
+  if (!Array.isArray(ids) || ids.some(id => !/^[a-f0-9]{64}$/.test(id)) || new Set(ids).size !== ids.length) {
+    throw new Error('OAuth cleanup did not return precise proxy IDs');
+  }
+  for (const id of ids) {
+    const read = spawnSync('docker', ['container', 'inspect', id], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    if (read.error || read.status !== 1 || !/No such (?:object|container)/i.test(read.stderr)) {
+      throw new Error(`OAuth removed proxy absence readback failed for ${id}`);
+    }
+  }
+  return { absent: true, ids };
 }
 async function discover(variant, filters) {
   const child = await childRun(['list', '--reporter', 'json', '--config', config, ...filters], env(variant));
@@ -123,6 +136,10 @@ for (const variant of variants) {
           try {
             group.resources = await runtime.close(); group.cleanup = 'passed';
             if (group.resources.directoryRemoved !== true) throw new Error('OAuth runtime directory was not removed');
+            if (group.resources.platform?.containerObjectsRemoved !== true || group.resources.platform?.proxyObjectsRemoved !== true
+              || group.resources.platform?.fixtureImageRemoved !== true) throw new Error('OAuth school container/proxy cleanup was not verified');
+            group.proxyReadback = readRemovedProxies(group.resources.platform);
+            if (group.business && !group.proxyReadback.ids.length) throw new Error('OAuth business journey has no removed native proxy evidence');
           } catch (error) { group.cleanup = 'failed'; errors.push(error); }
         }
         group.sourceUnchanged = evidence.sourceHash === sourceFingerprint();
