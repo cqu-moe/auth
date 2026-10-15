@@ -38,8 +38,12 @@ async function wrongCurrentTotp() {
   throw new Error('Could not derive a distinct synthetic TOTP');
 }
 
+const browserName = process.env.AUTH_E2E_BROWSER || 'chromium';
+if (!['chromium', 'firefox', 'webkit'].includes(browserName)) throw new Error('Unsupported AUTH_E2E_BROWSER');
+
 const webHolder = globalThis as typeof globalThis & { authE2eWebEngine?: ReturnType<typeof web> };
 export const authWebEngine = webHolder.authE2eWebEngine ??= web({
+  browser: browserName as 'chromium' | 'firefox' | 'webkit',
   viewport: process.env.AUTH_E2E_MOBILE ? { width: 390, height: 844 } : { width: 1440, height: 900 },
 });
 

@@ -1,12 +1,27 @@
 import { spawn } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { relative, resolve, join } from 'node:path';
 import { startAuth } from './runtime.mjs';
+import { tmpdir } from 'node:os';
+import { readdirSync } from 'node:fs';
+import { sourceFingerprint } from './school/source.mjs';
+
+const browserName = process.env.AUTH_E2E_BROWSER || 'chromium';
+if (!['chromium', 'firefox', 'webkit'].includes(browserName)) throw new Error('Unsupported AUTH_E2E_BROWSER');
+const supplement = browserName !== 'chromium';
+const config = supplement ? 'e2e.cross-browser.config.ts' : 'e2e.config.ts';
+const browserEnv = { AUTH_E2E_BROWSER: browserName, PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
+  AUTH_E2E_CLEANUP_CONTROL: process.env.AUTH_E2E_CLEANUP_CONTROL || '' };
+const applicable = supplement && !process.env.AUTH_E2E_CLEANUP_CONTROL ? ['--grep-invert', '^virtual WebAuthn'] : [];
 
 const output = process.env.AUTH_E2E_OUTPUT || `.e2e/run-${Date.now()}`;
 if (!resolve(output).startsWith(resolve('.e2e') + '/')) throw new Error('E2E output must be a child of .e2e');
-const variants = process.env.AUTH_E2E_MOBILE ? ['mobile'] : ['desktop', 'mobile'];
+const variants = process.env.AUTH_E2E_MOBILE ? ['mobile'] : supplement ? ['desktop'] : ['desktop', 'mobile'];
 const userArgs = process.argv.slice(2);
+if (supplement) for (let i = 0; i < userArgs.length; i++) {
+  if (userArgs[i] === '--grep' && userArgs[i + 1]) i++;
+  else if (!userArgs[i].startsWith('--grep=')) throw new Error(`Unsupported supplement option: ${userArgs[i]}`);
+}
 // Discovery already applied the user's title filters. Repeating them would OR
 // with the group's exact titles and run unrelated journeys in this runtime.
 const executionArgs = userArgs.filter((arg, index) =>
@@ -24,9 +39,10 @@ function serializeError(error) {
 }
 
 async function discoverTests(variant, args) {
-  const child = spawn(process.execPath, ['node_modules/e2e/dist/cli/bin.js', 'list', '--reporter', 'json', ...args], {
+  const child = spawn(process.execPath, ['node_modules/e2e/dist/cli/bin.js', 'list', '--reporter', 'json', '--config', config, ...args], {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
+      ...browserEnv,
       PATH: process.env.PATH,
       TMPDIR: process.env.TMPDIR,
       DO_NOT_TRACK: '1',
@@ -84,12 +100,16 @@ function selectionArgsFor(pairs) {
 }
 
 async function runE2EGroup({ args, dir, variant, runtime }) {
-  const child = spawn(process.execPath, ['node_modules/e2e/dist/cli/bin.js', 'run', ...args, '--output', dir], {
+  const browserTmp = supplement ? await mkdtemp(join(tmpdir(), 'auth-browser-')) : undefined;
+  const profiles = new Set();
+  const child = spawn(process.execPath, ['node_modules/e2e/dist/cli/bin.js', 'run', '--config', config, ...applicable, ...args, '--output', dir], {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
+      ...browserEnv,
       PATH: process.env.PATH,
-      TMPDIR: process.env.TMPDIR,
+      TMPDIR: browserTmp ?? process.env.TMPDIR,
       CI: process.env.CI,
+      ...(supplement ? { DEBUG: 'pw:browser' } : {}),
       AUTH_E2E_URL: runtime.origin,
       AUTH_E2E_CONTROL: runtime.controlOrigin,
       AUTH_E2E_MOBILE: variant === 'mobile' ? '1' : '',
@@ -104,6 +124,9 @@ async function runE2EGroup({ args, dir, variant, runtime }) {
   for (const stream of [child.stdout, child.stderr]) {
     stream.on('data', chunk => {
       log += chunk;
+      if (browserTmp) for (const name of readdirSync(browserTmp)) {
+        if (name.startsWith(`playwright_${browserName}dev_profile-`)) profiles.add(join(browserTmp, name));
+      }
       process.stdout.write(chunk);
     });
   }
@@ -116,10 +139,15 @@ async function runE2EGroup({ args, dir, variant, runtime }) {
       child.once('error', rejectChild);
       child.once('close', (code, signal) => resolveChild({ code, signal }));
     });
-    return { code: close.code ?? 1, signal: close.signal, log };
+    const profilesRemoved = await Promise.all([...profiles].map(path => access(path).then(() => false, error => {
+      if (error.code === 'ENOENT') return true; throw error;
+    })));
+    return { code: close.code ?? 1, signal: close.signal, log,
+      browserSafety: { temporaryProfile: profiles.size > 0, profileRemoved: profilesRemoved.length > 0 && profilesRemoved.every(Boolean) } };
   } finally {
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);
+    if (browserTmp) await rm(browserTmp, { recursive: true, force: true });
   }
 }
 
@@ -155,13 +183,14 @@ for (const variant of variants) {
   const groupEvidence = [];
   const logs = [];
   const variantErrors = [];
+  const sourceHash = supplement ? sourceFingerprint() : null;
   let allDiscovered = [];
   let selectedDiscovered = [];
   let groups = [];
 
   try {
     allDiscovered = await discoverTests(variant, []);
-    selectedDiscovered = await discoverTests(variant, userArgs);
+    selectedDiscovered = await discoverTests(variant, [...applicable, ...userArgs]);
     const allIds = new Set(allDiscovered.map(pair => pair.id));
     const selectedIds = new Set(selectedDiscovered.map(pair => pair.id));
     if (selectedDiscovered.some(pair => !allIds.has(pair.id))) throw new Error('Filtered discovery returned a test absent from full discovery');
@@ -190,10 +219,20 @@ for (const variant of variants) {
       try {
         runtime = await startAuth({ expectedCommit: process.env.AUTH_E2E_EXPECT_COMMIT });
         evidence.commit = runtime.commit;
+        evidence.bundleFingerprint = runtime.bundleFingerprint;
+        evidence.browser = browserName;
         console.log(`Auth built Worker ready; commit ${runtime.commit}; ${variant}; runtime ${index + 1}/${groups.length} (${group.name})`);
         const outcome = await runE2EGroup({ args: [...executionArgs, ...selectionArgsFor(group.pairs)], dir, variant, runtime });
         logs.push(outcome.log);
         await writeFile(join(dir, 'runner.log'), outcome.log);
+        evidence.runnerExitCode = outcome.code;
+        if (supplement) {
+          const launch = outcome.log.split('\n').find(line => line.includes('<launching>')) ?? '';
+          evidence.browserSafety = { headless: /(?:-headless|--headless)(?:\s|$)/.test(launch),
+            engine: browserName === 'firefox' ? /firefox[^\s]* -no-remote/.test(launch) : launch.includes('pw_run.sh'),
+            ...outcome.browserSafety };
+          if (!Object.values(evidence.browserSafety).every(Boolean)) throw new Error('Supplement browser launch/profile cleanup was not safe');
+        }
         if (outcome.code) {
           process.exitCode = outcome.code;
           groupErrors.push(new Error(`E2E runtime group ${group.name} exited ${outcome.code}${outcome.signal ? ` after ${outcome.signal}` : ''}`));
@@ -205,6 +244,7 @@ for (const variant of variants) {
         } catch {
           throw new Error(`E2E runtime group ${group.name} wrote no readable report.json`);
         }
+        evidence.report = relative(variantDir, join(dir, 'report.json'));
         const results = reportTests(report);
         const reportDiscovered = testIdSet(results);
         const reportSelected = testIdSet(results, result => result.selected);
@@ -214,10 +254,16 @@ for (const variant of variants) {
         assertSameSet(intended, reportExecuted, `executed test mismatch in ${group.name}`);
 
         // e2e 0.21 may report passed/exit 0 with a failed provider cleanup.
-        if (report.run.results.some(result => result.selected && result.attempts?.some(attempt =>
-          attempt.cleanup === 'failed' || attempt.secondaryErrors?.some(error => error.phase === 'cleanup')))) {
+        const attempts = results.filter(result => result.selected).flatMap(result => {
+          if (!result.attempts?.length) throw new Error('Selected test has no attempt evidence');
+          return result.attempts;
+        });
+        if (!attempts.length || attempts.some(attempt => attempt.cleanup !== 'complete'
+          || attempt.secondaryErrors?.some(error => error.phase === 'cleanup'))
+          || report.run.errors?.some(error => error.phase === 'cleanup')) {
           throw new Error('Browser provider cleanup failed in framework attempt evidence');
         }
+        evidence.attemptCleanup = 'complete';
 
         const summary = report.run.summary;
         if (!summary.executed || summary.skipped || summary.interrupted) {
@@ -226,7 +272,6 @@ for (const variant of variants) {
         if (!outcome.code && (summary.failed || report.run.status !== 'passed')) {
           throw new Error(`Runner result mismatch in ${group.name}`);
         }
-        evidence.report = relative(variantDir, join(dir, 'report.json'));
         evidence.status = report.run.status;
         evidence.selectedTests = reportSelected.size;
         evidence.executedTests = reportExecuted.size;
@@ -240,7 +285,8 @@ for (const variant of variants) {
 
       if (runtime) {
         try {
-          await runtime.close();
+          evidence.resources = await runtime.close();
+          if (!evidence.resources.directoryRemoved) throw new Error('Runtime directory was not removed');
           evidence.cleanup = 'passed';
         } catch (error) {
           process.exitCode ||= 1;
@@ -251,6 +297,9 @@ for (const variant of variants) {
       } else {
         evidence.cleanup = 'failed';
         evidence.stage = 'startup';
+      }
+      if (supplement && sourceFingerprint() !== sourceHash) {
+        process.exitCode ||= 1; groupErrors.push(new Error('Source changed during supplement run'));
       }
       await writeJson(join(dir, 'runtime.json'), evidence);
       if (groupErrors.length) {
@@ -323,6 +372,7 @@ for (const variant of variants) {
         selectedMatch,
         executedMatch,
       },
+      browser: browserName, sourceHash, sourceUnchanged: !supplement || sourceFingerprint() === sourceHash,
       runtimeIsolation: 'one Worker/D1/browser context per AUTH-02 journey; AUTH-01 registration journeys share one runtime',
       groups: groupEvidence,
       errors: variantErrors.map(serializeError),
@@ -330,7 +380,7 @@ for (const variant of variants) {
   });
   await writeFile(join(variantDir, 'runner.log'), logs.join('\n'));
   await writeJson(join(variantDir, 'runtime.json'), {
-    commit: firstCommit,
+    commit: firstCommit, browser: browserName, sourceHash, sourceUnchanged: !supplement || sourceFingerprint() === sourceHash,
     variant,
     cleanup: groupEvidence.length === groups.length && groups.length > 0 && groupEvidence.every(group => group.cleanup === 'passed') ? 'passed' : 'failed',
     isolatedRuntimes: groupEvidence.filter(group => group.cleanup !== 'failed' || group.stage !== 'startup').length,

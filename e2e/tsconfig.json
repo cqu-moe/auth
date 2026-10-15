@@ -4,5 +4,5 @@
     "lib": ["ESNext", "DOM"], "types": ["node"],
     "strict": true, "skipLibCheck": true, "noEmit": true
   },
-  "include": ["*.e2e.ts", "school/*.school.ts", "oauth/*.ts", "../e2e.config.ts", "../e2e.school.config.ts", "../e2e.oauth.config.ts", "../e2e.oauth-cleanup.config.ts"]
+  "include": ["*.e2e.ts", "school/*.school.ts", "oauth/*.ts", "../e2e.config.ts", "../e2e.school.config.ts", "../e2e.oauth.config.ts", "../e2e.oauth-cleanup.config.ts", "../e2e.cross-browser.config.ts"]
 }
