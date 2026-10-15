@@ -194,15 +194,15 @@ export default function VerifyEmail() {
 
       <div className="mt-5 flex min-h-11 items-center justify-center gap-1 text-sm text-muted-foreground">
         <span>没有收到？</span>
-        <Button
+        <ActionButton
           type="button"
           variant="link"
           size="sm"
           onClick={() => void handleResend()}
           disabled={sendStatus === "sending" || verifying}
-        >
-          {sendStatus === "sending" ? "发送中…" : "重新发送验证码"}
-        </Button>
+          state={sendStatus === "sending" ? "loading" : "idle"}
+          labels={{ idle: "重新发送验证码", loading: "发送中…", success: "已发送", error: "重试发送" }}
+        />
       </div>
 
       <div className="min-h-5 text-center text-sm" aria-live="polite">

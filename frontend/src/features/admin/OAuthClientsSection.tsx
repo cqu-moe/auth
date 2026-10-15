@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { ChevronDown, ChevronRight, Loader2, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, Plus } from "lucide-react";
 import {
+  ActionButton,
   Alert,
   AlertDescription,
   AlertTitle,
@@ -12,6 +13,7 @@ import {
 } from "@cqu-moe/ui";
 import { adminFetch } from "../../lib/api/admin";
 import MenuSelect from "../../components/MenuSelect";
+import { OAuthClientEditorSkeleton, OAuthClientsSkeleton } from "./AdminSkeletons";
 import { CopyButton, FieldLabel, Modal, StringListInput, Toggle } from "./ui";
 
 interface ClientConfig {
@@ -178,10 +180,18 @@ function DeleteConfirmModal({
           <Button variant="outline" onClick={onCancel} disabled={loading}>
             取消
           </Button>
-          <Button variant="destructive" onClick={onConfirm} disabled={loading}>
-            {loading && <Loader2 className="animate-spin" aria-hidden="true" size={16} />}
-            删除
-          </Button>
+          <ActionButton
+            type="button"
+            variant="destructive"
+            onClick={onConfirm}
+            state={loading ? "loading" : "idle"}
+            labels={{
+              idle: "删除",
+              loading: "删除中…",
+              success: "已删除",
+              error: "重试删除",
+            }}
+          />
         </>
       }
     >
@@ -295,6 +305,8 @@ function OAuthClientEditor({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [loading, setLoading] = useState(false);
   const [initLoading, setInitLoading] = useState(isEdit);
+  const [initError, setInitError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [error, setError] = useState("");
   const [rotating, setRotating] = useState(false);
   const [rotatedSecret, setRotatedSecret] = useState<string | null>(null);
@@ -308,26 +320,23 @@ function OAuthClientEditor({
     let cancelled = false;
     const load = async () => {
       setInitLoading(true);
-      let scopes: string[] = [];
+      setInitError(false);
       try {
         const res = await adminFetch(`/admin/oauth-clients/${client.id}/scopes`);
-        if (res.ok) {
-          const data = (await res.json()) as { scopes: string[] };
-          scopes = data.scopes ?? [];
-        }
+        if (!res.ok) throw new Error("无法读取客户端权限");
+        const data = (await res.json()) as { scopes: string[] };
+        if (!cancelled) setState(stateFromClient(client, data.scopes ?? []));
       } catch {
-        // Non-fatal: fall back to empty CQU scopes; editing other fields still works.
-      }
-      if (!cancelled) {
-        setState(stateFromClient(client, scopes));
-        setInitLoading(false);
+        if (!cancelled) setInitError(true);
+      } finally {
+        if (!cancelled) setInitLoading(false);
       }
     };
     void load();
     return () => {
       cancelled = true;
     };
-  }, [client]);
+  }, [client, loadAttempt]);
 
   const patch = <K extends keyof EditorState>(key: K, value: EditorState[K]) =>
     setState((prev) => ({ ...prev, [key]: value }));
@@ -542,17 +551,32 @@ function OAuthClientEditor({
       title={isEdit ? "编辑 OAuth 客户端" : "新建 OAuth 客户端"}
       description={isEdit && client ? `Client ID：${client.client_id}` : "配置回调、授权类型与 CQU 服务权限。"}
       footer={
-        !initLoading ? (
-          <>
+        <>
             <Button variant="outline" onClick={onClose} disabled={loading}>
               取消
             </Button>
-            <Button onClick={handleSave} disabled={loading}>
-              {loading && <Loader2 className="animate-spin" aria-hidden="true" size={16} />}
-              {isEdit ? "保存" : "创建"}
-            </Button>
+            <ActionButton
+              type="button"
+              onClick={handleSave}
+              disabled={initLoading || initError}
+              state={loading ? "loading" : "idle"}
+              labels={
+                isEdit
+                  ? {
+                      idle: "保存",
+                      loading: "正在保存…",
+                      success: "已保存",
+                      error: "重试保存",
+                    }
+                  : {
+                      idle: "创建",
+                      loading: "正在创建…",
+                      success: "已创建",
+                      error: "重试创建",
+                    }
+              }
+            />
           </>
-        ) : undefined
       }
     >
       <div className="space-y-5">
@@ -563,7 +587,9 @@ function OAuthClientEditor({
         )}
 
         {initLoading ? (
-          <PageState state="loading" title="正在加载客户端" description="正在读取客户端配置…" />
+          <OAuthClientEditorSkeleton isEdit={isEdit} />
+        ) : initError ? (
+          <PageState state="error" title="无法读取客户端权限" description="请重试后再编辑，以免覆盖尚未读取的权限。" action={<Button type="button" onClick={() => setLoadAttempt(attempt => attempt + 1)}>重试</Button>} />
         ) : (
           <>
             {isEdit && client && (
@@ -755,16 +781,19 @@ function OAuthClientEditor({
               <div className="border-t border-border pt-4">
                 <p className="mb-2 text-xs font-medium text-foreground">客户端密钥</p>
                 <p className="mb-3 text-xs text-muted-foreground">出于安全考虑，现有密钥不会显示。重新生成后旧密钥立即失效。</p>
-                <Button
+                <ActionButton
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={handleRotate}
-                  disabled={rotating}
-                >
-                  {rotating && <Loader2 className="animate-spin" aria-hidden="true" size={16} />}
-                  重新生成密钥
-                </Button>
+                  state={rotating ? "loading" : "idle"}
+                  labels={{
+                    idle: "重新生成密钥",
+                    loading: "正在重新生成…",
+                    success: "已重新生成",
+                    error: "重试重新生成",
+                  }}
+                />
               </div>
             )}
           </>
@@ -786,6 +815,8 @@ function OAuthClientEditor({
 export function OAuthClientsSection() {
   const [clients, setClients] = useState<ClientConfig[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
 
   // editor: undefined = closed, null = create, ClientConfig = edit
@@ -795,12 +826,14 @@ export function OAuthClientsSection() {
   const [createdSecret, setCreatedSecret] = useState<{ clientId: string; clientSecret: string } | null>(null);
 
   const fetchClients = useCallback(async () => {
-    setLoading(true);
+    setRefreshing(true);
+    setError("");
     try {
       const res = await adminFetch("/admin/oauth-clients");
       if (res.ok) {
         const data = (await res.json()) as { data: ClientConfig[] };
         setClients(data.data ?? []);
+        setHasLoaded(true);
       } else {
         setError(await readErrorMessage(res, "加载 OAuth 客户端失败"));
       }
@@ -808,6 +841,7 @@ export function OAuthClientsSection() {
       setError("网络错误，请稍后重试");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
@@ -842,15 +876,36 @@ export function OAuthClientsSection() {
 
   if (loading) {
     return (
-      <PageState state="loading" title="正在加载客户端" description="正在读取 OAuth 客户端列表…" />
+      <OAuthClientsSkeleton />
+    );
+  }
+
+  if (error && !hasLoaded) {
+    return (
+      <PageState
+        state="error"
+        title="加载 OAuth 客户端失败"
+        description={error}
+        action={
+          <Button
+            disabled={refreshing}
+            onClick={() => {
+              setLoading(true);
+              void fetchClients();
+            }}
+          >
+            重试
+          </Button>
+        }
+      />
     );
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" aria-busy={refreshing}>
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">共 {clients.length} 个客户端</p>
-        <Button size="sm" onClick={() => setEditor(null)}>
+        <Button size="sm" onClick={() => setEditor(null)} disabled={refreshing}>
           <Plus aria-hidden="true" size={16} />
           新建客户端
         </Button>
@@ -867,8 +922,8 @@ export function OAuthClientsSection() {
       )}
 
       {clients.map((client) => (
-        <div key={client.id} className="flex flex-wrap items-start justify-between gap-4 border-b border-border py-5 first:pt-0 last:border-b-0 last:pb-0">
-          <div className="min-w-0">
+        <div key={client.id} className="flex flex-col gap-4 border-b border-border py-5 first:pt-0 last:border-b-0 last:pb-0 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h4 className="truncate text-sm font-semibold text-foreground">
                 {client.client_name || client.client_id}
@@ -879,10 +934,11 @@ export function OAuthClientsSection() {
             </div>
             <p className="mt-0.5 break-all font-mono text-xs text-muted-foreground">{client.client_id}</p>
           </div>
-          <div className="ml-4 flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2 sm:ml-4">
             <Button
               variant="outline"
               size="sm"
+              disabled={refreshing}
               onClick={() => setEditor(client)}
             >
               编辑
@@ -891,6 +947,7 @@ export function OAuthClientsSection() {
               variant="ghost"
               size="sm"
               className="text-destructive"
+              disabled={refreshing}
               onClick={() => setDeleteTarget(client)}
             >
               删除

@@ -7,7 +7,7 @@ import ShellUtilities from "../components/ShellUtilities";
 import BrandLogo from "../components/BrandLogo";
 
 /** 管理区外壳：独立侧栏列出管理分区，底部提供返回账户设置的入口。 */
-export default function AdminLayout() {
+export default function AdminLayout({ children }: { children?: ReactNode }) {
   const navigate = useNavigate();
 
   const handleSignOut = async () => {
@@ -47,7 +47,7 @@ export default function AdminLayout() {
       utilities={<ShellUtilities onSignOut={handleSignOut} />}
     >
       <ContentContainer width="compact">
-        <Outlet />
+        {children ?? <Outlet />}
       </ContentContainer>
     </AppShell>
   );

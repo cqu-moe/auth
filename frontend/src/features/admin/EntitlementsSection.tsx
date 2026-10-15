@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Loader2, Plus } from "lucide-react";
 import {
+  ActionButton,
   Alert,
   AlertDescription,
   Button,
@@ -18,6 +19,7 @@ import {
   type EntitlementItem,
 } from "../../components/entitlement-form";
 import { adminFetch } from "../../lib/api/admin";
+import { EntitlementsSkeleton } from "./AdminSkeletons";
 import { FieldLabel, Modal } from "./ui";
 
 interface EntitlementPreset {
@@ -102,10 +104,17 @@ function PresetEditor({
           <Button variant="outline" onClick={onClose} disabled={saving}>
             取消
           </Button>
-          <Button onClick={handleSave} disabled={saving}>
-            {saving && <Loader2 className="animate-spin" aria-hidden="true" size={16} />}
-            保存
-          </Button>
+          <ActionButton
+            type="button"
+            onClick={handleSave}
+            state={saving ? "loading" : "idle"}
+            labels={{
+              idle: "保存",
+              loading: "正在保存…",
+              success: "已保存",
+              error: "重试保存",
+            }}
+          />
         </>
       }
     >
@@ -148,6 +157,8 @@ export function EntitlementsSection() {
   const [presets, setPresets] = useState<EntitlementPreset[]>([]);
   const [defaultPreset, setDefaultPreset] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [defaultState, setDefaultState] = useState<"idle" | "saving" | "saved">("idle");
@@ -160,7 +171,7 @@ export function EntitlementsSection() {
   const [deleting, setDeleting] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    setRefreshing(true);
     setError("");
     try {
       const [presetsRes, defaultRes] = await Promise.all([
@@ -170,6 +181,7 @@ export function EntitlementsSection() {
       if (presetsRes.ok) {
         const data = (await presetsRes.json()) as { data: EntitlementPreset[] };
         setPresets(data.data ?? []);
+        setHasLoaded(true);
       } else {
         setError(await readErrorMessage(presetsRes, "加载预设失败"));
       }
@@ -181,6 +193,7 @@ export function EntitlementsSection() {
       setError("网络错误，请稍后重试");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
@@ -244,12 +257,33 @@ export function EntitlementsSection() {
 
   if (loading) {
     return (
-      <PageState state="loading" title="正在加载预设" description="正在读取权益预设与默认配置…" />
+      <EntitlementsSkeleton />
+    );
+  }
+
+  if (error && !hasLoaded) {
+    return (
+      <PageState
+        state="error"
+        title="加载预设失败"
+        description={error}
+        action={
+          <Button
+            disabled={refreshing}
+            onClick={() => {
+              setLoading(true);
+              void load();
+            }}
+          >
+            重试
+          </Button>
+        }
+      />
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" aria-busy={refreshing}>
       {error && (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
@@ -278,7 +312,7 @@ export function EntitlementsSection() {
           <MenuSelect
             value={defaultPreset ?? ""}
             onChange={(v) => void changeDefault(v)}
-            disabled={defaultState === "saving"}
+            disabled={defaultState === "saving" || refreshing}
             options={[
               { value: "", label: "无默认权益" },
               ...presets.map((p) => ({
@@ -299,6 +333,7 @@ export function EntitlementsSection() {
           <Button
             type="button"
             size="sm"
+            disabled={refreshing}
             onClick={() =>
               setEditing({ name: null, form: formFromItems([]) })
             }
@@ -313,9 +348,9 @@ export function EntitlementsSection() {
         ) : (
           <div className="divide-y divide-border rounded-lg border border-border">
             {presets.map((p) => (
-              <div key={p.name} className="flex flex-wrap items-center gap-4 px-4 py-3">
+              <div key={p.name} className="flex flex-col gap-4 px-4 py-3 sm:flex-row sm:items-center">
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex min-h-7 items-center gap-2">
                     <span className="text-sm font-medium text-foreground">{p.name}</span>
                     {defaultPreset === p.name && (
                       <span className="badge badge-success">默认</span>
@@ -331,6 +366,7 @@ export function EntitlementsSection() {
                     type="button"
                     variant="outline"
                     size="sm"
+                    disabled={refreshing}
                     onClick={() =>
                       setEditing({ name: p.name, form: formFromItems(p.items) })
                     }
@@ -338,21 +374,27 @@ export function EntitlementsSection() {
                     编辑
                   </Button>
                   {confirmDelete === p.name ? (
-                    <Button
-                      type="button"
+                    <ActionButton
                       variant="destructive"
                       size="sm"
+                      type="button"
                       onClick={() => void handleDelete(p.name)}
-                      disabled={deleting === p.name}
-                    >
-                      {deleting === p.name ? "删除中…" : "确认删除"}
-                    </Button>
+                      disabled={refreshing}
+                      state={deleting === p.name ? "loading" : "idle"}
+                      labels={{
+                        idle: "确认删除",
+                        loading: "删除中…",
+                        success: "已删除",
+                        error: "重试删除",
+                      }}
+                    />
                   ) : (
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
                       className="text-destructive"
+                      disabled={refreshing}
                       onClick={() => setConfirmDelete(p.name)}
                     >
                       删除

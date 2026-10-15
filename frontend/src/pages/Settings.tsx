@@ -1,8 +1,9 @@
+import { CquBindingSkeleton } from "../components/SettingsSkeletons";
 import PasskeySettings from "../components/PasskeySettings";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
 import { ChevronDown, Link2, Loader2, Mail } from "lucide-react";
-import { Alert, AlertDescription, Button, PageHeader, Skeleton } from "@cqu-moe/ui";
+import { ActionButton, Alert, AlertDescription, Button, PageHeader } from "@cqu-moe/ui";
 import { authClient } from "../lib/auth-client";
 import {
   deleteBinding,
@@ -308,20 +309,17 @@ function CquBindingSection() {
     }
   };
 
-  if (statusLoading) {
+  if (statusLoading && !status) {
     return (
-      <SettingsCard title="CQU 账户绑定">
-        <div className="space-y-3">
-          <Skeleton className="h-4 w-2/3" />
-          <Skeleton className="h-4 w-1/2" />
-        </div>
+      <SettingsCard title="CQU 账户绑定" description="绑定后由系统代你维护与重庆大学统一认证的会话。">
+        <CquBindingSkeleton />
       </SettingsCard>
     );
   }
 
-  if (statusError) {
+  if (statusError && !status) {
     return (
-      <SettingsCard title="CQU 账户绑定">
+      <SettingsCard title="CQU 账户绑定" description="绑定后由系统代你维护与重庆大学统一认证的会话。">
         <div className="space-y-4">
           <Alert variant="destructive">
             <AlertDescription>获取绑定状态失败，请稍后重试。</AlertDescription>
@@ -348,6 +346,9 @@ function CquBindingSection() {
 
   return (
     <SettingsCard title="CQU 账户绑定" description="绑定后由系统代你维护与重庆大学统一认证的会话。">
+      {statusError && <Alert variant="destructive" className="mb-4">
+        <AlertDescription>无法刷新绑定状态，仍显示上次结果。<Button type="button" variant="outline" className="ml-3" disabled={statusLoading} onClick={() => void fetchStatus()}>重新加载</Button></AlertDescription>
+      </Alert>}
       {actionError && (
         <Alert variant="destructive" className="mb-4">
           <AlertDescription>{actionError}</AlertDescription>
@@ -360,7 +361,7 @@ function CquBindingSection() {
       )}
 
       {isBound ? (
-        <div className="space-y-5">
+        <div className="space-y-5" aria-busy={statusLoading}>
           {status?.bindStatus === "deleting" && (
             <Alert><AlertDescription>解绑尚未完成，学校访问已停用。请重试解绑。</AlertDescription></Alert>
           )}
@@ -388,7 +389,7 @@ function CquBindingSection() {
                     </p>
                   </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="flex min-h-10 flex-wrap items-center gap-3 sm:min-h-0">
                   <span className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-foreground">
                     {status.address}
                   </span>
@@ -420,18 +421,16 @@ function CquBindingSection() {
               <Link to="/cqu/bind?repair=1">重新设置密码</Link>
             </Button>
 
-            <Button
+            <ActionButton
               type="button"
               variant="destructive"
               size="sm"
               className="min-h-11"
               onClick={() => void handleUnbind()}
-              disabled={unbindLoading}
-              aria-busy={unbindLoading}
-            >
-              {unbindLoading && <Loader2 className="animate-spin" aria-hidden="true" />}
-              {unbindLoading ? "正在解除…" : "解除绑定"}
-            </Button>
+              disabled={unbindLoading || statusLoading}
+              state={unbindLoading ? "loading" : "idle"}
+              labels={{ idle: "解除绑定", loading: "正在解除…", success: "已解除", error: "重试解绑" }}
+            />
           </div>
         </div>
       ) : (

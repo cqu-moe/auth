@@ -13,7 +13,7 @@ export default function AuthLayout({
   children,
 }: {
   title: string;
-  description?: string;
+  description?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -31,7 +31,7 @@ export default function AuthLayout({
         <div className="auth-wrap">
           <div className="auth-intro">
             <h1>{title}</h1>
-            {description && <p>{description}</p>}
+            {description && <div className="auth-description">{description}</div>}
           </div>
           <div className="auth-card">{children}</div>
         </div>

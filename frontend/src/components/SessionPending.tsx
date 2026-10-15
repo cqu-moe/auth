@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import RouteSkeleton from "./RouteSkeleton";
 
 /** Short session checks should not flash a full-page status card. */
 export default function SessionPending({ message = "正在确认登录状态…" }: { message?: string }) {
@@ -11,13 +11,13 @@ export default function SessionPending({ message = "正在确认登录状态…"
   }, []);
 
   return (
-    <main className="session-pending" aria-busy="true" aria-label={message}>
+    <div aria-busy="true" aria-label={message}>
       {visible && (
-        <p className="session-pending-feedback" role="status" data-session-feedback>
-          <Loader2 size={18} className="animate-spin" aria-hidden="true" />
+        <p className="sr-only" role="status" data-session-feedback>
           {message}
         </p>
       )}
-    </main>
+      <RouteSkeleton />
+    </div>
   );
 }

@@ -10,8 +10,8 @@ import {
 } from "../../lib/api/quicklogin";
 import type { Overview } from "../../lib/api/quicklogin-protocol.generated";
 import { ApiError } from "../../lib/api/http";
-import { Alert, AlertDescription, Button, Switch } from "@cqu-moe/ui";
-import { Loader2 } from "lucide-react";
+import { Alert, AlertDescription, Button, Skeleton, Switch } from "@cqu-moe/ui";
+import { QuickloginSkeleton } from "../SettingsSkeletons";
 import SettingsCard from "../SettingsCard";
 import DeviceList from "./DeviceList";
 
@@ -211,10 +211,10 @@ export default function QuickloginSettings({ currentDeviceHint, reconnectDeviceH
     <SettingsCard
       title="浏览器快捷登录"
       description={description}
-      action={preference?.eligible && (
+      action={loading && !preference ? <Skeleton className="h-5 w-9" aria-hidden="true" /> : preference?.eligible && (
         <Switch
           aria-label="浏览器快捷登录总开关"
-          disabled={action !== null}
+          disabled={action !== null || loading}
           checked={enabled}
           onCheckedChange={() => void toggleMaster()}
           className={action?.kind === "toggle" ? "opacity-60" : undefined}
@@ -226,11 +226,8 @@ export default function QuickloginSettings({ currentDeviceHint, reconnectDeviceH
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      {loading && !preference ? (
-        <p role="status" className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-          <Loader2 className="animate-spin" aria-hidden="true" size={16} />
-          正在检查快捷登录资格…
-        </p>
+      {loading && !data && (!preference || isDeviceQuickloginPreference(preference)) ? (
+        <QuickloginSkeleton />
       ) : data ? (
         <DeviceList
           data={data}
