@@ -1,8 +1,18 @@
 import { useState, useEffect, useRef, useCallback, FormEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ArrowLeft, Check, Loader2, Lock, Mail, RefreshCw } from "lucide-react";
-import { ActionButton, Alert, AlertDescription, Button, Input, Label, PageHeader } from "@cqu-moe/ui";
+import {
+  ActionButton,
+  Alert,
+  AlertDescription,
+  Button,
+  Input,
+  Label,
+  PageHeader,
+  Skeleton,
+} from "@cqu-moe/ui";
 import Layout from "../components/Layout";
+import { BindingSkeleton } from "../components/BindingSkeleton";
 import CquBindSuccess from "../components/CquBindSuccess";
 import { authClient } from "../lib/auth-client";
 import { bindingReturnTarget } from "../lib/cqu-bind-continuation";
@@ -76,10 +86,6 @@ function isValidEmail(s: string): boolean {
 // Shared UI atoms
 // ────────────────────────────────────────────────────────────────────────────
 
-function Spinner({ size = 16, className = "" }: { size?: number; className?: string }) {
-  return <Loader2 aria-hidden="true" size={size} className={`animate-spin ${className}`} />;
-}
-
 function AlertBox({ variant, children }: { variant: "error" | "success" | "info" | "warning"; children: React.ReactNode }) {
   if (variant === "error") {
     return (
@@ -96,6 +102,10 @@ function AlertBox({ variant, children }: { variant: "error" | "success" | "info"
   return (
     <div className={`rounded-lg border p-3 text-sm ${styles[variant]}`}>{children}</div>
   );
+}
+
+function Spinner({ size = 16, className = "" }: { size?: number; className?: string }) {
+  return <Loader2 aria-hidden="true" size={size} className={`animate-spin ${className}`} />;
 }
 
 function StepIndicator({ current }: { current: Step }) {
@@ -389,6 +399,8 @@ function Step2Direct({
     return `${m}:${sec.toString().padStart(2, "0")}`;
   };
 
+  const addressSkeletonLabel = "正在生成专属密保邮箱…";
+
   return (
     <div className="space-y-6">
       <div>
@@ -408,9 +420,18 @@ function Step2Direct({
       )}
 
       {addrLoading ? (
-        <div className="flex items-center gap-3 rounded-lg bg-muted p-4 text-sm text-muted-foreground">
-          <Spinner />
-          正在生成专属地址…
+        <div>
+          <span className="sr-only" role="status">{addressSkeletonLabel}</span>
+          <div
+            className="rounded-lg border border-link/40 bg-link/10 p-4"
+            aria-hidden="true"
+          >
+            <Skeleton className="mb-2 h-4 w-40" />
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <Skeleton className="h-5 min-w-0 flex-1" />
+              <Button type="button" variant="outline" size="sm" disabled><Skeleton><span className="invisible">复制</span></Skeleton></Button>
+            </div>
+          </div>
         </div>
       ) : bindAddress ? (
         <div className="rounded-lg border border-link/40 bg-link/10 p-4">
@@ -424,18 +445,21 @@ function Step2Direct({
         </div>
       ) : null}
 
-      {bindAddress && (
+      {(addrLoading || bindAddress) && (
         <div className="space-y-2">
-          <Button asChild variant="outline">
-            <a
-              href="https://self.cqu.edu.cn/cas-success/safe-center/email-bind-way/rebind"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              前往修改密保邮箱
-              <span className="sr-only">（在新标签页打开）</span>
-            </a>
-          </Button>
+          {addrLoading && <Button type="button" variant="outline" disabled aria-hidden="true"><Skeleton><span className="invisible">前往修改密保邮箱</span></Skeleton></Button>}
+          {bindAddress && (
+            <Button asChild variant="outline">
+              <a
+                href="https://self.cqu.edu.cn/cas-success/safe-center/email-bind-way/rebind"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                前往修改密保邮箱
+                <span className="sr-only">（在新标签页打开）</span>
+              </a>
+            </Button>
+          )}
           <p className="text-xs text-muted-foreground">发送验证邮件后，回到这里查看验证码。</p>
         </div>
       )}
@@ -549,6 +573,8 @@ function Step2Forward({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const addressSkeletonLabel = "正在生成专属转发地址…";
+
   return (
     <div className="space-y-6">
       <div>
@@ -568,9 +594,18 @@ function Step2Forward({
       )}
 
       {addrLoading ? (
-        <div className="flex items-center gap-3 rounded-lg bg-muted p-4 text-sm text-muted-foreground">
-          <Spinner />
-          正在生成专属转发地址…
+        <div>
+          <span className="sr-only" role="status">{addressSkeletonLabel}</span>
+          <div
+            className="rounded-lg border border-link/40 bg-link/10 p-4"
+            aria-hidden="true"
+          >
+            <Skeleton className="mb-2 h-4 w-64 max-w-full" />
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <Skeleton className="h-5 min-w-0 flex-1" />
+              <Button type="button" variant="outline" size="sm" disabled><Skeleton><span className="invisible">复制</span></Skeleton></Button>
+            </div>
+          </div>
         </div>
       ) : bindAddress ? (
         <div className="rounded-lg border border-link/40 bg-link/10 p-4">
@@ -584,8 +619,7 @@ function Step2Forward({
         </div>
       ) : null}
 
-      {bindAddress && (
-        <div className="space-y-2 text-sm text-muted-foreground">
+      <div className="space-y-2 text-sm text-muted-foreground">
           <p className="font-medium text-foreground">操作步骤：</p>
           <ol className="list-inside list-decimal space-y-2 marker:text-muted-foreground">
             <li>
@@ -596,19 +630,16 @@ function Step2Forward({
             </li>
             <li>保存规则，完成后点击下方按钮继续</li>
           </ol>
-        </div>
-      )}
+      </div>
 
-      {bindAddress && (
-        <div className="space-y-1 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs text-warning">
+      <div className="space-y-1 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs text-warning">
           <p className="font-semibold">重要提示</p>
           <p>
             请确保您的邮箱在转发时会对邮件做地址改写（SRS）或用自身 DKIM 重签，
             Gmail、QQ 邮箱、Outlook 等主流服务均支持。
             若转发后我们未收到邮件，请检查转发器是否兼容。
           </p>
-        </div>
-      )}
+      </div>
 
       <Button
         type="button"
@@ -953,10 +984,7 @@ export default function CquBindWizard({ onReturn = replaceLocation }: CquBindWiz
       </Button>
     </div>
   ) : screen === null ? (
-    <div className="flex min-h-24 items-center justify-center gap-3 text-sm text-muted-foreground">
-      <Spinner className="text-link" />
-      正在确认绑定状态…
-    </div>
+    <BindingSkeleton repair={repair} />
   ) : screen === "intro" ? (
     <Step1Intro
       onNext={() => setScreen("address")}
@@ -983,8 +1011,14 @@ export default function CquBindWizard({ onReturn = replaceLocation }: CquBindWiz
       await checkBindingConfirmation();
     }} />
   ) : screen === "waiting" ? (
-    <div className="space-y-4 text-center">
-      <div className="flex justify-center"><Spinner size={32} className="text-link" /></div>
+    <div className="space-y-4 text-center" role="status" aria-busy={!waitTimedOut}>
+      <div className="flex justify-center">
+        {waitTimedOut ? (
+          <RefreshCw aria-hidden="true" size={32} className="text-link" />
+        ) : (
+          <Spinner size={32} className="text-link" />
+        )}
+      </div>
       <div>
         <h2 className="text-xl font-semibold text-foreground">
           {repair

@@ -72,7 +72,7 @@ async function renderFlow(entry = "/settings/security") {
 }
 
 function button(container: HTMLElement, text: string) {
-  const element = Array.from(container.querySelectorAll("button")).find(button => button.textContent === text);
+  const element = Array.from(container.querySelectorAll("button")).find(button => (button.getAttribute("aria-label") ?? button.textContent) === text);
   expect(element, `missing button: ${text}`).toBeDefined();
   return element!;
 }
@@ -132,7 +132,7 @@ it("keeps other API failures on the devices page so the user can retry", async (
   await click(button(container, "查看登录设备"));
   expect(container.querySelector("output")!.textContent).toBe("/settings/security");
   expect(container.textContent).toContain("服务暂不可用");
-  await click(button(container, "查看登录设备"));
+  await click(button(container, "重试读取"));
   expect(container.textContent).toContain("当前设备：Test browser");
 });
 
@@ -142,6 +142,6 @@ it("stops redirecting if the returned session is still not fresh, and permits an
   expect(container.querySelector("output")!.textContent).toBe("/settings/security?devices=1#login-devices");
   expect(container.textContent).toContain("仍需重新登录才能查看登录设备");
   expect(auth.listSessions).toHaveBeenCalledOnce();
-  await click(button(container, "查看登录设备"));
+  await click(button(container, "重试读取"));
   expect(container.textContent).toContain("为了确保安全，请重新登录后查看登录设备。");
 });

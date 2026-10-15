@@ -1,6 +1,8 @@
 import RecentAuthentication from "./components/RecentAuthentication";
 import { lazy, Suspense, useEffect, useRef } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { EntitlementsSkeleton, InvitationsSkeleton, OAuthClientsSkeleton } from "./features/admin/AdminSkeletons";
+import { UsersRouteSkeleton } from "./components/RouteSkeleton";
 import SessionPending from "./components/SessionPending";
 import { authClient } from "./lib/auth-client";
 import Login from "./pages/Login";
@@ -131,7 +133,7 @@ export default function App() {
                 path="users"
                 element={
                   <AdminPage title="用户管理" description="查看用户、调整角色与封禁状态。">
-                    <UsersSection />
+                    <Suspense fallback={<UsersRouteSkeleton />}><UsersSection /></Suspense>
                   </AdminPage>
                 }
               />
@@ -139,7 +141,7 @@ export default function App() {
                 path="presets"
                 element={
                   <AdminPage title="权益预设" description="维护能力预设与新用户默认权益。">
-                    <EntitlementsSection />
+                    <Suspense fallback={<EntitlementsSkeleton />}><EntitlementsSection /></Suspense>
                   </AdminPage>
                 }
               />
@@ -147,7 +149,7 @@ export default function App() {
                 path="invitations"
                 element={
                   <AdminPage title="注册邀请" description="生成与管理注册邀请码。">
-                    <InvitationsSection />
+                    <Suspense fallback={<InvitationsSkeleton />}><InvitationsSection /></Suspense>
                   </AdminPage>
                 }
               />
@@ -155,7 +157,7 @@ export default function App() {
                 path="oauth"
                 element={
                   <AdminPage title="OAuth 客户端" description="管理第三方应用的 OAuth 接入。">
-                    <OAuthClientsSection />
+                    <Suspense fallback={<OAuthClientsSkeleton />}><OAuthClientsSection /></Suspense>
                   </AdminPage>
                 }
               />

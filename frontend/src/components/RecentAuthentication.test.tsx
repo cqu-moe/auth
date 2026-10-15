@@ -22,7 +22,7 @@ it("allows a Passkey alone to complete the pending operation only after the serv
   await renderUi(createElement(RecentAuthentication));
   let completed = false;
   await act(async () => { void requestAuthentication("admin").then(result => { completed = result; }); });
-  const button = () => Array.from(document.querySelectorAll("button")).find(item => item.textContent === "使用 Passkey 验证")!;
+  const button = () => document.querySelector<HTMLButtonElement>('button[aria-label="使用 Passkey 验证"]')!;
   await click(button());
   expect(completed).toBe(false);
   expect(document.querySelector('[role="alert"]')?.textContent).toContain("Passkey");
