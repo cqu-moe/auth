@@ -42,11 +42,11 @@ export class SyntheticSchoolMail extends WorkerEntrypoint<Env> {
   async deliver(input: {to: string; code: string; kind?: string}) {
     const subject = input.kind === 'bind_confirm' ? '密保邮箱绑定验证码' : '邮件验证码登录';
     const raw = new TextEncoder().encode(`From: sso@cqu.edu.cn\r\nTo: ${input.to}\r\nSubject: ${subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n验证码为：${input.code}`);
-    let rejected = false;
+    let rejection: string | null = null;
     await handleEmail({from:'sso@cqu.edu.cn',to:input.to,raw:raw.buffer,rawSize:raw.length,
-      setReject:()=>{rejected=true;}, forward:()=>{throw new Error('Unexpected mail forward');},reply:()=>{throw new Error('Unexpected mail reply');},
+      setReject:(reason: string)=>{rejection=reason;}, forward:()=>{throw new Error('Unexpected mail forward');},reply:()=>{throw new Error('Unexpected mail reply');},
     } as unknown as ForwardableEmailMessage, this.env);
-    return {accepted:!rejected};
+    return {accepted:rejection===null,reason:rejection};
   }
 }
 

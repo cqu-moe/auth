@@ -10,6 +10,15 @@ await mkdir(output,{recursive:true});
 const fixtureDirectory=await mkdtemp(resolve('.auth-e2e-consumer-fixture-'));
 try {
 await writeFile(join(fixtureDirectory,'school.py'),(await readFile('e2e/school/school.py','utf8')).replaceAll('合成电路','调用仓合成课程'));
+async function control(runtime,path,body) {
+  const response=await fetch(`${runtime.schoolOrigin}${path}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+  assert.equal(response.status,200);return response.json();
+}
+async function until(read,match) {
+  const end=Date.now()+90000;
+  do {const value=await read();if(match(value)) return value;await new Promise(r=>setTimeout(r,100));} while(Date.now()<end);
+  throw new Error('Consumer school delivery state did not arrive');
+}
 for(let run=1;run<=2;run++) {
   const runtime=await startSchoolAuth({expectedCommit:process.env.AUTH_E2E_EXPECT_COMMIT,
     fixtureDirectory,
@@ -38,13 +47,20 @@ for(let run=1;run<=2;run++) {
     assert.deepEqual(result.items,[{id:'31',name:'调用仓合成课程',extra:'SYN101',courseCode:'SYN101'}]);
     assert.deepEqual((await consumerDb.prepare('SELECT id,name,code FROM imported_course').all()).results,
       [{id:'31',name:'调用仓合成课程',code:'SYN101'}]);
+    await control(runtime,'/fixture',{email:account.email,changes:{expire:true,holdMail:true,clearEvents:true}});
+    const expired=await consumer.fetch('http://consumer/import',{method:'POST',headers:{cookie}});
+    assert.equal(expired.status,403);assert.deepEqual(await expired.json(),{error:'TGT_EXPIRED'});
+    await until(()=>control(runtime,'/fixture',{email:account.email}),value=>['mail_held','code_requested'].every(kind=>value.events.some(event=>event.kind===kind)));
     const removed=await fetch(`${runtime.origin}/api/v1/cqu/binding`,{method:'DELETE',headers:{cookie,origin:runtime.origin}});
     assert.equal(removed.status,204);
     const after=await (await fetch(`${runtime.origin}/api/v1/cqu/binding`,{headers:{cookie}})).json();
     assert.equal(after.data.bindStatus,'unbound');
+    await control(runtime,'/fixture',{email:account.email,changes:{holdMail:false}});
+    const deliveries=await until(()=>control(runtime,'/deliveries',{email:account.email}),value=>value.some(item=>item.accepted===false));
+    assert.deepEqual(deliveries.at(-1),{accepted:false,reason:'inactive binding'});
     const denied=await consumer.fetch('http://consumer/import',{method:'POST',headers:{cookie}});
     assert.equal(denied.status,403);assert.deepEqual(await denied.json(),{error:'NO_CQU_BINDING'});
-    evidence.business='independent login, composed Worker→AuthService→container→own D1 readback and post-unbind refusal passed';
+    evidence.business='independent login, composed Worker→AuthService→container→own D1 readback, delayed school mail refusal and post-unbind refusal passed';
   } finally {
     evidence.resources=await runtime.close();evidence.cleanup='passed';
     await writeFile(`${output}/run-${run}.json`,JSON.stringify(evidence,null,2)+'\n');

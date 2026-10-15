@@ -115,6 +115,10 @@ back. It also checks refusal after unbind. This is a composition transport probe
 not Schedule's production business acceptance. Its two runs supply a different
 external `school.py` and require its changed course name, proving fixture input
 reaches the real browser/parser rather than only the Node test process.
+The probe additionally holds actual school mail after address selection, unbinds,
+then releases it: the production handler must reject the obsolete address. The
+pump permits only that specific refusal after re-reading D1; rejection of a
+current address, malformed mail and transport errors still fail the run.
 
 `fixtureDirectory` is a Docker named build context containing the external
 `school.py`; the production container/server/CDP code and fixture TLS wrapper
@@ -123,6 +127,7 @@ SCHEDULE-01. Those APIs are not implemented or claimed here. Preserve HTTPS
 school hosts/port 443, `/fixture/{cert.pem,key.pem}`, and the control server on
 9090 with `/control` (GET/POST mode/session/hold/expiry/events and actual
 profiles/chromeProcesses) plus `/mail` (drain generated `{code}` messages).
+`holdMail` is an optional control used by the support's delayed-mail regression.
 The image's cleanup evidence includes the SHA256 of the supplied school file.
 Never put an Auth/browser/Workflow replacement into that external fixture.
 

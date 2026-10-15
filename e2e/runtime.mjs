@@ -108,7 +108,7 @@ export async function startAuth({ expectedCommit, platform } = {}) {
         ]);
         const cleanup = await Promise.allSettled([platform?.close(), rm(dir, {recursive:true,force:true})]);
         const errors = [...before,...results,...cleanup].filter(result => result.status === 'rejected');
-        if (errors.length) throw new Error('Auth runtime cleanup failed');
+        if (errors.length) throw new AggregateError(errors.map(result=>result.reason), 'Auth runtime cleanup failed');
         if (unexpected.length) throw new Error(`Unexpected Worker egress denied (${unexpected.length} requests)`);
         return {directoryRemoved:!(await readdir('.')).some(name=>resolve(name)===dir),
           platform:cleanup[0].status==='fulfilled'?cleanup[0].value:undefined};

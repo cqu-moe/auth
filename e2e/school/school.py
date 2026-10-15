@@ -16,7 +16,7 @@ from aiohttp import web
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
-state = {"mode": "success", "session": "202610", "pageSession": "202610", "hold": False, "holdLogin": False}
+state = {"mode": "success", "session": "202610", "pageSession": "202610", "hold": False, "holdLogin": False, "holdMail": False}
 events = []
 mail = []
 sessions = set()
@@ -170,7 +170,7 @@ async def control(request):
             record("sessions_expired")
         if updates.pop("clearEvents", False):
             events.clear()
-        allowed = {"mode","session","pageSession","hold","holdLogin"}
+        allowed = {"mode","session","pageSession","hold","holdLogin","holdMail"}
         if set(updates) - allowed:
             raise web.HTTPBadRequest()
         state.update(updates)
@@ -186,6 +186,10 @@ async def control(request):
 
 
 async def drain(_request):
+    if state["holdMail"]:
+        record("mail_held")
+        while state["holdMail"]:
+            await asyncio.sleep(.05)
     pending = list(mail)
     mail.clear()
     return web.json_response(pending)

@@ -26,6 +26,7 @@ export async function startSchoolAuth(options = {}) {
   const users = new Map();
   const used = new Set();
   const errors = [];
+  const deliveries = [];
   let runtime, mf, db, caller, control, admin, polling = false, timer;
   docker(['image','inspect',base]);
   docker(['build','--platform','linux/amd64','--build-context',`school-fixture=${fixtureDirectory}`,
@@ -101,6 +102,7 @@ export async function startSchoolAuth(options = {}) {
           let value;
           if (url.pathname === '/fixture') value = await school(userId,'control',input.changes);
           else if (url.pathname === '/ban') value = await admin.ban(userId,input.banned);
+          else if (url.pathname === '/deliveries') value = deliveries.filter(item=>item.userId===userId).map(({accepted,reason})=>({accepted,reason}));
           else if (url.pathname === '/outcomes') value = (await evidence.prepare('SELECT ok,code,phase FROM browser_outcomes ORDER BY id').all()).results;
           else if (url.pathname === '/directory') value = await privateCall('directory',{
             clientId:input.unapproved ? 'school-unapproved' : 'school-calendar',clientSecret:'synthetic-rpc-secret',userId,
@@ -128,7 +130,13 @@ export async function startSchoolAuth(options = {}) {
             for (const message of await school(userId,'mail')) {
               secrets.add(message.code);
               const result = await privateCall('mail',{...message,to:`${address.token}@example.test`});
-              if (!result.accepted) throw new Error('School message rejected');
+              deliveries.push({userId,...result});
+              if (!result.accepted) {
+                // Unbind can commit while external mail is waiting. Accept only
+                // the production inactive-binding refusal, confirmed by D1 now.
+                const current=await db.prepare("SELECT token FROM cqu_bind_addresses WHERE user_id=? AND status IN ('pending','active')").bind(userId).first();
+                if(result.reason!=='inactive binding' || current?.token===address.token) throw new Error('School message rejected');
+              }
             }
           }
         } catch(error) {errors.push(error.message);}
@@ -210,6 +218,8 @@ export async function startSchoolAuth(options = {}) {
       }
       return {
         containers,
+        transportErrors:[...new Set(errors)],
+        deliveries:deliveries.map(({accepted,reason})=>({accepted,reason})),
         browserOutcomes:(await evidence.prepare('SELECT ok,code,phase FROM browser_outcomes ORDER BY id').all()).results,
         credentials:await db.prepare('SELECT count(*) AS n FROM cqu_credentials').first('n'),
         bindingAddresses:await db.prepare('SELECT count(*) AS n FROM cqu_bind_addresses').first('n'),

@@ -6,6 +6,9 @@ import {startSchoolAuth} from './runtime.mjs';
 import {sourceFingerprint} from './source.mjs';
 
 const output=process.env.AUTH_E2E_OUTPUT || `.e2e/school-${Date.now()}`;
+const describeError=error=>error instanceof AggregateError
+  ? `${error.message}: ${error.errors.map(describeError).join('; ')}`
+  : error.message ?? String(error);
 if(!resolve(output).startsWith(resolve('.e2e')+'/')) throw new Error('Output must be inside .e2e');
 for(const variant of process.env.AUTH_E2E_MOBILE?['mobile']:['desktop','mobile']) {
   const dir=join(output,variant);
@@ -62,7 +65,7 @@ for(const variant of process.env.AUTH_E2E_MOBILE?['mobile']:['desktop','mobile']
   } finally {
     if(runtime) {
       try {evidence.resources=await runtime.close();evidence.cleanup='passed';assert.equal(evidence.resources.directoryRemoved,true);}
-      catch(error) {evidence.cleanup='failed';evidence.cleanupError=error.message;process.exitCode=1;}
+      catch(error) {evidence.cleanup='failed';evidence.cleanupError=describeError(error);process.exitCode=1;}
     }
     await writeFile(join(dir,'runtime.json'),JSON.stringify(evidence,null,2)+'\n');
     if(runtime) {
