@@ -1,5 +1,6 @@
 import { Miniflare, Log, LogLevel } from 'miniflare';
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -100,7 +101,9 @@ export async function startAuth({ expectedCommit, platform } = {}) {
     // reject even a valid virtual-authenticator ceremony.
     origin = `http://localhost:${port}`;
     const bundle = join(dir, platform?.bundleName ?? 'index.js');
-    const options = { name: 'auth-e2e', host: '127.0.0.1', port, modules: [{ type: 'ESModule', path: bundle, contents: await readFile(bundle, 'utf8') }],
+    const bundleContents = await readFile(bundle, 'utf8');
+    const bundleFingerprint = createHash('sha256').update(bundleContents).digest('hex');
+    const options = { name: 'auth-e2e', host: '127.0.0.1', port, modules: [{ type: 'ESModule', path: bundle, contents: bundleContents }],
        compatibilityDate: '2026-05-01', compatibilityFlags: ['nodejs_compat'],
       log: new Log(LogLevel.ERROR),
       d1Databases: { DATABASE: 'auth-e2e' }, d1Persist: join(dir, 'd1'),
@@ -153,7 +156,7 @@ export async function startAuth({ expectedCommit, platform } = {}) {
       async refreshBindings() { db = await mf.getD1Database('DATABASE'); },
     });
     return { origin, controlOrigin: `http://127.0.0.1:${control.address().port}`, get db() { return db; }, support,
-      commit,
+      commit, bundleFingerprint,
       async checkArtifacts(outputDir) {
         const sensitive = ['Synthetic-only-123!', 'Synthetic-reset-only-456!', 'Synthetic-change-only-456!',
           ...mails.values().flatMap(mail => [mail.otp, mail.resetUrl].filter(Boolean)), ...artifactSecrets];

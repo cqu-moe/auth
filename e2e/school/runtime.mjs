@@ -98,6 +98,7 @@ export async function startSchoolAuth(options = {}) {
         durableObjectsPersist:join(dir,'do'), workflowsPersist:join(dir,'workflows'),
         workers:[{
           ...base,
+          bindings: { ...base.bindings, ...options.authBindings },
           durableObjects:{...base.durableObjects,CQU_LOGIN:{className:'CquLoginContainer',useSQLite:true,container:{imageName:image}}},
           workflows:{CQU_SESSION_RECOVERY:{name:'cqu-session-recovery',className:'CquSessionRecoveryWorkflow'}},
           d1Databases:{...base.d1Databases,EVIDENCE:'workflow-evidence'},
