@@ -196,15 +196,17 @@ test('virtual WebAuthn completes registration, login and step-up while cancellat
   if (cdpProbe !== 'ok') throw new Error(`CDP WebAuthn capability probe failed: ${cdpProbe}`);
   await cdp.send('WebAuthn.clearCredentials', { authenticatorId: active.authenticatorId });
 
-  await screen.getByLabel('新 Passkey 名称').fill('E2E 虚拟密钥');
+  await screen.getByRole('button', '添加 Passkey', { exact: true }).click();
+  const editor = screen.getByRole('dialog', '添加 Passkey', { exact: true });
+  await editor.getByLabel('名称', { exact: true }).fill('E2E 虚拟密钥');
   const registrationResponsePromise = browser.waitForResponse(/\/api\/v1\/auth\/passkey\/verify-registration($|\?)/);
-  await screen.getByRole('button', '添加 Passkey').click();
+  await editor.getByRole('button', '添加并保存', { exact: true }).click();
   await expect(screen.getByRole('heading', '验证身份后继续', { exact: true })).toBeVisible();
   await screen.getByLabel('当前密码').fill(account.password);
   await screen.getByRole('button', '验证并继续').click();
   const registrationResponse = await registrationResponsePromise;
   expect(registrationResponse.status, await registrationResponse.text()).toBe(200);
-  await expect(screen.getByLabel('Passkey 名称 E2E 虚拟密钥')).toBeVisible();
+  await expect(screen.getByRole('list', '已添加的 Passkey').getByText('E2E 虚拟密钥', { exact: true })).toBeVisible();
   const stored = await cdp.send('WebAuthn.getCredentials', { authenticatorId: active.authenticatorId });
   expect(stored.credentials.length).toBe(1);
 
