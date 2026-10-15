@@ -1,0 +1,321 @@
+{
+  "schemaVersion": "report-1",
+  "run": {
+    "id": "01a14041-fa04-754b-b316-1ada02662c45",
+    "specVersion": "0.1",
+    "runner": {
+      "name": "e2e",
+      "version": "0.21.0"
+    },
+    "status": "failed",
+    "exitCode": 1,
+    "startedAt": "2026-10-15T15:50:28.363Z",
+    "finishedAt": "2026-10-15T15:50:30.121Z",
+    "project": {
+      "id": "auth",
+      "configDigest": "3190ba0e3367cfc78143b4f777bd23c5b5488d7d6f404c82542c390bb5b73e30"
+    },
+    "environment": {
+      "ci": false,
+      "trustNoticeShown": false,
+      "os": "darwin 25.6.0",
+      "arch": "arm64",
+      "runtime": "node v22.22.3"
+    },
+    "vcs": {
+      "commit": "17673b8da69e1e24ad82bd2e3a359da39d515e23",
+      "branch": "codex/e2e-20261015-auth-04",
+      "dirty": false
+    },
+    "targets": [
+      {
+        "id": "mobile",
+        "index": 0,
+        "platform": "web",
+        "baseOrigin": "http://localhost:62235",
+        "environment": "test",
+        "engine": {
+          "name": "web",
+          "version": "0.15.0",
+          "spiVersion": 1
+        },
+        "capabilities": [
+          "actions",
+          "artifacts",
+          "browser",
+          "keyboard",
+          "location",
+          "observation",
+          "pointer",
+          "state"
+        ],
+        "artifactCapabilities": [
+          "screenshot",
+          "video"
+        ],
+        "stateCapability": true
+      }
+    ],
+    "serialGroups": [],
+    "results": [
+      {
+        "id": "d0d928b0d053cfcd0af3942e46e7e4a465834a1c6c21b017179e68b5e8a2bd60",
+        "testId": "e2e/oauth/journey.oauth.e2e.ts::OAuth%20S256%20authorization%2C%20DPoP%2C%20refresh%20and%20one-device%20revocation%20preserve%20independent%20website%20and%20other-device%20business",
+        "kind": "test",
+        "declarationIndex": 2,
+        "titlePath": [
+          "OAuth S256 authorization, DPoP, refresh and one-device revocation preserve independent website and other-device business"
+        ],
+        "file": "e2e/oauth/journey.oauth.e2e.ts",
+        "source": {
+          "file": "e2e/oauth/journey.oauth.e2e.ts",
+          "line": 91,
+          "column": 1
+        },
+        "targetId": "mobile",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": true,
+        "status": "failed",
+        "attempts": [
+          {
+            "id": "01a14041-fc5f-726e-856b-c16b2abcfd9e",
+            "index": 0,
+            "status": "failed",
+            "startedAt": "2026-10-15T15:50:28.703Z",
+            "durationMs": 1395,
+            "artifacts": [
+              {
+                "id": "01a14041-fc5f-726e-856b-c16b2abcfd9e:artifact:0",
+                "kind": "log",
+                "mediaType": "text/plain",
+                "redaction": "complete",
+                "producer": {
+                  "kind": "attempt"
+                },
+                "path": "journey-oauth-oauth-s256-authorization-dpop-d0d928b0d053cfcd/attempt-1/screen-at-failure.txt",
+                "size": 652,
+                "sha256": "e8b3b4db349dd354ad79f8166c10e47706ce2efca4d7d47705bc5e956f97be21"
+              },
+              {
+                "id": "01a14041-fc5f-726e-856b-c16b2abcfd9e:artifact:1",
+                "kind": "screenshot",
+                "mediaType": "image/png",
+                "redaction": "complete",
+                "producer": {
+                  "kind": "attempt"
+                },
+                "path": "journey-oauth-oauth-s256-authorization-dpop-d0d928b0d053cfcd/attempt-1/screenshots/001-failure.png",
+                "size": 28124,
+                "sha256": "6c050585a6014cd0fd5ca2799a6731dc9ba9098c9593baa763e4141ee1909cb3"
+              }
+            ],
+            "error": {
+              "category": "test",
+              "code": "ASSERTION_FAILED",
+              "message": "expect.toBeVisible failed\nlocator: getByRole(\"heading\", name: \"AUTH04 deliberate failure\")\nexpected: visible\nobserved: no node (match count 0)",
+              "retryable": false,
+              "phase": "beforeEach",
+              "details": {
+                "locator": "getByRole(\"heading\", name: \"AUTH04 deliberate failure\")",
+                "expected": "visible",
+                "observed": "no node",
+                "matches": 0
+              }
+            },
+            "secondaryErrors": [],
+            "cleanup": "complete",
+            "environment": {
+              "browser": "chromium 156.0.8078.4",
+              "user agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.4 Safari/537.36"
+            },
+            "failure": {
+              "url": "http://localhost:62235/login",
+              "viewport": {
+                "width": 390,
+                "height": 844
+              },
+              "nodes": 18,
+              "screen": "01a14041-fc5f-726e-856b-c16b2abcfd9e:artifact:0",
+              "screenshot": "01a14041-fc5f-726e-856b-c16b2abcfd9e:artifact:1"
+            },
+            "steps": [
+              {
+                "id": "01a14041-fc5f-726e-856b-c16b2abcfd9e:0",
+                "index": 0,
+                "kind": "resource",
+                "api": "browser.route",
+                "label": "**/*",
+                "status": "passed",
+                "startedAt": "2026-10-15T15:50:28.797Z",
+                "durationMs": 3,
+                "events": [],
+                "phase": "beforeEach",
+                "artifacts": [],
+                "source": {
+                  "file": "e2e/oauth/journey.oauth.e2e.ts",
+                  "line": 16,
+                  "column": 17
+                }
+              },
+              {
+                "id": "01a14041-fc5f-726e-856b-c16b2abcfd9e:1",
+                "index": 1,
+                "kind": "app",
+                "api": "app.open",
+                "label": "/login",
+                "status": "passed",
+                "startedAt": "2026-10-15T15:50:28.800Z",
+                "durationMs": 161,
+                "events": [
+                  {
+                    "kind": "navigation",
+                    "startedAt": "2026-10-15T15:50:28.910Z",
+                    "durationMs": 0,
+                    "status": "passed",
+                    "detail": "navigated to http://localhost:62235/login"
+                  }
+                ],
+                "phase": "beforeEach",
+                "artifacts": [],
+                "screen": {
+                  "location": "http://localhost:62235/login",
+                  "nodes": 18,
+                  "changes": []
+                },
+                "source": {
+                  "file": "e2e/oauth/journey.oauth.e2e.ts",
+                  "line": 21,
+                  "column": 13
+                }
+              },
+              {
+                "id": "01a14041-fc5f-726e-856b-c16b2abcfd9e:2",
+                "index": 2,
+                "kind": "app",
+                "api": "app.open",
+                "label": "/login",
+                "status": "passed",
+                "startedAt": "2026-10-15T15:50:28.967Z",
+                "durationMs": 71,
+                "events": [],
+                "phase": "beforeEach",
+                "artifacts": [],
+                "screen": {
+                  "location": "http://localhost:62235/login",
+                  "nodes": 18,
+                  "since": 1,
+                  "changes": []
+                },
+                "source": {
+                  "file": "e2e/oauth/journey.oauth.e2e.ts",
+                  "line": 24,
+                  "column": 15
+                }
+              },
+              {
+                "id": "01a14041-fc5f-726e-856b-c16b2abcfd9e:3",
+                "index": 3,
+                "kind": "assertion",
+                "api": "expect.toBeVisible",
+                "label": "getByRole(\"heading\", name: \"AUTH04 deliberate failure\")",
+                "status": "failed",
+                "startedAt": "2026-10-15T15:50:29.039Z",
+                "durationMs": 1003,
+                "events": [
+                  {
+                    "kind": "poll",
+                    "name": "expect",
+                    "startedAt": "2026-10-15T15:50:29.039Z",
+                    "durationMs": 1003,
+                    "status": "failed",
+                    "count": 10,
+                    "detail": "no node (0 matches) x10"
+                  }
+                ],
+                "phase": "beforeEach",
+                "artifacts": [],
+                "source": {
+                  "file": "e2e/oauth/journey.oauth.e2e.ts",
+                  "line": 25,
+                  "column": 76
+                },
+                "error": {
+                  "category": "test",
+                  "code": "ASSERTION_FAILED",
+                  "message": "expect.toBeVisible failed\nlocator: getByRole(\"heading\", name: \"AUTH04 deliberate failure\")\nexpected: visible\nobserved: no node (match count 0)",
+                  "retryable": false,
+                  "details": {
+                    "locator": "getByRole(\"heading\", name: \"AUTH04 deliberate failure\")",
+                    "expected": "visible",
+                    "observed": "no node",
+                    "matches": 0
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "f6d6c1dcf119072eecf8049b992e3f748c19d1196fe0a3adcfaa0795aa280566",
+        "testId": "e2e/oauth/journey.oauth.e2e.ts::password%20change%2C%20administrator%20recovery%20and%20all-device%20logout%20each%20revoke%20active%20devices%20while%20background%20survives%20until%20ban%20or%20unbind",
+        "kind": "test",
+        "declarationIndex": 3,
+        "titlePath": [
+          "password change, administrator recovery and all-device logout each revoke active devices while background survives until ban or unbind"
+        ],
+        "file": "e2e/oauth/journey.oauth.e2e.ts",
+        "source": {
+          "file": "e2e/oauth/journey.oauth.e2e.ts",
+          "line": 163,
+          "column": 1
+        },
+        "targetId": "mobile",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": false,
+        "status": "skipped",
+        "skip": {
+          "cause": "filtered",
+          "reason": "title does not match --grep"
+        },
+        "attempts": []
+      }
+    ],
+    "errors": [],
+    "summary": {
+      "discovered": 2,
+      "selected": 1,
+      "executed": 1,
+      "passed": 0,
+      "failed": 1,
+      "interrupted": 0,
+      "flaky": 0,
+      "skipped": 0
+    },
+    "limits": {
+      "maxAgentContextBytes": 16384,
+      "maxLedgerBytes": 8192,
+      "maxObservationBytes": 262144,
+      "maxEventsPerStep": 1000,
+      "maxModelTokensPerCall": 64000
+    },
+    "usage": {
+      "discoveredResults": 2,
+      "maxAgentContextBytes": 0,
+      "maxLedgerBytes": 0,
+      "maxObservationBytes": 0,
+      "artifactBytes": 28776,
+      "downloads": 0,
+      "events": 2,
+      "modelTokens": 0,
+      "maxModelCallsInStep": 0,
+      "maxActionStepsInStep": 0
+    }
+  }
+}

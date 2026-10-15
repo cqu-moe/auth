@@ -1,0 +1,12 @@
+{
+  "variant": "mobile",
+  "sourceHash": "641e1728e9bac70caf80077fc3b997be6d63c351082f8ea23f9879913249608f",
+  "result": "failed",
+  "cleanup": "not-started",
+  "stage": "startup",
+  "failure": {
+    "stage": "startup",
+    "name": "Error",
+    "message": "Auth commit does not match the pinned dependency"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "variant": "mobile",
+  "sourceHash": "56652a980ea9dedf33c8f1640e90215e12d3990920343d248e00c7e61e59b08a",
+  "result": "failed",
+  "cleanup": "passed",
+  "stage": "complete",
+  "commit": "7a915b91ec85a594e0fc6310cd6dc359e89cd445",
+  "runnerExitCode": 1,
+  "summary": {
+    "discovered": 9,
+    "selected": 1,
+    "executed": 1,
+    "passed": 0,
+    "failed": 1,
+    "interrupted": 0,
+    "flaky": 0,
+    "skipped": 0
+  },
+  "workflows": [],
+  "sourceUnchanged": true,
+  "resources": {
+    "directoryRemoved": true,
+    "platform": {
+      "containerObjectsRemoved": true,
+      "fixtureImageRemoved": true,
+      "imageId": "sha256:4149f48f73564276dfa2ce044a7275bbe8f8a11a7c76931eb0f297bad6300312",
+      "base": "auth-school-browser:7bfc98777820631b",
+      "fixtureHash": "7603f222b9a855f493ac5b1ec2d72ad8db3aa4fd0e0c44c91472dbbd9af90cb3"
+    }
+  },
+  "redactions": 0
+}

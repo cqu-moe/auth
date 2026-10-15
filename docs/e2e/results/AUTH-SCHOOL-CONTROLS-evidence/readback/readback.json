@@ -1,0 +1,168 @@
+{
+  "base": "45ddb371495974dcfc86dbabb2c340183cfc7988",
+  "result": "passed",
+  "records": [
+    {
+      "case": "unmodified real OAuth failure at school receipt boundary",
+      "legacyAccepted": true,
+      "newRejected": true,
+      "reason": "Unexpected selected school test\n+ actual - expected\n\n+ 'e2e/oauth/journey.oauth.e2e.ts::OAuth%20S256%20authorization%2C%20DPoP%2C%20refresh%20and%20one-device%20revocation%20preserve%20independent%20website%20and%20other-device%20business'\n- 'e2e/school/journey.school.ts::school%20binding%20persists%20and%20returns%20an%20allowed%20business%20directory%20through%20the%20real%20container'\n"
+    },
+    {
+      "case": "historical-local/assertion",
+      "accepted": true
+    },
+    {
+      "case": "historical-local/zero",
+      "accepted": true
+    },
+    {
+      "case": "historical-local/pin",
+      "accepted": true
+    },
+    {
+      "case": "historical-Linux-CI/assertion",
+      "accepted": true
+    },
+    {
+      "case": "historical-Linux-CI/zero",
+      "accepted": true
+    },
+    {
+      "case": "historical-Linux-CI/pin",
+      "accepted": true
+    },
+    {
+      "case": "derived/wrong-cause",
+      "rejected": true
+    },
+    {
+      "case": "derived/wrong-code",
+      "rejected": true
+    },
+    {
+      "case": "derived/wrong-observation",
+      "rejected": true
+    },
+    {
+      "case": "derived/run-error",
+      "rejected": true
+    },
+    {
+      "case": "derived/secondary-error",
+      "rejected": true
+    },
+    {
+      "case": "derived/attempt-cleanup",
+      "rejected": true
+    },
+    {
+      "case": "derived/runtime-cleanup",
+      "rejected": true
+    },
+    {
+      "case": "derived/artifact-error",
+      "rejected": true
+    },
+    {
+      "case": "derived/zero-unrelated-collection-error",
+      "rejected": true
+    },
+    {
+      "case": "derived/pin-unrelated-startup-error",
+      "rejected": true
+    }
+  ],
+  "sources": [
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-04/.e2e/oauth-negative-1792079417393/assertion-mobile/mobile/1-d0d928b0d053/runtime.json",
+      "copy": "actual-unrelated/mobile/runtime.json",
+      "bytes": 1383,
+      "sha256": "c43808fca520e8052d367eb6a443df1cc8690a464d485cae972dfa3a1348e3c8"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-04/.e2e/oauth-negative-1792079417393/assertion-mobile/mobile/1-d0d928b0d053/report.json",
+      "copy": "actual-unrelated/mobile/report.json",
+      "bytes": 11065,
+      "sha256": "f66414432f6fd84d4db5030030e6afc0c522bdffba71106241fb2d3b6edefbe4"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-04/.e2e/oauth-negative-1792079417393/assertion-mobile/mobile/1-d0d928b0d053/runner.log",
+      "copy": "actual-unrelated/mobile/runner.log",
+      "bytes": 4666,
+      "sha256": "8956e685359632177431e7d06bc37c624cd356ba3e23ff64ad237582c8cc4d3c"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-03/.e2e/school-negative-1792068166920/assertion/mobile/runtime.json",
+      "copy": "historical-local/assertion/mobile/runtime.json",
+      "bytes": 874,
+      "sha256": "4b3065b501f4aa593033af0e876d7c6a0cb1a40564819632a68e1792132d9fc5"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-03/.e2e/school-negative-1792068166920/assertion/mobile/report.json",
+      "copy": "historical-local/assertion/mobile/report.json",
+      "bytes": 16452,
+      "sha256": "2cfd3c05f861e5a30f8e86e5d7e4b5fa368e6a6b7bccd2cc18e5997bcc3d7ba8"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-03/.e2e/school-negative-1792068166920/assertion/mobile/runner.log",
+      "copy": "historical-local/assertion/mobile/runner.log",
+      "bytes": 1556,
+      "sha256": "559611b3c993b4b08ac0e7c529a0518f9953c6dfdea3219f10995d4e23eb22af"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-03/.e2e/school-negative-1792068166920/zero/mobile/runtime.json",
+      "copy": "historical-local/zero/mobile/runtime.json",
+      "bytes": 823,
+      "sha256": "f9987e435e40f4c1f4887a59d6fb022a698bb7a3644358a7b8ef9d0cbbbb2213"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-03/.e2e/school-negative-1792068166920/zero/mobile/runner.log",
+      "copy": "historical-local/zero/mobile/runner.log",
+      "bytes": 717,
+      "sha256": "644090d4aeb9184d8d688ba4477d721d8e7d1e3b18ff08029cf5e2102701a8e0"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-03/.e2e/school-negative-1792068166920/pin/mobile/runtime.json",
+      "copy": "historical-local/pin/mobile/runtime.json",
+      "bytes": 313,
+      "sha256": "b82d40a17f53e9c38fa82b41b0b03dffe918af3a2439884b333b5af50cedb06e"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-03-CI/.e2e/ci-38750075601-school/school-negative-1792075483794/assertion/mobile/runtime.json",
+      "copy": "historical-Linux-CI/assertion/mobile/runtime.json",
+      "bytes": 962,
+      "sha256": "fb3056422b1333946124fe187b2acbf82ab270e909b1876fe3d54dfc4081e487"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-03-CI/.e2e/ci-38750075601-school/school-negative-1792075483794/assertion/mobile/report.json",
+      "copy": "historical-Linux-CI/assertion/mobile/report.json",
+      "bytes": 16447,
+      "sha256": "d2b02f3c86c331a801fae0b7bae7d01c36132b147dbae0f78fa72b209ec3198a"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-03-CI/.e2e/ci-38750075601-school/school-negative-1792075483794/assertion/mobile/runner.log",
+      "copy": "historical-Linux-CI/assertion/mobile/runner.log",
+      "bytes": 1510,
+      "sha256": "b222d43615be8630b80523da3662c7303660a822bd0be6804bc7a526843bcf9f"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-03-CI/.e2e/ci-38750075601-school/school-negative-1792075483794/zero/mobile/runtime.json",
+      "copy": "historical-Linux-CI/zero/mobile/runtime.json",
+      "bytes": 911,
+      "sha256": "dfadc9402e456f79290fcd84bf9eb7aa83232e97ccd1687ff6ef2f84f60250de"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-03-CI/.e2e/ci-38750075601-school/school-negative-1792075483794/zero/mobile/runner.log",
+      "copy": "historical-Linux-CI/zero/mobile/runner.log",
+      "bytes": 671,
+      "sha256": "ce00b67f40ebb6f1cdf05b26634c6bc9e2550319d22e18d191e0e52e4f1680d9"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-03-CI/.e2e/ci-38750075601-school/school-negative-1792075483794/pin/mobile/runtime.json",
+      "copy": "historical-Linux-CI/pin/mobile/runtime.json",
+      "bytes": 313,
+      "sha256": "a3fe3a63be70eac6684227c7a16a6032a394272a14943d9c9378555ee4d74852"
+    }
+  ]
+}

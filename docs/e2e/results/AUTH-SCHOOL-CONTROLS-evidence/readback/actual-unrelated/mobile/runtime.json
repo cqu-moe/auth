@@ -1,0 +1,51 @@
+{
+  "test": "OAuth S256 authorization, DPoP, refresh and one-device revocation preserve independent website and other-device business",
+  "cleanup": "passed",
+  "stage": "journey",
+  "result": "failed",
+  "commit": "17673b8da69e1e24ad82bd2e3a359da39d515e23",
+  "bundleFingerprint": "ce241c4213ca6a768d2f5be7c9241fcd2708d73c0c5c1cdf42f29f3020a62249",
+  "runnerExitCode": 1,
+  "browser": {
+    "headless": true,
+    "passwordStore": true,
+    "mockKeychain": true,
+    "temporaryProfile": true,
+    "profileRemoved": true
+  },
+  "report": "1-d0d928b0d053/report.json",
+  "summary": {
+    "discovered": 2,
+    "selected": 1,
+    "executed": 1,
+    "passed": 0,
+    "failed": 1,
+    "interrupted": 0,
+    "flaky": 0,
+    "skipped": 0
+  },
+  "attemptCleanup": {
+    "selected": 1,
+    "attempts": 1,
+    "cleanup": "complete"
+  },
+  "protocol": [],
+  "resources": {
+    "directoryRemoved": true,
+    "platform": {
+      "containerObjectsRemoved": true,
+      "fixtureImageRemoved": true,
+      "imageId": "sha256:c34e11f227f67ea37ee2c57f3a002d79d8a1b8a47b450240057a8dd979a34291",
+      "base": "auth-school-browser:7bfc98777820631b",
+      "fixtureHash": "7603f222b9a855f493ac5b1ec2d72ad8db3aa4fd0e0c44c91472dbbd9af90cb3",
+      "runtimeLog": []
+    }
+  },
+  "sourceUnchanged": true,
+  "errors": [
+    {
+      "name": "Error",
+      "message": "OAuth journey failed (exit 1)"
+    }
+  ]
+}

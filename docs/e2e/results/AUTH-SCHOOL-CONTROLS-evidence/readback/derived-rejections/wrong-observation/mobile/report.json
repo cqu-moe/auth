@@ -1,0 +1,484 @@
+{
+  "schemaVersion": "report-1",
+  "run": {
+    "id": "01a13f96-2f77-707d-b2d6-3450f4ec5745",
+    "specVersion": "0.1",
+    "runner": {
+      "name": "e2e",
+      "version": "0.21.0"
+    },
+    "status": "failed",
+    "exitCode": 1,
+    "startedAt": "2026-10-15T12:42:49.836Z",
+    "finishedAt": "2026-10-15T12:42:51.512Z",
+    "project": {
+      "id": "auth",
+      "configDigest": "1002d1bb359afe608d89d391c6edfd08c0633c6d673c8b8ac35344538697d79b"
+    },
+    "environment": {
+      "ci": false,
+      "trustNoticeShown": false,
+      "os": "darwin 25.6.0",
+      "arch": "arm64",
+      "runtime": "node v22.22.3"
+    },
+    "vcs": {
+      "commit": "7a915b91ec85a594e0fc6310cd6dc359e89cd445",
+      "branch": "codex/e2e-20261015-auth-03",
+      "dirty": false
+    },
+    "targets": [
+      {
+        "id": "mobile",
+        "index": 0,
+        "platform": "web",
+        "baseOrigin": "http://localhost:55259",
+        "environment": "test",
+        "engine": {
+          "name": "web",
+          "version": "0.15.0",
+          "spiVersion": 1
+        },
+        "capabilities": [
+          "actions",
+          "artifacts",
+          "browser",
+          "keyboard",
+          "location",
+          "observation",
+          "pointer",
+          "state"
+        ],
+        "artifactCapabilities": [
+          "screenshot",
+          "video"
+        ],
+        "stateCapability": true
+      }
+    ],
+    "serialGroups": [],
+    "results": [
+      {
+        "id": "e2276b307c2e9f84f1f7ce4ad17b097dd7f02313eefd4a3b0a496f45ff83e87d",
+        "testId": "e2e/school/journey.school.ts::school%20binding%20persists%20and%20returns%20an%20allowed%20business%20directory%20through%20the%20real%20container",
+        "kind": "test",
+        "declarationIndex": 2,
+        "titlePath": [
+          "school binding persists and returns an allowed business directory through the real container"
+        ],
+        "file": "e2e/school/journey.school.ts",
+        "source": {
+          "file": "e2e/school/journey.school.ts",
+          "line": 60,
+          "column": 1
+        },
+        "targetId": "mobile",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": true,
+        "status": "failed",
+        "attempts": [
+          {
+            "id": "01a13f96-31aa-7e84-8c3e-4d451aa0f498",
+            "index": 0,
+            "status": "failed",
+            "startedAt": "2026-10-15T12:42:50.155Z",
+            "durationMs": 1333,
+            "artifacts": [
+              {
+                "id": "01a13f96-31aa-7e84-8c3e-4d451aa0f498:artifact:0",
+                "kind": "log",
+                "mediaType": "text/plain",
+                "redaction": "complete",
+                "producer": {
+                  "kind": "attempt"
+                },
+                "path": "journey-school-school-binding-persists-and-e2276b307c2e9f84/attempt-1/screen-at-failure.txt",
+                "size": 610,
+                "sha256": "0fa19d21d8f15c9eaffbd9b53b9dd4303cf51bdb08c5bd822838f6b3d946d4ae"
+              },
+              {
+                "id": "01a13f96-31aa-7e84-8c3e-4d451aa0f498:artifact:1",
+                "kind": "screenshot",
+                "mediaType": "image/png",
+                "redaction": "complete",
+                "producer": {
+                  "kind": "attempt"
+                },
+                "path": "journey-school-school-binding-persists-and-e2276b307c2e9f84/attempt-1/screenshots/001-failure.png",
+                "size": 28124,
+                "sha256": "6c050585a6014cd0fd5ca2799a6731dc9ba9098c9593baa763e4141ee1909cb3"
+              }
+            ],
+            "error": {
+              "category": "test",
+              "code": "ASSERTION_FAILED",
+              "message": "expect.toHaveText failed\nlocator: getByRole(\"heading\", name: \"欢迎回来\")\nexpected: text \"故意错误的学校绑定入口\"\nobserved: text \"欢迎回来\" (match count 1)",
+              "retryable": false,
+              "phase": "body",
+              "details": {
+                "locator": "getByRole(\"heading\", name: \"欢迎回来\")",
+                "expected": "text \"故意错误的学校绑定入口\"",
+                "observed": "no node",
+                "matches": 1
+              }
+            },
+            "secondaryErrors": [],
+            "cleanup": "complete",
+            "environment": {
+              "browser": "chromium 156.0.8078.4",
+              "user agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.8078.4 Safari/537.36"
+            },
+            "failure": {
+              "url": "http://localhost:55259/login",
+              "viewport": {
+                "width": 390,
+                "height": 844
+              },
+              "nodes": 18,
+              "screen": "01a13f96-31aa-7e84-8c3e-4d451aa0f498:artifact:0",
+              "screenshot": "01a13f96-31aa-7e84-8c3e-4d451aa0f498:artifact:1"
+            },
+            "steps": [
+              {
+                "id": "01a13f96-31aa-7e84-8c3e-4d451aa0f498:0",
+                "index": 0,
+                "kind": "resource",
+                "api": "browser.route",
+                "label": "**/*",
+                "status": "passed",
+                "startedAt": "2026-10-15T12:42:50.261Z",
+                "durationMs": 2,
+                "events": [],
+                "phase": "beforeEach",
+                "artifacts": [],
+                "source": {
+                  "file": "e2e/school/journey.school.ts",
+                  "line": 11,
+                  "column": 17
+                }
+              },
+              {
+                "id": "01a13f96-31aa-7e84-8c3e-4d451aa0f498:1",
+                "index": 1,
+                "kind": "app",
+                "api": "app.open",
+                "label": "/login",
+                "status": "passed",
+                "startedAt": "2026-10-15T12:42:50.264Z",
+                "durationMs": 161,
+                "events": [
+                  {
+                    "kind": "navigation",
+                    "startedAt": "2026-10-15T12:42:50.384Z",
+                    "durationMs": 0,
+                    "status": "passed",
+                    "detail": "navigated to http://localhost:55259/login"
+                  }
+                ],
+                "artifacts": [],
+                "screen": {
+                  "location": "http://localhost:55259/login",
+                  "nodes": 18,
+                  "changes": []
+                },
+                "source": {
+                  "file": "e2e/school/journey.school.ts",
+                  "line": 62,
+                  "column": 13
+                }
+              },
+              {
+                "id": "01a13f96-31aa-7e84-8c3e-4d451aa0f498:2",
+                "index": 2,
+                "kind": "assertion",
+                "api": "expect.toHaveText",
+                "label": "getByRole(\"heading\", name: \"欢迎回来\")",
+                "status": "failed",
+                "startedAt": "2026-10-15T12:42:50.429Z",
+                "durationMs": 1004,
+                "events": [
+                  {
+                    "kind": "poll",
+                    "name": "expect",
+                    "startedAt": "2026-10-15T12:42:50.429Z",
+                    "durationMs": 1004,
+                    "status": "failed",
+                    "count": 10,
+                    "detail": "text \"欢迎回来\" (1 match) x10"
+                  }
+                ],
+                "artifacts": [],
+                "source": {
+                  "file": "e2e/school/journey.school.ts",
+                  "line": 64,
+                  "column": 67
+                },
+                "error": {
+                  "category": "test",
+                  "code": "ASSERTION_FAILED",
+                  "message": "expect.toHaveText failed\nlocator: getByRole(\"heading\", name: \"欢迎回来\")\nexpected: text \"故意错误的学校绑定入口\"\nobserved: text \"欢迎回来\" (match count 1)",
+                  "retryable": false,
+                  "details": {
+                    "locator": "getByRole(\"heading\", name: \"欢迎回来\")",
+                    "expected": "text \"故意错误的学校绑定入口\"",
+                    "observed": "text \"欢迎回来\"",
+                    "matches": 1
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "5fec309a53b13c1ed2ca0973f8df95f624dff805fdc317c7efab9d57b2c1613e",
+        "testId": "e2e/school/journey.school.ts::school%20reject%20has%20a%20terminal%20failure%20and%20cannot%20create%20a%20binding",
+        "kind": "test",
+        "declarationIndex": 3,
+        "titlePath": [
+          "school reject has a terminal failure and cannot create a binding"
+        ],
+        "file": "e2e/school/journey.school.ts",
+        "source": {
+          "file": "e2e/school/journey.school.ts",
+          "line": 139,
+          "column": 3
+        },
+        "targetId": "mobile",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": false,
+        "status": "skipped",
+        "skip": {
+          "cause": "filtered",
+          "reason": "title does not match --grep"
+        },
+        "attempts": []
+      },
+      {
+        "id": "c692192ef5496eb575908412feabeefba36a431dac9ee738978fc1c8c1ebdea3",
+        "testId": "e2e/school/journey.school.ts::school%20send_reject%20has%20a%20terminal%20failure%20and%20cannot%20create%20a%20binding",
+        "kind": "test",
+        "declarationIndex": 4,
+        "titlePath": [
+          "school send_reject has a terminal failure and cannot create a binding"
+        ],
+        "file": "e2e/school/journey.school.ts",
+        "source": {
+          "file": "e2e/school/journey.school.ts",
+          "line": 139,
+          "column": 3
+        },
+        "targetId": "mobile",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": false,
+        "status": "skipped",
+        "skip": {
+          "cause": "filtered",
+          "reason": "title does not match --grep"
+        },
+        "attempts": []
+      },
+      {
+        "id": "9774c515674a201432401afae86cdff7938eac5055289fa7ed5ac21813f97682",
+        "testId": "e2e/school/journey.school.ts::school%20send_timeout%20has%20a%20terminal%20failure%20and%20cannot%20create%20a%20binding",
+        "kind": "test",
+        "declarationIndex": 5,
+        "titlePath": [
+          "school send_timeout has a terminal failure and cannot create a binding"
+        ],
+        "file": "e2e/school/journey.school.ts",
+        "source": {
+          "file": "e2e/school/journey.school.ts",
+          "line": 139,
+          "column": 3
+        },
+        "targetId": "mobile",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": false,
+        "status": "skipped",
+        "skip": {
+          "cause": "filtered",
+          "reason": "title does not match --grep"
+        },
+        "attempts": []
+      },
+      {
+        "id": "9ea23008ebcd37b76afb2e925e31833adcd951bdf7697bf8bc47582e71103a33",
+        "testId": "e2e/school/journey.school.ts::school%20wrong_code%20has%20a%20terminal%20failure%20and%20cannot%20create%20a%20binding",
+        "kind": "test",
+        "declarationIndex": 6,
+        "titlePath": [
+          "school wrong_code has a terminal failure and cannot create a binding"
+        ],
+        "file": "e2e/school/journey.school.ts",
+        "source": {
+          "file": "e2e/school/journey.school.ts",
+          "line": 139,
+          "column": 3
+        },
+        "targetId": "mobile",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": false,
+        "status": "skipped",
+        "skip": {
+          "cause": "filtered",
+          "reason": "title does not match --grep"
+        },
+        "attempts": []
+      },
+      {
+        "id": "520813c176576ef09c6093197f28e8b5e530e50a5c06f18bd5d4253c7e480283",
+        "testId": "e2e/school/journey.school.ts::unbinding%20cancels%20a%20running%20school%20login%20and%20its%20late%20response%20cannot%20activate%20a%20new%20binding",
+        "kind": "test",
+        "declarationIndex": 7,
+        "titlePath": [
+          "unbinding cancels a running school login and its late response cannot activate a new binding"
+        ],
+        "file": "e2e/school/journey.school.ts",
+        "source": {
+          "file": "e2e/school/journey.school.ts",
+          "line": 158,
+          "column": 1
+        },
+        "targetId": "mobile",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": false,
+        "status": "skipped",
+        "skip": {
+          "cause": "filtered",
+          "reason": "title does not match --grep"
+        },
+        "attempts": []
+      },
+      {
+        "id": "83e3567faa36307982b86b82ae1e1795bb57c18f067b7c8f811d3878ccee0fba",
+        "testId": "e2e/school/journey.school.ts::banning%20during%20school%20login%20rejects%20the%20old%20result%20and%20keeps%20business%20denied%20after%20unban",
+        "kind": "test",
+        "declarationIndex": 8,
+        "titlePath": [
+          "banning during school login rejects the old result and keeps business denied after unban"
+        ],
+        "file": "e2e/school/journey.school.ts",
+        "source": {
+          "file": "e2e/school/journey.school.ts",
+          "line": 175,
+          "column": 1
+        },
+        "targetId": "mobile",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": false,
+        "status": "skipped",
+        "skip": {
+          "cause": "filtered",
+          "reason": "title does not match --grep"
+        },
+        "attempts": []
+      },
+      {
+        "id": "6e316b8549633fd45e96e7f4e3304eba392cd2f690cbc3cae9705ec81b58c280",
+        "testId": "e2e/school/journey.school.ts::a%20real%20recovery%20Workflow%20discards%20its%20late%20school%20result%20after%20unbind",
+        "kind": "test",
+        "declarationIndex": 9,
+        "titlePath": [
+          "a real recovery Workflow discards its late school result after unbind"
+        ],
+        "file": "e2e/school/journey.school.ts",
+        "source": {
+          "file": "e2e/school/journey.school.ts",
+          "line": 196,
+          "column": 3
+        },
+        "targetId": "mobile",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": false,
+        "status": "skipped",
+        "skip": {
+          "cause": "filtered",
+          "reason": "title does not match --grep"
+        },
+        "attempts": []
+      },
+      {
+        "id": "b82497917aea95f9138a0e4be10e8a6f4d714739f5ce633b0262eeb2e02131d9",
+        "testId": "e2e/school/journey.school.ts::a%20real%20recovery%20Workflow%20discards%20its%20late%20school%20result%20after%20ban",
+        "kind": "test",
+        "declarationIndex": 10,
+        "titlePath": [
+          "a real recovery Workflow discards its late school result after ban"
+        ],
+        "file": "e2e/school/journey.school.ts",
+        "source": {
+          "file": "e2e/school/journey.school.ts",
+          "line": 196,
+          "column": 3
+        },
+        "targetId": "mobile",
+        "platform": "web",
+        "agent": "default",
+        "repeat": 0,
+        "tags": [],
+        "selected": false,
+        "status": "skipped",
+        "skip": {
+          "cause": "filtered",
+          "reason": "title does not match --grep"
+        },
+        "attempts": []
+      }
+    ],
+    "errors": [],
+    "summary": {
+      "discovered": 9,
+      "selected": 1,
+      "executed": 1,
+      "passed": 0,
+      "failed": 1,
+      "interrupted": 0,
+      "flaky": 0,
+      "skipped": 0
+    },
+    "limits": {
+      "maxAgentContextBytes": 16384,
+      "maxLedgerBytes": 8192,
+      "maxObservationBytes": 262144,
+      "maxEventsPerStep": 1000,
+      "maxModelTokensPerCall": 64000
+    },
+    "usage": {
+      "discoveredResults": 9,
+      "maxAgentContextBytes": 0,
+      "maxLedgerBytes": 0,
+      "maxObservationBytes": 0,
+      "artifactBytes": 28734,
+      "downloads": 0,
+      "events": 2,
+      "modelTokens": 0,
+      "maxModelCallsInStep": 0,
+      "maxActionStepsInStep": 0
+    }
+  }
+}
