@@ -213,6 +213,12 @@ for (const variant of variants) {
         assertSameSet(intended, reportSelected, `selected test mismatch in ${group.name}`);
         assertSameSet(intended, reportExecuted, `executed test mismatch in ${group.name}`);
 
+        // e2e 0.21 may report passed/exit 0 with a failed provider cleanup.
+        if (report.run.results.some(result => result.selected && result.attempts?.some(attempt =>
+          attempt.cleanup === 'failed' || attempt.secondaryErrors?.some(error => error.phase === 'cleanup')))) {
+          throw new Error('Browser provider cleanup failed in framework attempt evidence');
+        }
+
         const summary = report.run.summary;
         if (!summary.executed || summary.skipped || summary.interrupted) {
           throw new Error(`Required E2E group was empty, skipped or interrupted (${group.name})`);
