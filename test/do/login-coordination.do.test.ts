@@ -1,8 +1,12 @@
-import { abortAllDurableObjects, env, runInDurableObject } from 'cloudflare:test';
+import { abortAllDurableObjects, env, reset, runInDurableObject } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { freshStub, readStorage, readStatus, readAlarm, readState, seedSession, seedCredentials, spyBrowserFetch, validStorageState } from './helpers';
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(async () => {
+  // Retire prior objects and alarms before the next test installs browser spies.
+  await reset();
+  vi.restoreAllMocks();
+});
 
 async function seedInterrupted(stub: DurableObjectStub, kind: 'cas' | 'quicklogin', observed = false) {
   const now = Date.now();
