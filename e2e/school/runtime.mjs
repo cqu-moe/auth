@@ -37,6 +37,8 @@ export async function startSchoolAuth(options = {}) {
   docker(['build','--platform','linux/amd64','--build-context',`school-fixture=${fixtureDirectory}`,
     '--build-arg',`BASE=${base}`,'--build-arg',`RUN_ID=${runId}`,'-t',image,'-f','e2e/school/Dockerfile','.']);
   const imageId=docker(['image','inspect','--format','{{.Id}}',image]);
+  const rawDockerSocket=process.env.AUTH_SCHOOL_DOCKER_SOCKET || docker(['context','inspect','--format','{{.Endpoints.docker.Host}}']).replace(/^unix:\/\//,'');
+  const dockerSocket=rawDockerSocket.startsWith('/') ? `unix://${rawDockerSocket}` : rawDockerSocket;
   async function school(userId, path, body) {
     used.add(userId);
     const ns = await mf.getDurableObjectNamespace('CQU_LOGIN','auth-e2e');
@@ -82,7 +84,7 @@ export async function startSchoolAuth(options = {}) {
             });
           }
         },
-        containerEngine:{localDocker:{socketPath:process.env.AUTH_SCHOOL_DOCKER_SOCKET || docker(['context','inspect','--format','{{.Endpoints.docker.Host}}']).replace(/^unix:\/\//,'')}},
+        containerEngine:{localDocker:{socketPath:dockerSocket}},
         durableObjectsPersist:join(dir,'do'), workflowsPersist:join(dir,'workflows'),
         workers:[{
           ...base,
