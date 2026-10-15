@@ -8,6 +8,7 @@ import { startAuth } from '../runtime.mjs';
 import { prepareAccount } from '../prepare-account.mjs';
 import { prepareSchoolAdmin } from './admin.mjs';
 import { browserBase } from './image.mjs';
+import { schoolContainerCleanup } from './containers.mjs';
 
 const docker = args => execFileSync('docker', args, {encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
 const pause = ms => new Promise(r=>setTimeout(r,ms));
@@ -49,10 +50,13 @@ export async function startSchoolAuth(options = {}) {
   docker(['build','--platform','linux/amd64','--build-context',`school-fixture=${fixtureDirectory}`,
     '--build-arg',`BASE=${base}`,'--build-arg',`RUN_ID=${runId}`,'-t',image,'-f','e2e/school/Dockerfile','.']);
   const imageId=docker(['image','inspect','--format','{{.Id}}',image]);
+  const containerCleanup = schoolContainerCleanup({docker,image,interceptor:containerEgressImage});
   async function school(userId, path, body) {
     used.add(userId);
     const ns = await mf.getDurableObjectNamespace('CQU_LOGIN','auth-e2e');
-    const response = await ns.get(ns.idFromName(userId)).fetch(`http://fixture/__fixture/${path}`,
+    const instanceId = ns.idFromName(userId);
+    containerCleanup.track('auth-e2e', instanceId);
+    const response = await ns.get(instanceId).fetch(`http://fixture/__fixture/${path}`,
       body === undefined ? {} : {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
     if (!response.ok) {
       const detail = (await response.text()).slice(0,500);
@@ -179,16 +183,10 @@ export async function startSchoolAuth(options = {}) {
     },
     async close() {
       if (control?.listening) await new Promise((r,j)=>control.close(e=>e?j(e):r()));
-      const remaining = docker(['ps','-aq','--filter',`ancestor=${image}`]);
-      // The local engine stops instances but can retain exited Docker objects.
-      // Reclaim only this run's unique image, then independently check absence.
-      if (remaining) {
-        docker(['rm','-f',...remaining.split('\n')]);
-      }
-      if (docker(['ps','-aq','--filter',`ancestor=${image}`])) throw new Error('School container cleanup failed');
+      const containers = containerCleanup.close();
       docker(['image','rm',image]);
       if (errors.length) throw new Error(`School cleanup/transport failed: ${[...new Set(errors)].join('; ')}`);
-      return {containerObjectsRemoved:true,fixtureImageRemoved:true,imageId,base,fixtureHash,
+      return {...containers,fixtureImageRemoved:true,imageId,base,fixtureHash,
         runtimeLog:runtimeLog.map(redactDiagnostic)};
     },
   };
