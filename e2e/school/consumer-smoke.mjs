@@ -1,10 +1,13 @@
+import { createArtifactRun } from '../artifacts.mjs';
 import assert from 'node:assert/strict';
 import {mkdir,writeFile,readFile,mkdtemp,rm} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {startSchoolAuth} from './runtime.mjs';
 import {prepareSchoolBinding} from './prepare-binding.mjs';
 
-const output=`.e2e/school-consumer-${Date.now()}`;
+const publicOutput=`.e2e/school-consumer-${Date.now()}`;
+const artifacts=await createArtifactRun(publicOutput);
+const output=artifacts.raw;
 const consumerScript=await readFile('e2e/school/consumer-worker.js','utf8');
 await mkdir(output,{recursive:true});
 const fixtureDirectory=await mkdtemp(resolve('.auth-e2e-consumer-fixture-'));
@@ -20,7 +23,7 @@ async function until(read,match) {
   throw new Error('Consumer school delivery state did not arrive');
 }
 for(let run=1;run<=2;run++) {
-  const runtime=await startSchoolAuth({expectedCommit:process.env.AUTH_E2E_EXPECT_COMMIT,
+  const runtime=await startSchoolAuth({expectedCommit:process.env.AUTH_E2E_EXPECT_COMMIT,artifacts,
     fixtureDirectory,
     workers:(({authOrigin,authWorkerName})=>[{name:'school-consumer',modules:true,script:consumerScript,
       compatibilityDate:'2026-05-01',d1Databases:{SCHEDULE_DB:'school-consumer-db'},
@@ -29,7 +32,9 @@ for(let run=1;run<=2;run++) {
       outboundService:()=>{throw new Error('Unexpected consumer egress');},
     }]),
   });
+  artifacts.add(runtime);
   const evidence={run,commit:runtime.commit,cleanup:'pending'};
+  const errors=[];
   try {
     let consumer=await runtime.getWorker('school-consumer');
     let consumerDb=await runtime.getD1Database('SCHEDULE_DB','school-consumer');
@@ -91,11 +96,20 @@ for(let run=1;run<=2;run++) {
     const denied=await consumer.fetch('http://consumer/import',{method:'POST',headers:{cookie}});
     assert.equal(denied.status,403);assert.deepEqual(await denied.json(),{error:'NO_CQU_BINDING'});
     evidence.business='independent login, composed Worker→AuthService→container→own D1 readback, delayed school mail refusal and post-unbind refusal passed';
-  } finally {
-    evidence.resources=await runtime.close();evidence.cleanup='passed';
+  } catch(error) {errors.push(error);} finally {
+    try {evidence.resources=await runtime.close();evidence.cleanup='passed';}
+    catch(error) {errors.push(error);evidence.cleanup='failed';}
+    evidence.errors=errors.map(error=>({name:error.name,message:error.message}));
     await writeFile(`${output}/run-${run}.json`,JSON.stringify(evidence,null,2)+'\n');
-    await runtime.redact(output);await runtime.checkArtifacts(output);
+    artifacts.outcome(errors.length?'failed':'passed',evidence.cleanup);
   }
+  if(errors.length) throw new AggregateError(errors,'Consumer journey or cleanup failed');
 }
-} finally {await rm(fixtureDirectory,{recursive:true,force:true});}
-console.log(`School consumer helper passed twice; evidence: ${output}`);
+artifacts.finished();
+} catch(error) {artifacts.failure(error);process.exitCode=1;
+} finally {
+  try {await rm(fixtureDirectory,{recursive:true,force:true});}
+  catch(error) {artifacts.outcome('failed','failed');artifacts.failure(error);process.exitCode=1;}
+  finally {if((await artifacts.publish()).publication!=='scanned') process.exitCode=1;}
+}
+console.log(`School consumer helper finished; evidence: ${publicOutput}`);

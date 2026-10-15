@@ -4,15 +4,20 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { checkArtifacts } from './artifacts.mjs';
 
 // Node-side lifecycle API. Never import this from production or expose seed controls on Auth.
-export async function startAuth({ expectedCommit, platform } = {}) {
+export async function startAuth({ expectedCommit, platform, artifacts } = {}) {
   const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   if (expectedCommit && expectedCommit !== commit) throw new Error('Auth commit does not match the pinned dependency');
   const dir = await mkdtemp(resolve('.auth-e2e-'));
   const mails = new Map();
   const unexpected = [];
   const artifactSecrets = [];
+  const inspectArtifacts = output => checkArtifacts(output, [
+    ...mails.values().flatMap(mail => [mail.otp, mail.resetUrl].filter(Boolean)), ...artifactSecrets,
+  ]);
+  artifacts?.add({ checkArtifacts: inspectArtifacts });
   let mf;
   let db;
   let origin;
@@ -157,23 +162,7 @@ export async function startAuth({ expectedCommit, platform } = {}) {
     });
     return { origin, controlOrigin: `http://127.0.0.1:${control.address().port}`, get db() { return db; }, support,
       commit, bundleFingerprint,
-      async checkArtifacts(outputDir) {
-        const sensitive = ['Synthetic-only-123!', 'Synthetic-reset-only-456!', 'Synthetic-change-only-456!',
-          ...mails.values().flatMap(mail => [mail.otp, mail.resetUrl].filter(Boolean)), ...artifactSecrets];
-        async function inspect(directory) {
-          for (const entry of await readdir(directory, { withFileTypes: true })) {
-            const path = join(directory, entry.name);
-            if (entry.isDirectory()) await inspect(path);
-            else if (/\.(json|txt|md|log)$/.test(entry.name)) {
-              const text = await readFile(path, 'utf8');
-              if (sensitive.some(value => text.includes(value))) {
-                throw new Error('Sensitive synthetic value found in E2E text artifacts');
-              }
-            }
-          }
-        }
-        await inspect(outputDir);
-      },
+      checkArtifacts: inspectArtifacts,
       async close() {
         const before = await Promise.allSettled([platform?.beforeClose()]);
         const results = await Promise.allSettled([

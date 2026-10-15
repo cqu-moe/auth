@@ -1,3 +1,4 @@
+import { checkArtifacts as checkKnownArtifacts } from '../artifacts.mjs';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, writeFile } from 'node:fs/promises';
@@ -166,6 +167,10 @@ export async function startOAuthAuth(options = {}) {
       oauthAppOrigin: app.origin,
       oauthControlOrigin: `http://127.0.0.1:${control.address().port}`,
       oauthDiagnostics: () => app.diagnostics(),
+      async checkArtifacts(output) {
+        await runtime.checkArtifacts(output);
+        await checkKnownArtifacts(output, [...secrets]);
+      },
       async redact(output) {
         await runtime.redact(output);
         async function visit(dir) {

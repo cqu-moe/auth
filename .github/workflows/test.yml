@@ -76,6 +76,8 @@ jobs:
       - run: npm run test:e2e
       - run: node e2e/account-smoke.mjs
       - run: node e2e/self-check.mjs
+      - run: node e2e/artifact-safety-check.mjs
+      - run: node --test e2e/publication-failure.test.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -163,7 +165,7 @@ jobs:
     name: Auth supplement (${{ matrix.browser }})
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
@@ -171,6 +173,7 @@ jobs:
     env:
       AUTH_E2E_BROWSER: ${{ matrix.browser }}
       AUTH_E2E_EXPECT_COMMIT: ${{ github.sha }}
+      AUTH_SCHOOL_DOCKER_SOCKET: /var/run/docker.sock
       E2E_TELEMETRY_DISABLED: '1'
       DO_NOT_TRACK: '1'
       WRANGLER_SEND_METRICS: 'false'

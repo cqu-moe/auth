@@ -24,7 +24,7 @@
     "typecheck:e2e": "tsc -p e2e/tsconfig.json",
     "test:e2e:school": "npm run typecheck:e2e && tsc -p e2e/school/tsconfig.json && VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build && node e2e/school/build.mjs && node e2e/school/run.mjs",
     "test:e2e:oauth": "npm run typecheck:e2e && VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build && node e2e/school/build.mjs && node e2e/oauth/run.mjs",
-    "test:e2e:cross-browser": "npm run typecheck:e2e && VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build && node e2e/cross-browser.mjs"
+    "test:e2e:cross-browser": "npm run typecheck:e2e && VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build && node e2e/school/build.mjs && node e2e/cross-browser.mjs"
   },
   "repository": {
     "type": "git",

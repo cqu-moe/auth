@@ -1,8 +1,7 @@
-import { web } from '@e2e-dev/web';
 import { defineEngine, type EngineCleanupContext } from 'e2e/engine';
 import base from './e2e.config';
 
-const { capabilities: _capabilities, ...original } = web();
+const { capabilities: _capabilities, ...original } = base.targets[0].engine;
 const engine = defineEngine({
   ...original,
   async endAttempt(context: EngineCleanupContext) {

@@ -15,6 +15,7 @@ artifacts/
 
 # Isolated local Auth E2E state and per-run failure evidence
 .auth-e2e-*/
+.auth-e2e-*.errors.log
 .e2e/
 .npm-cache/
 .pnpm-store/

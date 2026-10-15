@@ -1,3 +1,4 @@
+import { checkArtifacts as checkKnownArtifacts } from '../artifacts.mjs';
 import { createServer } from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
@@ -241,6 +242,10 @@ export async function startSchoolAuth(options = {}) {
     async getD1Database(binding,workerName) {
       if(!consumerNames.has(workerName)) throw new Error('Unknown consumer Worker');
       return mf.getD1Database(binding,workerName);
+    },
+    async checkArtifacts(output) {
+      await runtime.checkArtifacts(output);
+      await checkKnownArtifacts(output, [...secrets]);
     },
     async redact(output) {
       let redactions = 0;

@@ -1,5 +1,6 @@
 import type { E2EConfig } from 'e2e';
-import { web } from '@e2e-dev/web';
+import { surfaceOf, web } from '@e2e-dev/web';
+import { defineEngine } from 'e2e/engine';
 import { base32 } from '@better-auth/utils/base32';
 import { createOTP } from '@better-auth/utils/otp';
 import { authSecuritySecrets } from './e2e/secret-holder';
@@ -47,6 +48,31 @@ export const authWebEngine = webHolder.authE2eWebEngine ??= web({
   viewport: process.env.AUTH_E2E_MOBILE ? { width: 390, height: 844 } : { width: 1440, height: 900 },
 });
 
+const { capabilities: _capabilities, ...originalEngine } = authWebEngine;
+let observedViewports = 0, wrongViewport = false;
+const expectedViewport = process.env.AUTH_E2E_MOBILE ? { width: 390, height: 844 } : { width: 1440, height: 900 };
+const engine = browserName === 'chromium' ? authWebEngine : defineEngine({
+  ...originalEngine,
+  async startAttempt(context) {
+    observedViewports = 0; wrongViewport = false;
+    await originalEngine.startAttempt?.(context);
+    const surface = surfaceOf(authWebEngine)!;
+    const actual = surface.context().browser()?.browserType().name();
+    if (actual !== browserName) throw new Error(`Wrong actual browser: ${actual}`);
+    context.environment({ engine: actual });
+    surface.context().on('page', page => {
+      const size = page.viewportSize();
+      observedViewports++;
+      wrongViewport ||= size?.width !== expectedViewport.width || size?.height !== expectedViewport.height;
+      context.environment({ viewport: size ? `${size.width}x${size.height}` : 'missing' });
+    });
+  },
+  async settleAttempt(context) {
+    if (!observedViewports || wrongViewport) throw new Error('Actual browser viewport did not match the selected target');
+    await originalEngine.settleAttempt?.(context);
+  },
+});
+
 export default {
   tests: ['e2e/*.e2e.ts'], workers: 1, retries: 0,
   timeout: 90000, assertionTimeout: 10000,
@@ -89,6 +115,6 @@ export default {
     },
   },
   targets: [{ name: process.env.AUTH_E2E_MOBILE ? 'mobile' : 'desktop',
-    engine: authWebEngine,
+    engine,
     app: { url: process.env.AUTH_E2E_URL || 'http://127.0.0.1:18797' } }],
 } satisfies E2EConfig;

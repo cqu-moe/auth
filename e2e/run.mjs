@@ -1,22 +1,21 @@
+import { createArtifactRun } from './artifacts.mjs';
 import { spawn } from 'node:child_process';
-import { access, mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
-import { relative, resolve, join } from 'node:path';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { relative, join } from 'node:path';
 import { startAuth } from './runtime.mjs';
-import { tmpdir } from 'node:os';
-import { readdirSync } from 'node:fs';
 import { sourceFingerprint } from './school/source.mjs';
+import { observeBrowserProfiles, selectedBrowser, withBrowserCustody } from './browser-custody.mjs';
 
-const browserName = process.env.AUTH_E2E_BROWSER || 'chromium';
-if (!['chromium', 'firefox', 'webkit'].includes(browserName)) throw new Error('Unsupported AUTH_E2E_BROWSER');
+const browserName = selectedBrowser();
 const supplement = browserName !== 'chromium';
 const config = supplement ? 'e2e.cross-browser.config.ts' : 'e2e.config.ts';
 const browserEnv = { AUTH_E2E_BROWSER: browserName, PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
   AUTH_E2E_CLEANUP_CONTROL: process.env.AUTH_E2E_CLEANUP_CONTROL || '' };
-const applicable = supplement && !process.env.AUTH_E2E_CLEANUP_CONTROL ? ['--grep-invert', '^virtual WebAuthn'] : [];
+const applicable = supplement && !process.env.AUTH_E2E_CLEANUP_CONTROL
+  ? ['--grep-invert', '^(virtual WebAuthn|manual recovery invalidates actual old factors)'] : [];
 
-const output = process.env.AUTH_E2E_OUTPUT || `.e2e/run-${Date.now()}`;
-if (!resolve(output).startsWith(resolve('.e2e') + '/')) throw new Error('E2E output must be a child of .e2e');
-const variants = process.env.AUTH_E2E_MOBILE ? ['mobile'] : supplement ? ['desktop'] : ['desktop', 'mobile'];
+const publicOutput = process.env.AUTH_E2E_OUTPUT || `.e2e/run-${Date.now()}`;
+const variants = process.env.AUTH_E2E_MOBILE ? ['mobile'] : ['desktop', 'mobile'];
 const userArgs = process.argv.slice(2);
 if (supplement) for (let i = 0; i < userArgs.length; i++) {
   if (userArgs[i] === '--grep' && userArgs[i + 1]) i++;
@@ -35,6 +34,8 @@ function serializeError(error) {
     name: error?.name ?? 'Error',
     message: error?.message ?? String(error),
     stack: error?.stack ?? String(error),
+    ...(error instanceof AggregateError ? { errors: error.errors.map(serializeError) } : {}),
+    ...(error?.cause ? { cause: serializeError(error.cause) } : {}),
   };
 }
 
@@ -100,16 +101,15 @@ function selectionArgsFor(pairs) {
 }
 
 async function runE2EGroup({ args, dir, variant, runtime }) {
-  const browserTmp = supplement ? await mkdtemp(join(tmpdir(), 'auth-browser-')) : undefined;
-  const profiles = new Set();
+  const custody = supplement ? await observeBrowserProfiles(browserName) : undefined;
   const child = spawn(process.execPath, ['node_modules/e2e/dist/cli/bin.js', 'run', '--config', config, ...applicable, ...args, '--output', dir], {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
       ...browserEnv,
       PATH: process.env.PATH,
-      TMPDIR: browserTmp ?? process.env.TMPDIR,
+      TMPDIR: process.env.TMPDIR,
       CI: process.env.CI,
-      ...(supplement ? { DEBUG: 'pw:browser' } : {}),
+      ...custody?.env,
       AUTH_E2E_URL: runtime.origin,
       AUTH_E2E_CONTROL: runtime.controlOrigin,
       AUTH_E2E_MOBILE: variant === 'mobile' ? '1' : '',
@@ -124,31 +124,25 @@ async function runE2EGroup({ args, dir, variant, runtime }) {
   for (const stream of [child.stdout, child.stderr]) {
     stream.on('data', chunk => {
       log += chunk;
-      if (browserTmp) for (const name of readdirSync(browserTmp)) {
-        if (name.startsWith(`playwright_${browserName}dev_profile-`)) profiles.add(join(browserTmp, name));
-      }
-      process.stdout.write(chunk);
+      custody?.observe();
     });
   }
   const stop = () => child.kill('SIGTERM');
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
-  try {
+  return withBrowserCustody(custody, async () => { try {
     // Wait for close, not exit: report writing and both stdio streams must flush.
     const close = await new Promise((resolveChild, rejectChild) => {
       child.once('error', rejectChild);
       child.once('close', (code, signal) => resolveChild({ code, signal }));
     });
-    const profilesRemoved = await Promise.all([...profiles].map(path => access(path).then(() => false, error => {
-      if (error.code === 'ENOENT') return true; throw error;
-    })));
+    await writeFile(join(dir, 'runner.log'), log);
     return { code: close.code ?? 1, signal: close.signal, log,
-      browserSafety: { temporaryProfile: profiles.size > 0, profileRemoved: profilesRemoved.length > 0 && profilesRemoved.every(Boolean) } };
+      browserSafety: custody ? await custody.readback(log) : undefined };
   } finally {
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);
-    if (browserTmp) await rm(browserTmp, { recursive: true, force: true });
-  }
+  } });
 }
 
 function describeSetMismatch(expected, actual, label) {
@@ -175,6 +169,9 @@ async function writeJson(path, value) {
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+const artifacts = await createArtifactRun(publicOutput);
+const output = artifacts.raw;
+try {
 for (const variant of variants) {
   const variantDir = join(output, variant);
   await mkdir(variantDir, { recursive: true });
@@ -200,6 +197,10 @@ for (const variant of variants) {
       variant,
       all: allDiscovered,
       selected: selectedDiscovered,
+      ...(supplement && !process.env.AUTH_E2E_CLEANUP_CONTROL ? {
+        capabilityExceptions: allDiscovered.filter(pair => /^(virtual WebAuthn|manual recovery invalidates actual old factors)/.test(pair.title))
+          .map(pair => ({ ...pair, reason: 'Original implementation requires Chromium-only CDP virtual authenticator; FF/WK hardware-key manual acceptance is unverified' })),
+      } : {}),
     });
 
     for (const [index, group] of groups.entries()) {
@@ -217,20 +218,17 @@ for (const variant of variants) {
       const groupErrors = [];
 
       try {
-        runtime = await startAuth({ expectedCommit: process.env.AUTH_E2E_EXPECT_COMMIT });
+        runtime = await startAuth({ expectedCommit: process.env.AUTH_E2E_EXPECT_COMMIT, artifacts });
+        artifacts.add(runtime);
         evidence.commit = runtime.commit;
         evidence.bundleFingerprint = runtime.bundleFingerprint;
         evidence.browser = browserName;
         console.log(`Auth built Worker ready; commit ${runtime.commit}; ${variant}; runtime ${index + 1}/${groups.length} (${group.name})`);
         const outcome = await runE2EGroup({ args: [...executionArgs, ...selectionArgsFor(group.pairs)], dir, variant, runtime });
         logs.push(outcome.log);
-        await writeFile(join(dir, 'runner.log'), outcome.log);
         evidence.runnerExitCode = outcome.code;
         if (supplement) {
-          const launch = outcome.log.split('\n').find(line => line.includes('<launching>')) ?? '';
-          evidence.browserSafety = { headless: /(?:-headless|--headless)(?:\s|$)/.test(launch),
-            engine: browserName === 'firefox' ? /firefox[^\s]* -no-remote/.test(launch) : launch.includes('pw_run.sh'),
-            ...outcome.browserSafety };
+          evidence.browserSafety = outcome.browserSafety;
           if (!Object.values(evidence.browserSafety).every(Boolean)) throw new Error('Supplement browser launch/profile cleanup was not safe');
         }
         if (outcome.code) {
@@ -276,7 +274,6 @@ for (const variant of variants) {
         evidence.selectedTests = reportSelected.size;
         evidence.executedTests = reportExecuted.size;
         summaries.push(summary);
-        await runtime.checkArtifacts(dir);
       } catch (error) {
         process.exitCode ||= 1;
         groupErrors.push(error);
@@ -301,6 +298,7 @@ for (const variant of variants) {
       if (supplement && sourceFingerprint() !== sourceHash) {
         process.exitCode ||= 1; groupErrors.push(new Error('Source changed during supplement run'));
       }
+      artifacts.outcome(groupErrors.length ? 'failed' : 'passed', evidence.cleanup);
       await writeJson(join(dir, 'runtime.json'), evidence);
       if (groupErrors.length) {
         const error = groupErrors.length === 1
@@ -388,4 +386,12 @@ for (const variant of variants) {
   });
   if (process.exitCode) break;
 }
-console.log(`Evidence: ${output}`);
+  artifacts.finished();
+} catch (error) {
+  artifacts.failure(error);
+  process.exitCode = 1;
+} finally {
+  const publication = await artifacts.publish();
+  if (publication.publication !== 'scanned') process.exitCode = 1;
+}
+console.log(`Evidence: ${publicOutput}`);
