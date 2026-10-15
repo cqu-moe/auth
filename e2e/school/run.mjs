@@ -33,12 +33,19 @@ for(const variant of process.env.AUTH_E2E_MOBILE?['mobile']:['desktop','mobile']
     for(const stream of [child.stdout,child.stderr]) stream.on('data',chunk=>{log+=chunk;process.stdout.write(chunk);});
     const stop=()=>child.kill('SIGTERM');
     process.once('SIGINT',stop);process.once('SIGTERM',stop);
-    try {process.exitCode=await new Promise((r,j)=>{child.on('error',j);child.on('exit',code=>r(code ?? 1));});}
+    try {process.exitCode=await new Promise((r,j)=>{child.on('error',j);child.on('close',code=>r(code ?? 1));});}
     finally {process.removeListener('SIGINT',stop);process.removeListener('SIGTERM',stop);}
     await writeFile(join(dir,'runner.log'),log);
+    evidence.stage='framework-report';
     const report=JSON.parse(await readFile(join(dir,'report.json'),'utf8'));
     evidence.runnerExitCode=process.exitCode;
     evidence.summary=report.run.summary;
+    // e2e 0.21 may report passed/exit 0 with a failed provider cleanup.
+    if (report.run.results.some(result => result.selected && result.attempts?.some(attempt =>
+      attempt.cleanup === 'failed' || attempt.secondaryErrors?.some(error => error.phase === 'cleanup')))) {
+      throw new Error('Browser provider cleanup failed in framework attempt evidence');
+    }
+
     if(!report.run.summary.executed || report.run.summary.skipped || report.run.summary.interrupted) throw new Error('Empty/skipped/interrupted school suite');
     if(process.exitCode===0 && (report.run.summary.failed || report.run.status!=='passed')) throw new Error('Runner mismatch');
     evidence.stage='business-readback';
