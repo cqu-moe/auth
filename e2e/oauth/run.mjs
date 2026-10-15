@@ -2,12 +2,14 @@ import { spawn } from 'node:child_process';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { relative, resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { assertAttemptCleanup } from './report.mjs';
 import { startOAuthAuth } from './runtime.mjs';
 import { sourceFingerprint } from '../school/source.mjs';
 
 const output = process.env.AUTH_E2E_OUTPUT || `.e2e/oauth-${Date.now()}`;
 if (!resolve(output).startsWith(resolve('.e2e') + '/')) throw new Error('OAuth output must be a child of .e2e');
 const args = process.argv.slice(2);
+const config = process.env.AUTH_OAUTH_CLEANUP_CONTROL ? 'e2e.oauth-cleanup.config.ts' : 'e2e.oauth.config.ts';
 // Only discovery filters are accepted. Headed/AI/retry flags cannot weaken this gate.
 for (let index = 0; index < args.length; index++) {
   if (args[index] === '--grep' && args[index + 1]) index++;
@@ -39,7 +41,7 @@ async function childRun(argv, childEnv, logPath) {
   } finally { process.removeListener('SIGINT', stop); process.removeListener('SIGTERM', stop); }
 }
 async function discover(variant, filters) {
-  const child = await childRun(['list', '--reporter', 'json', '--config', 'e2e.oauth.config.ts', ...filters], env(variant));
+  const child = await childRun(['list', '--reporter', 'json', '--config', config, ...filters], env(variant));
   if (child.code) throw new Error(`OAuth discovery exited ${child.code}: ${child.stderr.trim()}`);
   const pairs = JSON.parse(child.stdout).pairs?.filter(pair => pair.kind === 'test' && pair.disposition === 'run') ?? [];
   if (!pairs.length) throw new Error(`OAuth discovery selected no tests for ${variant}`);
@@ -78,7 +80,7 @@ for (const variant of variants) {
         runtime = await startOAuthAuth({ expectedCommit: process.env.AUTH_E2E_EXPECT_COMMIT });
         group.commit = runtime.commit; group.bundleFingerprint = runtime.bundleFingerprint;
         group.stage = 'journey';
-        const child = await childRun(['run', '--config', 'e2e.oauth.config.ts', pair.file,
+        const child = await childRun(['run', '--config', config, pair.file,
           '--grep', `^${escapeRegExp(pair.titlePath.join(' '))}$`, '--output', groupDir], {
           ...env(variant), DEBUG: 'pw:browser', AUTH_E2E_URL: runtime.origin, AUTH_E2E_CONTROL: runtime.controlOrigin,
           AUTH_OAUTH_APP: runtime.oauthAppOrigin, AUTH_OAUTH_CONTROL: runtime.oauthControlOrigin,
@@ -100,6 +102,7 @@ for (const variant of variants) {
         assertIds(report, pair);
         const summary = report.run.summary;
         summaries.push(summary); group.summary = summary;
+        group.attemptCleanup = assertAttemptCleanup(report);
         if (child.code || report.run.status !== 'passed' || summary.executed !== 1 || summary.passed !== 1
           || summary.failed || summary.skipped || summary.interrupted || summary.flaky) throw new Error(`OAuth journey failed (exit ${child.code})`);
         group.stage = 'business-readback';

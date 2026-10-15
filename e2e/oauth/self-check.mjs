@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { assertAttemptCleanup } from './report.mjs';
 import { join } from 'node:path';
 const root = `.e2e/oauth-negative-${Date.now()}`;
 await mkdir(root, { recursive: true });
@@ -46,10 +47,25 @@ for (const variant of ['desktop', 'mobile']) {
   assert.match(trace, /AUTH04 deliberate failure/);
   assert.match(trace, /ASSERTION_FAILED/);
 }
+const cleanup = await run('engine-cleanup', 'desktop', [], { AUTH_OAUTH_CLEANUP_CONTROL: '1' });
+const cleanupGroup = cleanup.runtime.groups[0];
+assert.equal(cleanupGroup.runnerExitCode, 0, 'Native e2e no longer reproduces the passed/cleanup-failed bug; review this control');
+assert.equal(cleanupGroup.summary.passed, 1);
+assert.equal(cleanup.runtime.cleanup, 'passed');
+assert.equal(cleanupGroup.browser.profileRemoved, true);
+assert.match(cleanupGroup.errors[0].message, /selected attempt cleanup failed/);
+const native = JSON.parse(await readFile(join(cleanup.dir, cleanupGroup.report), 'utf8'));
+assert.equal(native.run.status, 'passed');
+const attempt = native.run.results.find(result => result.kind === 'test' && result.selected).attempts[0];
+assert.equal(attempt.cleanup, 'failed');
+assert.ok(attempt.secondaryErrors.some(error => error.phase === 'cleanup' && /AUTH04 deliberate engine cleanup failure/.test(error.message)));
+// The secondary-error branch must reject even when cleanup is mislabeled complete.
+attempt.cleanup = 'complete';
+assert.throws(() => assertAttemptCleanup(native), /selected attempt cleanup failed/);
 const empty = await run('zero', 'desktop', ['--grep', '^AUTH04_ZERO_SELECTION$']);
 assert.equal(empty.runtime.cleanup, 'not-started');
 assert.deepEqual(empty.runtime.groups, []);
-assert.match(empty.runtime.failure.message, /selected no tests/);
+assert.match(empty.runtime.failure.message, /selected no tests|NO_TESTS/);
 const pin = await run('pin', 'desktop', ['--grep', '^OAuth S256'], { AUTH_E2E_EXPECT_COMMIT: 'AUTH04_WRONG_COMMIT' });
 assert.equal(pin.runtime.cleanup, 'not-started');
 assert.equal(pin.runtime.groups[0].stage, 'startup');
