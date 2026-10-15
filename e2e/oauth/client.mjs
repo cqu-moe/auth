@@ -120,10 +120,26 @@ export function startOAuthClientApp({ authOrigin, accountPassword, business, reg
   }
 
   async function authorizeCode(email, overrides = {}, client = clients.first, reusedCookie) {
-    const login = reusedCookie ? null : await fetch(`${authOrigin}/api/v1/auth/sign-in/email`, {
-      method: 'POST', headers: { origin: authOrigin, 'content-type': 'application/json' },
-      body: JSON.stringify({ email, password: accountPassword }),
-    });
+    let login = null;
+    if (!reusedCookie) {
+      const deadline = Date.now() + 45000;
+      for (;;) {
+        login = await fetch(`${authOrigin}/api/v1/auth/sign-in/email`, {
+          method: 'POST', headers: { origin: authOrigin, 'content-type': 'application/json' },
+          body: JSON.stringify({ email, password: accountPassword }),
+          signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
+        });
+        events.push({ kind: 'negative-login', status: login.status });
+        if (login.status !== 429) break;
+        const seconds = Number(login.headers.get('retry-after') ?? login.headers.get('x-retry-after') ?? NaN);
+        await login.arrayBuffer();
+        const delay = Math.max(1000, seconds * 1000 + 100);
+        if (!Number.isFinite(seconds) || seconds < 0 || Date.now() + delay >= deadline) {
+          throw new Error('Negative-control login rate limit has no bounded Retry-After');
+        }
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
     let cookie = reusedCookie;
     if (login) {
       if (!login.ok) throw new Error(`Negative-control login failed (${login.status})`);
@@ -361,6 +377,7 @@ export function startOAuthClientApp({ authOrigin, accountPassword, business, reg
 
       return res.writeHead(404).end('Unknown OAuth application route');
     } catch (error) {
+      events.push({ kind: 'client-error', message: error.message });
       res.writeHead(500, { 'content-type': 'application/json', 'cache-control': 'no-store' })
         .end(JSON.stringify({ error: error.message }));
     }
