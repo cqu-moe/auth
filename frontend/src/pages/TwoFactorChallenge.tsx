@@ -132,7 +132,7 @@ export default function TwoFactorChallenge() {
         </Alert>
       )}
 
-      <form onSubmit={handleVerify} className="space-y-4" noValidate>
+      <form id="two-factor-challenge" method="post" onSubmit={handleVerify} className="space-y-4" noValidate>
         <div className="field">
           <Label htmlFor="twoFactorCode">{isBackupCode ? "备用恢复码" : "六位验证码"}</Label>
           {isBackupCode ? (

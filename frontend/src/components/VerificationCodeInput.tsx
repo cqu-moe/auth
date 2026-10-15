@@ -15,7 +15,7 @@ export function VerificationCodeInput({
   value,
   onChange,
   id,
-  name,
+  name = "one-time-code",
   disabled,
   "aria-describedby": ariaDescribedBy,
   "aria-invalid": ariaInvalid,
@@ -144,8 +144,6 @@ export function VerificationCodeInput({
         autoCapitalize="off"
         autoCorrect="off"
         enterKeyHint="done"
-        data-lpignore="true"
-        data-1p-ignore
         aria-describedby={ariaDescribedBy}
         aria-invalid={isInvalid || undefined}
         className="verification-code-field"
