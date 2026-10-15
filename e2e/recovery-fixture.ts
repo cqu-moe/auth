@@ -16,13 +16,15 @@ export async function virtualAuthenticator() {
 
 export async function registerPasskey(fixture: Fixture, account: Awaited<ReturnType<typeof createVerifiedAccount>>, name: string) {
   const { screen } = fixture;
-  await screen.getByLabel('新 Passkey 名称').fill(name);
+  await screen.getByRole('button', '添加 Passkey', { exact: true }).click();
+  const editor = screen.getByRole('dialog', '添加 Passkey', { exact: true });
+  await editor.getByLabel('名称', { exact: true }).fill(name);
   const registration = responseFor(/\/api\/v1\/auth\/passkey\/verify-registration$/, 'POST');
-  await screen.getByRole('button', '添加 Passkey').click();
+  await editor.getByRole('button', '添加并保存', { exact: true }).click();
   await screen.getByLabel('当前密码').fill(account.password);
   await screen.getByRole('button', '验证并继续').click();
   expect((await registration).status).toBe(200);
-  await expect(screen.getByLabel(`Passkey 名称 ${name}`)).toBeVisible();
+  await expect(screen.getByRole('list', '已添加的 Passkey').getByText(name, { exact: true })).toBeVisible();
 }
 
 /** Real UV Passkey admission avoids spending the target's native TOTP rate window on fixture setup. */
