@@ -125,16 +125,22 @@ jobs:
           } > "$diagnostics/engine.txt" 2>&1
           docker image inspect cloudflare/proxy-everything:3cb1195@sha256:0ef6716c52430096900b150d84a3302057d6cd2319dae7987128c85d0733e3c8 \
             --format '{{json .Config}}' > "$diagnostics/egress-image.json" 2>&1
+          docker pull cloudflare/proxy-everything:3cb1195@sha256:0ef6716c52430096900b150d84a3302057d6cd2319dae7987128c85d0733e3c8 \
+            > "$diagnostics/egress-pull.log" 2>&1
+          pull_status=$?
           docker network ls --format '{{.ID}} {{.Name}} {{.Driver}} {{.Scope}}' > "$diagnostics/networks-before.txt" 2>&1
           event_start=$(date -u +%Y-%m-%dT%H:%M:%S)
-          docker events --since "$event_start" --filter type=container --filter type=network \
+          docker events --since "$event_start" --filter type=image --filter type=container --filter type=network \
             > "$diagnostics/events.jsonl" 2>&1 &
           event_pid=$!
           node e2e/school/container-probe.mjs
           probe_status=$?
           kill "$event_pid" 2>/dev/null
           wait "$event_pid" 2>/dev/null
+          docker image inspect cloudflare/proxy-everything:3cb1195@sha256:0ef6716c52430096900b150d84a3302057d6cd2319dae7987128c85d0733e3c8 \
+            --format '{{.Id}} {{json .RepoDigests}}' > "$diagnostics/egress-image-after.txt" 2>&1
           docker network ls --format '{{.ID}} {{.Name}} {{.Driver}} {{.Scope}}' > "$diagnostics/networks-after.txt" 2>&1
+          if [ "$pull_status" -ne 0 ]; then exit "$pull_status"; fi
           exit "$probe_status"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
