@@ -39,11 +39,38 @@ describe("VerificationCodeInput", () => {
     await enterText(input, "  123 456abc", "insertFromPaste");
 
     expect(input.value).toBe("123456");
-    expect(input.dataset.lpignore).toBe("true");
-    expect(input.hasAttribute("data-1p-ignore")).toBe(true);
     expect(display.textContent).toBe("123456");
     expect(container.querySelectorAll("input, button, select, textarea, [tabindex]:not([tabindex='-1'])")).toHaveLength(1);
     expect(container.textContent).not.toContain("000000");
+  });
+
+  it("exposes an autofillable OTP field and submits an autofilled code", async () => {
+    const submitted = vi.fn();
+    function AutofillHarness() {
+      const [value, setValue] = useState("");
+      return createElement("form", {
+        onSubmit: (event: FormEvent<HTMLFormElement>) => {
+          event.preventDefault();
+          submitted(value, new FormData(event.currentTarget).get("one-time-code"));
+        },
+      },
+      createElement("label", { htmlFor: "autofill-code" }, "六位验证码"),
+      createElement(VerificationCodeInput, { id: "autofill-code", value, onChange: setValue }),
+      createElement("button", { type: "submit" }, "完成验证"));
+    }
+
+    const container = await renderUi(createElement(AutofillHarness));
+    const input = container.querySelector("input")!;
+    expect(input.autocomplete).toBe("one-time-code");
+    expect(input.labels?.[0]?.textContent).toBe("六位验证码");
+    expect(input.hasAttribute("data-1p-ignore")).toBe(false);
+    expect(input.hasAttribute("data-op-ignore")).toBe(false);
+    expect(input.hasAttribute("data-lpignore")).toBe(false);
+
+    await enterText(input, "654321", "insertReplacementText");
+    expect(container.querySelector(".verification-code-display")?.textContent).toBe("654321");
+    await act(async () => container.querySelector("button")!.click());
+    expect(submitted).toHaveBeenCalledExactlyOnceWith("654321", "654321");
   });
 
   it("maps native selection to the visible cells", async () => {
