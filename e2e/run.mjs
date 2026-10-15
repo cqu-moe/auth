@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process';
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { relative, resolve, join } from 'node:path';
 import { startAuth } from './runtime.mjs';
 import { tmpdir } from 'node:os';
+import { readdirSync } from 'node:fs';
 import { sourceFingerprint } from './school/source.mjs';
 
 const browserName = process.env.AUTH_E2E_BROWSER || 'chromium';
@@ -99,12 +100,14 @@ function selectionArgsFor(pairs) {
 }
 
 async function runE2EGroup({ args, dir, variant, runtime }) {
+  const browserTmp = supplement ? await mkdtemp(join(tmpdir(), 'auth-browser-')) : undefined;
+  const profiles = new Set();
   const child = spawn(process.execPath, ['node_modules/e2e/dist/cli/bin.js', 'run', '--config', config, ...applicable, ...args, '--output', dir], {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
       ...browserEnv,
       PATH: process.env.PATH,
-      TMPDIR: process.env.TMPDIR,
+      TMPDIR: browserTmp ?? process.env.TMPDIR,
       CI: process.env.CI,
       ...(supplement ? { DEBUG: 'pw:browser' } : {}),
       AUTH_E2E_URL: runtime.origin,
@@ -121,6 +124,9 @@ async function runE2EGroup({ args, dir, variant, runtime }) {
   for (const stream of [child.stdout, child.stderr]) {
     stream.on('data', chunk => {
       log += chunk;
+      if (browserTmp) for (const name of readdirSync(browserTmp)) {
+        if (name.startsWith(`playwright_${browserName}dev_profile-`)) profiles.add(join(browserTmp, name));
+      }
       process.stdout.write(chunk);
     });
   }
@@ -133,10 +139,15 @@ async function runE2EGroup({ args, dir, variant, runtime }) {
       child.once('error', rejectChild);
       child.once('close', (code, signal) => resolveChild({ code, signal }));
     });
-    return { code: close.code ?? 1, signal: close.signal, log };
+    const profilesRemoved = await Promise.all([...profiles].map(path => access(path).then(() => false, error => {
+      if (error.code === 'ENOENT') return true; throw error;
+    })));
+    return { code: close.code ?? 1, signal: close.signal, log,
+      browserSafety: { temporaryProfile: profiles.size > 0, profileRemoved: profilesRemoved.length > 0 && profilesRemoved.every(Boolean) } };
   } finally {
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);
+    if (browserTmp) await rm(browserTmp, { recursive: true, force: true });
   }
 }
 
@@ -217,10 +228,9 @@ for (const variant of variants) {
         evidence.runnerExitCode = outcome.code;
         if (supplement) {
           const launch = outcome.log.split('\n').find(line => line.includes('<launching>')) ?? '';
-          const profile = /(?:-profile |--user-data-dir=)([^\s]+)/.exec(launch)?.[1];
-          const temporaryProfile = Boolean(profile?.startsWith(join(tmpdir(), `playwright_${browserName}dev_profile-`)));
-          evidence.browserSafety = { headless: /(?:-headless|--headless)(?:\s|$)/.test(launch), temporaryProfile,
-            profileRemoved: profile ? await access(profile).then(() => false, error => { if (error.code === 'ENOENT') return true; throw error; }) : false };
+          evidence.browserSafety = { headless: /(?:-headless|--headless)(?:\s|$)/.test(launch),
+            engine: browserName === 'firefox' ? /firefox[^\s]* -no-remote/.test(launch) : launch.includes('pw_run.sh'),
+            ...outcome.browserSafety };
           if (!Object.values(evidence.browserSafety).every(Boolean)) throw new Error('Supplement browser launch/profile cleanup was not safe');
         }
         if (outcome.code) {
