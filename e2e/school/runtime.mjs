@@ -4,7 +4,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { join,resolve } from 'node:path';
-import { platform, release } from 'node:os';
+import { platform as osPlatform, release } from 'node:os';
 import { startAuth } from '../runtime.mjs';
 import { prepareAccount } from '../prepare-account.mjs';
 import { prepareSchoolAdmin } from './admin.mjs';
@@ -207,7 +207,7 @@ export async function startSchoolAuth(options = {}) {
             };
           })
         : [];
-      const networkDiagnostics = process.env.AUTH_SCHOOL_CONTAINER_DIAGNOSTICS && platform() === 'linux' ? {
+      const networkDiagnostics = process.env.AUTH_SCHOOL_CONTAINER_DIAGNOSTICS && osPlatform() === 'linux' ? {
         kernel:release(),
         srcValidMark:readOptionalSysctl('/proc/sys/net/ipv4/conf/all/src_valid_mark'),
         rpFilter:readOptionalSysctl('/proc/sys/net/ipv4/conf/all/rp_filter'),
