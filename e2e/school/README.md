@@ -14,6 +14,7 @@ contract, credible regression, missing stronger coverage, and support boundary.
 | Product recovery triggered by an expired external school session | Business refusal, real Workflow steps/alarms, new login, usable directory and terminal cleanup; catches missing bindings and durable scheduling failures | Existing Workflow unit tests call a helper with fake steps. The observer calls `super.run`, and the assertion reads actual Workflow API status |
 | Real private Service Binding RPC → fixed school directory | Caller approval, current term, parsing errors, and permission/binding checks after delayed school completion | Existing RPC tests replace DO fetch. The fixture returns school API input; the actual browser/production parser must produce the result |
 | UI/API unbind and strongly authenticated admin ban while school I/O is pending | No stale activation/session resurrection, and subsequent business refusal | Existing race tests use internal browser mocks. The external school holds an actual HTTPS response; neither DO nor Workflow responses are manufactured |
+| Consumer bindings reconfiguration on the native platform | A generated Auth user ID reaches only the registered consumer while existing Auth identity, school session and consumer D1 survive; catches replacing full options, losing cumulative bindings, poisoned handles and stale mail pump | The composition smoke owns this lifecycle contract. It reloads real Miniflare after an actual import; no production API, service or storage is replaced |
 
 No production flag/export or authorization change is introduced for tests.
 `worker.ts` is a build-only wrapper: the production HTTP handler, DOs, RPC and
@@ -107,6 +108,30 @@ live inside this runtime's isolated platform state. The consumer supplies its
 compiled code, actual bindings/assets/DO declarations/migrations and application
 HTTP adapter. The privileged `/directory` control is only an Auth assertion;
 it is not evidence that a consuming application ran.
+
+When the consumer needs the real generated Auth ID, finish preparing its school
+identity before updating that consumer's bindings:
+
+```js
+const account = await prepareSchoolBinding(runtime, {email, password});
+await runtime.updateConsumerBindings('schedule-e2e', {
+  EXTERNAL_DIRECTORY_USER_ID: account.userId,
+});
+const schedule = await runtime.getWorker('schedule-e2e');
+const scheduleDb = await runtime.getD1Database('DB', 'schedule-e2e');
+```
+
+This Node-only method accepts only worker names registered through `workers` at
+startup. It merges the supplied plain bindings into that worker's current
+bindings and passes the captured full configuration to native `mf.setOptions`;
+worker code, service bindings, assets, D1/DO/Workflow declarations and persistence
+paths remain intact. Reconfiguration restarts workerd and invalidates previous
+Miniflare handles: reacquire consumer Worker/D1 handles afterward. The support
+refreshes its own Auth D1, private caller and evidence handles and pauses its mail
+pump during reload. Call it serially between completed requests, before starting
+the consumer journey; do not reconfigure during a running school login, Workflow
+or browser request. It preserves persisted state, not in-flight requests or live
+container processes, and exposes no production API or binding override.
 
 `consumer-smoke.mjs` adds a separate actual Worker, forwards a real independently
 created login cookie to the production Auth HTTP service, calls the actual

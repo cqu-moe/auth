@@ -149,8 +149,10 @@ export async function startAuth({ expectedCommit, platform } = {}) {
     }
     await db.prepare("INSERT INTO registration_invitation(code,created_by,expires_at,used_at) VALUES ('STUVWXYZ','synthetic-fixture','2099-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z')").run();
     await new Promise(r => control.listen(0, '127.0.0.1', r));
-    const support = await platform?.ready({mf, db, origin});
-    return { origin, controlOrigin: `http://127.0.0.1:${control.address().port}`, db, support,
+    const support = await platform?.ready({mf, db, origin,
+      async refreshBindings() { db = await mf.getD1Database('DATABASE'); },
+    });
+    return { origin, controlOrigin: `http://127.0.0.1:${control.address().port}`, get db() { return db; }, support,
       commit,
       async checkArtifacts(outputDir) {
         const sensitive = ['Synthetic-only-123!', 'Synthetic-reset-only-456!', 'Synthetic-change-only-456!',

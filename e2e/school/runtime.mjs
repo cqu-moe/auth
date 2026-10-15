@@ -44,7 +44,7 @@ export async function startSchoolAuth(options = {}) {
   const deliveries = [];
   const runtimeLog = [];
   const redactDiagnostic = text => [...secrets].reduce((value,secret) => value.split(secret).join('[synthetic-secret-redacted]'),text);
-  let runtime, mf, db, caller, control, admin, polling = false, timer;
+  let runtime, mf, db, caller, control, admin, evidence, runtimeOptions, refreshAuthBindings, deliver, polling = false, timer;
   docker(['image','inspect',base]);
   docker(['build','--platform','linux/amd64','--build-context',`school-fixture=${fixtureDirectory}`,
     '--build-arg',`BASE=${base}`,'--build-arg',`RUN_ID=${runId}`,'-t',image,'-f','e2e/school/Dockerfile','.']);
@@ -84,7 +84,7 @@ export async function startSchoolAuth(options = {}) {
         if(!worker.name || ['auth-e2e','school-private-caller'].includes(worker.name) || consumerNames.has(worker.name)) throw new Error('Each consumer Worker needs a unique non-Auth name');
         consumerNames.add(worker.name);
       }
-      return {
+      runtimeOptions = {
         host:base.host,port:base.port,log:base.log,d1Persist:base.d1Persist,
         handleRuntimeStdio(stdout,stderr) {
           for (const stream of [stdout,stderr]) {
@@ -108,11 +108,12 @@ export async function startSchoolAuth(options = {}) {
           outboundService:()=>{errors.push('private egress');return new Response(null,{status:502});},
         },...workers],
       };
+      return runtimeOptions;
     },
     async ready(runtime) {
-      ({mf,db}=runtime);
+      ({mf,db,refreshBindings:refreshAuthBindings}=runtime);
       caller = await mf.getWorker('school-private-caller');
-      const evidence = await mf.getD1Database('EVIDENCE','auth-e2e');
+      evidence = await mf.getD1Database('EVIDENCE','auth-e2e');
       await evidence.prepare('CREATE TABLE workflows(id TEXT PRIMARY KEY)').run();
       await evidence.prepare('CREATE TABLE browser_outcomes(id INTEGER PRIMARY KEY,ok INTEGER,code TEXT,phase TEXT)').run();
       control = createServer(async (req,res) => {
@@ -145,7 +146,7 @@ export async function startSchoolAuth(options = {}) {
         } catch(error) {res.writeHead(500,{'content-type':'application/json'}).end(JSON.stringify({error:redactDiagnostic(describeError(error))}));}
       });
       await new Promise(r=>control.listen(0,'127.0.0.1',r));
-      async function deliver() {
+      deliver = async () => {
         if (polling) return;
         polling = true;
         try {
@@ -168,7 +169,7 @@ export async function startSchoolAuth(options = {}) {
           }
         } catch(error) {errors.push(error.message);}
         finally {polling=false;}
-      }
+      };
       timer = setInterval(()=>void deliver(),200);
       return {origin:`http://127.0.0.1:${control.address().port}`};
     },
@@ -201,8 +202,32 @@ export async function startSchoolAuth(options = {}) {
   }
   return {
     ...runtime,
+    get db() { return db; },
     schoolOrigin:runtime.support.origin,
     prepare,
+    async updateConsumerBindings(name,bindings) {
+      if(!consumerNames.has(name)) throw new Error('Unknown consumer Worker');
+      if(!bindings || typeof bindings!=='object' || Array.isArray(bindings)) throw new TypeError('Consumer bindings must be an object');
+      clearInterval(timer);
+      while(polling) await pause(20);
+      const nextOptions={...runtimeOptions,workers:runtimeOptions.workers.map(worker=>worker.name===name
+        ? {...worker,bindings:{...worker.bindings,...bindings}} : worker)};
+      try {
+        await mf.setOptions(nextOptions);
+        await mf.ready;
+        runtimeOptions=nextOptions;
+        // setOptions invalidates every Miniflare handle, including the private
+        // mail pump and Auth control server's D1; retain their persisted state.
+        await refreshAuthBindings();
+        db=runtime.db;
+        caller=await mf.getWorker('school-private-caller');
+        evidence=await mf.getD1Database('EVIDENCE','auth-e2e');
+        timer=setInterval(()=>void deliver(),200);
+      } catch(error) {
+        errors.push('Consumer Worker reconfiguration failed');
+        throw error;
+      }
+    },
     async getWorker(name) {
       if(!consumerNames.has(name)) throw new Error('Unknown consumer Worker');
       return mf.getWorker(name);
