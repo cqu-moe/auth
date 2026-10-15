@@ -12,7 +12,7 @@ export function schoolContainerCleanup({ docker, image, interceptor }) {
       assert.match(String(id), /^[a-f0-9]{64}$/);
       names.add(`workerd-${worker}-CquLoginContainer-${id}`);
     },
-    close() {
+    capture() {
       const owned = docker(['ps', '-aq', '--no-trunc', '--filter', `ancestor=${image}`]).split('\n').filter(Boolean);
       if (owned.length) {
         for (const container of JSON.parse(docker(['inspect', ...owned]))) {
@@ -20,6 +20,10 @@ export function schoolContainerCleanup({ docker, image, interceptor }) {
           names.add(container.Name.replace(/^\//, ''));
         }
       }
+      return owned;
+    },
+    close() {
+      const owned = this.capture();
       const proxies = [];
       for (const name of names) {
         const id = find(`${name}-proxy`);

@@ -178,8 +178,13 @@ export async function startSchoolAuth(options = {}) {
       return {origin:`http://127.0.0.1:${control.address().port}`};
     },
     async beforeClose() {
-      clearInterval(timer);
-      while (polling) await pause(20);
+      try {
+        clearInterval(timer);
+        while (polling) await pause(20);
+      } finally {
+        // Capture native starts before dispose can remove their business object.
+        containerCleanup.capture();
+      }
     },
     async close() {
       if (control?.listening) await new Promise((r,j)=>control.close(e=>e?j(e):r()));
