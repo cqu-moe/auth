@@ -496,6 +496,22 @@ export class CquSessionDO extends DurableObject<Env> {
             const cycle = await tx.get<SessionRecoveryCycle>("sessionRecoveryCycle");
             if (cycle?.id !== body.recoveryId) return;
             await tx.delete("sessionRecoveryCycle");
+            // Retire only this completed cycle's check. It must not become an early
+            // keepalive that competes with foreground school requests after recovery.
+            const state = await tx.get<SessionState>("state");
+            if (body.outcome === "complete" && state
+              && (await tx.get<CquStatus>("status")) === "active"
+              && state.consecutiveFailures === 0
+              && (await tx.getAlarm()) === Math.min(cycle.deadlineAt, (cycle.checkedAt ?? 0) + RETRY_INTERVAL_MS)
+              && !(await tx.get("loginInFlight"))
+              && !(await tx.list({prefix: "quickloginLogin:"})).size
+              && !((await tx.get<InterruptedLogin[]>("interruptedLogins")) ?? []).length
+              && !(await tx.get("bindingDeletion"))
+              && !(await tx.get("bindingOutbox"))
+              && !(await tx.get("bindingTransition"))
+              && !(await tx.get("codePermitPending"))) {
+              await tx.setAlarm(Math.max(Date.now() + 1_000, state.lastKeepAlive + KEEPALIVE_INTERVAL_MS));
+            }
             if (body.outcome === "failed" && (await tx.get<CquStatus>("status")) !== "active") {
               const cooldownUntil = Date.now() + 15 * 60_000;
               await tx.put("sessionRecoveryCooldownUntil", cooldownUntil);
