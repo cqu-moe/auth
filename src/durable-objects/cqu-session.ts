@@ -510,7 +510,10 @@ export class CquSessionDO extends DurableObject<Env> {
               && !(await tx.get("bindingOutbox"))
               && !(await tx.get("bindingTransition"))
               && !(await tx.get("codePermitPending"))) {
-              await tx.setAlarm(Math.max(Date.now() + 1_000, state.lastKeepAlive + KEEPALIVE_INTERVAL_MS));
+              let next = state.lastKeepAlive + KEEPALIVE_INTERVAL_MS;
+              const retryAt = await tx.get<number>("reloginRetryAt");
+              if (retryAt && retryAt > Date.now()) next = Math.min(next, retryAt);
+              await tx.setAlarm(Math.max(Date.now() + 1_000, next));
             }
             if (body.outcome === "failed" && (await tx.get<CquStatus>("status")) !== "active") {
               const cooldownUntil = Date.now() + 15 * 60_000;

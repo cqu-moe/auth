@@ -28,10 +28,10 @@ describe('completed recovery check alarm', () => {
     expect(browser).not.toHaveBeenCalled();
   });
 
-  it.each(['other alarm','CAS login','device login','cleanup','binding deletion','binding outbox','binding transition','code permit','keepalive retry','expired','failed recovery'])(
+  it.each(['other alarm','CAS login','device login','cleanup','binding deletion','binding outbox','binding transition','code permit','keepalive retry','relogin retry','expired','failed recovery'])(
     'preserves a deadline owned by %s', async kind => {
       const {stub,checkedAt} = await recovered();
-      const expected = kind === 'other alarm' ? checkedAt+30_000 : checkedAt+60_000;
+      const expected = kind === 'other alarm' ? checkedAt+30_000 : kind === 'relogin retry' ? checkedAt+300_000 : checkedAt+60_000;
       await runInDurableObject(stub, async (_, state) => {
         if(kind==='other alarm') await state.storage.setAlarm(expected);
         if(kind==='CAS login') await state.storage.put('loginInFlight',{token:'running',startedAt:checkedAt,deadlineAt:checkedAt+780_000});
@@ -41,6 +41,7 @@ describe('completed recovery check alarm', () => {
         if(kind==='binding outbox') await state.storage.put('bindingOutbox',{ownerUserId:'u1',revision:1});
         if(kind==='binding transition') await state.storage.put('bindingTransition',{id:'new-binding'});
         if(kind==='code permit') await state.storage.put('codePermitPending','pending');
+        if(kind==='relogin retry') await state.storage.put('reloginRetryAt',expected);
         if(kind==='keepalive retry') {
           const session = await state.storage.get<Record<string,unknown>>('state');
           await state.storage.put('state',{...session,consecutiveFailures:1});
@@ -49,5 +50,9 @@ describe('completed recovery check alarm', () => {
       });
       await finish(stub,kind==='failed recovery'?'failed':'complete');
       expect(await readAlarm(stub)).toBe(expected);
+      if(kind==='relogin retry') {
+        expect(await readStorage(stub,'sessionRecoveryCycle')).toBeUndefined();
+        expect(await readStorage(stub,'reloginRetryAt')).toBe(expected);
+      }
     });
 });
