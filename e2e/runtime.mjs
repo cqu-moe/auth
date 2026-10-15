@@ -11,19 +11,80 @@ export async function startAuth({ expectedCommit, platform } = {}) {
   const dir = await mkdtemp(resolve('.auth-e2e-'));
   const mails = new Map();
   const unexpected = [];
+  const artifactSecrets = [];
   let mf;
   let db;
+  let origin;
   const control = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
     if (req.method === 'GET' && url.pathname === '/mail') {
       res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({ otp: mails.get(url.searchParams.get('email')) ?? null }));
+      const mail = mails.get(url.searchParams.get('email'));
+      res.end(JSON.stringify({ otp: mail?.otp ?? null, resetUrl: mail?.resetUrl ?? null }));
+    } else if (req.method === 'POST' && url.pathname === '/artifact-secret') {
+      let body = ''; for await (const chunk of req) body += chunk;
+      const { values } = JSON.parse(body);
+      if (!Array.isArray(values) || values.length > 20 || values.some(value => typeof value !== 'string' || !value || value.length > 10000)) {
+        res.writeHead(400).end();
+      } else {
+        artifactSecrets.push(...values);
+        res.writeHead(204).end();
+      }
+    } else if (req.method === 'POST' && url.pathname === '/real-session') {
+      let body = ''; for await (const chunk of req) body += chunk;
+      const { email } = JSON.parse(body);
+      if (!/^[^@\s]+@example\.test$/.test(email ?? '')) { res.writeHead(400).end(); return; }
+      const login = await fetch(`${origin}/api/v1/auth/sign-in/email`, {
+        method: 'POST', headers: { 'content-type': 'application/json', origin },
+        body: JSON.stringify({ email, password: 'Synthetic-only-123!' }),
+      });
+      if (!login.ok) { res.writeHead(502).end(); return; }
+      const cookies = login.headers.getSetCookie().map(cookie => {
+        const [name, value] = cookie.split(';')[0].split(/=(.*)/s);
+        return { name, value: value ?? '' };
+      });
+      artifactSecrets.push(...cookies.map(cookie => cookie.value).filter(Boolean));
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ cookies }));
+    } else if (req.method === 'POST' && url.pathname === '/invitation') {
+      const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      const bytes = new Uint8Array(8);
+      crypto.getRandomValues(bytes);
+      const code = Array.from(bytes, byte => alphabet[byte % alphabet.length]).join('');
+      await db.prepare('INSERT INTO registration_invitation(code,created_by,expires_at) VALUES (?,?,?)')
+        .bind(code, 'synthetic-fixture', new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString()).run();
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ code }));
+    } else if (req.method === 'POST' && url.pathname === '/promote-admin') {
+      let body = ''; for await (const chunk of req) body += chunk;
+      const { email } = JSON.parse(body);
+      if (!/^[^@\s]+@example\.test$/.test(email ?? '')) { res.writeHead(400).end(); return; }
+      const result = await db.prepare("UPDATE \"user\" SET role='superAdmin' WHERE email=?").bind(email).run();
+      if (!result.meta.changes) res.writeHead(404).end(); else res.writeHead(204).end();
     } else if (req.method === 'POST' && url.pathname === '/registration') {
       let body = ''; for await (const chunk of req) body += chunk;
       const { required } = JSON.parse(body);
       if (typeof required !== 'boolean') { res.writeHead(400).end(); return; }
       await db.prepare("UPDATE entitlement_config SET value=? WHERE key='invitation_required'").bind(required ? '1' : '0').run();
       res.writeHead(204).end();
+    } else if (req.method === 'POST' && url.pathname === '/expire') {
+      let body = ''; for await (const chunk of req) body += chunk;
+      const request = JSON.parse(body);
+      if (request?.type === 'reset-token' && /^[A-Za-z0-9_-]+$/.test(request.token ?? '')) {
+        const result = await db.prepare("UPDATE verification SET \"expiresAt\"='2000-01-01T00:00:00.000Z' WHERE identifier=?")
+          .bind(`reset-password:${request.token}`).run();
+        if (!result.meta.changes) res.writeHead(404).end(); else res.writeHead(204).end();
+      } else if (request?.type === 'recent-auth' && /^[^@\s]+@example\.test$/.test(request.email ?? '') &&
+          ['password', 'email', 'mfa', 'admin', 'strong'].includes(request.purpose)) {
+        const session = await db.prepare('SELECT s.id FROM session s JOIN "user" u ON u.id=s."userId" WHERE u.email=? ORDER BY s."createdAt" DESC LIMIT 1')
+          .bind(request.email).first();
+        if (!session) res.writeHead(404).end();
+        else {
+          await db.prepare("UPDATE verification SET \"expiresAt\"='2000-01-01T00:00:00.000Z' WHERE identifier=?")
+            .bind(`security-proof:${session.id}:${request.purpose}`).run();
+          res.writeHead(204).end();
+        }
+      } else res.writeHead(400).end();
     } else { res.writeHead(404).end(); }
   });
   try {
@@ -37,7 +98,7 @@ export async function startAuth({ expectedCommit, platform } = {}) {
     await new Promise(r => portServer.close(r));
     // WebAuthn RP IDs are registrable domains; an IP-address origin makes Chrome
     // reject even a valid virtual-authenticator ceremony.
-    const origin = `http://localhost:${port}`;
+    origin = `http://localhost:${port}`;
     const bundle = join(dir, platform?.bundleName ?? 'index.js');
     const options = { name: 'auth-e2e', host: '127.0.0.1', port, modules: [{ type: 'ESModule', path: bundle, contents: await readFile(bundle, 'utf8') }],
        compatibilityDate: '2026-05-01', compatibilityFlags: ['nodejs_compat'],
@@ -57,11 +118,15 @@ export async function startAuth({ expectedCommit, platform } = {}) {
         const url = new URL(request.url);
         if (url.origin === 'https://api.resend.com' && url.pathname === '/emails' && request.method === 'POST') {
           const mail = await request.json();
-          const otp = mail.html?.match(/letter-spacing:6px">(\d{6})</)?.[1];
-          if (!otp) throw new Error('Unexpected external email payload');
+          const html = typeof mail.html === 'string' ? mail.html : '';
+          const otp = html.match(/letter-spacing:6px">(\d{6})</)?.[1];
+          const encodedHref = html.match(/<a href="([^"]+)"/)?.[1];
+          const resetUrl = encodedHref?.replace(/&amp;/g, '&');
+          if (!otp && !resetUrl) throw new Error('Unexpected external email payload');
+          if (resetUrl && new URL(resetUrl).origin !== origin) throw new Error('Non-application reset link denied');
           for (const recipient of [].concat(mail.to)) {
             if (!recipient.endsWith('@example.test')) throw new Error('Non-synthetic email denied');
-            mails.set(recipient, otp);
+            mails.set(recipient, { ...(otp ? { otp } : {}), ...(resetUrl ? { resetUrl } : {}) });
           }
           return Response.json({ id: crypto.randomUUID() });
         }
@@ -88,14 +153,17 @@ export async function startAuth({ expectedCommit, platform } = {}) {
     return { origin, controlOrigin: `http://127.0.0.1:${control.address().port}`, db, support,
       commit,
       async checkArtifacts(outputDir) {
-        const sensitive = ['Synthetic-only-123!', ...mails.values()];
+        const sensitive = ['Synthetic-only-123!', 'Synthetic-reset-only-456!', 'Synthetic-change-only-456!',
+          ...mails.values().flatMap(mail => [mail.otp, mail.resetUrl].filter(Boolean)), ...artifactSecrets];
         async function inspect(directory) {
           for (const entry of await readdir(directory, { withFileTypes: true })) {
             const path = join(directory, entry.name);
             if (entry.isDirectory()) await inspect(path);
             else if (/\.(json|txt|md|log)$/.test(entry.name)) {
               const text = await readFile(path, 'utf8');
-              if (sensitive.some(value => text.includes(value))) throw new Error('Sensitive synthetic value found in E2E text artifacts');
+              if (sensitive.some(value => text.includes(value))) {
+                throw new Error('Sensitive synthetic value found in E2E text artifacts');
+              }
             }
           }
         }
@@ -107,9 +175,9 @@ export async function startAuth({ expectedCommit, platform } = {}) {
           new Promise((r,j) => control.close(e => e ? j(e) : r())), mf.dispose(),
         ]);
         const cleanup = await Promise.allSettled([platform?.close(), rm(dir, {recursive:true,force:true})]);
-        const errors = [...before,...results,...cleanup].filter(result => result.status === 'rejected');
-        if (errors.length) throw new AggregateError(errors.map(result=>result.reason), 'Auth runtime cleanup failed');
-        if (unexpected.length) throw new Error(`Unexpected Worker egress denied (${unexpected.length} requests)`);
+        const errors = [...before,...results,...cleanup].flatMap(result => result.status === 'rejected' ? [result.reason] : []);
+        if (unexpected.length) errors.push(new Error(`Unexpected Worker egress denied (${unexpected.length} requests)`));
+        if (errors.length) throw new AggregateError(errors, 'Auth runtime cleanup failed');
         return {directoryRemoved:!(await readdir('.')).some(name=>resolve(name)===dir),
           platform:cleanup[0].status==='fulfilled'?cleanup[0].value:undefined};
       } };
