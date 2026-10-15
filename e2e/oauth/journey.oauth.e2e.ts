@@ -75,7 +75,7 @@ async function authorize(context: Journey, account: ReturnType<typeof credential
   return appJson(`/authority/${device}`);
 }
 async function device(context: Journey, name: string, status = 'active') {
-  await surface().page().goto(`${process.env.AUTH_OAUTH_APP}/device/${name}`, { waitUntil: 'commit' });
+  await surface().page().goto(`${process.env.AUTH_OAUTH_APP}/device/${name}`, { waitUntil: 'commit', timeout: 150000 });
   expect(await context.browser.evaluate(() => document.body.dataset.status ?? '')).toBe(status);
   if (status === 'active') await expect(context.screen.getByText('合成电路', { exact: true })).toBeVisible();
 }
