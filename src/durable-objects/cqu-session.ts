@@ -1,4 +1,5 @@
 import { classifyContainerLoginFailure } from "../services/cqu-2fa/login-failure";
+import { isBanned } from "../services/oauth-tokens";
 import type { BindingSnapshot } from "../services/quicklogin/binding-snapshot";
 import { DurableObject } from "cloudflare:workers";
 import { CquSsoClient, type CasCookies, type CquStorageState, CquSsoError } from "../services/cqu-sso";
@@ -817,6 +818,10 @@ export class CquSessionDO extends DurableObject<Env> {
       if (await this.getStatus() !== "revoked") await this.revoke();
       return false;
     }
+    const owner = await this.env.DATABASE.prepare(
+      "SELECT banned, banExpires FROM user WHERE id = ?"
+    ).bind(userId).first<{ banned: number | null; banExpires: string | null }>();
+    if (owner && isBanned({ banned: owner.banned === 1, banExpires: owner.banExpires })) return false;
     return true;
   }
 
@@ -2235,7 +2240,7 @@ export class CquSessionDO extends DurableObject<Env> {
     }
     await this.pruneQuickloginMintReceipts(Date.now());
     await this.loadState();
-    if (!this.state) return;
+    if (!this.state || !(await this.reconcileBinding())) return;
     // alarm 的 13 分钟平台预算在入口建立一次,贯穿保活/主动重登;
     // 内部函数不得重新取得新的 13 分钟。
     const deadlineAt = resolveBrowserDeadline(undefined, Date.now());
@@ -3057,6 +3062,7 @@ export class CquSessionDO extends DurableObject<Env> {
   private async recoveryTick(recoveryId: string): Promise<{state: "complete" | "needs_reauth" | "waiting" | "failed"; retryAt?: number}> {
     const cycle = await this.ctx.storage.get<SessionRecoveryCycle>("sessionRecoveryCycle");
     if (!cycle || cycle.id !== recoveryId) return {state: "complete"};
+    if (!(await this.reconcileBinding())) return {state: "failed"};
     if (Date.now() >= cycle.deadlineAt) return {state: "failed"};
     const status = await this.getStatus();
     if (status === "needs_reauth" || status === "revoked" || status === "unbound") return {state: "needs_reauth"};

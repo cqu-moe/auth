@@ -20,7 +20,8 @@
     "db:migrate:local": "wrangler d1 migrations apply auth-cqu-moe-db --local",
     "build:frontend": "pnpm --dir frontend run build",
     "test:e2e": "npm run typecheck:e2e && VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build && node e2e/run.mjs",
-    "typecheck:e2e": "tsc -p e2e/tsconfig.json"
+    "typecheck:e2e": "tsc -p e2e/tsconfig.json",
+    "test:e2e:school": "npm run typecheck:e2e && tsc -p e2e/school/tsconfig.json && VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build && node e2e/school/build.mjs && node e2e/school/run.mjs"
   },
   "repository": {
     "type": "git",

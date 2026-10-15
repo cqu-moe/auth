@@ -5,7 +5,7 @@ import { resolve, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 // Node-side lifecycle API. Never import this from production or expose seed controls on Auth.
-export async function startAuth({ expectedCommit } = {}) {
+export async function startAuth({ expectedCommit, platform } = {}) {
   const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   if (expectedCommit && expectedCommit !== commit) throw new Error('Auth commit does not match the pinned dependency');
   const dir = await mkdtemp(resolve('.auth-e2e-'));
@@ -27,7 +27,7 @@ export async function startAuth({ expectedCommit } = {}) {
     } else { res.writeHead(404).end(); }
   });
   try {
-    execFileSync(process.execPath, ['node_modules/wrangler/bin/wrangler.js', 'deploy', '--dry-run', '--config', 'e2e/wrangler.jsonc', '--outdir', dir], {
+    execFileSync(process.execPath, ['node_modules/wrangler/bin/wrangler.js', 'deploy', '--dry-run', '--config', platform?.buildConfig ?? 'e2e/wrangler.jsonc', '--outdir', dir], {
       stdio: 'pipe', env: { PATH: process.env.PATH, WRANGLER_SEND_METRICS: 'false', WRANGLER_LOG_PATH: join(dir, 'build.log') },
     });
     // Reserve an OS-selected port without inheriting any developer Wrangler config/secrets.
@@ -35,8 +35,11 @@ export async function startAuth({ expectedCommit } = {}) {
     await new Promise(r => portServer.listen(0, '127.0.0.1', r));
     const port = portServer.address().port;
     await new Promise(r => portServer.close(r));
-    const origin = `http://127.0.0.1:${port}`;
-    mf = new Miniflare({ name: 'auth-e2e', host: '127.0.0.1', port, modules: [{ type: 'ESModule', path: join(dir, 'index.js'), contents: await readFile(join(dir, 'index.js'), 'utf8') }],
+    // WebAuthn RP IDs are registrable domains; an IP-address origin makes Chrome
+    // reject even a valid virtual-authenticator ceremony.
+    const origin = `http://localhost:${port}`;
+    const bundle = join(dir, platform?.bundleName ?? 'index.js');
+    const options = { name: 'auth-e2e', host: '127.0.0.1', port, modules: [{ type: 'ESModule', path: bundle, contents: await readFile(bundle, 'utf8') }],
        compatibilityDate: '2026-05-01', compatibilityFlags: ['nodejs_compat'],
       log: new Log(LogLevel.ERROR),
       d1Databases: { DATABASE: 'auth-e2e' }, d1Persist: join(dir, 'd1'),
@@ -65,7 +68,8 @@ export async function startAuth({ expectedCommit } = {}) {
         unexpected.push(url.origin);
         return new Response('Unexpected external request denied', { status: 502 });
       },
-    });
+    };
+    mf = new Miniflare(platform ? platform.configure(options, dir) : options);
     await mf.ready;
     db = await mf.getD1Database('DATABASE');
     for (const file of (await readdir('drizzle/migrations')).filter(f => f.endsWith('.sql')).sort()) {
@@ -80,7 +84,8 @@ export async function startAuth({ expectedCommit } = {}) {
     }
     await db.prepare("INSERT INTO registration_invitation(code,created_by,expires_at,used_at) VALUES ('STUVWXYZ','synthetic-fixture','2099-01-01T00:00:00.000Z','2020-01-01T00:00:00.000Z')").run();
     await new Promise(r => control.listen(0, '127.0.0.1', r));
-    return { origin, controlOrigin: `http://127.0.0.1:${control.address().port}`, db,
+    const support = await platform?.ready({mf, db, origin});
+    return { origin, controlOrigin: `http://127.0.0.1:${control.address().port}`, db, support,
       commit,
       async checkArtifacts(outputDir) {
         const sensitive = ['Synthetic-only-123!', ...mails.values()];
@@ -97,18 +102,26 @@ export async function startAuth({ expectedCommit } = {}) {
         await inspect(outputDir);
       },
       async close() {
+        const before = await Promise.allSettled([platform?.beforeClose()]);
         const results = await Promise.allSettled([
           new Promise((r,j) => control.close(e => e ? j(e) : r())), mf.dispose(),
         ]);
-        await rm(dir, { recursive: true });
-        const errors = results.filter(result => result.status === 'rejected');
+        const cleanup = await Promise.allSettled([platform?.close(), rm(dir, {recursive:true,force:true})]);
+        const errors = [...before,...results,...cleanup].filter(result => result.status === 'rejected');
         if (errors.length) throw new Error('Auth runtime cleanup failed');
         if (unexpected.length) throw new Error(`Unexpected Worker egress denied (${unexpected.length} requests)`);
+        return {directoryRemoved:!(await readdir('.')).some(name=>resolve(name)===dir),
+          platform:cleanup[0].status==='fulfilled'?cleanup[0].value:undefined};
       } };
   } catch (error) {
-    control.close();
-    if (mf) await mf.dispose();
-    await rm(dir, { recursive: true, force: true });
+    const before = await Promise.allSettled([platform?.beforeClose()]);
+    const disposed = await Promise.allSettled([
+      mf?.dispose(),
+      control.listening ? new Promise((r,j)=>control.close(e=>e?j(e):r())) : undefined,
+    ]);
+    const cleaned = await Promise.allSettled([platform?.close(), rm(dir, {recursive:true,force:true})]);
+    const failures = [...before,...disposed,...cleaned].filter(result=>result.status==='rejected');
+    if (failures.length) throw new AggregateError([error,...failures.map(result=>result.reason)], 'Auth startup and cleanup failed');
     throw error;
   }
 }

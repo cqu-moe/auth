@@ -4,5 +4,5 @@
     "lib": ["ESNext", "DOM"], "types": ["node"],
     "strict": true, "skipLibCheck": true, "noEmit": true
   },
-  "include": ["*.e2e.ts", "../e2e.config.ts"]
+  "include": ["*.e2e.ts", "school/*.school.ts", "../e2e.config.ts", "../e2e.school.config.ts"]
 }
