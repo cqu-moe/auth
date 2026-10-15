@@ -111,7 +111,31 @@ jobs:
       - run: node e2e/school/workflow-probe.mjs
       - run: VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build
       - run: node e2e/school/build.mjs
-      - run: node e2e/school/container-probe.mjs
+      - name: Probe real school container with Docker diagnostics
+        run: |
+          set +e
+          diagnostics=.e2e/linux-docker-diagnostics
+          mkdir -p "$diagnostics"
+          {
+            printf '%s\n' "socket=$(readlink -f /var/run/docker.sock)"
+            ls -l /var/run/docker.sock
+            docker version --format 'Client={{.Client.Version}} Server={{.Server.Version}} API={{.Client.APIVersion}}'
+            docker info --format 'Driver={{.Driver}} RootDir={{.DockerRootDir}} CgroupDriver={{.CgroupDriver}} CgroupVersion={{.CgroupVersion}} Security={{json .SecurityOptions}}'
+            docker context ls
+          } > "$diagnostics/engine.txt" 2>&1
+          docker image inspect cloudflare/proxy-everything:3cb1195@sha256:0ef6716c52430096900b150d84a3302057d6cd2319dae7987128c85d0733e3c8 \
+            --format '{{json .Config}}' > "$diagnostics/egress-image.json" 2>&1
+          docker network ls --format '{{.ID}} {{.Name}} {{.Driver}} {{.Scope}}' > "$diagnostics/networks-before.txt" 2>&1
+          event_start=$(date -u +%Y-%m-%dT%H:%M:%S)
+          docker events --since "$event_start" --filter type=container --filter type=network \
+            > "$diagnostics/events.jsonl" 2>&1 &
+          event_pid=$!
+          node e2e/school/container-probe.mjs
+          probe_status=$?
+          kill "$event_pid" 2>/dev/null
+          wait "$event_pid" 2>/dev/null
+          docker network ls --format '{{.ID}} {{.Name}} {{.Driver}} {{.Scope}}' > "$diagnostics/networks-after.txt" 2>&1
+          exit "$probe_status"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
