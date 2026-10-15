@@ -7,6 +7,10 @@ const output = process.env.AUTH_E2E_OUTPUT || `.e2e/run-${Date.now()}`;
 if (!resolve(output).startsWith(resolve('.e2e') + '/')) throw new Error('E2E output must be a child of .e2e');
 const variants = process.env.AUTH_E2E_MOBILE ? ['mobile'] : ['desktop', 'mobile'];
 const userArgs = process.argv.slice(2);
+// Discovery already applied the user's title filters. Repeating them would OR
+// with the group's exact titles and run unrelated journeys in this runtime.
+const executionArgs = userArgs.filter((arg, index) =>
+  arg !== '--grep' && !arg.startsWith('--grep=') && userArgs[index - 1] !== '--grep');
 
 const slug = value => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48);
 const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -187,7 +191,7 @@ for (const variant of variants) {
         runtime = await startAuth({ expectedCommit: process.env.AUTH_E2E_EXPECT_COMMIT });
         evidence.commit = runtime.commit;
         console.log(`Auth built Worker ready; commit ${runtime.commit}; ${variant}; runtime ${index + 1}/${groups.length} (${group.name})`);
-        const outcome = await runE2EGroup({ args: [...userArgs, ...selectionArgsFor(group.pairs)], dir, variant, runtime });
+        const outcome = await runE2EGroup({ args: [...executionArgs, ...selectionArgsFor(group.pairs)], dir, variant, runtime });
         logs.push(outcome.log);
         await writeFile(join(dir, 'runner.log'), outcome.log);
         if (outcome.code) {

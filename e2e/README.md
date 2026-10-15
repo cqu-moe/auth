@@ -20,6 +20,8 @@ WebAuthn uses Chromium CDP virtual authenticators with protocol-level user verif
 
 Every run retains aggregate `.e2e/run-<time>/{desktop,mobile}/discovery.json`, `report.json`, `runner.log`, and `runtime.json`, plus numbered per-runtime directories containing their own framework report, runner log and cleanup record. Aggregate group reports keep their path relative to that viewport directory. No retries are enabled. Zero tests, skipped/interrupted required cases, selected or executed ID sets that differ from framework discovery, egress, secret leakage in text artifacts, startup and cleanup failures fail the command. Runtime cleanup always attempts to write its record; a cleanup error is retained alongside the original run error rather than replacing it. Text-artifact scanning covers synthetic passwords, application OTPs, reset URLs, TOTP URIs, recovery codes and cookies; revealed TOTP/recovery text is also hidden while the real UI remains active. Cleanup stops workerd and the mail control server and removes the run's SQLite/bundle directory. Never publish a runtime DB or mail payload. Public CI uploads only `.e2e/` synthetic reports.
 
+User title greps are applied during framework discovery. Group execution replaces them with that group's exact titles; the CLI treats repeated `--grep` options as alternatives, so forwarding a broader grep would break per-journey runtime isolation. Other execution options are retained.
+
 ## Downstream fixed-commit interface
 
 Consumers must check out a specific Auth commit (the integration merge owner records the final ticket commit), install its lockfiles and build its frontend. Never track moving `main`. The API is ESM, run with this Auth checkout as the process working directory:
