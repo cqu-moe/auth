@@ -2,6 +2,7 @@
   "name": "auth",
   "version": "1.0.0",
   "scripts": {
+    "postinstall": "node scripts/apply-miniflare-transport-patch.mjs",
     "dev": "wrangler dev",
     "deploy": "npm run build:frontend && wrangler deploy --var QUICKLOGIN_SERVER_BUILD:$(git rev-parse HEAD) --var RELEASE:$(git rev-parse HEAD)",
     "typecheck": "tsc --noEmit",
