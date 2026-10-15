@@ -16,6 +16,7 @@ export default function Login() {
   const { refetch: refetchSession } = authClient.useSession();
   const [searchParams] = useSearchParams();
   const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
+  const requiresFreshSession = searchParams.get("reason") === "session-not-fresh";
   const scheduleSource = isScheduleBindingContinuation(postLoginRedirect, window.location.origin);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -71,8 +72,8 @@ export default function Login() {
 
   return (
     <AuthLayout
-      title="欢迎回来"
-      description={scheduleSource ? "继续使用重庆大学课表" : "登录你的账户，继续使用校园服务。"}
+      title={requiresFreshSession ? "重新登录" : "欢迎回来"}
+      description={requiresFreshSession ? "为了确保安全，请重新登录后查看登录设备。" : scheduleSource ? "继续使用重庆大学课表" : "登录你的账户，继续使用校园服务。"}
     >
       <form onSubmit={handleSubmit} className="space-y-4" aria-busy={loading}>
         {error && (
