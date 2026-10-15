@@ -191,9 +191,10 @@ export async function startSchoolAuth(options = {}) {
       if (control?.listening) await new Promise((r,j)=>control.close(e=>e?j(e):r()));
       const containers = containerCleanup.close();
       docker(['image','rm',image]);
-      if (errors.length) throw new Error(`School cleanup/transport failed: ${[...new Set(errors)].join('; ')}`);
-      return {...containers,fixtureImageRemoved:true,imageId,base,fixtureHash,
+      const cleanupEvidence = {...containers,fixtureImageRemoved:true,imageId,base,fixtureHash,
         runtimeLog:runtimeLog.map(redactDiagnostic)};
+      if (errors.length) throw Object.assign(new Error(`School cleanup/transport failed: ${[...new Set(errors)].join('; ')}`), {cleanupEvidence});
+      return cleanupEvidence;
     },
   };
   runtime = await startAuth({...options,platform});
@@ -208,6 +209,7 @@ export async function startSchoolAuth(options = {}) {
     ...runtime,
     get db() { return db; },
     schoolOrigin:runtime.support.origin,
+    schoolFixture: {image,imageId},
     prepare,
     async updateConsumerBindings(name,bindings) {
       if(!consumerNames.has(name)) throw new Error('Unknown consumer Worker');
@@ -275,6 +277,7 @@ export async function startSchoolAuth(options = {}) {
       }
       return {
         containers,
+        runtimeLog:runtimeLog.map(redactDiagnostic),
         transportErrors:[...new Set(errors)],
         deliveries:deliveries.map(({accepted,reason})=>({accepted,reason})),
         browserOutcomes:(await evidence.prepare('SELECT ok,code,phase FROM browser_outcomes ORDER BY id').all()).results,
@@ -283,5 +286,9 @@ export async function startSchoolAuth(options = {}) {
       };
     },
   };
-  } catch(error) {await runtime.close();throw error;}
+  } catch(error) {
+    try { await runtime.close(); }
+    catch(cleanupError) { throw new AggregateError([error,cleanupError], 'School preparation and cleanup failed'); }
+    throw error;
+  }
 }

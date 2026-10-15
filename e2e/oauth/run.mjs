@@ -18,7 +18,8 @@ for (let index = 0; index < args.length; index++) {
 const variants = process.env.AUTH_E2E_MOBILE ? ['mobile'] : ['desktop', 'mobile'];
 const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const serialize = error => ({ name: error?.name ?? 'Error', message: error?.message ?? String(error),
-  ...(error instanceof AggregateError ? { causes: error.errors.map(serialize) } : {}) });
+  ...(error instanceof AggregateError ? { causes: error.errors.map(serialize) } : {}),
+  ...(error?.cleanupEvidence ? { cleanupEvidence: error.cleanupEvidence } : {}) });
 const json = (path, value) => writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
 const env = variant => ({ PATH: process.env.PATH, TMPDIR: process.env.TMPDIR, CI: process.env.CI,
   AUTH_E2E_MOBILE: variant === 'mobile' ? '1' : '', DO_NOT_TRACK: '1', E2E_TELEMETRY_DISABLED: '1', WRANGLER_SEND_METRICS: 'false' });
@@ -91,7 +92,8 @@ for (const variant of variants) {
       const errors = [];
       try {
         runtime = await startOAuthAuth({ expectedCommit: process.env.AUTH_E2E_EXPECT_COMMIT });
-        group.commit = runtime.commit; group.bundleFingerprint = runtime.bundleFingerprint;
+        group.commit = runtime.commit; group.bundleFingerprint = runtime.bundleFingerprint; group.fixture = runtime.schoolFixture;
+        await json(join(groupDir, 'fixture.json'), group.fixture);
         group.stage = 'journey';
         const child = await childRun(['run', '--config', config, pair.file,
           '--grep', `^${escapeRegExp(pair.titlePath.join(' '))}$`, '--output', groupDir], {
@@ -140,7 +142,17 @@ for (const variant of variants) {
               || group.resources.platform?.fixtureImageRemoved !== true) throw new Error('OAuth school container/proxy cleanup was not verified');
             group.proxyReadback = readRemovedProxies(group.resources.platform);
             if (group.business && !group.proxyReadback.ids.length) throw new Error('OAuth business journey has no removed native proxy evidence');
-          } catch (error) { group.cleanup = 'failed'; errors.push(error); }
+          } catch (error) {
+            group.cleanup = 'failed'; errors.push(error);
+            const findCleanup = failure => failure?.cleanupEvidence ?? (failure instanceof AggregateError
+              ? failure.errors.map(findCleanup).find(Boolean) : undefined);
+            const partial = findCleanup(error);
+            if (partial) {
+              group.failedCleanupEvidence = partial;
+              try { group.proxyReadback = readRemovedProxies(partial); }
+              catch (readbackError) { errors.push(readbackError); }
+            }
+          }
         }
         group.sourceUnchanged = evidence.sourceHash === sourceFingerprint();
         if (!group.sourceUnchanged) errors.push(new Error('Source changed during OAuth run'));
