@@ -22,8 +22,7 @@ const wrongOtpFor = (name: string) => async () => {
   return delivered === '111111' ? '222222' : '111111';
 };
 
-async function currentTotp() {
-  const uri = authSecuritySecrets.mfaRawSecret;
+async function currentTotp(uri = authSecuritySecrets.mfaRawSecret) {
   if (!uri) throw new Error('TOTP enrollment response has not been captured');
   const encoded = new URL(uri).searchParams.get('secret');
   if (!encoded) throw new Error('Captured TOTP URI has no secret');
@@ -49,6 +48,11 @@ export default {
   timeout: 90000, assertionTimeout: 10000,
   output: process.env.AUTH_E2E_OUTPUT || '.e2e',
   credentials: {
+    ...Object.fromEntries(['manager', 'member', 'invitee', 'reviewer'].map(name => [name, { username: `${name}@example.test`, password: 'Synthetic-only-123!' }])),
+    recovered: { username: 'member@example.test', password: async () => {
+      if (!authSecuritySecrets.recoveryPassword) throw new Error('Recovery result not captured');
+      return authSecuritySecrets.recoveryPassword;
+    } },
     journey: { username: 'journey@example.test', password: 'Synthetic-only-123!' },
     profile: { username: 'profile@example.test', password: 'Synthetic-only-123!' },
     profileNew: { username: 'profile-new@example.test', password: 'Synthetic-only-123!' },
@@ -67,7 +71,13 @@ export default {
     profileOtp: otpFor('profile'), wrongProfileOtp: wrongOtpFor('profile'),
     profileNewOtp: otpFor('profileNew'), wrongProfileNewOtp: wrongOtpFor('profileNew'),
     resetOtp: otpFor('reset'), mfaOtp: otpFor('mfa'), passkeyOtp: otpFor('passkey'), recentOtp: otpFor('recent'), adminStrongOtp: otpFor('adminStrong'), revokeOtp: otpFor('revoke'),
-    mfaTotp: currentTotp, wrongMfaTotp: wrongCurrentTotp,
+    ...Object.fromEntries(['manager', 'member', 'invitee', 'reviewer'].map(name => [`${name}Otp`, otpFor(name)])),
+    adminTotp: async () => await currentTotp(authSecuritySecrets.adminRawSecret),
+    managedInvitation: async () => {
+      if (!authSecuritySecrets.managedInvitation) throw new Error('Managed invitation has not been created');
+      return authSecuritySecrets.managedInvitation;
+    },
+    mfaTotp: () => currentTotp(), wrongMfaTotp: wrongCurrentTotp,
     mfaBackupCode: async () => {
       const code = authSecuritySecrets.mfaBackupCode;
       if (!code) throw new Error('Recovery codes have not been captured');
