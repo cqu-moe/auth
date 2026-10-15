@@ -1,6 +1,9 @@
 type AuthSecuritySecrets = {
   mfaRawSecret?: string;
   mfaBackupCode?: string;
+  adminRawSecret?: string;
+  recoveryPassword?: string;
+  managedInvitation?: string;
 };
 
 const holder = globalThis as typeof globalThis & { authE2eSecuritySecrets?: AuthSecuritySecrets };
