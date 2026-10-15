@@ -11,6 +11,9 @@ import { browserBase } from './image.mjs';
 
 const docker = args => execFileSync('docker', args, {encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
 const pause = ms => new Promise(r=>setTimeout(r,ms));
+const describeError = error => error instanceof AggregateError
+  ? `${error.message}: ${error.errors.map(describeError).join('; ')}`
+  : `${error?.name ?? 'Error'}: ${error?.message ?? String(error)}`;
 
 export async function startSchoolAuth(options = {}) {
   const commit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
@@ -27,6 +30,7 @@ export async function startSchoolAuth(options = {}) {
   const used = new Set();
   const errors = [];
   const deliveries = [];
+  const runtimeLog = [];
   let runtime, mf, db, caller, control, admin, polling = false, timer;
   docker(['image','inspect',base]);
   docker(['build','--platform','linux/amd64','--build-context',`school-fixture=${fixtureDirectory}`,
@@ -66,7 +70,14 @@ export async function startSchoolAuth(options = {}) {
       }
       return {
         host:base.host,port:base.port,log:base.log,d1Persist:base.d1Persist,
-        handleRuntimeStdio(stdout,stderr) {stdout.resume();stderr.resume();},
+        handleRuntimeStdio(stdout,stderr) {
+          for (const stream of [stdout,stderr]) {
+            stream.on('data',chunk => {
+              runtimeLog.push(chunk.toString('utf8').trim());
+              while (runtimeLog.length > 400) runtimeLog.shift();
+            });
+          }
+        },
         containerEngine:{localDocker:{socketPath:process.env.AUTH_SCHOOL_DOCKER_SOCKET || docker(['context','inspect','--format','{{.Endpoints.docker.Host}}']).replace(/^unix:\/\//,'')}},
         durableObjectsPersist:join(dir,'do'), workflowsPersist:join(dir,'workflows'),
         workers:[{
@@ -115,7 +126,7 @@ export async function startSchoolAuth(options = {}) {
             value = await admin.entitlement(userId,input.enabled);
           } else throw new Error('Unknown school control');
           res.setHeader('content-type','application/json');res.end(JSON.stringify(value));
-        } catch {res.writeHead(500).end('School test control failed');}
+        } catch(error) {res.writeHead(500,{'content-type':'application/json'}).end(JSON.stringify({error:describeError(error)}));}
       });
       await new Promise(r=>control.listen(0,'127.0.0.1',r));
       async function deliver() {
@@ -160,7 +171,7 @@ export async function startSchoolAuth(options = {}) {
       if (docker(['ps','-aq','--filter',`ancestor=${image}`])) throw new Error('School container cleanup failed');
       docker(['image','rm',image]);
       if (errors.length) throw new Error(`School cleanup/transport failed: ${[...new Set(errors)].join('; ')}`);
-      return {containerObjectsRemoved:true,fixtureImageRemoved:true,imageId,base,fixtureHash};
+      return {containerObjectsRemoved:true,fixtureImageRemoved:true,imageId,base,fixtureHash,runtimeLog};
     },
   };
   runtime = await startAuth({...options,platform});

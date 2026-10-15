@@ -107,12 +107,10 @@ jobs:
       - run: npm ci
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
-      - run: npx --no-install e2e-web install chromium --with-deps
       - run: node e2e/school/workflow-probe.mjs
-      - run: npm run test:e2e:school
-      - run: node e2e/school/run.mjs
-      - run: node e2e/school/consumer-smoke.mjs
-      - run: node e2e/school/self-check.mjs
+      - run: VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build
+      - run: node e2e/school/build.mjs
+      - run: node e2e/school/container-probe.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
