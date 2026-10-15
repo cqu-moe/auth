@@ -223,7 +223,7 @@ export default function SecuritySection({ twoFactorEnabled }: SecuritySectionPro
           </Button>
         </div>
 
-        <div className="pt-4">
+        <div className="py-4">
           <div className="flex items-center justify-between gap-4">
             <span className="w-16 shrink-0 text-sm text-muted-foreground">密码</span>
             <span className="min-w-0 flex-1 text-sm text-muted-foreground">定期更换密码可提升账户安全性。</span>

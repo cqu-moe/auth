@@ -480,8 +480,10 @@ export function SettingsSecurity() {
   return (
     <Layout>
       <PageHeader title="安全" description="二次验证与登录密码。" />
-      <SecuritySection twoFactorEnabled={user?.twoFactorEnabled === true} />
-      <PasskeySettings />
+      <div className="space-y-8">
+        <SecuritySection twoFactorEnabled={user?.twoFactorEnabled === true} />
+        <PasskeySettings />
+      </div>
     </Layout>
   );
 }
