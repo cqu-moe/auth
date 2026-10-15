@@ -93,6 +93,7 @@ jobs:
       DO_NOT_TRACK: '1'
       WRANGLER_SEND_METRICS: 'false'
       AUTH_SCHOOL_DOCKER_SOCKET: /var/run/docker.sock
+      AUTH_SCHOOL_CONTAINER_DIAGNOSTICS: '1'
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:

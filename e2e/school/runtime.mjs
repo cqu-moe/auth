@@ -4,6 +4,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { join,resolve } from 'node:path';
+import { platform, release } from 'node:os';
 import { startAuth } from '../runtime.mjs';
 import { prepareAccount } from '../prepare-account.mjs';
 import { prepareSchoolAdmin } from './admin.mjs';
@@ -179,6 +180,35 @@ export async function startSchoolAuth(options = {}) {
         networks:JSON.parse(docker(['inspect','--format','{{json .NetworkSettings.Networks}}',id])),
         logs:redactDiagnostic(docker(['logs','--tail','200',id])),
       })) : [];
+      const proxyDiagnostics = process.env.AUTH_SCHOOL_CONTAINER_DIAGNOSTICS
+        ? docker(['ps','-aq','--filter','name=workerd-auth-e2e-CquLoginContainer-']).split('\n')
+          .filter(Boolean).map(id => {
+            const hostConfig=JSON.parse(docker(['inspect','--format','{{json .HostConfig}}',id]));
+            return {
+              id,
+              name:docker(['inspect','--format','{{.Name}}',id]),
+              image:docker(['inspect','--format','{{.Config.Image}}',id]),
+              state:JSON.parse(docker(['inspect','--format','{{json .State}}',id])),
+              hostConfig:{
+                privileged:hostConfig.Privileged,
+                capAdd:hostConfig.CapAdd,
+                devices:hostConfig.Devices,
+                securityOpt:hostConfig.SecurityOpt,
+                sysctls:hostConfig.Sysctls,
+                networkMode:hostConfig.NetworkMode,
+                portBindings:hostConfig.PortBindings,
+              },
+              networks:JSON.parse(docker(['inspect','--format','{{json .NetworkSettings.Networks}}',id])),
+              logs:redactDiagnostic(docker(['logs','--tail','200',id])),
+            };
+          })
+        : [];
+      const networkDiagnostics = process.env.AUTH_SCHOOL_CONTAINER_DIAGNOSTICS && platform() === 'linux' ? {
+        kernel:release(),
+        srcValidMark:readFileSync('/proc/sys/net/ipv4/conf/all/src_valid_mark','utf8').trim(),
+        rpFilter:readFileSync('/proc/sys/net/ipv4/conf/all/rp_filter','utf8').trim(),
+        devconfInheritInitNet:readFileSync('/proc/sys/net/core/devconf_inherit_init_net','utf8').trim(),
+      } : undefined;
       // The local engine stops instances but can retain exited Docker objects.
       // Reclaim only this run's unique image, then independently check absence.
       if (remaining) {
@@ -187,7 +217,8 @@ export async function startSchoolAuth(options = {}) {
       if (docker(['ps','-aq','--filter',`ancestor=${image}`])) throw new Error('School container cleanup failed');
       docker(['image','rm',image]);
       if (errors.length) throw new Error(`School cleanup/transport failed: ${[...new Set(errors)].join('; ')}`);
-      return {containerObjectsRemoved:true,fixtureImageRemoved:true,imageId,base,fixtureHash,runtimeLog,containerDiagnostics};
+      return {containerObjectsRemoved:true,fixtureImageRemoved:true,imageId,base,fixtureHash,runtimeLog,
+        containerDiagnostics,proxyDiagnostics,networkDiagnostics};
     },
   };
   runtime = await startAuth({...options,platform});
