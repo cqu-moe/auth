@@ -18,7 +18,7 @@
 //     入口同 DO(会抛 "Cannot perform I/O on behalf of a different Durable Object")。故 M7 不靠
 //     input-gate 真交错, 而是让 keepalive spy 往【同一 state.storage】写 revoked(同 DO 上下文)
 //     来复现「探活在途 status 被改写」的因果, 断言写回分支命中撤销守卫。
-import { abortAllDurableObjects, runInDurableObject } from "cloudflare:test";
+import { abortAllDurableObjects, reset, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:test";
 import { describe, it, expect, afterEach, vi, type MockInstance } from "vitest";
 import { encrypt } from "../../src/services/crypto";
@@ -39,7 +39,9 @@ import {
   spyBrowserFetch,
 } from "./helpers";
 
-afterEach(() => {
+afterEach(async () => {
+  // Retire prior objects and alarms before the next test installs browser spies.
+  await reset();
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
