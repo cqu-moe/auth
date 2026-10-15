@@ -2889,6 +2889,131 @@ describe("external-search action", () => {
   });
 });
 
+describe("external-directory action", () => {
+  const recipe = {
+    kind: "instructors",
+    classIds: ["740923", "744669"],
+    expectedSessionId: "session-current",
+  };
+  const typedResult = {
+    ok: true,
+    contractVersion: 1,
+    kind: "instructors",
+    session: { id: "session-current", name: "2026秋" },
+    classes: [
+      {
+        classId: "740923",
+        items: [{ id: "teacher-1", name: "张三", extra: "10001 / 软件学院", departmentId: "dept-1" }],
+      },
+      { classId: "744669", items: [] },
+    ],
+  };
+
+  async function postDirectory(stub: DurableObjectStub, body: unknown = recipe) {
+    return stub.fetch("http://do/external-directory?clientId=calendar&source=rpc", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("dispatches one bounded browser batch and records one real browser action", async () => {
+    const stub = freshStub("external-directory-ok");
+    await seedSession(stub, { status: "active" });
+    let received: Record<string, unknown> | null = null;
+    spyBrowserFetch({
+      "/external-directory": async (request) => {
+        received = await request.json() as Record<string, unknown>;
+        return Response.json(typedResult);
+      },
+    });
+
+    const res = await postDirectory(stub);
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual(typedResult);
+    expect(received).toMatchObject(recipe);
+    expect(received).not.toHaveProperty("deadlineAt");
+    expect(received?.["state"]).toEqual(validStorageState());
+    expect(typeof received?.["operationTimeoutMs"]).toBe("number");
+    expect(received?.["operationTimeoutMs"]).toBeLessThanOrEqual(70_000);
+    expect(await readStMintLog(stub)).toHaveLength(1);
+  });
+
+  it("rejects malformed fixed recipes before browser dispatch or accounting", async () => {
+    const stub = freshStub("external-directory-invalid");
+    await seedSession(stub, { status: "active" });
+    const spy = spyBrowserFetch({ "/external-directory": async () => Response.json({}) });
+
+    const res = await postDirectory(stub, { ...recipe, url: "https://example.com" });
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ code: "INVALID_DIRECTORY_RECIPE" });
+    expect(spy).not.toHaveBeenCalled();
+    expect(await readStMintLog(stub)).toHaveLength(0);
+  });
+
+  it("maps an unverifiable current page term without echoing raw diagnostics", async () => {
+    const stub = freshStub("external-directory-term-unverified");
+    await seedSession(stub, { status: "active" });
+    spyBrowserFetch({
+      "/external-directory": async () => Response.json(
+        { ok: false, error: "CURRENT_SESSION_UNVERIFIED", diagnostics: { cookie: "SECRET" } },
+        { status: 409 },
+      ),
+    });
+
+    const res = await postDirectory(stub);
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body).toMatchObject({ code: "CURRENT_SESSION_UNVERIFIED" });
+    expect(JSON.stringify(body)).not.toContain("SECRET");
+    expect(await readStatus(stub)).toBe("active");
+  });
+
+  it("serializes a directory batch against neighboring external search", async () => {
+    const stub = freshStub("external-directory-shared-flight");
+    await seedSession(stub, { status: "active" });
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    spyBrowserFetch({
+      "/external-directory": async () => {
+        await gate;
+        return Response.json(typedResult);
+      },
+    });
+
+    const directory = postDirectory(stub);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const search = await stub.fetch("http://do/external-search?clientId=calendar&source=rpc", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "admin_class_search",
+        departmentId: "",
+        departmentName: "",
+        grade: "",
+        keyword: "电气",
+      }),
+    });
+    expect(search.status).toBe(503);
+    await expect(search.json()).resolves.toMatchObject({ code: "BROWSER_BUSY" });
+    release();
+    expect((await directory).status).toBe(200);
+  });
+
+  it("does not return directory data after the binding changes", async () => {
+    const stub = freshStub("external-directory-binding-changed");
+    await seedSession(stub, { status: "active" });
+    spyBrowserFetch({
+      "/external-directory": async () => {
+        await env.DATABASE.prepare("UPDATE cqu_bind_addresses SET status = 'deleting' WHERE user_id = 'u1'").run();
+        return Response.json(typedResult);
+      },
+    });
+
+    const res = await postDirectory(stub);
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ code: "SESSION_INACTIVE" });
+  });
+});
+
 describe("external-capture action", () => {
   const recipe = {
     action: "admin_class_capture",

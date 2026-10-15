@@ -20,3 +20,12 @@
 - 休眠 WebSocket 的 ping/pong 由 `setWebSocketAutoResponse` 处理，保留无需唤醒 DO 的路径。
 
 改动后分别验证纯函数策略与 Workers pool 的 DO 时序行为；真实学校登录、2FA、ST 未核销及长期保活需单独记录现场证据。
+
+## 外部共享目录
+
+- `cquExternalDirectory` 是固定类型 RPC，只接受六类目录 catalog 或最多 10 个唯一数字 `classId` 的 instructors 批量。调用方不能传 URL、method、selector 或其它传输控制；教师批量没有部分成功，任一学校请求失败时整批失败，调用方稍后最多重试 10 个类。
+- 目录动作经 `/external-directory` 进入既有 CquSession DO：复用 external search/search capture 的每用户浏览器互斥、限流与审计，浏览器阶段共享 90 秒预算；RPC 在浏览器等待后、返回结果前还会重新读取 `calendar.external` 权益和 active binding。
+- 容器只在水合的 AllCourseSchedule 页面内调用固定业务 API。GET 使用页面组件的 `getRequest`，admin POST 使用 `postJsonRequest` 和绝对 timetable base；不得裸 `fetch`、读取或输出 header/cookie/token。所有学校请求串行，业务请求间隔随机 0.75–1.25 秒。
+- 每次动作前后都读取当前学业 API session，并要求页面中恰好一个目录 Vue 组件、恰好一个数字 `sessionId`，且三者与调用方 `expectedSessionId` 一致；无法确认当前页面学期时返回 `CURRENT_SESSION_UNVERIFIED`，绝不替用户切换学期。instructors 的 `expectedSessionId` 必填；catalog 可选但一旦提供必须精确匹配。
+- 输出只保留合同字段：目录行 ID 全局唯一且数量必须严格小于固定上限（不截断），名称/extra 不超过 200 字符，可选 `departmentId`/`grade`/`courseCode` 都是不超过 100 字符的字符串。admin 班级可把学校整数年级规范成字符串；学校缺 `departmentId` 时只用完整部门名在部门树中唯一匹配的 ID 回填，歧义或未匹配则省略。course catalog 的 canonical `courseCode` 只来自 `codeR`。
+- 现场证据只支持“当前选定学期页面 + 当前学业 API 一致”的读取。学校接口没有独立 total，也未证明历史学期与当前 bulk 结果的完全隔离；不要把这些接口描述成全历史枚举，也不要移除页面学期 guard。

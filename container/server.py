@@ -30,6 +30,7 @@ import cqu_keepalive  # 国内节点浏览器水化探活, 暴露 probe_session_
 import cqu_ticket_browser  # 浏览器水化取 ST(过瑞数 JS 挑战), 暴露 fetch_service_ticket_browser(...)
 import cqu_data_harvest  # 浏览器 organic harvest(navigate+capture+in-page fetch), 暴露 harvest(...)
 import cqu_external_search
+import cqu_external_directory
 import cqu_external_capture
 from qg_proxy import acquire_qg_proxy, QgExtractError, should_use_proxy  # 青果代理 + 灰度门(/run 登录仍用)
 from posthog_client import (
@@ -101,6 +102,7 @@ NODE_CAPABILITIES = [
     "reusable-code",
     "data-harvest",
     "external-search-v1",
+    "external-directory-v1",
     "external-capture-v1",
     "browser-route-v1",
     "operation-deadline-v1",
@@ -1134,6 +1136,63 @@ async def external_search_handler(request: web.Request) -> web.Response:
         release_browser_job(job_acquired)
 
 
+async def external_directory_handler(request: web.Request) -> web.Response:
+    """POST /external-directory {state, fixed directory recipe} -> typed payload."""
+    try:
+        body = await request.json()
+    except Exception:
+        mark_business_outcome("failure", "INVALID_REQUEST")
+        return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
+    if not isinstance(body, dict) or not isinstance(body.get("state"), dict):
+        mark_business_outcome("failure", "INVALID_REQUEST")
+        return web.json_response({"ok": False, "error": "missing required field: state (object)"}, status=400)
+
+    try:
+        operation_timeout_ms = parse_operation_timeout_ms(body)
+    except InvalidOperationTimeout as error:
+        mark_business_outcome("failure", "INVALID_TIMEOUT")
+        return web.json_response({"ok": False, "error": str(error)}, status=400)
+    if operation_timeout_ms is None and browser_profile.CLOUDFLARE_PROFILE:
+        mark_business_outcome("failure", "INVALID_TIMEOUT")
+        return web.json_response({"ok": False, "error": "operationTimeoutMs is required"}, status=400)
+    try:
+        recipe = cqu_external_directory.parse_external_directory_recipe(body)
+    except cqu_external_directory.ExternalDirectoryRecipeError:
+        mark_business_outcome("failure", "RECIPE_NOT_ALLOWED")
+        return web.json_response({"ok": False, "error": "recipe not allowed"}, status=400)
+
+    try:
+        job_acquired = await acquire_browser_job()
+    except BrowserBusyError:
+        mark_business_outcome("failure", "BROWSER_BUSY")
+        return web.json_response({"ok": False, "error": "BROWSER_BUSY"}, status=503)
+    try:
+        result = await run_bounded(
+            cqu_external_directory.external_directory(body["state"], recipe, operation_timeout_ms),
+            operation_timeout_ms,
+        )
+        typed = cqu_external_directory.sanitize_external_directory_result(result)
+        mark_business_outcome("success")
+        return web.json_response({"ok": True, **typed})
+    except BrowserDeadlineExceeded:
+        mark_business_outcome("failure", "BROWSER_DEADLINE")
+        return web.json_response({"ok": False, "error": "BROWSER_DEADLINE"}, status=503)
+    except cqu_external_directory.ExternalDirectoryTransientError as error:
+        code = error.code
+        mark_business_outcome("failure", code)
+        return web.json_response({"ok": False, "error": code}, status=cqu_external_directory.ERROR_STATUS[code])
+    except Exception as error:
+        safe_capture_exception(
+            request.app.get(POSTHOG_CLIENT_KEY),
+            error,
+            {"operation": "external_directory", "error_code": "DIRECTORY_TRANSIENT"},
+        )
+        mark_business_outcome("failure", "DIRECTORY_TRANSIENT")
+        return web.json_response({"ok": False, "error": "DIRECTORY_TRANSIENT"}, status=503)
+    finally:
+        release_browser_job(job_acquired)
+
+
 async def external_capture_handler(request: web.Request) -> web.Response:
     """POST /external-capture {state, fixed business target} -> typed capture."""
     try:
@@ -1227,6 +1286,7 @@ def build_app() -> web.Application:
         web.post("/keepalive", keepalive_handler),
         web.post("/data-harvest", data_harvest_handler),
         web.post("/external-search", external_search_handler),
+        web.post("/external-directory", external_directory_handler),
         web.post("/external-capture", external_capture_handler),
         # CF Containers 默认探测 /ping 判断实例就绪。
         web.get("/ping", health_handler),

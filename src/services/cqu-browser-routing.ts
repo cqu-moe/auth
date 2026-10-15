@@ -62,6 +62,7 @@ export async function fetchBrowser(
   // External stage owners classify contract and residual transport errors, including 503.
   if (new URL(request.url).pathname === "/data-harvest"
       || new URL(request.url).pathname === "/external-search"
+      || new URL(request.url).pathname === "/external-directory"
       || new URL(request.url).pathname === "/external-capture") return response;
   if (response.status === 429 || response.status === 503) {
     const protocolError = await readProtocolError(response);

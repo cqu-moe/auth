@@ -68,6 +68,20 @@ async function fixture(options?: { rpcMethods?: string[]; external?: boolean }) 
   };
 }
 
+const directoryResult = {
+  ok: true,
+  contractVersion: 1,
+  kind: "instructors",
+  session: { id: "session-current", name: "2026秋" },
+  classes: [
+    {
+      classId: "740923",
+      items: [{ id: "teacher-1", name: "张三", extra: "10001 / 软件学院", departmentId: "dept-1" }],
+    },
+    { classId: "744669", items: [] },
+  ],
+};
+
 it("dispatches a fixed admin-class recipe and returns only the typed search contract", async () => {
   const f = await fixture();
   const deadlineAt = Date.now() + 60_000;
@@ -242,6 +256,118 @@ it("requires method approval, external entitlement and an active school binding"
     keyword: "电气",
   })).resolves.toEqual({ error: "NO_CQU_BINDING" });
   expect(bound.fetch).not.toHaveBeenCalled();
+});
+
+it("dispatches a fixed instructor directory through the shared external-search approval", async () => {
+  const f = await fixture();
+  f.fetch.mockImplementationOnce(async () => Response.json(directoryResult));
+  const deadlineAt = Date.now() + 90_000;
+
+  const result = await f.rpc.cquExternalDirectory({
+    ...f.args,
+    kind: "instructors",
+    classIds: ["740923", "744669"],
+    expectedSessionId: "session-current",
+    deadlineAt,
+  });
+
+  expect(result).toEqual({
+    contractVersion: 1,
+    kind: "instructors",
+    session: { id: "session-current", name: "2026秋" },
+    classes: directoryResult.classes,
+  });
+  expect(f.fetch).toHaveBeenCalledTimes(1);
+  const request = f.fetch.mock.calls[0][0];
+  expect(new URL(request.url).pathname).toBe("/external-directory");
+  expect(request.method).toBe("POST");
+  expect(new URL(request.url).searchParams.get("deadlineAt")).toBe(String(deadlineAt));
+  await expect(request.clone().json()).resolves.toEqual({
+    kind: "instructors",
+    classIds: ["740923", "744669"],
+    expectedSessionId: "session-current",
+  });
+  expect(JSON.stringify(result)).not.toContain("rpc-test-secret");
+
+  await expect(f.rpc.cquExternalDirectory({
+    ...f.args,
+    kind: "instructors",
+    classIds: ["740923", "744669"],
+    expectedSessionId: "session-current",
+    url: "https://example.com",
+  } as unknown as Parameters<typeof f.rpc.cquExternalDirectory>[0]))
+    .resolves.toEqual({ error: "INVALID_REQUEST" });
+  expect(f.fetch).toHaveBeenCalledTimes(1);
+});
+
+it("requires the existing external-search method rather than a separate directory approval", async () => {
+  const wrongClient = await fixture();
+  await expect(wrongClient.rpc.cquExternalDirectory({
+    ...wrongClient.args,
+    clientId: crypto.randomUUID(),
+    clientSecret: "wrong-secret",
+    kind: "instructors",
+    classIds: ["740923"],
+    expectedSessionId: "session-current",
+  })).resolves.toEqual({ error: "INVALID_CLIENT" });
+  expect(wrongClient.fetch).not.toHaveBeenCalled();
+
+  const separatelyApproved = await fixture({ rpcMethods: ["cquExternalDirectory"] });
+  await expect(separatelyApproved.rpc.cquExternalDirectory({
+    ...separatelyApproved.args,
+    kind: "instructors",
+    classIds: ["740923"],
+    expectedSessionId: "session-current",
+  })).resolves.toEqual({ error: "FORBIDDEN" });
+  expect(separatelyApproved.fetch).not.toHaveBeenCalled();
+
+  const unentitled = await fixture({ external: false });
+  await expect(unentitled.rpc.cquExternalDirectory({
+    ...unentitled.args,
+    kind: "instructors",
+    classIds: ["740923"],
+    expectedSessionId: "session-current",
+  })).resolves.toEqual({ error: "FORBIDDEN" });
+  expect(unentitled.fetch).not.toHaveBeenCalled();
+
+  const bound = await fixture();
+  await env.DATABASE.prepare("UPDATE cqu_credentials SET status = ? WHERE user_id = ?")
+    .bind("deleting", bound.userId).run();
+  await expect(bound.rpc.cquExternalDirectory({
+    ...bound.args,
+    kind: "instructors",
+    classIds: ["740923"],
+    expectedSessionId: "session-current",
+  })).resolves.toEqual({ error: "NO_CQU_BINDING" });
+  expect(bound.fetch).not.toHaveBeenCalled();
+});
+
+it("rechecks external entitlement and binding after the browser batch before returning data", async () => {
+  const entitlement = await fixture();
+  entitlement.fetch.mockImplementationOnce(async () => {
+    await env.DATABASE.prepare("DELETE FROM user_entitlement WHERE user_id = ?")
+      .bind(entitlement.userId).run();
+    return Response.json(directoryResult);
+  });
+  await expect(entitlement.rpc.cquExternalDirectory({
+    ...entitlement.args,
+    kind: "instructors",
+    classIds: ["740923", "744669"],
+    expectedSessionId: "session-current",
+  })).resolves.toEqual({ error: "FORBIDDEN" });
+
+  const binding = await fixture();
+  binding.fetch.mockImplementationOnce(async () => {
+    await env.DATABASE.prepare("UPDATE cqu_credentials SET status = ? WHERE user_id = ?")
+      .bind("deleting", binding.userId).run();
+    return Response.json(directoryResult);
+  });
+  await expect(binding.rpc.cquExternalDirectory({
+    ...binding.args,
+    kind: "instructors",
+    classIds: ["740923", "744669"],
+    expectedSessionId: "session-current",
+  })).resolves.toEqual({ error: "NO_CQU_BINDING" });
 });
 
 it("binds teaching-class results to the requested course and term", async () => {

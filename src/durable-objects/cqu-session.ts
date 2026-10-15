@@ -79,10 +79,12 @@ import {
   buildStMintAudit,
   classifyNodeHarvestResponse,
   classifyNodeExternalSearchResponse,
+  classifyNodeExternalDirectoryResponse,
   classifyNodeExternalCaptureResponse,
   type NodeTicketBody,
   type NodeHarvestBody,
   type NodeExternalSearchBody,
+  type NodeExternalDirectoryBody,
   type NodeExternalCaptureBody,
   type HarvestCapture,
   type HarvestFetch,
@@ -91,6 +93,10 @@ import {
   parseExternalSearchRecipe,
   type ExternalSearchRecipe,
 } from "../services/cqu-external-search";
+import {
+  parseExternalDirectoryRecipe,
+  type ExternalDirectoryRecipe,
+} from "../services/cqu-external-directory";
 import {
   parseExternalCaptureRecipe,
   type ExternalCaptureRecipe,
@@ -586,6 +592,20 @@ export class CquSessionDO extends DurableObject<Env> {
           const rawDeadlineAt = url.searchParams.get("deadlineAt");
           const recipe = await request.json<unknown>();
           const result = await this.externalSearch({
+            recipe,
+            clientId,
+            source,
+            deadlineAt: rawDeadlineAt === null ? undefined : Number(rawDeadlineAt),
+          });
+          return Response.json(result);
+        }
+        case "external-directory": {
+          const clientId = url.searchParams.get("clientId") || null;
+          const rawSource = url.searchParams.get("source");
+          const source = rawSource === "route" || rawSource === "rpc" ? rawSource : "unknown";
+          const rawDeadlineAt = url.searchParams.get("deadlineAt");
+          const recipe = await request.json<unknown>();
+          const result = await this.externalDirectory({
             recipe,
             clientId,
             source,
@@ -1320,10 +1340,23 @@ export class CquSessionDO extends DurableObject<Env> {
     return this.performExternalBrowser(recipe, arg, "search");
   }
 
+  private async externalDirectory(arg: {
+    recipe: unknown;
+    clientId: string | null;
+    source: string;
+    deadlineAt?: number;
+  }): Promise<Record<string, unknown>> {
+    const recipe = parseExternalDirectoryRecipe(arg.recipe);
+    if ("error" in recipe) {
+      throw new CquSsoError("INVALID_DIRECTORY_RECIPE", "external directory recipe is not allowed");
+    }
+    return this.runExternalBrowser(() => this.performExternalBrowser(recipe, arg, "directory"));
+  }
+
   private async performExternalBrowser(
-    recipe: ExternalSearchRecipe | ExternalCaptureRecipe,
+    recipe: ExternalSearchRecipe | ExternalDirectoryRecipe | ExternalCaptureRecipe,
     arg: { clientId: string | null; source: string; deadlineAt?: number },
-    kind: "search" | "capture",
+    kind: "search" | "directory" | "capture",
   ): Promise<Record<string, unknown>> {
     if (!(await this.reconcileBinding())) {
       throw new CquSsoError("SESSION_INACTIVE", "CQU binding inactive");
@@ -1345,7 +1378,7 @@ export class CquSessionDO extends DurableObject<Env> {
     }
 
     const now = Date.now();
-    const captureDeadline = kind === "capture" ? resolveBrowserDeadline(arg.deadlineAt, now) : undefined;
+    const operationDeadline = resolveBrowserDeadline(arg.deadlineAt, now);
     const stored = (await this.ctx.storage.get<StMintRecord[]>("stMintLog")) ?? [];
     const pruned = pruneStMintLog(stored, now, ST_MINT_RATE_WINDOW_MS);
     if (stMintThrottled(pruned, arg.clientId, MAX_ST_MINTS_PER_USER, MAX_ST_MINTS_PER_CLIENT)) {
@@ -1366,8 +1399,10 @@ export class CquSessionDO extends DurableObject<Env> {
     let outcome = "INTERNAL_ERROR";
     try {
       const budget = this.browserOperationBudget(
-        captureDeadline ?? resolveBrowserDeadline(arg.deadlineAt, now),
-        kind === "search" ? CONTAINER_EXTERNAL_SEARCH_DEADLINE_MS : CONTAINER_HARVEST_DEADLINE_MS
+        operationDeadline,
+        kind === "search" || kind === "directory"
+          ? CONTAINER_EXTERNAL_SEARCH_DEADLINE_MS
+          : CONTAINER_HARVEST_DEADLINE_MS
       );
       const requestBody: Record<string, unknown> = {
         state: sourceSession.storageState,
@@ -1387,12 +1422,15 @@ export class CquSessionDO extends DurableObject<Env> {
         );
       } catch (error) {
         if (error instanceof CquSsoError && STABLE_BROWSER_CODES.has(error.code)) throw error;
-        throw new CquSsoError(kind === "search" ? "SEARCH_TRANSIENT" : "CAPTURE_TRANSIENT", `browser /external-${kind} fetch failed`);
+        const fallback = kind === "search" ? "SEARCH_TRANSIENT" : kind === "directory" ? "DIRECTORY_TRANSIENT" : "CAPTURE_TRANSIENT";
+        throw new CquSsoError(fallback, `browser /external-${kind} fetch failed`);
       }
-      const body = await response.json<NodeExternalSearchBody | NodeExternalCaptureBody>().catch(() => null);
+      const body = await response.json<NodeExternalSearchBody | NodeExternalDirectoryBody | NodeExternalCaptureBody>().catch(() => null);
       const classified = kind === "search"
         ? classifyNodeExternalSearchResponse(response.status, body)
-        : classifyNodeExternalCaptureResponse(response.status, body);
+        : kind === "directory"
+          ? classifyNodeExternalDirectoryResponse(response.status, body)
+          : classifyNodeExternalCaptureResponse(response.status, body);
       if (classified.kind === "instance_replaced") {
         throw new CquSsoError("BROWSER_INSTANCE_REPLACED", `browser instance replaced during ${kind}`);
       }
@@ -1401,7 +1439,8 @@ export class CquSessionDO extends DurableObject<Env> {
         throw new CquSsoError("TGT_EXPIRED", `CQU session expired during ${kind}`);
       }
       if (classified.kind === "transient") {
-        throw new CquSsoError(classified.code ?? (kind === "search" ? "SEARCH_TRANSIENT" : "CAPTURE_TRANSIENT"), `browser external ${kind} failed`);
+        const fallback = kind === "search" ? "SEARCH_TRANSIENT" : kind === "directory" ? "DIRECTORY_TRANSIENT" : "CAPTURE_TRANSIENT";
+        throw new CquSsoError(classified.code ?? fallback, `browser external ${kind} failed`);
       }
       if (!(await this.reconcileBinding()) || await this.getStatus() !== "active"
         || sourceBindingRevision !== await this.ctx.storage.get<number>("bindingRevision")
