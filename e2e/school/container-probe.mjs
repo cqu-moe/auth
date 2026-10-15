@@ -3,6 +3,9 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { startSchoolAuth } from './runtime.mjs';
 
+const describeError = error => error instanceof AggregateError
+  ? `${error.message}: ${error.errors.map(describeError).join('; ')}`
+  : `${error?.name ?? 'Error'}: ${error?.message ?? String(error)}`;
 const output = process.env.AUTH_E2E_OUTPUT || `.e2e/school-container-probe-${Date.now()}`;
 await mkdir(output,{recursive:true});
 const evidence = {result:'failed',cleanup:'not-started'};
@@ -28,7 +31,7 @@ try {
       evidence.cleanup = 'passed';
     } catch (error) {
       evidence.cleanup = 'failed';
-      evidence.cleanupError = `${error?.name ?? 'Error'}: ${error?.message ?? String(error)}`;
+      evidence.cleanupError = describeError(error);
       process.exitCode = 1;
     }
   }

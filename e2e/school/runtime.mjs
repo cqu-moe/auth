@@ -15,6 +15,10 @@ const pause = ms => new Promise(r=>setTimeout(r,ms));
 const describeError = error => error instanceof AggregateError
   ? `${error.message}: ${error.errors.map(describeError).join('; ')}`
   : `${error?.name ?? 'Error'}: ${error?.message ?? String(error)}`;
+const readOptionalSysctl = path => {
+  try { return readFileSync(path,'utf8').trim(); }
+  catch { return null; }
+};
 
 export async function startSchoolAuth(options = {}) {
   const commit=execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();
@@ -205,9 +209,9 @@ export async function startSchoolAuth(options = {}) {
         : [];
       const networkDiagnostics = process.env.AUTH_SCHOOL_CONTAINER_DIAGNOSTICS && platform() === 'linux' ? {
         kernel:release(),
-        srcValidMark:readFileSync('/proc/sys/net/ipv4/conf/all/src_valid_mark','utf8').trim(),
-        rpFilter:readFileSync('/proc/sys/net/ipv4/conf/all/rp_filter','utf8').trim(),
-        devconfInheritInitNet:readFileSync('/proc/sys/net/core/devconf_inherit_init_net','utf8').trim(),
+        srcValidMark:readOptionalSysctl('/proc/sys/net/ipv4/conf/all/src_valid_mark'),
+        rpFilter:readOptionalSysctl('/proc/sys/net/ipv4/conf/all/rp_filter'),
+        devconfInheritInitNet:readOptionalSysctl('/proc/sys/net/core/devconf_inherit_init_net'),
       } : undefined;
       // The local engine stops instances but can retain exited Docker objects.
       // Reclaim only this run's unique image, then independently check absence.
