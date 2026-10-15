@@ -31,6 +31,7 @@ export async function startSchoolAuth(options = {}) {
   const errors = [];
   const deliveries = [];
   const runtimeLog = [];
+  const redactDiagnostic = text => [...secrets].reduce((value,secret) => value.split(secret).join('[synthetic-secret-redacted]'),text);
   let runtime, mf, db, caller, control, admin, polling = false, timer;
   docker(['image','inspect',base]);
   docker(['build','--platform','linux/amd64','--build-context',`school-fixture=${fixtureDirectory}`,
@@ -41,7 +42,10 @@ export async function startSchoolAuth(options = {}) {
     const ns = await mf.getDurableObjectNamespace('CQU_LOGIN','auth-e2e');
     const response = await ns.get(ns.idFromName(userId)).fetch(`http://fixture/__fixture/${path}`,
       body === undefined ? {} : {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
-    if (!response.ok) throw new Error(`School fixture transport failed (${response.status})`);
+    if (!response.ok) {
+      const detail = (await response.text()).slice(0,500);
+      throw new Error(`School fixture transport failed (${response.status})${detail ? `: ${detail}` : ''}`);
+    }
     return response.json();
   }
   async function privateCall(action,args) {
@@ -73,7 +77,7 @@ export async function startSchoolAuth(options = {}) {
         handleRuntimeStdio(stdout,stderr) {
           for (const stream of [stdout,stderr]) {
             stream.on('data',chunk => {
-              runtimeLog.push(chunk.toString('utf8').trim());
+              runtimeLog.push(redactDiagnostic(chunk.toString('utf8').trim()));
               while (runtimeLog.length > 400) runtimeLog.shift();
             });
           }
@@ -163,6 +167,16 @@ export async function startSchoolAuth(options = {}) {
     async close() {
       if (control?.listening) await new Promise((r,j)=>control.close(e=>e?j(e):r()));
       const remaining = docker(['ps','-aq','--filter',`ancestor=${image}`]);
+      const containerDiagnostics = remaining ? remaining.split('\n').map(id => ({
+        id,
+        name:docker(['inspect','--format','{{.Name}}',id]),
+        state:JSON.parse(docker(['inspect','--format','{{json .State}}',id])),
+        entrypoint:JSON.parse(docker(['inspect','--format','{{json .Config.Entrypoint}}',id])),
+        command:JSON.parse(docker(['inspect','--format','{{json .Config.Cmd}}',id])),
+        networkMode:docker(['inspect','--format','{{.HostConfig.NetworkMode}}',id]),
+        networks:JSON.parse(docker(['inspect','--format','{{json .NetworkSettings.Networks}}',id])),
+        logs:redactDiagnostic(docker(['logs','--tail','200',id])),
+      })) : [];
       // The local engine stops instances but can retain exited Docker objects.
       // Reclaim only this run's unique image, then independently check absence.
       if (remaining) {
@@ -171,7 +185,7 @@ export async function startSchoolAuth(options = {}) {
       if (docker(['ps','-aq','--filter',`ancestor=${image}`])) throw new Error('School container cleanup failed');
       docker(['image','rm',image]);
       if (errors.length) throw new Error(`School cleanup/transport failed: ${[...new Set(errors)].join('; ')}`);
-      return {containerObjectsRemoved:true,fixtureImageRemoved:true,imageId,base,fixtureHash,runtimeLog};
+      return {containerObjectsRemoved:true,fixtureImageRemoved:true,imageId,base,fixtureHash,runtimeLog,containerDiagnostics};
     },
   };
   runtime = await startAuth({...options,platform});
