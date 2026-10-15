@@ -44,7 +44,7 @@ export const authWebEngine = webHolder.authE2eWebEngine ??= web({
 });
 
 export default {
-  tests: ['e2e/**/*.e2e.ts'], workers: 1, retries: 0,
+  tests: ['e2e/*.e2e.ts'], workers: 1, retries: 0,
   timeout: 90000, assertionTimeout: 10000,
   output: process.env.AUTH_E2E_OUTPUT || '.e2e',
   credentials: {
