@@ -274,6 +274,59 @@ export function classifyNodeExternalSearchResponse(
   return { kind: "transient", code: error };
 }
 
+export interface NodeExternalDirectoryBody {
+  ok?: boolean;
+  contractVersion?: unknown;
+  kind?: unknown;
+  sourceType?: unknown;
+  session?: unknown;
+  items?: unknown;
+  departments?: unknown;
+  classes?: unknown;
+  error?: string;
+  diagnostics?: Record<string, unknown>;
+}
+
+const EXTERNAL_DIRECTORY_ERROR_CODES = new Set([
+  "CURRENT_SESSION_CHANGED",
+  "CURRENT_SESSION_UNVERIFIED",
+  "SCHEMA_INVALID",
+  "DIRECTORY_API_REJECTED",
+  "DIRECTORY_BODY_TIMEOUT",
+  "DIRECTORY_REQUEST_HUNG",
+  "APP_READY_TIMEOUT",
+  "DIRECTORY_TRANSIENT",
+  "WAF_CHALLENGE",
+  "BROWSER_BUSY",
+  "BROWSER_DEADLINE",
+  "TGT_EXPIRED",
+  "PAGE_PERMISSION_DENIED",
+]);
+
+export interface NodeExternalDirectoryClassification {
+  kind: "ok" | "expired" | "instance_replaced" | "transient";
+  code?: string;
+  body?: NodeExternalDirectoryBody;
+}
+
+export function classifyNodeExternalDirectoryResponse(
+  status: number,
+  body: NodeExternalDirectoryBody | null
+): NodeExternalDirectoryClassification {
+  if (status === 409 && body?.error === "BROWSER_INSTANCE_REPLACED") {
+    return { kind: "instance_replaced" };
+  }
+  if (status === 409 && body?.error === "TGT_EXPIRED") {
+    return { kind: "expired", code: "TGT_EXPIRED" };
+  }
+  if (body === null) return { kind: "transient", code: "DIRECTORY_TRANSIENT" };
+  if (status >= 200 && status < 300 && body.ok === true) return { kind: "ok", body };
+  const error = typeof body.error === "string" && EXTERNAL_DIRECTORY_ERROR_CODES.has(body.error)
+    ? body.error
+    : "DIRECTORY_TRANSIENT";
+  return { kind: "transient", code: error };
+}
+
 export interface NodeExternalCaptureBody {
   ok?: boolean;
   contractVersion?: unknown;

@@ -22,6 +22,13 @@ import {
   type CquExternalSearchResult,
 } from "./services/cqu-external-search";
 import {
+  parseExternalDirectoryArgs,
+  parseExternalDirectoryResult,
+  type CquExternalDirectoryArgs,
+  type CquExternalDirectoryInstructorsArgs,
+  type CquExternalDirectoryResult,
+} from "./services/cqu-external-directory";
+import {
   parseExternalCaptureArgs,
   parseExternalCaptureResult,
   type CquExternalCaptureArgs,
@@ -116,6 +123,7 @@ export class AuthService extends WorkerEntrypoint<Env> {
       | "getCquTicket"
       | "cquHarvest"
       | "cquExternalSearch"
+      | "cquExternalDirectory"
       | "cquExternalCapture"
   ): Promise<{ subsystem: string } | { error: string }> {
     const finish = (result: { subsystem: string } | { error: string }) => {
@@ -431,6 +439,51 @@ export class AuthService extends WorkerEntrypoint<Env> {
       (result.course.id !== args.courseId || result.course.name !== args.courseName || result.session.id !== args.expectedSessionId)) {
       return { error: "SCHEMA_INVALID" };
     }
+    return result;
+  }
+
+  /** Weekly shared directories; the external-search privilege owns this same school scope. */
+  async cquExternalDirectory(
+    args: CquExternalDirectoryArgs | CquExternalDirectoryInstructorsArgs
+  ): Promise<CquExternalDirectoryResult | { error: string }> {
+    const recipe = parseExternalDirectoryArgs(args);
+    if ("error" in recipe) return recipe;
+
+    // This is deliberate: both RPCs expose the same fixed AllCourseSchedule
+    // directory privilege, so client approval remains a single permission.
+    const authorization = await this.authorizeService(args, "cquExternalSearch");
+    if ("error" in authorization) return authorization;
+    const caps = await resolveCapsForRpc(this.env.DATABASE, args.userId);
+    if (authorization.subsystem !== "calendar" || caps?.calendar.external !== true) {
+      return { error: "FORBIDDEN" };
+    }
+    if (!(await this.hasSchoolBinding(args.userId))) return { error: "NO_CQU_BINDING" };
+
+    const doId = this.env.CQU_SESSION.idFromName(args.userId);
+    const stub = this.env.CQU_SESSION.get(doId);
+    const doUrl = new URL("https://do/external-directory");
+    doUrl.searchParams.set("clientId", args.clientId);
+    doUrl.searchParams.set("source", "rpc");
+    if (typeof args.deadlineAt === "number") doUrl.searchParams.set("deadlineAt", String(args.deadlineAt));
+    const resp = await stub.fetch(new Request(doUrl.toString(), {
+      method: "POST",
+      body: JSON.stringify(recipe),
+    }));
+    const body = await resp.json<unknown>().catch(() => null);
+    if (!resp.ok || typeof body !== "object" || body === null || (body as { ok?: unknown }).ok !== true) {
+      const code = typeof body === "object" && body !== null
+        ? (body as { code?: unknown }).code ?? (body as { error?: unknown }).error
+        : undefined;
+      return { error: typeof code === "string" ? code : "DIRECTORY_FAILED" };
+    }
+    const result = parseExternalDirectoryResult(body, recipe);
+    if ("error" in result) return result;
+
+    // A directory batch can run for most of a minute. Re-read the authoritative
+    // entitlement and binding before a school payload leaves Auth.
+    const refreshedCaps = await resolveCapsForRpc(this.env.DATABASE, args.userId);
+    if (refreshedCaps?.calendar.external !== true) return { error: "FORBIDDEN" };
+    if (!(await this.hasSchoolBinding(args.userId))) return { error: "NO_CQU_BINDING" };
     return result;
   }
 

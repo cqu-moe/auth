@@ -14,6 +14,7 @@ import {
   shouldAbandonKeepaliveWriteback,
   buildStMintAudit,
   classifyNodeHarvestResponse,
+  classifyNodeExternalDirectoryResponse,
   type NodeHarvestBody,
 } from "./cqu-node-protocol";
 
@@ -568,5 +569,38 @@ describe("isValidHarvestStorageState", () => {
     { ...state(TRIPLE), origins: [null] },
   ])("rejects malformed or foreign refreshed state %# without throwing", (value) => {
     expect(isValidHarvestStorageState(value)).toBe(false);
+  });
+});
+
+
+describe("classifyNodeExternalDirectoryResponse", () => {
+  it("accepts only an HTTP-success typed body", () => {
+    const body = { ok: true, kind: "instructors" };
+    expect(classifyNodeExternalDirectoryResponse(200, body)).toEqual({ kind: "ok", body });
+    expect(classifyNodeExternalDirectoryResponse(200, { ok: false })).toEqual({
+      kind: "transient",
+      code: "DIRECTORY_TRANSIENT",
+    });
+  });
+
+  it.each([
+    ["CURRENT_SESSION_UNVERIFIED", 409],
+    ["DIRECTORY_API_REJECTED", 502],
+    ["DIRECTORY_REQUEST_HUNG", 504],
+    ["PAGE_PERMISSION_DENIED", 403],
+  ] as const)("preserves stable directory error %s", (error, status) => {
+    expect(classifyNodeExternalDirectoryResponse(status, { ok: false, error }))
+      .toEqual({ kind: "transient", code: error });
+  });
+
+  it("separates instance replacement and expiry from other 409 responses", () => {
+    expect(classifyNodeExternalDirectoryResponse(409, { ok: false, error: "BROWSER_INSTANCE_REPLACED" }).kind)
+      .toBe("instance_replaced");
+    expect(classifyNodeExternalDirectoryResponse(409, { ok: false, error: "TGT_EXPIRED" }).kind)
+      .toBe("expired");
+    expect(classifyNodeExternalDirectoryResponse(409, null)).toEqual({
+      kind: "transient",
+      code: "DIRECTORY_TRANSIENT",
+    });
   });
 });

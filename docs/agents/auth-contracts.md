@@ -16,6 +16,7 @@
 - OAuth 客户端 API 使用 snake_case（如 `client_id`），consent 响应读取 `{redirect, url}`。
 - 中央 Auth 使用 host-only cookie，第一方应用各自持有隔离会话；保持 `isolatedAuthCookies` 与精确来源边界，不能恢复跨子域会话共享。迁移按 [会话隔离 ADR](../adr/0002-first-party-session-isolation.md) 和 [切换清单](../auth-cutover.md) 执行。
 - Service Binding RPC 验证服务凭证、允许的业务操作和目标用户状态；自报 clientId 不构成身份凭证，私有 RPC 不等于任意 userId 授权。遵循 [服务身份 ADR](../adr/0009-private-rpc-service-identity.md)。
+- `cquExternalDirectory` 刻意复用 `cquExternalSearch` 方法审批：两者都是 calendar external 目录特权，避免同一学校目录能力出现两份 client 权限。除服务凭证外还要求 calendar subsystem、`caps.calendar.external` 与 active CQU binding；浏览器批量等待结束后必须重新校验权益和绑定，撤销期间取得的目录数据不得返回。
 
 ## 安全能力与生命周期
 

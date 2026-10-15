@@ -18,6 +18,7 @@ BROWSER_OPERATIONS = {
     "/keepalive": "keepalive",
     "/data-harvest": "harvest",
     "/external-search": "external_search",
+    "/external-directory": "external_directory",
     "/external-capture": "external_capture",
 }
 REDACTED = "[redacted]"
