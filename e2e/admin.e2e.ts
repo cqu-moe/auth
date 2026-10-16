@@ -223,7 +223,7 @@ test('saved user entitlements and device quota affect only the intended account 
   await userRow(fixture, member.user.email).getByRole('button', '权益').click();
   await screen.getByRole('checkbox', /^通知存档访问/).check();
   await screen.getByRole('button', '保存', { exact: true }).click();
-  await expect(screen.getByText('已保存', { exact: true })).toBeVisible();
+  await expect(screen.getByRole('alert').filter({ hasText: /^已保存$/ })).toBeVisible();
   const granted = await request(`/api/v1/admin/users/${member.user.id}/entitlements`);
   expect(granted.body.data.map(({ subsystem, capability, value }: { subsystem: string; capability: string; value: string }) => ({ subsystem, capability, value })))
     .toEqual([{ subsystem: 'feed', capability: 'access', value: '1' }]);
@@ -253,7 +253,7 @@ test('saved user entitlements and device quota affect only the intended account 
   expect({ status: bypass.status, code: bypass.body.code }).toEqual({ status: 409, code: 'QUICKLOGIN_PREVIEW_REQUIRED' });
   await screen.getByRole('checkbox', /^通知存档访问/).uncheck();
   await screen.getByRole('button', '保存', { exact: true }).click();
-  await expect(screen.getByText('已保存', { exact: true })).toBeVisible();
+  await expect(screen.getByRole('alert').filter({ hasText: /^已保存$/ })).toBeVisible();
   expect((await request('/api/v1/cqu/quicklogin', 'PUT', { enabled: false }, member.cookies)).body.data.masterEnabled).toBe(false);
   await screen.getByLabel('设备数').fill('0');
   await screen.getByRole('button', '预览调整').click();

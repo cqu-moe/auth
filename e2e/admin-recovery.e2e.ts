@@ -77,7 +77,7 @@ test('manual recovery invalidates actual old factors and interactive credentials
   await userRow(fixture, member.user.email).getByRole('button', '权益').click();
   await screen.getByRole('checkbox', /^通知存档访问/).check();
   await screen.getByRole('button', '保存', { exact: true }).click();
-  await expect(screen.getByText('已保存', { exact: true })).toBeVisible();
+  await expect(screen.getByRole('alert').filter({ hasText: /^已保存$/ })).toBeVisible();
   await screen.getByRole('button', '取消', { exact: true }).click();
   expect((await sessionAfterRateLimit(oldCookies)).body.caps.feed.access).toBe(true);
 
