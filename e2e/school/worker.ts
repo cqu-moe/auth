@@ -6,7 +6,30 @@ import { CquSessionRecoveryWorkflow as RecoveryWorkflow } from '../../src/workfl
 import { handleEmail } from '../../src/email-handler';
 import type { Env, CquSessionRecoveryParams } from '../../src/types';
 export { CquSessionDO, CquQuickloginAccountDO, CquQuickloginDeviceDO, AuthService } from '../../src/index';
-export default production;
+let transportSequence = 0;
+export default {
+  ...production,
+  async fetch(request, env, ctx) {
+    if (request.method !== 'PUT' || new URL(request.url).pathname !== '/api/v1/cqu/binding/credentials') {
+      return production.fetch(request, env, ctx);
+    }
+    const id = ++transportSequence;
+    const emit = (event: string, status?: number) => console.info('AUTH_SCHOOL_TRANSPORT ' + JSON.stringify({
+      side: 'worker', event, id, at: Date.now(), aborted: request.signal.aborted, ...(status === undefined ? {} : { status }),
+    }));
+    const aborted = () => emit('signal-abort');
+    request.signal.addEventListener('abort', aborted, { once: true });
+    emit('request');
+    try {
+      const response = await production.fetch(request, env, ctx);
+      emit('response', response.status);
+      return response;
+    } catch (error) {
+      emit('threw');
+      throw error;
+    } finally { request.signal.removeEventListener('abort', aborted); }
+  },
+} satisfies ExportedHandler<Env>;
 
 // Configuration/observation only. All browser protocol requests run the production Container class.
 export class CquLoginContainer extends BrowserContainer {

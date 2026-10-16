@@ -1,18 +1,27 @@
-import { test, beforeEach, afterEach } from '@e2e-dev/web';
+import { test, beforeEach, afterEach, surfaceOf } from '@e2e-dev/web';
 import { expect, credentials } from 'e2e';
 import type { TestFixtures } from 'e2e';
 import type { Browser } from '@e2e-dev/web';
+import { authWebEngine } from '../../e2e.config';
+import { observeSchoolTransport } from './transport-diagnostics';
 
 type Journey = TestFixtures & {browser:Browser};
 
 let unexpected: string[];
 beforeEach(async ({browser}) => {
+  await observeSchoolTransport(surfaceOf(authWebEngine)!.context());
   unexpected = [];
   await browser.route('**/*', async route => {
     if (new URL(route.request.url).origin !== process.env.AUTH_E2E_URL) {
       unexpected.push(new URL(route.request.url).origin);
       await route.abort();
-    } else await route.continue();
+    } else {
+      const credentials = route.request.method === 'PUT' && new URL(route.request.url).pathname === '/api/v1/cqu/binding/credentials';
+      const note = (event: string) => { if (credentials) console.info('AUTH_SCHOOL_TRANSPORT ' + JSON.stringify({ side: 'route', event, at: Date.now() })); };
+      note('continue');
+      await route.continue();
+      note('continued');
+    }
   });
 });
 afterEach(async () => { expect(unexpected).toEqual([]); });

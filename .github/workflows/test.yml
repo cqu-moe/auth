@@ -194,6 +194,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
       - run: npx --no-install e2e-web install ${{ matrix.browser }} --with-deps
+      # Temporary diagnosis: stop at the original school failure before the full supplement.
+      - name: Diagnose school request cancellation
+        run: |
+          VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build
+          node e2e/school/build.mjs
+          node e2e/school/run.mjs --grep '^school binding persists and returns an allowed business directory through the real container$'
+        env:
+          AUTH_E2E_OUTPUT: .e2e/cross-browser-school-diagnostic
       - run: npm run test:e2e:cross-browser
       - run: node e2e/cross-browser.mjs
       - run: node e2e/cross-browser.mjs --self-check
