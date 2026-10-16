@@ -9,3 +9,6 @@
 !src
 !src/services
 !src/services/cqu-browser-budget.ts
+!e2e
+!e2e/school
+!e2e/school/**

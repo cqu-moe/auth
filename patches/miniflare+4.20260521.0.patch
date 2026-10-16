@@ -1,0 +1,61 @@
+--- a/node_modules/miniflare/dist/src/index.js
++++ b/node_modules/miniflare/dist/src/index.js	2026-10-16 04:48:53
+@@ -77872,7 +77872,7 @@
+       port.postMessage({ id, error: new Error(String(error)) });
+     }
+   } finally {
+-    Atomics.store(notifyHandle, /* index */ 0, /* value */ 1);
++    Atomics.store(notifyHandle, /* index */ 0, /* generation */ (id + 1) | 0);
+     Atomics.notify(notifyHandle, /* index */ 0);
+   }
+ });
+@@ -77903,13 +77903,6 @@
+   }
+   fetch(url38, init2) {
+     this.#ensureWorker();
+-    Atomics.store(
+-      this.#notifyHandle,
+-      /* index */
+-      0,
+-      /* value */
+-      0
+-    );
+     const id = this.#nextId++;
+     this.#channel.port1.postMessage({
+       id,
+@@ -77918,17 +77911,7 @@
+       headers: init2.headers,
+       body: init2.body
+     });
+-    Atomics.wait(
+-      this.#notifyHandle,
+-      /* index */
+-      0,
+-      /* value */
+-      0
+-    );
+-    const message = (0, import_node_worker_threads.receiveMessageOnPort)(
+-      this.#channel.port1
+-    )?.message;
+-    (0, import_node_assert14.default)(message?.id === id);
++    const message = receiveReply(this.#notifyHandle, this.#channel.port1, id);
+     if ("response" in message) {
+       const { status: status2, headers: rawHeaders, body } = message.response;
+       const headers = new import_undici5.Headers(rawHeaders);
+@@ -77947,6 +77930,16 @@
+     await this.#worker?.terminate();
+   }
+ };
++function receiveReply(notifyHandle, port, id) {
++  const generation = (id + 1) | 0;
++  for (let seen = Atomics.load(notifyHandle, /* index */ 0); seen !== generation;
++    seen = Atomics.load(notifyHandle, /* index */ 0)) {
++    Atomics.wait(notifyHandle, /* index */ 0, seen);
++  }
++  const message = (0, import_node_worker_threads.receiveMessageOnPort)(port)?.message;
++  (0, import_node_assert14.default)(message?.id === id);
++  return message;
++}
+ 
+ // src/plugins/core/proxy/types.ts
+ var import_node_buffer4 = require("node:buffer");

@@ -240,12 +240,16 @@ cquBinding.put("/credentials", async (c) => {
         (id,user_id,student_id,encrypted_password,iv,status)
         SELECT ?,user_id,?,?,?,'active' FROM cqu_bind_addresses
         WHERE user_id = ? AND token = ? AND status IN ('pending','active')
+          AND NOT EXISTS (SELECT 1 FROM user WHERE id = ? AND banned = 1
+            AND (banExpires IS NULL OR banExpires = '' OR julianday(banExpires) > julianday('now')))
         ON CONFLICT(user_id) DO UPDATE SET student_id=excluded.student_id,
         encrypted_password=excluded.encrypted_password,iv=excluded.iv,status='active'
         WHERE cqu_credentials.status != 'deleting' AND cqu_credentials.status != 'revoked'`)
-        .bind(crypto.randomUUID(), studentId, ciphertext, iv, user.id, bind.token),
-      c.env.DATABASE.prepare("UPDATE cqu_bind_addresses SET status='active' WHERE user_id=? AND token=? AND status IN ('pending','active')")
-        .bind(user.id, bind.token),
+        .bind(crypto.randomUUID(), studentId, ciphertext, iv, user.id, bind.token, user.id),
+      c.env.DATABASE.prepare(`UPDATE cqu_bind_addresses SET status='active' WHERE user_id=? AND token=? AND status IN ('pending','active')
+        AND NOT EXISTS (SELECT 1 FROM user WHERE id = ? AND banned = 1
+          AND (banExpires IS NULL OR banExpires = '' OR julianday(banExpires) > julianday('now')))`)
+        .bind(user.id, bind.token, user.id),
     ]);
     if (!writes[0].meta.changes || !writes[1].meta.changes) {
       finish("failure", "BINDING_UNAVAILABLE");

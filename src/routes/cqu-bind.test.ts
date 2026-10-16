@@ -169,6 +169,8 @@ function createBindingFixture() {
   const database = new DatabaseSync(":memory:");
   databases.push(database);
   database.exec(`
+    CREATE TABLE user (id TEXT PRIMARY KEY, banned INTEGER, banExpires TEXT);
+    INSERT INTO user VALUES ('current-user', 0, NULL);
     CREATE TABLE cqu_credentials (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL UNIQUE,
@@ -273,6 +275,9 @@ function createBindingFixture() {
     failActivationBatch() {
       failNextBatch = true;
     },
+    banOwner(expires: string | null) {
+      database.prepare("UPDATE user SET banned=1, banExpires=? WHERE id='current-user'").run(expires);
+    },
     close() {
       const index = databases.indexOf(database);
       if (index >= 0) databases.splice(index, 1);
@@ -282,6 +287,37 @@ function createBindingFixture() {
 }
 
 describe("PUT CQU binding credentials", () => {
+  // The real-container journey covers ban during browser I/O. These existing
+  // SQLite/DO-response seams isolate the remaining D1 activation race window.
+  it.each([null, "", "2099-01-01T00:00:00.000Z"])("does not activate an owner banned after login admission (expiry %s)", async (expires) => {
+    const fixture = createBindingFixture();
+    await fixture.insertAddress("current-user");
+    const init = fixture.deferInit();
+    const request = fixture.putCredentials({ studentId: "20260001", password: "test-only" });
+    await init.started;
+    fixture.banOwner(expires);
+    init.resolve({ success: true });
+    const response = await request;
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({detail:{error:{code:"BINDING_UNAVAILABLE"}}});
+    expect(fixture.credentialStatus()).toBeUndefined();
+    expect((await fixture.getBinding()).bindStatus).toBe("pending");
+    fixture.close();
+  });
+
+  it("retains the existing expired-ban semantics at activation", async () => {
+    const fixture = createBindingFixture();
+    await fixture.insertAddress("current-user");
+    const init = fixture.deferInit();
+    const request = fixture.putCredentials({ studentId: "20260001", password: "test-only" });
+    await init.started;
+    fixture.banOwner("2000-01-01T00:00:00.000Z");
+    init.resolve({ success: true });
+    expect((await request).status).toBe(200);
+    expect((await fixture.getBinding()).bindStatus).toBe("active");
+    fixture.close();
+  });
+
   it("does not persist a new credential before init succeeds", async () => {
     const fixture = createBindingFixture();
     await fixture.insertAddress("current-user", "pending");

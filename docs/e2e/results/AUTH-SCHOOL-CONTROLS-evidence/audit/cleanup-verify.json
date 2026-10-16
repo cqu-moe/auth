@@ -1,0 +1,46 @@
+{
+  "result": "passed",
+  "images": [
+    {
+      "run": "school-negative-1792087862645",
+      "control": "assertion",
+      "imageId": "sha256:919c90655d334b64593567c2d23c127134ef0854c61f54dd9dff53a4fa03a4de",
+      "imageAbsent": true,
+      "businessObjectsAbsent": true,
+      "removedContainerIds": [],
+      "removedProxyIds": []
+    },
+    {
+      "run": "school-negative-1792087862645",
+      "control": "zero",
+      "imageId": "sha256:5ba078ff900391217c1063d75a2395714d27ac05740caf552ac525730ac4fcbf",
+      "imageAbsent": true,
+      "businessObjectsAbsent": true,
+      "removedContainerIds": [],
+      "removedProxyIds": []
+    },
+    {
+      "run": "school-negative-1792087982965",
+      "control": "assertion",
+      "imageId": "sha256:4a2f507f96f1ebfd251c9ed6b438a66794c8c7711f24717683995c2e7ae5f178",
+      "imageAbsent": true,
+      "businessObjectsAbsent": true,
+      "removedContainerIds": [],
+      "removedProxyIds": []
+    },
+    {
+      "run": "school-negative-1792087982965",
+      "control": "zero",
+      "imageId": "sha256:bc11aa9db4cd88b6718d3b174be6c8494a0246cc11cf5d2156b0e3bd1a61edb5",
+      "imageAbsent": true,
+      "businessObjectsAbsent": true,
+      "removedContainerIds": [],
+      "removedProxyIds": []
+    }
+  ],
+  "observedBrowserPidsAbsent": [
+    41469
+  ],
+  "runtimeDirectories": [],
+  "note": "Pre-secret and zero controls create fixture images but no school business/proxy instances; empty removed-ID arrays are expected, not full binding cleanup proof."
+}

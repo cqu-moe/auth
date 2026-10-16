@@ -1,0 +1,16 @@
+{
+  "commit": "d0ba5c2143643f697e7173143cfb8d440e58d0c0",
+  "exitCode": 0,
+  "observations": [
+    {
+      "pid": 41469,
+      "ppid": 41465,
+      "profile": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/native-tmp/playwright_chromiumdev_profile-AodUcj",
+      "headless": true,
+      "basic": true,
+      "mockKeychain": true
+    }
+  ],
+  "ownedPidsAlive": [],
+  "remainingProfiles": []
+}

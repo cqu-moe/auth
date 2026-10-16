@@ -2,7 +2,7 @@ name: Tests
 on:
   pull_request:
   push:
-    branches: ['**']
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
 permissions:
@@ -50,10 +50,170 @@ jobs:
         with:
           persist-credentials: false
       - run: bash scripts/test-container.sh
+  browser:
+    name: Built Auth registration and session E2E
+    runs-on: ubuntu-24.04
+    # Two independent 34-attempt rounds plus build/install and negative controls.
+    timeout-minutes: 25
+    env:
+      E2E_TELEMETRY_DISABLED: '1'
+      DO_NOT_TRACK: '1'
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '22.22.3'
+          cache: npm
+      - run: npm ci
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      - run: npx --no-install e2e-web install chromium --with-deps
+      - run: npm run test:e2e
+      - run: node e2e/run.mjs
+      - run: node e2e/account-smoke.mjs
+      - run: node e2e/self-check.mjs
+      - run: node e2e/artifact-safety-check.mjs
+      - run: node --test e2e/publication-failure.test.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: auth-browser-${{ github.sha }}
+          path: .e2e/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+  school:
+    name: Built Auth school and native container E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      E2E_TELEMETRY_DISABLED: '1'
+      DO_NOT_TRACK: '1'
+      WRANGLER_SEND_METRICS: 'false'
+      AUTH_SCHOOL_DOCKER_SOCKET: /var/run/docker.sock
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '22.22.3'
+          cache: npm
+      - run: npm ci
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      - run: node e2e/school/workflow-probe.mjs
+      - run: VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build
+      - run: node e2e/school/build.mjs
+      - run: node e2e/school/container-probe.mjs
+      - run: npx --no-install e2e-web install chromium --with-deps
+      - run: npm run test:e2e:school
+      - run: node e2e/school/run.mjs
+      - run: node e2e/school/consumer-smoke.mjs
+      - run: node e2e/school/self-check.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: auth-school-${{ github.sha }}
+          path: .e2e/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+  oauth:
+    name: Built Auth OAuth devices and background E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      E2E_TELEMETRY_DISABLED: '1'
+      DO_NOT_TRACK: '1'
+      WRANGLER_SEND_METRICS: 'false'
+      AUTH_SCHOOL_DOCKER_SOCKET: /var/run/docker.sock
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '22.22.3'
+          cache: npm
+      - run: npm ci
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      - run: npx --no-install e2e-web install chromium --with-deps
+      - run: npm run test:e2e:oauth
+      - run: node e2e/oauth/run.mjs
+      - run: node e2e/oauth/self-check.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: auth-oauth-${{ github.sha }}
+          path: .e2e/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+  cross-browser:
+    name: Auth supplement (${{ matrix.browser }}, ${{ matrix.suite }})
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [firefox, webkit]
+        suite: [account, oauth, school]
+    env:
+      AUTH_E2E_BROWSER: ${{ matrix.browser }}
+      AUTH_E2E_SUITE: ${{ matrix.suite }}
+      AUTH_E2E_EXPECT_COMMIT: ${{ github.sha }}
+      AUTH_SCHOOL_DOCKER_SOCKET: /var/run/docker.sock
+      E2E_TELEMETRY_DISABLED: '1'
+      DO_NOT_TRACK: '1'
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '22.22.3'
+          cache: npm
+      - run: npm ci
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      - run: npx --no-install e2e-web install ${{ matrix.browser }} --with-deps
+      - run: node --test e2e/oauth/network-proxy.test.mjs
+        if: matrix.browser == 'webkit' && matrix.suite == 'oauth'
+      - run: npm run test:e2e:cross-browser
+      - run: node e2e/cross-browser.mjs
+      - run: node e2e/cross-browser.mjs --self-check
+        if: matrix.suite == 'account'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: auth-cross-browser-${{ matrix.browser }}-${{ matrix.suite }}-${{ github.sha }}
+          path: .e2e/cross-browser-*/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
   ci:
     name: CI
     if: always()
-    needs: [test, container]
+    needs: [test, container, browser, school, oauth, cross-browser]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -61,7 +221,15 @@ jobs:
         env:
           TEST_RESULT: ${{ needs.test.result }}
           CONTAINER_RESULT: ${{ needs.container.result }}
-        run: test "$TEST_RESULT" = success && test "$CONTAINER_RESULT" = success
+          BROWSER_RESULT: ${{ needs.browser.result }}
+          SCHOOL_RESULT: ${{ needs.school.result }}
+          OAUTH_RESULT: ${{ needs.oauth.result }}
+        run: test "$TEST_RESULT" = success && test "$CONTAINER_RESULT" = success && test "$BROWSER_RESULT" = success && test "$SCHOOL_RESULT" = success && test "$OAUTH_RESULT" = success
+      - name: Require browser supplement before release or manual acceptance
+        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+        env:
+          CROSS_BROWSER_RESULT: ${{ needs.cross-browser.result }}
+        run: test "$CROSS_BROWSER_RESULT" = success
   release:
     name: Versioned build archive
     if: startsWith(github.ref, 'refs/tags/v')

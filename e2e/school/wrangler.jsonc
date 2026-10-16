@@ -1,0 +1,6 @@
+{
+  "name": "auth-school-e2e-build",
+  "main": "./worker.ts",
+  "compatibility_date": "2026-05-01",
+  "compatibility_flags": ["nodejs_compat"]
+}

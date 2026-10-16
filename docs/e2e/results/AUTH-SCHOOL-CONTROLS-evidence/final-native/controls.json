@@ -1,0 +1,26 @@
+{
+  "result": "passed",
+  "controls": [
+    {
+      "name": "assertion",
+      "innerExit": 1,
+      "result": "passed",
+      "runtime": ".e2e/school-negative-1792087982965/assertion/mobile/runtime.json",
+      "cleanup": "passed"
+    },
+    {
+      "name": "zero",
+      "innerExit": 1,
+      "result": "passed",
+      "runtime": ".e2e/school-negative-1792087982965/zero/mobile/runtime.json",
+      "cleanup": "passed"
+    },
+    {
+      "name": "pin",
+      "innerExit": 1,
+      "result": "passed",
+      "runtime": ".e2e/school-negative-1792087982965/pin/mobile/runtime.json",
+      "cleanup": "not-started"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "variant": "mobile",
+  "sourceHash": "641e1728e9bac70caf80077fc3b997be6d63c351082f8ea23f9879913249608f",
+  "result": "failed",
+  "cleanup": "passed",
+  "stage": "framework-report",
+  "commit": "d0ba5c2143643f697e7173143cfb8d440e58d0c0",
+  "failure": {
+    "stage": "framework-report",
+    "name": "Error",
+    "message": "ENOENT: no such file or directory, open '.e2e/school-negative-1792087982965/zero/mobile/report.json'"
+  },
+  "resources": {
+    "directoryRemoved": true,
+    "platform": {
+      "containerObjectsRemoved": true,
+      "proxyObjectsRemoved": true,
+      "removedContainerIds": [],
+      "removedProxyIds": [],
+      "fixtureImageRemoved": true,
+      "imageId": "sha256:bc11aa9db4cd88b6718d3b174be6c8494a0246cc11cf5d2156b0e3bd1a61edb5",
+      "base": "auth-school-browser:7bfc98777820631b",
+      "fixtureHash": "7603f222b9a855f493ac5b1ec2d72ad8db3aa4fd0e0c44c91472dbbd9af90cb3",
+      "runtimeLog": []
+    }
+  },
+  "redactions": 0
+}

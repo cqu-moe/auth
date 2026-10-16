@@ -1,0 +1,530 @@
+{
+  "result": "passed",
+  "sourceCommit": "d0ba5c2143643f697e7173143cfb8d440e58d0c0",
+  "files": [
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/actual-unrelated/mobile/report.json",
+      "path": "readback/actual-unrelated/mobile/report.json",
+      "bytes": 11065,
+      "sha256": "f66414432f6fd84d4db5030030e6afc0c522bdffba71106241fb2d3b6edefbe4",
+      "originalBytes": 11065,
+      "originalSha256": "f66414432f6fd84d4db5030030e6afc0c522bdffba71106241fb2d3b6edefbe4",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/actual-unrelated/mobile/results/journey-oauth-oauth-s256-authorization-dpop-d0d928b0d053cfcd/attempt-1/screenshots/001-failure.png",
+      "path": "readback/actual-unrelated/mobile/results/journey-oauth-oauth-s256-authorization-dpop-d0d928b0d053cfcd/attempt-1/screenshots/001-failure.png",
+      "bytes": 28124,
+      "sha256": "6c050585a6014cd0fd5ca2799a6731dc9ba9098c9593baa763e4141ee1909cb3",
+      "originalBytes": 28124,
+      "originalSha256": "6c050585a6014cd0fd5ca2799a6731dc9ba9098c9593baa763e4141ee1909cb3",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/actual-unrelated/mobile/runner.log",
+      "path": "readback/actual-unrelated/mobile/runner.log.gz",
+      "bytes": 1833,
+      "sha256": "593c955d4d72635a386608f313ed1c3b354bfeed45f8668a8daf42032471b77f",
+      "originalBytes": 4666,
+      "originalSha256": "8956e685359632177431e7d06bc37c624cd356ba3e23ff64ad237582c8cc4d3c",
+      "encoding": "gzip"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/actual-unrelated/mobile/runtime.json",
+      "path": "readback/actual-unrelated/mobile/runtime.json",
+      "bytes": 1383,
+      "sha256": "c43808fca520e8052d367eb6a443df1cc8690a464d485cae972dfa3a1348e3c8",
+      "originalBytes": 1383,
+      "originalSha256": "c43808fca520e8052d367eb6a443df1cc8690a464d485cae972dfa3a1348e3c8",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/derived-rejections/artifact-error/mobile/report.json",
+      "path": "readback/derived-rejections/artifact-error/mobile/report.json",
+      "bytes": 16452,
+      "sha256": "2cfd3c05f861e5a30f8e86e5d7e4b5fa368e6a6b7bccd2cc18e5997bcc3d7ba8",
+      "originalBytes": 16452,
+      "originalSha256": "2cfd3c05f861e5a30f8e86e5d7e4b5fa368e6a6b7bccd2cc18e5997bcc3d7ba8",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/derived-rejections/attempt-cleanup/mobile/report.json",
+      "path": "readback/derived-rejections/attempt-cleanup/mobile/report.json",
+      "bytes": 16450,
+      "sha256": "b86e3d059c89159c557cb80862ac2a79e5ee684a5a5b7da2614d3365120737d8",
+      "originalBytes": 16450,
+      "originalSha256": "b86e3d059c89159c557cb80862ac2a79e5ee684a5a5b7da2614d3365120737d8",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/derived-rejections/run-error/mobile/report.json",
+      "path": "readback/derived-rejections/run-error/mobile/report.json",
+      "bytes": 16523,
+      "sha256": "d903c2bfb2015327fc61003f9e2a0f573e5f8e9e8cc498bde59b5749cce87847",
+      "originalBytes": 16523,
+      "originalSha256": "d903c2bfb2015327fc61003f9e2a0f573e5f8e9e8cc498bde59b5749cce87847",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/derived-rejections/runtime-cleanup/mobile/report.json",
+      "path": "readback/derived-rejections/runtime-cleanup/mobile/report.json",
+      "bytes": 16452,
+      "sha256": "2cfd3c05f861e5a30f8e86e5d7e4b5fa368e6a6b7bccd2cc18e5997bcc3d7ba8",
+      "originalBytes": 16452,
+      "originalSha256": "2cfd3c05f861e5a30f8e86e5d7e4b5fa368e6a6b7bccd2cc18e5997bcc3d7ba8",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/derived-rejections/secondary-error/mobile/report.json",
+      "path": "readback/derived-rejections/secondary-error/mobile/report.json",
+      "bytes": 16585,
+      "sha256": "ff6b33a4747dd64d6a4c131e345d9cca93753e528ab4adf96fd7ba3d5d37cbc7",
+      "originalBytes": 16585,
+      "originalSha256": "ff6b33a4747dd64d6a4c131e345d9cca93753e528ab4adf96fd7ba3d5d37cbc7",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/derived-rejections/wrong-cause/mobile/report.json",
+      "path": "readback/derived-rejections/wrong-cause/mobile/report.json",
+      "bytes": 16296,
+      "sha256": "a3a064ff795069ebf2379e382e1b5e6d363ff85481ecb07818cdbd636d1fafb4",
+      "originalBytes": 16296,
+      "originalSha256": "a3a064ff795069ebf2379e382e1b5e6d363ff85481ecb07818cdbd636d1fafb4",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/derived-rejections/wrong-code/mobile/report.json",
+      "path": "readback/derived-rejections/wrong-code/mobile/report.json",
+      "bytes": 16450,
+      "sha256": "2e9f271d7dcf117b5b6f54035948c0df9f3ec2c08f06473a2be15b29de97f2de",
+      "originalBytes": 16450,
+      "originalSha256": "2e9f271d7dcf117b5b6f54035948c0df9f3ec2c08f06473a2be15b29de97f2de",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/derived-rejections/wrong-observation/mobile/report.json",
+      "path": "readback/derived-rejections/wrong-observation/mobile/report.json",
+      "bytes": 16438,
+      "sha256": "4572d3bed6d1093994c7ba7574ae255c9ca98d981c863381a4e12a151cf4324b",
+      "originalBytes": 16438,
+      "originalSha256": "4572d3bed6d1093994c7ba7574ae255c9ca98d981c863381a4e12a151cf4324b",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/derived-rejections/zero/mobile/runner.log",
+      "path": "readback/derived-rejections/zero/mobile/runner.log.gz",
+      "bytes": 102,
+      "sha256": "516d5880707921862c879269b2ee5d1bc866cadc365dd268a277451929a391b2",
+      "originalBytes": 93,
+      "originalSha256": "01a5fbfe64f4adafd7816b8734c28ee8cbc7aeaf5e5652234f1a7d15dc8bf22b",
+      "encoding": "gzip"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/historical-Linux-CI/assertion/mobile/report.json",
+      "path": "readback/historical-Linux-CI/assertion/mobile/report.json",
+      "bytes": 16447,
+      "sha256": "d2b02f3c86c331a801fae0b7bae7d01c36132b147dbae0f78fa72b209ec3198a",
+      "originalBytes": 16447,
+      "originalSha256": "d2b02f3c86c331a801fae0b7bae7d01c36132b147dbae0f78fa72b209ec3198a",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/historical-Linux-CI/assertion/mobile/results/journey-school-school-binding-persists-and-e2276b307c2e9f84/attempt-1/screenshots/001-failure.png",
+      "path": "readback/historical-Linux-CI/assertion/mobile/results/journey-school-school-binding-persists-and-e2276b307c2e9f84/attempt-1/screenshots/001-failure.png",
+      "bytes": 31409,
+      "sha256": "28ae1236fc9f7f535051ae0064d789d8a25c0b59afa86d080a5a043d0be96b21",
+      "originalBytes": 31409,
+      "originalSha256": "28ae1236fc9f7f535051ae0064d789d8a25c0b59afa86d080a5a043d0be96b21",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/historical-Linux-CI/assertion/mobile/runner.log",
+      "path": "readback/historical-Linux-CI/assertion/mobile/runner.log.gz",
+      "bytes": 644,
+      "sha256": "94a4c86e7942d662cbfa863aa3269bce80fa68eae888f42ec0d0f4aa48bbd891",
+      "originalBytes": 1510,
+      "originalSha256": "b222d43615be8630b80523da3662c7303660a822bd0be6804bc7a526843bcf9f",
+      "encoding": "gzip"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/historical-Linux-CI/assertion/mobile/runtime.json",
+      "path": "readback/historical-Linux-CI/assertion/mobile/runtime.json",
+      "bytes": 962,
+      "sha256": "fb3056422b1333946124fe187b2acbf82ab270e909b1876fe3d54dfc4081e487",
+      "originalBytes": 962,
+      "originalSha256": "fb3056422b1333946124fe187b2acbf82ab270e909b1876fe3d54dfc4081e487",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/historical-Linux-CI/pin/mobile/runtime.json",
+      "path": "readback/historical-Linux-CI/pin/mobile/runtime.json",
+      "bytes": 313,
+      "sha256": "a3fe3a63be70eac6684227c7a16a6032a394272a14943d9c9378555ee4d74852",
+      "originalBytes": 313,
+      "originalSha256": "a3fe3a63be70eac6684227c7a16a6032a394272a14943d9c9378555ee4d74852",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/historical-Linux-CI/zero/mobile/runner.log",
+      "path": "readback/historical-Linux-CI/zero/mobile/runner.log.gz",
+      "bytes": 365,
+      "sha256": "a7826b1c8c4f9306ddf56d20cbbbb623b35f9aff5ca6be43e1e6e074bab106ae",
+      "originalBytes": 671,
+      "originalSha256": "ce00b67f40ebb6f1cdf05b26634c6bc9e2550319d22e18d191e0e52e4f1680d9",
+      "encoding": "gzip"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/historical-Linux-CI/zero/mobile/runtime.json",
+      "path": "readback/historical-Linux-CI/zero/mobile/runtime.json",
+      "bytes": 911,
+      "sha256": "dfadc9402e456f79290fcd84bf9eb7aa83232e97ccd1687ff6ef2f84f60250de",
+      "originalBytes": 911,
+      "originalSha256": "dfadc9402e456f79290fcd84bf9eb7aa83232e97ccd1687ff6ef2f84f60250de",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/historical-local/assertion/mobile/report.json",
+      "path": "readback/historical-local/assertion/mobile/report.json",
+      "bytes": 16452,
+      "sha256": "2cfd3c05f861e5a30f8e86e5d7e4b5fa368e6a6b7bccd2cc18e5997bcc3d7ba8",
+      "originalBytes": 16452,
+      "originalSha256": "2cfd3c05f861e5a30f8e86e5d7e4b5fa368e6a6b7bccd2cc18e5997bcc3d7ba8",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/historical-local/assertion/mobile/results/journey-school-school-binding-persists-and-e2276b307c2e9f84/attempt-1/screenshots/001-failure.png",
+      "path": "readback/historical-local/assertion/mobile/results/journey-school-school-binding-persists-and-e2276b307c2e9f84/attempt-1/screenshots/001-failure.png",
+      "bytes": 28124,
+      "sha256": "6c050585a6014cd0fd5ca2799a6731dc9ba9098c9593baa763e4141ee1909cb3",
+      "originalBytes": 28124,
+      "originalSha256": "6c050585a6014cd0fd5ca2799a6731dc9ba9098c9593baa763e4141ee1909cb3",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/historical-local/assertion/mobile/runner.log",
+      "path": "readback/historical-local/assertion/mobile/runner.log.gz",
+      "bytes": 682,
+      "sha256": "78905e845002776a713d454ccf2231afc4cc9ad367eb1b43a3035b253ef0cf57",
+      "originalBytes": 1556,
+      "originalSha256": "559611b3c993b4b08ac0e7c529a0518f9953c6dfdea3219f10995d4e23eb22af",
+      "encoding": "gzip"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/historical-local/assertion/mobile/runtime.json",
+      "path": "readback/historical-local/assertion/mobile/runtime.json",
+      "bytes": 874,
+      "sha256": "4b3065b501f4aa593033af0e876d7c6a0cb1a40564819632a68e1792132d9fc5",
+      "originalBytes": 874,
+      "originalSha256": "4b3065b501f4aa593033af0e876d7c6a0cb1a40564819632a68e1792132d9fc5",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/historical-local/pin/mobile/runtime.json",
+      "path": "readback/historical-local/pin/mobile/runtime.json",
+      "bytes": 313,
+      "sha256": "b82d40a17f53e9c38fa82b41b0b03dffe918af3a2439884b333b5af50cedb06e",
+      "originalBytes": 313,
+      "originalSha256": "b82d40a17f53e9c38fa82b41b0b03dffe918af3a2439884b333b5af50cedb06e",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/historical-local/zero/mobile/runner.log",
+      "path": "readback/historical-local/zero/mobile/runner.log.gz",
+      "bytes": 400,
+      "sha256": "68261cefce96d4c5c7b76bbafb0102e3f6ba899edddc9f4d8752535fbce20fdd",
+      "originalBytes": 717,
+      "originalSha256": "644090d4aeb9184d8d688ba4477d721d8e7d1e3b18ff08029cf5e2102701a8e0",
+      "encoding": "gzip"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/historical-local/zero/mobile/runtime.json",
+      "path": "readback/historical-local/zero/mobile/runtime.json",
+      "bytes": 823,
+      "sha256": "f9987e435e40f4c1f4887a59d6fb022a698bb7a3644358a7b8ef9d0cbbbb2213",
+      "originalBytes": 823,
+      "originalSha256": "f9987e435e40f4c1f4887a59d6fb022a698bb7a3644358a7b8ef9d0cbbbb2213",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback/readback.json",
+      "path": "readback/readback.json",
+      "bytes": 7118,
+      "sha256": "f7efe7a2038dace2a2b6f6bdacedfd3489a53aaff6ba5ff5182306ccc65ff90e",
+      "originalBytes": 7118,
+      "originalSha256": "f7efe7a2038dace2a2b6f6bdacedfd3489a53aaff6ba5ff5182306ccc65ff90e",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/school-negative-1792087862645/assertion/mobile/report.json",
+      "path": "first-attempt/assertion/mobile/report.json",
+      "bytes": 16465,
+      "sha256": "d8b36b9715e68a50d67d67c43a866a75c1b0bbe87f7d7f91537a8fe018fe6708",
+      "originalBytes": 16465,
+      "originalSha256": "d8b36b9715e68a50d67d67c43a866a75c1b0bbe87f7d7f91537a8fe018fe6708",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/school-negative-1792087862645/assertion/mobile/results/journey-school-school-binding-persists-and-e2276b307c2e9f84/attempt-1/screen-at-failure.txt",
+      "path": "first-attempt/assertion/mobile/results/journey-school-school-binding-persists-and-e2276b307c2e9f84/attempt-1/screen-at-failure.txt.gz",
+      "bytes": 418,
+      "sha256": "baaacfdd5f8a4310a38f2562e37ef4948514a7ec52ac8f1603807b8e277d9d9d",
+      "originalBytes": 610,
+      "originalSha256": "0fa19d21d8f15c9eaffbd9b53b9dd4303cf51bdb08c5bd822838f6b3d946d4ae",
+      "encoding": "gzip"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/school-negative-1792087862645/assertion/mobile/results/journey-school-school-binding-persists-and-e2276b307c2e9f84/attempt-1/screenshots/001-failure.png",
+      "path": "first-attempt/assertion/mobile/results/journey-school-school-binding-persists-and-e2276b307c2e9f84/attempt-1/screenshots/001-failure.png",
+      "bytes": 28124,
+      "sha256": "6c050585a6014cd0fd5ca2799a6731dc9ba9098c9593baa763e4141ee1909cb3",
+      "originalBytes": 28124,
+      "originalSha256": "6c050585a6014cd0fd5ca2799a6731dc9ba9098c9593baa763e4141ee1909cb3",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/school-negative-1792087862645/assertion/mobile/results/journey-school-school-binding-persists-and-e2276b307c2e9f84/trace.md",
+      "path": "first-attempt/assertion/mobile/results/journey-school-school-binding-persists-and-e2276b307c2e9f84/trace.md.gz",
+      "bytes": 1319,
+      "sha256": "dfa914c91e5d59fdf92d668c9f9cef6cbf09d4b9278d2254881459fe1aeb3afb",
+      "originalBytes": 2446,
+      "originalSha256": "9d585f00d7cdaf1953ea4b3c611e00bfa403aa552b16f49e7bc3a38b5bddc14c",
+      "encoding": "gzip"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/school-negative-1792087862645/assertion/mobile/runner.log",
+      "path": "first-attempt/assertion/mobile/runner.log.gz",
+      "bytes": 693,
+      "sha256": "982be81dadce28f72d4af08679d331340e777c60ceb4c9b0b0342d14ac862ba6",
+      "originalBytes": 1569,
+      "originalSha256": "8a9726ac7092c5b000c2c0e7bf8708cce36ff6a03f32e0d4cb6b80003c94f616",
+      "encoding": "gzip"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/school-negative-1792087862645/assertion/mobile/runtime.json",
+      "path": "first-attempt/assertion/mobile/runtime.json",
+      "bytes": 995,
+      "sha256": "3af3efa7ad7957d4cf7848218d2bdd9706693bec2e1a6fcc189971b29af1f037",
+      "originalBytes": 995,
+      "originalSha256": "3af3efa7ad7957d4cf7848218d2bdd9706693bec2e1a6fcc189971b29af1f037",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/school-negative-1792087862645/zero/mobile/runner.log",
+      "path": "first-attempt/zero/mobile/runner.log.gz",
+      "bytes": 411,
+      "sha256": "bb8e3a81a2b752e2e9d801f0c6c19199d7400f9b1ca0f2d90a3bbfc4f2088c81",
+      "originalBytes": 730,
+      "originalSha256": "069000f15950f5e2442b039bc13b9ea8c7c2be92cbe7bba518b790aadf9db16a",
+      "encoding": "gzip"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/school-negative-1792087862645/zero/mobile/runtime.json",
+      "path": "first-attempt/zero/mobile/runtime.json",
+      "bytes": 958,
+      "sha256": "3bcb56eb19e7333b5523042557bb88b17387eefd384c2b6d9eaad719376d0ac8",
+      "originalBytes": 958,
+      "originalSha256": "3bcb56eb19e7333b5523042557bb88b17387eefd384c2b6d9eaad719376d0ac8",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/school-negative-1792087982965/assertion/mobile/report.json",
+      "path": "final-native/assertion/mobile/report.json",
+      "bytes": 16465,
+      "sha256": "200c25019ff2f0bb29659c40cc7ce6ed8b422dca69825e53a0d7ea97d773c121",
+      "originalBytes": 16465,
+      "originalSha256": "200c25019ff2f0bb29659c40cc7ce6ed8b422dca69825e53a0d7ea97d773c121",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/school-negative-1792087982965/assertion/mobile/results/journey-school-school-binding-persists-and-e2276b307c2e9f84/attempt-1/screen-at-failure.txt",
+      "path": "final-native/assertion/mobile/results/journey-school-school-binding-persists-and-e2276b307c2e9f84/attempt-1/screen-at-failure.txt.gz",
+      "bytes": 418,
+      "sha256": "baaacfdd5f8a4310a38f2562e37ef4948514a7ec52ac8f1603807b8e277d9d9d",
+      "originalBytes": 610,
+      "originalSha256": "0fa19d21d8f15c9eaffbd9b53b9dd4303cf51bdb08c5bd822838f6b3d946d4ae",
+      "encoding": "gzip"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/school-negative-1792087982965/assertion/mobile/results/journey-school-school-binding-persists-and-e2276b307c2e9f84/attempt-1/screenshots/001-failure.png",
+      "path": "final-native/assertion/mobile/results/journey-school-school-binding-persists-and-e2276b307c2e9f84/attempt-1/screenshots/001-failure.png",
+      "bytes": 28124,
+      "sha256": "6c050585a6014cd0fd5ca2799a6731dc9ba9098c9593baa763e4141ee1909cb3",
+      "originalBytes": 28124,
+      "originalSha256": "6c050585a6014cd0fd5ca2799a6731dc9ba9098c9593baa763e4141ee1909cb3",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/school-negative-1792087982965/assertion/mobile/results/journey-school-school-binding-persists-and-e2276b307c2e9f84/trace.md",
+      "path": "final-native/assertion/mobile/results/journey-school-school-binding-persists-and-e2276b307c2e9f84/trace.md.gz",
+      "bytes": 1319,
+      "sha256": "fc064741ccd1c8f2686a292926ddad4c6e1ea0dc790160fa315addba1fd3f567",
+      "originalBytes": 2446,
+      "originalSha256": "60a72866d9ce05c41924a3841edc202b3e24112df09dde03d62ab34b8dfe0b4b",
+      "encoding": "gzip"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/school-negative-1792087982965/assertion/mobile/runner.log",
+      "path": "final-native/assertion/mobile/runner.log.gz",
+      "bytes": 696,
+      "sha256": "a0ea318ee4676e8928ea4c613bd237db08490749754c62342256c27f0320bbaf",
+      "originalBytes": 1569,
+      "originalSha256": "a15ac6f02f45ec711fbfa74039355a7924ba867441038234f5aed30a324cf715",
+      "encoding": "gzip"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/school-negative-1792087982965/assertion/mobile/runtime.json",
+      "path": "final-native/assertion/mobile/runtime.json",
+      "bytes": 995,
+      "sha256": "648caceccce09cb7391a6c00f3a59371628bb00cee297d8e96374600c2e16673",
+      "originalBytes": 995,
+      "originalSha256": "648caceccce09cb7391a6c00f3a59371628bb00cee297d8e96374600c2e16673",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/school-negative-1792087982965/controls.json",
+      "path": "final-native/controls.json",
+      "bytes": 625,
+      "sha256": "9ce1d0cd4859dcd14b08dc3e10fe6f42de3e596be211f781c3411568a3f3ba89",
+      "originalBytes": 625,
+      "originalSha256": "9ce1d0cd4859dcd14b08dc3e10fe6f42de3e596be211f781c3411568a3f3ba89",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/school-negative-1792087982965/pin/mobile/runtime.json",
+      "path": "final-native/pin/mobile/runtime.json",
+      "bytes": 313,
+      "sha256": "d1152194a143a4434c3213a1278d00daf735cc286c6f1dd23f4d4ce34226d513",
+      "originalBytes": 313,
+      "originalSha256": "d1152194a143a4434c3213a1278d00daf735cc286c6f1dd23f4d4ce34226d513",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/school-negative-1792087982965/zero/mobile/runner.log",
+      "path": "final-native/zero/mobile/runner.log.gz",
+      "bytes": 409,
+      "sha256": "b09b02a4041d8d93e0a1618f556f6fadc6ae646b51616cdf3fcf214dd45406b1",
+      "originalBytes": 730,
+      "originalSha256": "dc028d6e3159d83fc1ed5b8b581e5c5bd1033848e1b49daf543be7ea388f1b40",
+      "encoding": "gzip"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/school-negative-1792087982965/zero/mobile/runtime.json",
+      "path": "final-native/zero/mobile/runtime.json",
+      "bytes": 958,
+      "sha256": "b487908ccc6b3489861933a6019210acf1eb6e36d08835a105ba66580170abf0",
+      "originalBytes": 958,
+      "originalSha256": "b487908ccc6b3489861933a6019210acf1eb6e36d08835a105ba66580170abf0",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback.mjs",
+      "path": "audit/readback.mjs",
+      "bytes": 6140,
+      "sha256": "9ba0e333fd259483da3c4075080ebe6eb637694c2f45f2568f645a0ba04cbfd3",
+      "originalBytes": 6140,
+      "originalSha256": "9ba0e333fd259483da3c4075080ebe6eb637694c2f45f2568f645a0ba04cbfd3",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/readback.log",
+      "path": "audit/readback.log.gz",
+      "bytes": 178,
+      "sha256": "693535c6f9d326b1ea8b5508ac967e634637a8ed959d961b446c31fc4056477e",
+      "originalBytes": 188,
+      "originalSha256": "7faed19ca95d9d785fe6436f48275cf30781b04b6e635f40d343afd42ddcf316",
+      "encoding": "gzip"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/native-driver.py",
+      "path": "audit/native-driver.py",
+      "bytes": 2017,
+      "sha256": "317e3a0f489f0763955e6f4099fd9b49cc174f4c697db89093f47f12560aac3e",
+      "originalBytes": 2017,
+      "originalSha256": "317e3a0f489f0763955e6f4099fd9b49cc174f4c697db89093f47f12560aac3e",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/native-driver.log",
+      "path": "audit/native-driver.log.gz",
+      "bytes": 307,
+      "sha256": "18e655b6eaea6ea3ac50ddeca9637db0ed7f45637d609df955bd6148f724c05b",
+      "originalBytes": 391,
+      "originalSha256": "16769d04b3faabc5761dc53ad433136b49f836c501100dcd6c3f2cd6486ba5e7",
+      "encoding": "gzip"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/final-native-driver.json",
+      "path": "audit/final-native-driver.json",
+      "bytes": 453,
+      "sha256": "d0a017cfe4e8b8e97d4983e7eaad2944185700fb3c5070cf1074db07f096f959",
+      "originalBytes": 453,
+      "originalSha256": "d0a017cfe4e8b8e97d4983e7eaad2944185700fb3c5070cf1074db07f096f959",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/cleanup-verify.py",
+      "path": "audit/cleanup-verify.py",
+      "bytes": 2225,
+      "sha256": "21499c15baf2e8a987d98b51a8b2f4d7231cc2c944f6c2750b01c10239217009",
+      "originalBytes": 2225,
+      "originalSha256": "21499c15baf2e8a987d98b51a8b2f4d7231cc2c944f6c2750b01c10239217009",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/cleanup-verify.json",
+      "path": "audit/cleanup-verify.json",
+      "bytes": 1507,
+      "sha256": "140101b8fd61c298beca4a4c7590ea755af79e88f5b93a1d8229f38f364f6114",
+      "originalBytes": 1507,
+      "originalSha256": "140101b8fd61c298beca4a4c7590ea755af79e88f5b93a1d8229f38f364f6114",
+      "encoding": "original"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/cleanup-verify.log",
+      "path": "audit/cleanup-verify.log.gz",
+      "bytes": 86,
+      "sha256": "5cefabd35989579a222950a7fc71990269b75bddffec35dd41e5ea20d5618305",
+      "originalBytes": 74,
+      "originalSha256": "109ccd2c60c3d7ae18997c10484ace12bfde480b59555ba048792c389a292b1b",
+      "encoding": "gzip"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/typecheck.log",
+      "path": "audit/typecheck.log.gz",
+      "bytes": 73,
+      "sha256": "cb1f151cb1fcc315ee429dea3321887638c7147110418b8816ad0171128ef9ae",
+      "originalBytes": 56,
+      "originalSha256": "150b8db5adcc22e607f5ea1417223bafee21969ab5962419b59b3d1e76eb283a",
+      "encoding": "gzip"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/frontend-build.log",
+      "path": "audit/frontend-build.log.gz",
+      "bytes": 680,
+      "sha256": "77398c0d9d8646c720aedc40812ec1b7d326b151804e7f1bbde3daae7672a5c8",
+      "originalBytes": 1374,
+      "originalSha256": "33d8519bcc940b9f2364c5f7c759e43bd696fb49c64ce6c704247cbfe945406d",
+      "encoding": "gzip"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/fresh-self-check.log",
+      "path": "audit/fresh-self-check.log.gz",
+      "bytes": 1260,
+      "sha256": "206bbb3cbee40704c4a2b64b13cee7081f518221b01b5a4eb45747a8e62d00e9",
+      "originalBytes": 3357,
+      "originalSha256": "3ef5c23d462c98edde940f26c99b43aa92764635b79eafeec6308f242102ed2d",
+      "encoding": "gzip"
+    },
+    {
+      "source": "/Users/uu/Developer/cqu-moe/.agent-worktrees/e2e-20261015/tickets/AUTH-SCHOOL-CONTROLS/.e2e/control-review/final-self-check.log",
+      "path": "audit/final-self-check.log.gz",
+      "bytes": 1051,
+      "sha256": "bdecba0095bfd898139c260b3e05e6f9a482d93ae97c507a7ff28fff520912a7",
+      "originalBytes": 2762,
+      "originalSha256": "a617eb657c61ec23eae7fab6ff5569d2304522f7ba6965f44cdd555b55deb2d8",
+      "encoding": "gzip"
+    }
+  ],
+  "problems": [],
+  "screenshots": "Five PNG files, two distinct hashes: both visually reviewed, login forms empty with password field masked."
+}
