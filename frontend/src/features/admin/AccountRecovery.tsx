@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Button, Input, Label } from "@cqu-moe/ui";
+import { ActionButton, Button, Input, Label } from "@cqu-moe/ui";
 import { requestAuthentication } from "../../lib/recent-authentication";
 import { Modal } from "./ui";
 
@@ -24,7 +24,7 @@ export function AccountRecovery({ user, onClose }: { user: { id: string; name: s
   const close = () => { if (busy) return; setPassword(""); onClose(); };
   return <Modal title="重置全部认证" description={`${user.name} · ${user.email}`} onClose={close} footer={<>
     <Button variant="outline" onClick={close} disabled={busy}>{password ? "已保存，关闭" : "取消"}</Button>
-    {!password && <Button variant="destructive" onClick={reset} disabled={busy}>{busy ? "正在重置…" : "确认重置"}</Button>}
+    {!password && <ActionButton variant="destructive" onClick={reset} disabled={busy} state={busy ? "loading" : "idle"} labels={{ idle: "确认重置", loading: "正在重置…", success: "已重置", error: "重试重置" }} />}
   </>}>
     {password ? <div className="space-y-3">
       <p className="text-sm">旧认证已作废。请将新密码交付给用户；关闭后无法再次查看。</p>

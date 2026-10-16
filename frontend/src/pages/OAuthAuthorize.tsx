@@ -1,61 +1,62 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Check, ShieldAlert } from "lucide-react";
-import { ActionButton, Alert, AlertDescription, Button } from "@cqu-moe/ui";
+import { AppWindow, ShieldAlert } from "lucide-react";
+import { ActionButton, Alert, AlertDescription, Button, Skeleton } from "@cqu-moe/ui";
 import AuthLayout from "../components/AuthLayout";
+import OAuthPermissions from "../components/OAuthPermissions";
 import { authClient } from "../lib/auth-client";
 
-interface ScopeInfo {
-  label: string;
-  description: string;
-}
-
-const SCOPE_MAP: Record<string, ScopeInfo> = {
-  openid: { label: "身份验证", description: "确认您的身份" },
-  profile: { label: "个人资料", description: "访问您的用户名等基本信息" },
-  email: { label: "邮箱地址", description: "访问您的邮箱地址" },
-  offline_access: { label: "离线访问", description: "在您不在线时保持访问权限（刷新令牌）" },
-  roles: { label: "角色信息", description: "访问您的账户角色" },
-  "cqu:ticket:jwxt": { label: "教务系统", description: "代表您访问重庆大学教务系统" },
-  "cqu:ticket:jxpj": { label: "教学评价", description: "代表您访问重庆大学教学评价系统" },
-  "cqu:ticket:library": { label: "图书馆", description: "代表您访问重庆大学图书馆系统" },
-  "cqu:ticket:card": { label: "校园卡", description: "代表您访问重庆大学校园卡系统" },
-};
-
-function getScopeInfo(scope: string): ScopeInfo {
-  return SCOPE_MAP[scope] ?? { label: scope, description: `授予 ${scope} 权限` };
+function clientMeta(value: unknown, clientId: string) {
+  const meta = value as Record<string, unknown>;
+  const name = [meta.name, meta.client_name]
+    .find((item): item is string => typeof item === "string" && item.trim() !== "");
+  const icon = [meta.icon, meta.logo_uri]
+    .find((item): item is string => typeof item === "string" && item.trim() !== "");
+  return { name: name ?? clientId, icon: icon ?? null };
 }
 
 export default function OAuthAuthorize() {
   const [searchParams] = useSearchParams();
-  const [loading, setLoading] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [loading, setLoading] = useState<"accept" | "reject" | null>(null);
+  const [failedAction, setFailedAction] = useState<"accept" | "reject" | null>(null);
   const [clientInfo, setClientInfo] = useState<{ name: string; icon?: string | null } | null>(null);
+  const [clientStatus, setClientStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [clientAttempt, setClientAttempt] = useState(0);
 
   const clientId = searchParams.get("client_id") ?? "";
   const scopeParam = searchParams.get("scope") ?? "openid";
   const scopes = scopeParam.split(" ").filter(Boolean);
 
   useEffect(() => {
-    if (!clientId) return;
-    authClient.oauth2.publicClient({ query: { client_id: clientId } }).then((res) => {
-      if (res.data) {
-        const meta = res.data as { name?: unknown; icon?: unknown };
-        setClientInfo({
-          name: typeof meta.name === "string" ? meta.name : clientId,
-          icon: typeof meta.icon === "string" ? meta.icon : null,
-        });
-      }
-    }).catch(() => {
-      setClientInfo({ name: clientId });
-    });
-  }, [clientId]);
+    let current = true;
+    setClientInfo(null);
+    if (!clientId) {
+      setClientStatus("error");
+    } else {
+      setClientStatus("loading");
+      authClient.oauth2.publicClient({ query: { client_id: clientId } }).then((res) => {
+        if (!current) return;
+        if (res.data) {
+          setClientInfo(clientMeta(res.data, clientId));
+          setClientStatus("ready");
+        } else {
+          setClientStatus("error");
+        }
+      }).catch(() => {
+        if (!current) return;
+        setClientInfo({ name: clientId });
+        setClientStatus("error");
+      });
+    }
+    return () => { current = false; };
+  }, [clientId, clientAttempt]);
 
   const clientName = clientInfo?.name ?? clientId ?? "未知应用";
+  const clientLoading = clientStatus === "loading";
 
   const handleConsent = async (accept: boolean) => {
-    setLoading(true);
-    setFailed(false);
+    setLoading(accept ? "accept" : "reject");
+    setFailedAction(null);
     try {
       const res = await authClient.oauth2.consent({
         accept,
@@ -68,74 +69,79 @@ export default function OAuthAuthorize() {
     } catch {
       // fall through
     }
-    setFailed(true);
-    setLoading(false);
+    setFailedAction(accept ? "accept" : "reject");
+    setLoading(null);
   };
 
   return (
-    <AuthLayout title="授权请求" description={`${clientName} 请求访问您的账户。`}>
-      {clientInfo?.icon ? (
-        <img
-          src={clientInfo.icon}
-          alt=""
-          className="mx-auto mb-4 h-16 w-16 rounded-lg object-cover"
-        />
-      ) : null}
+    <AuthLayout
+      title="授权请求"
+      description={
+        clientLoading ? (
+          <div className="inline-flex flex-wrap items-center gap-2">
+            <span className="sr-only" role="status">正在读取应用名称…</span>
+            <Skeleton className="h-4 w-32 max-w-full" aria-hidden="true" />
+            <span>请求访问您的账户。</span>
+          </div>
+        ) : (
+          `${clientName} 请求访问您的账户。`
+        )
+      }
+    >
+      {clientLoading ? (
+        <div className="mx-auto mb-4 flex w-full max-w-16" aria-hidden="true">
+          <Skeleton className="size-16 rounded-lg" />
+        </div>
+      ) : clientInfo?.icon ? (
+        <img src={clientInfo.icon} alt="" className="mx-auto mb-4 size-16 rounded-lg object-cover" />
+      ) : <div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-lg bg-muted text-muted-foreground" aria-hidden="true"><AppWindow size={32} /></div>}
 
-      <div className="space-y-2">
-        {scopes.map((scope) => {
-          const info = getScopeInfo(scope);
-          const isCquScope = scope.startsWith("cqu:");
-          return (
-            <div
-              key={scope}
-              className={`flex items-start gap-3 rounded-lg p-3 ${
-                isCquScope ? "border border-warning/40 bg-warning/10" : "bg-muted"
-              }`}
-            >
-              <span
-                className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
-                  isCquScope ? "bg-warning/20 text-warning" : "bg-link/10 text-link"
-                }`}
+      {clientStatus === "error" && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertDescription>
+            <span>{clientId ? "无法读取应用信息，当前显示客户端 ID。" : "缺少客户端 ID，无法读取应用信息。"}</span>
+            {clientId && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-2"
+                onClick={() => setClientAttempt((attempt) => attempt + 1)}
               >
-                <Check aria-hidden="true" size={12} />
-              </span>
-              <div>
-                <p className="text-sm font-medium text-foreground">{info.label}</p>
-                <p className="text-xs text-muted-foreground">{info.description}</p>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {scopes.some((s) => s.startsWith("cqu:")) && (
-        <Alert className="mt-4 border-warning/40 bg-warning/10 text-warning">
-          <AlertDescription className="text-warning">
-            该应用请求访问您的 CQU 账户。授权后，该应用将可以以您的身份访问相关 CQU 系统。请确认您信任该应用。
+                重新读取应用信息
+              </Button>
+            )}
           </AlertDescription>
         </Alert>
       )}
 
-      {failed && (
+      <OAuthPermissions scopes={scopes} />
+
+      {failedAction && (
         <Alert variant="destructive" className="mt-4">
           <AlertDescription>授权处理失败，请重试。</AlertDescription>
         </Alert>
       )}
 
       <div className="mt-6 flex gap-3">
-        <Button
+        <ActionButton
           variant="outline"
           className="flex-1"
-          onClick={() => handleConsent(false)}
-          disabled={loading}
-        >
-          拒绝
-        </Button>
+          onClick={() => void handleConsent(false)}
+          disabled={loading !== null || clientLoading}
+          state={loading === "reject" ? "loading" : failedAction === "reject" ? "error" : "idle"}
+          labels={{
+            idle: "拒绝",
+            loading: "正在拒绝…",
+            success: "已拒绝",
+            error: "重试拒绝",
+          }}
+        />
         <ActionButton
           type="button"
           className="flex-1"
-          state={loading ? "loading" : failed ? "error" : "idle"}
+          disabled={loading !== null || clientLoading}
+          state={loading === "accept" ? "loading" : failedAction === "accept" ? "error" : "idle"}
           onClick={() => handleConsent(true)}
           labels={{
             idle: "授权",

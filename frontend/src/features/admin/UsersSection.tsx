@@ -4,8 +4,8 @@ import { AccountRecovery } from "./AccountRecovery";
 // 仅把勾选的 flag 与非空 quota 发给 PUT,未勾/空缺省即「false / 无限」。
 // 预设从 GET /admin/entitlement-presets 读(管理台「权益预设」页可编辑)。
 import { useState, useEffect, useCallback } from "react";
-import { Loader2 } from "lucide-react";
 import {
+  ActionButton,
   Alert,
   AlertDescription,
   Button,
@@ -30,6 +30,7 @@ import { USER_ROLE_OPTIONS } from "../../../../shared/user-roles";
 import { adminFetch } from "../../lib/api/admin";
 import { authClient } from "../../lib/auth-client";
 import QuotaEditor from "../../components/quicklogin/QuotaEditor";
+import { UserEntitlementsSkeleton, UsersSkeleton } from "./AdminSkeletons";
 import { FieldLabel, Modal } from "./ui";
 
 interface User {
@@ -114,19 +115,23 @@ export function UsersSection() {
   const [users, setUsers] = useState<User[]>([]);
   const [pagination, setPagination] = useState({ page: 1, total: 0, totalPages: 1 });
   const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [recoveryUser, setRecoveryUser] = useState<User | null>(null);
   const [entitlementUser, setEntitlementUser] = useState<User | null>(null);
 
   const fetchUsers = useCallback(async (page = 1) => {
-    setLoading(true);
+    setRefreshing(true);
+    setError("");
     try {
       const res = await adminFetch(`/admin/users?page=${page}&limit=20`);
       if (res.ok) {
         const data = await res.json() as UsersResponse;
         setUsers(data.data);
         setPagination({ page, total: data.pagination.total, totalPages: data.pagination.totalPages });
+        setHasLoaded(true);
       } else {
         setError("加载用户列表失败");
       }
@@ -134,6 +139,7 @@ export function UsersSection() {
       setError("网络错误，请稍后重试");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
@@ -163,12 +169,33 @@ export function UsersSection() {
 
   if (loading) {
     return (
-      <PageState state="loading" title="正在加载用户" description="正在读取用户列表…" />
+      <UsersSkeleton canEditQuota={canEditQuota} />
+    );
+  }
+
+  if (error && !hasLoaded) {
+    return (
+      <PageState
+        state="error"
+        title="加载用户列表失败"
+        description={error}
+        action={
+          <Button
+            disabled={refreshing}
+            onClick={() => {
+              setLoading(true);
+              void fetchUsers(1);
+            }}
+          >
+            重试
+          </Button>
+        }
+      />
     );
   }
 
   return (
-    <div>
+    <div aria-busy={refreshing}>
       {error && (
         <Alert variant="destructive" className="mb-4">
           <AlertDescription>{error}</AlertDescription>
@@ -192,7 +219,7 @@ export function UsersSection() {
             <div className="mt-4 flex items-center justify-between gap-3">
               <RoleSelect
                 value={user.role}
-                disabled={actionLoading === user.id}
+                disabled={actionLoading === user.id || refreshing}
                 onChange={(role) => updateUser(user.id, { role })}
                 ariaLabel={`${user.name} 的角色`}
               />
@@ -201,25 +228,36 @@ export function UsersSection() {
               </span>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-2">
-              {canEditQuota && <Button variant="outline" onClick={() => setRecoveryUser(user)}>重置认证</Button>}
+              {canEditQuota && (
+                <Button
+                  variant="outline"
+                  onClick={() => setRecoveryUser(user)}
+                  disabled={refreshing}
+                >
+                  重置认证
+                </Button>
+              )}
               <Button
                 variant="outline"
                 onClick={() => setEntitlementUser(user)}
+                disabled={refreshing}
               >
                 权益
               </Button>
-              <Button
+              <ActionButton
+                type="button"
                 variant="outline"
                 className={user.banned ? undefined : "text-destructive hover:text-destructive"}
                 onClick={() => updateUser(user.id, { action: user.banned ? "unban" : "ban" })}
-                disabled={actionLoading === user.id}
-              >
-                {actionLoading === user.id ? (
-                  <Loader2 className="animate-spin" aria-hidden="true" size={16} />
-                ) : (
-                  user.banned ? "解封" : "封禁"
-                )}
-              </Button>
+                disabled={refreshing}
+                state={actionLoading === user.id ? "loading" : "idle"}
+                labels={{
+                  idle: user.banned ? "解封" : "封禁",
+                  loading: user.banned ? "正在解封…" : "正在封禁…",
+                  success: user.banned ? "已解封" : "已封禁",
+                  error: user.banned ? "重试解封" : "重试封禁",
+                }}
+              />
             </div>
           </div>
         ))}
@@ -247,7 +285,7 @@ export function UsersSection() {
                 <TableCell>
                   <RoleSelect
                     value={user.role}
-                    disabled={actionLoading === user.id}
+                    disabled={actionLoading === user.id || refreshing}
                     onChange={(role) => updateUser(user.id, { role })}
                     ariaLabel={`${user.name} 的角色`}
                   />
@@ -263,27 +301,39 @@ export function UsersSection() {
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex items-center justify-end gap-2">
-                    {canEditQuota && <Button variant="outline" size="sm" onClick={() => setRecoveryUser(user)}>重置认证</Button>}
+                    {canEditQuota && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setRecoveryUser(user)}
+                        disabled={refreshing}
+                      >
+                        重置认证
+                      </Button>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => setEntitlementUser(user)}
+                      disabled={refreshing}
                     >
                       权益
                     </Button>
-                    <Button
+                    <ActionButton
+                      type="button"
                       variant="outline"
                       className={user.banned ? undefined : "text-destructive hover:text-destructive"}
                       size="sm"
                       onClick={() => updateUser(user.id, { action: user.banned ? "unban" : "ban" })}
-                      disabled={actionLoading === user.id}
-                    >
-                      {actionLoading === user.id ? (
-                        <Loader2 className="animate-spin" aria-hidden="true" size={16} />
-                      ) : (
-                        user.banned ? "解封" : "封禁"
-                      )}
-                    </Button>
+                      disabled={refreshing}
+                      state={actionLoading === user.id ? "loading" : "idle"}
+                      labels={{
+                        idle: user.banned ? "解封" : "封禁",
+                        loading: user.banned ? "正在解封…" : "正在封禁…",
+                        success: user.banned ? "已解封" : "已封禁",
+                        error: user.banned ? "重试解封" : "重试封禁",
+                      }}
+                    />
                   </div>
                 </TableCell>
               </TableRow>
@@ -306,7 +356,7 @@ export function UsersSection() {
               variant="outline"
               size="sm"
               onClick={() => fetchUsers(pagination.page - 1)}
-              disabled={pagination.page <= 1}
+              disabled={pagination.page <= 1 || refreshing}
             >
               上一页
             </Button>
@@ -317,7 +367,7 @@ export function UsersSection() {
               variant="outline"
               size="sm"
               onClick={() => fetchUsers(pagination.page + 1)}
-              disabled={pagination.page >= pagination.totalPages}
+              disabled={pagination.page >= pagination.totalPages || refreshing}
             >
               下一页
             </Button>
@@ -348,6 +398,8 @@ export function EntitlementPanel({
 }) {
   const [form, setForm] = useState<EntitlementForm>({});
   const [initLoading, setInitLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [applyingPreset, setApplyingPreset] = useState(false);
   const [presets, setPresets] = useState<EntitlementPreset[]>([]);
@@ -356,7 +408,7 @@ export function EntitlementPanel({
   const [success, setSuccess] = useState("");
 
   const load = useCallback(async () => {
-    setInitLoading(true);
+    setRefreshing(true);
     setError("");
     try {
       const [res, presetsRes] = await Promise.all([
@@ -366,6 +418,7 @@ export function EntitlementPanel({
       if (res.ok) {
         const data = (await res.json()) as { data: EntitlementItem[] };
         setForm(formFromItems(data.data ?? []));
+        setLoaded(true);
       } else {
         setError(await readErrorMessage(res, "加载权益失败"));
       }
@@ -381,6 +434,7 @@ export function EntitlementPanel({
       setError("网络错误，请稍后重试");
     } finally {
       setInitLoading(false);
+      setRefreshing(false);
     }
   }, [user.id]);
 
@@ -459,18 +513,24 @@ export function EntitlementPanel({
       title="分级权益 / 能力授权"
       description={`${user.name} · ${user.email}`}
       footer={
-        !initLoading ? (
-          <>
+        <>
             <p className="mr-auto text-xs text-muted-foreground">开关与配额按行授权；外部配额请选择未授予、无限或指定数值。保存为整组替换。</p>
             <Button variant="outline" onClick={onClose} disabled={saving}>
               取消
             </Button>
-            <Button onClick={handleSave} disabled={saving || applyingPreset}>
-              {saving && <Loader2 className="animate-spin" aria-hidden="true" size={16} />}
-              保存
-            </Button>
+            <ActionButton
+              type="button"
+              onClick={handleSave}
+              disabled={!loaded || refreshing || applyingPreset}
+              state={saving ? "loading" : "idle"}
+              labels={{
+                idle: "保存",
+                loading: "正在保存…",
+                success: "已保存",
+                error: "重试保存",
+              }}
+            />
           </>
-        ) : undefined
       }
     >
       <div className="space-y-5">
@@ -486,9 +546,30 @@ export function EntitlementPanel({
         )}
 
         {initLoading ? (
-          <PageState state="loading" title="正在加载权益" description="正在读取该用户的权益与预设…" />
+          <UserEntitlementsSkeleton canEditQuota={canEditQuota} />
+        ) : error && !loaded ? (
+          <PageState
+            state="error"
+            title="加载权益失败"
+            description={error}
+            action={
+              <Button
+                disabled={refreshing}
+                onClick={() => {
+                  setInitLoading(true);
+                  void load();
+                }}
+              >
+                重试
+              </Button>
+            }
+          />
         ) : (
-          <>
+          <fieldset
+            className="space-y-5"
+            aria-busy={refreshing}
+            disabled={refreshing}
+          >
             {presets.length > 0 && (
               <div className="flex items-end gap-2 rounded-lg border border-border bg-muted p-3">
                 <div className="flex-1">
@@ -505,15 +586,19 @@ export function EntitlementPanel({
                     className="w-full"
                   />
                 </div>
-                <Button
+                <ActionButton
                   type="button"
                   variant="outline"
                   onClick={handleApplyPreset}
-                  disabled={applyingPreset || saving}
-                >
-                  {applyingPreset && <Loader2 className="animate-spin" aria-hidden="true" size={16} />}
-                  套用
-                </Button>
+                  disabled={saving}
+                  state={applyingPreset ? "loading" : "idle"}
+                  labels={{
+                    idle: "套用",
+                    loading: "正在套用…",
+                    success: "已套用",
+                    error: "重试套用",
+                  }}
+                />
               </div>
             )}
 
@@ -533,7 +618,7 @@ export function EntitlementPanel({
                 }))}
               />
             )}
-          </>
+          </fieldset>
         )}
       </div>
     </Modal>

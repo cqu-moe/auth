@@ -3,6 +3,7 @@
 import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { ThemeProvider } from "@cqu-moe/ui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withRedirectParam } from "../lib/post-login-redirect";
 import EmailVerificationGate from "./EmailVerificationGate";
@@ -41,7 +42,7 @@ function LocationProbe({ label }: { label: string }) {
 async function renderFlow(entry: string) {
   await act(async () => {
     root.render(
-      <MemoryRouter initialEntries={[entry]}>
+      <ThemeProvider><MemoryRouter initialEntries={[entry]}>
         <EmailVerificationGate>
           <Routes>
             <Route path="/login" element={<><LocationProbe label="login" /><LoginDraft /></>} />
@@ -57,13 +58,16 @@ async function renderFlow(entry: string) {
             />
           </Routes>
         </EmailVerificationGate>
-      </MemoryRouter>,
+      </MemoryRouter></ThemeProvider>,
     );
     await Promise.resolve();
   });
 }
 
 beforeEach(() => {
+  vi.stubGlobal("matchMedia", (media: string) => ({
+    media, matches: false, addEventListener: () => {}, removeEventListener: () => {},
+  }));
   authState.session = null;
   authState.pending = false;
   authState.error = null;
@@ -76,6 +80,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  vi.unstubAllGlobals();
 });
 
 describe("email verification route integration", () => {

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { Plus, X } from "lucide-react";
 import {
   Button,
@@ -141,9 +141,15 @@ export function Modal({
   footer?: ReactNode;
   maxWidth?: string;
 }) {
+  const returnFocus = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className={maxWidth}>
+      <DialogContent className={maxWidth} onCloseAutoFocus={(event) => {
+        if (returnFocus.current?.isConnected) {
+          event.preventDefault();
+          returnFocus.current.focus();
+        }
+      }}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}

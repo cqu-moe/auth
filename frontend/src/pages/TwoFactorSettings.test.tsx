@@ -60,7 +60,7 @@ describe("two-factor settings page", () => {
     expect(html).not.toContain("备用恢复码");
   });
 
-  it("exposes the local QR target and manual-key fallback after enrollment begins", () => {
+  it("reserves the QR target while generation is pending and keeps the manual-key fallback available", () => {
     const html = renderToStaticMarkup(
       createElement(
         ThemeProvider,
@@ -78,7 +78,9 @@ describe("two-factor settings page", () => {
       )
     );
 
-    expect(html).toContain('alt="二次验证二维码"');
+    expect(html).toContain("正在生成二维码…");
+    expect(html).toContain('aria-busy="true"');
+    expect(html).not.toContain('alt="二次验证二维码"');
     expect(html).toContain("手动输入密钥");
     expect(html).toContain("ABCDEFGH");
     expect(html).not.toContain("recovery-fallback-x");

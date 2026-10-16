@@ -1,6 +1,6 @@
 import { useState, useRef, FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { ActionButton, Button, Alert, AlertDescription, Input, Label } from "@cqu-moe/ui";
+import { ActionButton, Alert, AlertDescription, Input, Label } from "@cqu-moe/ui";
 import AuthLayout from "../components/AuthLayout";
 import { authClient } from "../lib/auth-client";
 import { getLoginNavigationDestination } from "../lib/login-routing";
@@ -16,11 +16,12 @@ export default function Login() {
   const { refetch: refetchSession } = authClient.useSession();
   const [searchParams] = useSearchParams();
   const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
+  const requiresFreshSession = searchParams.get("reason") === "session-not-fresh";
   const scheduleSource = isScheduleBindingContinuation(postLoginRedirect, window.location.origin);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<"password" | "passkey" | null>(null);
   const submitting = useRef(false);
 
   const handleSubmit = async (e: FormEvent) => {
@@ -32,7 +33,7 @@ export default function Login() {
     }
     submitting.current = true;
     setError("");
-    setLoading(true);
+    setLoading("password");
     try {
       const { data, error } = await authClient.signIn.email({ email: email.trim(), password });
       if (error) {
@@ -48,14 +49,14 @@ export default function Login() {
       setError("网络连接失败，请检查网络后重试");
     } finally {
       submitting.current = false;
-      setLoading(false);
+      setLoading(null);
     }
   };
 
   const loginWithPasskey = async () => {
     if (submitting.current) return;
     submitting.current = true;
-    setLoading(true);
+    setLoading("passkey");
     setError("");
     try {
       const { data, error } = await authClient.signIn.passkey();
@@ -66,15 +67,15 @@ export default function Login() {
       if (isExternalHttpTarget(destination)) window.location.assign(destination);
       else navigate(destination, { replace: true });
     } catch { setError("Passkey 登录未完成，请重试"); }
-    finally { submitting.current = false; setLoading(false); }
+    finally { submitting.current = false; setLoading(null); }
   };
 
   return (
     <AuthLayout
-      title="欢迎回来"
-      description={scheduleSource ? "继续使用重庆大学课表" : "登录你的账户，继续使用校园服务。"}
+      title={requiresFreshSession ? "重新登录" : "欢迎回来"}
+      description={requiresFreshSession ? "为了确保安全，请重新登录后查看登录设备。" : scheduleSource ? "继续使用重庆大学课表" : "登录你的账户，继续使用校园服务。"}
     >
-      <form onSubmit={handleSubmit} className="space-y-4" aria-busy={loading}>
+      <form onSubmit={handleSubmit} className="space-y-4" aria-busy={loading !== null}>
         {error && (
           <Alert variant="destructive" id="login-error">
             <AlertDescription>{error}</AlertDescription>
@@ -89,7 +90,7 @@ export default function Login() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            readOnly={loading}
+            readOnly={loading !== null}
             aria-describedby={error ? "login-error" : undefined}
             autoComplete="email"
             placeholder="your@email.com"
@@ -115,7 +116,7 @@ export default function Login() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            readOnly={loading}
+            readOnly={loading !== null}
             aria-describedby={error ? "login-error" : undefined}
             autoComplete="current-password"
             placeholder="输入密码"
@@ -125,7 +126,8 @@ export default function Login() {
         <ActionButton
           type="submit"
           className="w-full"
-          state={loading ? "loading" : error ? "error" : "idle"}
+          disabled={loading !== null}
+          state={loading === "password" ? "loading" : error ? "error" : "idle"}
           labels={{
             idle: "登录",
             loading: "登录中…",
@@ -134,7 +136,7 @@ export default function Login() {
           }}
         />
       </form>
-      <Button type="button" variant="outline" className="mt-3 w-full" disabled={loading} onClick={() => void loginWithPasskey()}>使用 Passkey 登录</Button>
+      <ActionButton type="button" variant="outline" className="mt-3 w-full" disabled={loading !== null} onClick={() => void loginWithPasskey()} state={loading === "passkey" ? "loading" : "idle"} labels={{ idle: "使用 Passkey 登录", loading: "正在验证 Passkey…", success: "已登录", error: "重试登录" }} />
 
       <p className="mt-6 text-center text-sm text-muted-foreground">
         还没有账户？{" "}

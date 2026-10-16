@@ -74,6 +74,23 @@ afterEach(async () => {
 });
 
 describe("QuickLogin settings", () => {
+  it("keeps the initial loading state until both eligibility and devices are available", async () => {
+    api.getQuickloginPreference.mockResolvedValue({ eligible: true, masterEnabled: false, deviceLimit: 0, used: 0 });
+    const request = deferred<Overview>();
+    api.getQuickloginOverview.mockReturnValue(request.promise);
+    const container = await renderUi(createElement(QuickloginSettings));
+
+    expect(container.querySelector('[role="status"]')).not.toBeNull();
+    expect(container.textContent).not.toContain("重新加载");
+    expect(container.textContent).not.toContain("还没有授权的浏览器");
+    expect(container.querySelector<HTMLButtonElement>('[role="switch"]')?.disabled).toBe(true);
+
+    await act(async () => request.resolve(DEVICE_LIST));
+    await settleUi();
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(container.querySelector('[aria-label="快捷登录设备"]')).not.toBeNull();
+  });
+
   it("renders nothing after an explicit ineligible response without listing devices", async () => {
     api.getQuickloginPreference.mockResolvedValue({ eligible: false });
 

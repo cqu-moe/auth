@@ -14,6 +14,7 @@ import {
   Input,
   Label,
   PageHeader,
+  Skeleton,
 } from "@cqu-moe/ui";
 import Layout from "../components/Layout";
 import { VerificationCodeInput } from "../components/VerificationCodeInput";
@@ -145,6 +146,7 @@ export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettin
   const [password, setPassword] = useState("");
   const [totpCode, setTotpCode] = useState("");
   const [qrDataUrl, setQrDataUrl] = useState("");
+  const [qrFailed, setQrFailed] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [managementAction, setManagementAction] = useState<"" | "regenerate" | "disable">("");
@@ -165,6 +167,8 @@ export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettin
   useEffect(() => {
     if (!secret) return;
     let current = true;
+    setQrFailed(false);
+    setQrDataUrl("");
     void QRCode.toDataURL(secret.totpURI, {
       errorCorrectionLevel: "M",
       margin: 1,
@@ -172,7 +176,10 @@ export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettin
     }).then((dataUrl) => {
       if (current) setQrDataUrl(dataUrl);
     }).catch(() => {
-      if (current) setError("二维码生成失败，请使用手动密钥设置身份验证器");
+      if (current) {
+        setQrFailed(true);
+        setError("二维码生成失败，请使用手动密钥设置身份验证器");
+      }
     });
     return () => { current = false; };
   }, [secret]);
@@ -309,7 +316,30 @@ export default function TwoFactorSettings({ initialEnrollment }: TwoFactorSettin
           <section aria-labelledby="scan-authenticator-heading">
             <h2 id="scan-authenticator-heading" className="text-base font-semibold text-foreground">扫描二维码</h2>
             <p className="mt-1 text-sm text-muted-foreground">在身份验证器中添加账户后，输入生成的 6 位验证码。</p>
-            <img src={qrDataUrl || undefined} alt="二次验证二维码" width={224} height={224} className="mt-4 rounded-lg border border-border bg-surface p-2" />
+            {qrDataUrl ? (
+              <img
+                src={qrDataUrl}
+                alt="二次验证二维码"
+                width={224}
+                height={224}
+                className="mt-4 rounded-lg border border-border bg-surface p-2"
+              />
+            ) : (
+              <div
+                className="mt-4 flex size-56 flex-col items-center justify-center gap-2 rounded-lg border border-border bg-surface p-2 text-center"
+                role={qrFailed ? "alert" : "status"}
+                aria-busy={!qrFailed}
+              >
+                {qrFailed ? (
+                  <p className="text-xs text-destructive">二维码生成失败</p>
+                ) : (
+                  <>
+                    <Skeleton className="size-full rounded-md" aria-hidden="true" />
+                    <span className="sr-only">正在生成二维码…</span>
+                  </>
+                )}
+              </div>
+            )}
             <div className="mt-4 rounded-lg border border-border bg-muted p-3">
               <p className="text-xs font-medium text-muted-foreground">手动输入密钥</p>
               <code className="mt-1 block break-all text-sm text-foreground">{manualSecret}</code>

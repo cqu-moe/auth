@@ -6,7 +6,7 @@ import {
   previewQuickloginQuota,
   type QuotaPreview,
 } from "../../lib/api/quicklogin";
-import { Button, Input, Label } from "@cqu-moe/ui";
+import { ActionButton, Button, Input, Label } from "@cqu-moe/ui";
 
 export const PREVIEW_CHANGED_MESSAGE = "设备状态已变化，请确认最新名单";
 
@@ -39,6 +39,7 @@ export default function QuotaEditor({ userId, onSaved }: {
   const [value, setValue] = useState("");
   const [preview, setPreview] = useState<QuotaPreview | null>(null);
   const [busy, setBusy] = useState<"preview" | "apply" | null>(null);
+  const [failedAction, setFailedAction] = useState<"preview" | "apply" | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -47,15 +48,18 @@ export default function QuotaEditor({ userId, onSaved }: {
     const limit = Number(value);
     if (!/^\d+$/.test(value) || !Number.isSafeInteger(limit)) {
       setError("设备额度必须是非负整数。");
+      setFailedAction(null);
       return;
     }
     setBusy("preview");
     setError("");
     setNotice("");
+    setFailedAction(null);
     try {
       setPreview(await previewQuickloginQuota(userId, limit));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "无法生成额度预览。");
+      setFailedAction("preview");
     } finally {
       setBusy(null);
     }
@@ -66,6 +70,7 @@ export default function QuotaEditor({ userId, onSaved }: {
     setBusy("apply");
     setError("");
     setNotice("");
+    setFailedAction(null);
     try {
       const result = await applyQuickloginQuota(userId, preview);
       setNotice("设备额度已保存");
@@ -76,10 +81,12 @@ export default function QuotaEditor({ userId, onSaved }: {
       if (caught instanceof ApiError && caught.code === "PREVIEW_CHANGED" && latest) {
         setPreview(latest);
         setError(PREVIEW_CHANGED_MESSAGE);
+        setFailedAction("apply");
       } else {
         setError(caught instanceof Error && caught.message
           ? caught.message
           : "额度保存失败，请稍后重试。");
+        setFailedAction("apply");
       }
     } finally {
       setBusy(null);
@@ -117,13 +124,18 @@ export default function QuotaEditor({ userId, onSaved }: {
             className="w-28"
           />
         </div>
-        <Button
+        <ActionButton
           type="submit"
           variant="outline"
           disabled={busy !== null}
-        >
-          {busy === "preview" ? "正在检查…" : "预览调整"}
-        </Button>
+          state={busy === "preview" ? "loading" : failedAction === "preview" ? "error" : "idle"}
+          labels={{
+            idle: "预览调整",
+            loading: "正在检查…",
+            success: "已生成预览",
+            error: "重新检查",
+          }}
+        />
       </form>
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {notice && <p role="status" className="text-sm text-success">{notice}</p>}
@@ -142,13 +154,18 @@ export default function QuotaEditor({ userId, onSaved }: {
             {previewDeviceList("停用设备", preview.disabledDevices)}
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            <Button
+            <ActionButton
               type="button"
               disabled={busy !== null}
               onClick={() => void confirm()}
-            >
-              {busy === "apply" ? "正在保存…" : "确认保存额度"}
-            </Button>
+              state={busy === "apply" ? "loading" : failedAction === "apply" ? "error" : "idle"}
+              labels={{
+                idle: "确认保存额度",
+                loading: "正在保存…",
+                success: "已保存",
+                error: "重新保存",
+              }}
+            />
             <Button
               type="button"
               variant="outline"

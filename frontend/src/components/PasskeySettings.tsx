@@ -6,6 +6,7 @@ import {
 import { KeyRound, Plus } from "lucide-react";
 import { authClient } from "../lib/auth-client";
 import { requestAuthentication } from "../lib/recent-authentication";
+import { PasskeySkeleton } from "./SettingsSkeletons";
 import SettingsCard from "./SettingsCard";
 
 type Key = { id: string; name?: string | null };
@@ -82,14 +83,14 @@ export default function PasskeySettings() {
 
   return <>
     <SettingsCard title="Passkey" description="使用指纹、面容或设备 PIN 登录和验证身份。可添加多个 Passkey，密码登录仍可使用。">
-      <div className="space-y-4">
+      <div className="space-y-4" aria-busy={loading}>
         {loadError && <Alert variant="destructive">
           <AlertDescription>
             <p>{loadError}</p>
             <Button type="button" variant="outline" size="sm" className="mt-3 min-h-11" onClick={() => void load()}>重新加载</Button>
           </AlertDescription>
         </Alert>}
-        {loading && <p role="status" className="text-sm text-muted-foreground">正在读取 Passkey…</p>}
+        {loading && keys.length === 0 && <PasskeySkeleton />}
         {!loading && !loadError && keys.length === 0 && <p className="text-sm text-muted-foreground">尚未添加 Passkey。添加后即可使用设备解锁登录。</p>}
         {keys.length > 0 && <ul aria-label="已添加的 Passkey" className="divide-y divide-border">
           {keys.map(key => <li key={key.id} className="flex flex-col gap-3 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
@@ -103,8 +104,8 @@ export default function PasskeySettings() {
             </div>
           </li>)}
         </ul>}
-        <div className={keys.length ? "border-t border-border pt-4" : undefined}>
-          <Button ref={addButton} type="button" variant="outline" className="min-h-11" disabled={busy} onClick={event => openEditor({ kind: "add" }, event.currentTarget)}>
+        <div className={keys.length || loading ? "border-t border-border pt-4" : undefined}>
+          <Button ref={addButton} type="button" variant="outline" className="min-h-11" disabled={busy || loading} onClick={event => openEditor({ kind: "add" }, event.currentTarget)}>
             <Plus aria-hidden="true" />添加 Passkey
           </Button>
         </div>

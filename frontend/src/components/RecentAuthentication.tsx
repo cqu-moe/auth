@@ -1,6 +1,16 @@
 import { authenticateWithPasskey } from "../lib/passkey-operations";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Button, Input, Label, Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@cqu-moe/ui";
+import {
+  ActionButton,
+  Button,
+  Input,
+  Label,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@cqu-moe/ui";
 import { VerificationCodeInput } from "./VerificationCodeInput";
 import { normalizeOtp } from "../lib/two-factor";
 import type { AuthenticationRequest } from "../lib/recent-authentication";
@@ -13,7 +23,7 @@ export default function RecentAuthentication() {
   const [code, setCode] = useState("");
   const [method, setMethod] = useState("totp");
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<"password" | "passkey" | null>(null);
   const busyRef = useRef(false);
   const errorId = "recent-authentication-error";
   useEffect(() => {
@@ -27,6 +37,7 @@ export default function RecentAuthentication() {
     return () => window.removeEventListener("auth:verify", listener);
   }, []);
   if (!pending) return null;
+  const busy = busyAction !== null;
   const finish = (verified: boolean) => { pending.resolve(verified); setPending(null); setPassword(""); setCode(""); };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -40,7 +51,7 @@ export default function RecentAuthentication() {
         : "请输入当前密码");
       return;
     }
-    busyRef.current = true; setBusy(true); setError("");
+    busyRef.current = true; setBusyAction("password"); setError("");
     try {
       const response = await fetch(`/api/v1/auth/security/${challenge ? "complete" : "challenge"}`, {
         method: "POST", headers: { "content-type": "application/json" },
@@ -52,16 +63,16 @@ export default function RecentAuthentication() {
       if (result.verified) finish(true);
       else setChallenge(result.challenge);
     } catch { setError("网络错误，请重试"); }
-    finally { busyRef.current = false; setBusy(false); }
+    finally { busyRef.current = false; setBusyAction(null); }
   };
   const verifyPasskey = async () => {
     if (busyRef.current) return;
-    busyRef.current = true; setBusy(true); setError("");
+    busyRef.current = true; setBusyAction("passkey"); setError("");
     try {
       await authenticateWithPasskey(pending.purpose);
       finish(true);
     } catch (error) { setError(error instanceof Error ? error.message : "Passkey 验证未完成，请重试"); }
-    finally { busyRef.current = false; setBusy(false); }
+    finally { busyRef.current = false; setBusyAction(null); }
   };
   return <Dialog open onOpenChange={open => { if (!open && !busy) finish(false); }}>
     <DialogContent className="max-w-sm" showCloseButton={!busy}
@@ -130,9 +141,35 @@ export default function RecentAuthentication() {
           />
         </>}
         {error && <p id={errorId} role="alert" className="text-sm text-destructive">{error}{error.includes("设置") && <a href="/settings/two-factor" className="underline"> 前往安全设置</a>}</p>}
-        <div className="flex gap-2"><Button type="button" variant="outline" disabled={busy} onClick={() => finish(false)}>取消</Button><Button type="submit" disabled={busy}>{busy ? "正在验证…" : "验证并继续"}</Button></div>
+        <div className="flex gap-2">
+          <Button type="button" variant="outline" disabled={busy} onClick={() => finish(false)}>取消</Button>
+          <ActionButton
+            type="submit"
+            className="flex-1"
+            disabled={busy}
+            state={busyAction === "password" ? "loading" : error ? "error" : "idle"}
+            labels={{
+              idle: "验证并继续",
+              loading: "正在验证…",
+              success: "已验证",
+              error: "重新验证",
+            }}
+          />
+        </div>
       </form>
-      <Button type="button" variant="outline" className="mt-3 w-full" disabled={busy} onClick={() => void verifyPasskey()}>使用 Passkey 验证</Button>
+      <ActionButton
+        variant="outline"
+        className="mt-3 w-full"
+        disabled={busy}
+        onClick={() => void verifyPasskey()}
+        state={busyAction === "passkey" ? "loading" : "idle"}
+        labels={{
+          idle: "使用 Passkey 验证",
+          loading: "正在验证 Passkey…",
+          success: "已验证",
+          error: "重试 Passkey",
+        }}
+      />
     </DialogContent>
   </Dialog>;
 }

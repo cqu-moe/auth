@@ -112,10 +112,12 @@ describe("authentication continuation links", () => {
     setInput("#password", "password123");
     await act(async () => {
       if (method === "password") container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
-      else Array.from(container.querySelectorAll("button")).find(button => button.textContent === "使用 Passkey 登录")?.click();
+      else container.querySelector<HTMLButtonElement>('button[aria-label="使用 Passkey 登录"]')?.click();
     });
     expect(container.querySelector("[data-location]")?.textContent).toBe("/login");
-    expect(container.querySelector('button[type="submit"]')?.getAttribute("aria-busy")).toBe("true");
+    const activeButton = method === "password" ? 'button[type="submit"]' : 'button[aria-label="正在验证 Passkey…"]';
+    expect(container.querySelector(activeButton)?.getAttribute("aria-busy")).toBe("true");
+    expect(container.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true);
     await act(async () => {
       container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     });

@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus } from "lucide-react";
 import {
+  ActionButton,
   Alert,
   AlertDescription,
   Button,
+  Switch,
   Input,
   PageState,
   Table,
@@ -16,6 +17,7 @@ import {
 import MenuSelect from "../../components/MenuSelect";
 import type { EntitlementItem } from "../../components/entitlement-form";
 import { adminFetch } from "../../lib/api/admin";
+import { InvitationsSkeleton } from "./AdminSkeletons";
 import { CopyButton, FieldLabel, Toggle } from "./ui";
 
 interface EntitlementPreset {
@@ -69,6 +71,8 @@ export function InvitationsSection() {
   const [invitations, setInvitations] = useState<RegistrationInvitation[]>([]);
   const [created, setCreated] = useState<CreatedRegistrationInvitation | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [creating, setCreating] = useState(false);
   const [revoking, setRevoking] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -80,7 +84,8 @@ export function InvitationsSection() {
   const [createPreset, setCreatePreset] = useState("");
 
   const fetchInvitations = useCallback(async () => {
-    setLoading(true);
+    setRefreshing(true);
+    setError("");
     try {
       const [res, settingsRes, presetsRes] = await Promise.all([
         adminFetch("/admin/registration-invitations"),
@@ -93,6 +98,7 @@ export function InvitationsSection() {
       }
       const body = (await res.json()) as { data: RegistrationInvitation[] };
       setInvitations(body.data ?? []);
+      setHasLoaded(true);
       if (settingsRes.ok) {
         const settings = (await settingsRes.json()) as { invitationRequired?: boolean };
         if (typeof settings.invitationRequired === "boolean") {
@@ -107,6 +113,7 @@ export function InvitationsSection() {
       setError("网络错误，请稍后重试");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
@@ -182,23 +189,62 @@ export function InvitationsSection() {
 
   if (loading) {
     return (
-      <PageState state="loading" title="正在加载注册邀请" description="正在读取邀请与注册政策…" />
+      <InvitationsSkeleton />
+    );
+  }
+
+  if (error && !hasLoaded) {
+    return (
+      <PageState
+        state="error"
+        title="加载注册邀请失败"
+        description={error}
+        action={
+          <Button
+            disabled={refreshing}
+            onClick={() => {
+              setLoading(true);
+              void fetchInvitations();
+            }}
+          >
+            重试
+          </Button>
+        }
+      />
     );
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5" aria-busy={refreshing}>
       <div className="border-b border-border pb-5">
-        <Toggle
-          checked={invitationRequired}
-          onChange={(v) => void togglePolicy(v)}
-          label="强制邀请码注册"
-          hint={
-            invitationRequired
-              ? "未填写邀请码无法注册;邀请码可携带指定权益预设。"
-              : "任何人都能注册,未填邀请码的新用户套用「权益预设」页的默认权益。"
-          }
-        />
+        {refreshing || savingPolicy ? (
+          <div className="flex items-center justify-between gap-3 py-1">
+            <span>
+              <span className="text-sm text-foreground">强制邀请码注册</span>
+              <span className="block text-xs text-muted-foreground">
+                {invitationRequired
+                  ? "未填写邀请码无法注册;邀请码可携带指定权益预设。"
+                  : "任何人都能注册,未填邀请码的新用户套用「权益预设」页的默认权益。"}
+              </span>
+            </span>
+            <Switch
+              checked={invitationRequired}
+              disabled
+              aria-label="强制邀请码注册"
+            />
+          </div>
+        ) : (
+          <Toggle
+            checked={invitationRequired}
+            onChange={(v) => void togglePolicy(v)}
+            label="强制邀请码注册"
+            hint={
+              invitationRequired
+                ? "未填写邀请码无法注册;邀请码可携带指定权益预设。"
+                : "任何人都能注册,未填邀请码的新用户套用「权益预设」页的默认权益。"
+            }
+          />
+        )}
         {savingPolicy && (
           <p className="mt-1 text-xs text-muted-foreground">保存中…</p>
         )}
@@ -222,14 +268,18 @@ export function InvitationsSection() {
             className="w-full"
           />
         </div>
-        <Button
+        <ActionButton
           type="button"
           onClick={createInvitation}
-          disabled={creating}
-        >
-          <Plus aria-hidden="true" size={16} />
-          {creating ? "生成中…" : "生成邀请"}
-        </Button>
+          disabled={refreshing}
+          state={creating ? "loading" : "idle"}
+          labels={{
+            idle: "生成邀请",
+            loading: "正在生成…",
+            success: "已生成",
+            error: "重试生成",
+          }}
+        />
       </div>
 
       {error && (
@@ -305,15 +355,20 @@ export function InvitationsSection() {
                       <div className="flex items-center justify-end gap-2">
                         <CopyButton value={registrationUrl} />
                         {(invitation.status === "active" || invitation.status === "expired") && (
-                          <Button
-                            type="button"
+                          <ActionButton
                             variant="destructive"
                             size="sm"
+                            type="button"
                             onClick={() => revokeInvitation(invitation.code)}
-                            disabled={revoking === invitation.code}
-                          >
-                            {revoking === invitation.code ? "撤销中…" : "撤销"}
-                          </Button>
+                            disabled={refreshing}
+                            state={revoking === invitation.code ? "loading" : "idle"}
+                            labels={{
+                              idle: "撤销",
+                              loading: "撤销中…",
+                              success: "已撤销",
+                              error: "重试撤销",
+                            }}
+                          />
                         )}
                       </div>
                     </TableCell>
