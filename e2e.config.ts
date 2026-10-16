@@ -1,6 +1,7 @@
 import type { E2EConfig } from 'e2e';
 import { surfaceOf, web } from '@e2e-dev/web';
 import { defineEngine } from 'e2e/engine';
+import { firefox } from 'playwright-core';
 import { base32 } from '@better-auth/utils/base32';
 import { createOTP } from '@better-auth/utils/otp';
 import { authSecuritySecrets } from './e2e/secret-holder';
@@ -43,6 +44,14 @@ const browserName = process.env.AUTH_E2E_BROWSER || 'chromium';
 if (!['chromium', 'firefox', 'webkit'].includes(browserName)) throw new Error('Unsupported AUTH_E2E_BROWSER');
 
 const webHolder = globalThis as typeof globalThis & { authE2eWebEngine?: ReturnType<typeof web> };
+if (browserName === 'firefox' && process.platform === 'linux' && !webHolder.authE2eWebEngine) {
+  // Isolate local HTTP from Docker veth network-change notifications.
+  // shortcut: web 0.15 has no launch options; remove when it exposes Firefox preferences.
+  const launch = firefox.launch.bind(firefox);
+  firefox.launch = (options = {}) => launch({ ...options,
+    firefoxUserPrefs: { ...options.firefoxUserPrefs, 'network.notify.changed': false },
+  });
+}
 export const authWebEngine = webHolder.authE2eWebEngine ??= web({
   browser: browserName as 'chromium' | 'firefox' | 'webkit',
   viewport: process.env.AUTH_E2E_MOBILE ? { width: 390, height: 844 } : { width: 1440, height: 900 },
