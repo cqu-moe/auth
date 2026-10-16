@@ -48,6 +48,22 @@ export async function identity() {
   return result.body as { user: { id: string; email: string; name: string; role: string; twoFactorEnabled: boolean }; session: { token: string } };
 }
 
+// A complete admin journey can consume the unchanged 30/60s session-read bucket.
+// Only this safe GET may wait, and only on the provider's explicit bounded 429.
+export async function sessionAfterRateLimit() {
+  const deadline = Date.now() + 70000;
+  for (;;) {
+    const result = await request('/api/v1/auth/get-session');
+    if (result.status !== 429) return result;
+    const seconds = Number(result.headers.get('retry-after') ?? result.headers.get('x-retry-after'));
+    if (!Number.isInteger(seconds) || seconds < 1 || seconds > 60
+      || Date.now() + seconds * 1000 > deadline) {
+      throw new Error('Session-read 429 has no usable Retry-After within the 70-second budget');
+    }
+    await new Promise(resolve => setTimeout(resolve, seconds * 1000));
+  }
+}
+
 export async function administrator(fixture: Fixture, checkWeak = false) {
   const account = await createVerifiedAccount(fixture, 'manager', 'managerOtp');
   const promoted = await fetch(`${process.env.AUTH_E2E_CONTROL}/promote-admin`, {

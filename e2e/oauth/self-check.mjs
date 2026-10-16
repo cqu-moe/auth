@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { assertAttemptCleanup } from './report.mjs';
+import { assertOAuthAssertionFailure } from './control-evidence.mjs';
 import { join } from 'node:path';
 const root = `.e2e/oauth-negative-${Date.now()}`;
 await mkdir(root, { recursive: true });
@@ -42,7 +43,8 @@ for (const variant of ['desktop', 'mobile']) {
   assert.equal(group.proxyReadback.absent, true);
   assert.equal(group.resources.platform.fixtureImageRemoved, true);
   assert.equal(group.browser.profileRemoved, true);
-  assert.deepEqual(group.errors, [{ name: 'Error', message: 'OAuth journey failed (exit 1)' }]);
+  const native = JSON.parse(await readFile(join(result.dir, group.report), 'utf8'));
+  assertOAuthAssertionFailure(group, native, variant);
   const paths = await files(result.dir);
   assert.ok(paths.some(path => path.endsWith('.png')), 'Intentional pre-secret failure did not retain screenshot');
   const trace = (await Promise.all(paths.filter(path => path.endsWith('trace.md')).map(path => readFile(path, 'utf8')))).join('\n');

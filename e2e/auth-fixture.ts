@@ -80,6 +80,16 @@ export async function enrollTotp({ app, screen, browser }: Fixture, account: Ret
     await expect(screen.getByText('验证码不正确')).toBeVisible();
   }
   await browser.locator('#two-factor-totp').fill(secrets.get('mfaTotp'));
+  // A successful engine fill is not proof that the controlled input retained it.
+  // Record lengths only: an incomplete OTP must never appear in assertion output.
+  const inputState = await browser.evaluate(() => {
+    const input = document.querySelector<HTMLInputElement>('#two-factor-totp');
+    return {
+      inputLength: input?.value.length ?? -1,
+      displayedLength: input?.parentElement?.querySelector('.verification-code-display')?.textContent?.length ?? -1,
+    };
+  });
+  expect(inputState).toEqual({ inputLength: 6, displayedLength: 6 });
   await screen.getByRole('button', '验证并继续').click();
   await expect(screen.getByRole('heading', '保存备用恢复码', { exact: true })).toBeVisible();
   await screen.getByText('我已保存这些恢复码，知道关闭此页面后将无法再次查看。').click();

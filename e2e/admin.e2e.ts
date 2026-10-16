@@ -1,6 +1,6 @@
 import { test, beforeEach, afterEach } from '@e2e-dev/web';
 import { expect, credentials, secrets } from 'e2e';
-import { administrator, newMember, restore, request, setRole, userRow, login, saveCookies, adminProof, responseFor, surface, identity } from './admin-fixture';
+import { administrator, newMember, restore, request, setRole, userRow, login, saveCookies, adminProof, responseFor, surface, identity, sessionAfterRateLimit } from './admin-fixture';
 import { createVerifiedAccount, enrollTotp, protectArtifacts } from './auth-fixture';
 import { authSecuritySecrets } from './secret-holder';
 import { authorization, concealCredentials, createClient, issueTokens, tokenRequest, userinfo } from './oauth-fixture';
@@ -206,7 +206,8 @@ test('administrator ban and unban change real access while self ban is rejected'
   expect((await request('/api/v1/admin/users')).status).toBe(200);
   await login(fixture);
   await expect(browser).toHaveURL(/\/settings$/);
-  const live = await request('/api/v1/auth/get-session');
+  const live = await sessionAfterRateLimit();
+  expect(live.status).toBe(200);
   expect({ email: live.body.user.email, role: live.body.user.role }).toEqual({ email: credentials.user('member').username, role: 'user' });
 });
 

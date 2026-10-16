@@ -53,7 +53,8 @@ jobs:
   browser:
     name: Built Auth registration and session E2E
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # Two independent 34-attempt rounds plus build/install and negative controls.
+    timeout-minutes: 25
     env:
       E2E_TELEMETRY_DISABLED: '1'
       DO_NOT_TRACK: '1'
@@ -74,6 +75,7 @@ jobs:
         working-directory: frontend
       - run: npx --no-install e2e-web install chromium --with-deps
       - run: npm run test:e2e
+      - run: node e2e/run.mjs
       - run: node e2e/account-smoke.mjs
       - run: node e2e/self-check.mjs
       - run: node e2e/artifact-safety-check.mjs
