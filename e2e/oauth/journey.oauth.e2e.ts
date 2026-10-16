@@ -9,14 +9,21 @@ import { authSecuritySecrets } from '../secret-holder';
 type Journey = TestFixtures & { browser: Browser };
 const courses = [{ id: '31', name: '合成电路', extra: 'SYN101', courseCode: 'SYN101' }];
 let unexpected: string[];
+const pendingRoutes = new Map<object, { started: number; origin: string; path: string; decision: string }>();
+const diagnosticPaths = new Set(['/api/v1/auth/get-session', '/api/v1/auth/sign-in/email', '/api/v1/auth/list-sessions', '/api/v1/auth/update-user', '/api/v1/cqu/binding', '/login', '/settings', '/settings/security', '/oauth/authorize', '/callback']);
 
 beforeEach(async ({ app, screen, browser }) => {
   unexpected = [];
-  const allowed = new Set([new URL(process.env.AUTH_E2E_URL!).origin, new URL(process.env.AUTH_OAUTH_APP!).origin]);
+  const allowedOrigins = [new URL(process.env.AUTH_E2E_URL!).origin, new URL(process.env.AUTH_OAUTH_APP!).origin];
+  const allowed = new Set(allowedOrigins);
   await browser.route('**/*', async route => {
-    const origin = new URL(route.request.url).origin;
-    if (!allowed.has(origin)) { unexpected.push(origin); await route.abort(); }
-    else await route.continue();
+    const url = new URL(route.request.url);
+    pendingRoutes.set(route, { started: Date.now(), origin: url.origin === allowedOrigins[0] ? 'auth' : url.origin === allowedOrigins[1] ? 'oauth-app' : 'other',
+      path: diagnosticPaths.has(url.pathname) ? url.pathname : 'other', decision: allowed.has(url.origin) ? 'continue' : 'abort' });
+    try {
+      if (!allowed.has(url.origin)) { unexpected.push(url.origin); await route.abort(); }
+      else await route.continue();
+    } finally { pendingRoutes.delete(route); }
   });
   await app.open('/login');
   // Negative gate runs before any Secret fill, retaining a safe screenshot.
@@ -25,7 +32,11 @@ beforeEach(async ({ app, screen, browser }) => {
     await expect(screen.getByRole('heading', 'AUTH04 deliberate failure')).toBeVisible({ timeout: 1000 });
   }
 });
-afterEach(async () => { expect(unexpected).toEqual([]); });
+afterEach(async () => {
+  if (pendingRoutes.size) console.info('Auth OAuth pending route decisions:', JSON.stringify(
+    [...pendingRoutes.values()].map(({ started, ...route }) => ({ ...route, elapsedMs: Date.now() - started }))));
+  expect(unexpected).toEqual([]);
+});
 
 async function control(path: string, body: Record<string, unknown> = {}) {
   const response = await fetch(`${process.env.AUTH_OAUTH_CONTROL}${path}`, {
