@@ -16,7 +16,7 @@ beforeEach(async ({ app, screen, browser }) => {
   unexpected = [];
   const allowedOrigins = [new URL(process.env.AUTH_E2E_URL!).origin, new URL(process.env.AUTH_OAUTH_APP!).origin];
   const allowed = new Set(allowedOrigins);
-  await browser.route('**/*', async route => {
+  if (!process.env.AUTH_OAUTH_PROXY) await browser.route('**/*', async route => {
     const url = new URL(route.request.url);
     pendingRoutes.set(route, { started: Date.now(), origin: url.origin === allowedOrigins[0] ? 'auth' : url.origin === allowedOrigins[1] ? 'oauth-app' : 'other',
       path: diagnosticPaths.has(url.pathname) ? url.pathname : 'other', decision: allowed.has(url.origin) ? 'continue' : 'abort' });

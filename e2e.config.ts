@@ -1,7 +1,7 @@
 import type { E2EConfig } from 'e2e';
 import { surfaceOf, web } from '@e2e-dev/web';
 import { defineEngine } from 'e2e/engine';
-import { firefox } from 'playwright-core';
+import { firefox, webkit } from 'playwright-core';
 import { base32 } from '@better-auth/utils/base32';
 import { createOTP } from '@better-auth/utils/otp';
 import { authSecuritySecrets } from './e2e/secret-holder';
@@ -44,6 +44,13 @@ const browserName = process.env.AUTH_E2E_BROWSER || 'chromium';
 if (!['chromium', 'firefox', 'webkit'].includes(browserName)) throw new Error('Unsupported AUTH_E2E_BROWSER');
 
 const webHolder = globalThis as typeof globalThis & { authE2eWebEngine?: ReturnType<typeof web> };
+if (browserName === 'webkit' && process.env.AUTH_OAUTH_PROXY && !webHolder.authE2eWebEngine) {
+  const server = process.env.AUTH_OAUTH_PROXY;
+  if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(server)) throw new Error('OAuth proxy must be a disposable loopback server');
+  // shortcut: web 0.15 has no launch options; remove when it exposes proxy configuration.
+  const launch = webkit.launch.bind(webkit);
+  webkit.launch = (options = {}) => launch({ ...options, proxy: { server } });
+}
 if (browserName === 'firefox' && process.platform === 'linux' && !webHolder.authE2eWebEngine) {
   // Isolate local HTTP from Docker veth network-change notifications.
   // shortcut: web 0.15 has no launch options; remove when it exposes Firefox preferences.

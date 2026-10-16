@@ -7,6 +7,8 @@ import { sourceFingerprint } from './school/source.mjs';
 const args = process.argv.slice(2);
 if (args.length && (args.length !== 1 || args[0] !== '--self-check')) throw new Error('Only --self-check is supported');
 const selfCheck = args.length === 1;
+const suite = process.env.AUTH_E2E_SUITE;
+if (suite && !['account', 'oauth', 'school'].includes(suite)) throw new Error('Unknown supplement suite');
 const engines = process.env.AUTH_E2E_BROWSER ? [process.env.AUTH_E2E_BROWSER] : ['firefox', 'webkit'];
 if (engines.some(name => !['firefox', 'webkit'].includes(name))) throw new Error('Supplement requires firefox or webkit');
 const output = process.env.AUTH_E2E_OUTPUT || `.e2e/cross-browser-${Date.now()}`;
@@ -67,6 +69,7 @@ try {
       for (const [name, script, expected] of [
         ['account', 'e2e/run.mjs', 15], ['oauth', 'e2e/oauth/run.mjs', 2], ['school', 'e2e/school/run.mjs', 9],
       ]) {
+        if (suite && suite !== name) continue;
         const result = await run(browser, name, [], {}, script);
         assert.equal(result.exit, 0);
         for (const view of result.views) {

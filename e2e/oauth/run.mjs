@@ -7,6 +7,7 @@ import { assertAttemptCleanup } from './report.mjs';
 import { startOAuthAuth } from './runtime.mjs';
 import { sourceFingerprint } from '../school/source.mjs';
 import { observeBrowserProfiles, selectedBrowser, withBrowserCustody } from '../browser-custody.mjs';
+import { startNetworkProxy } from './network-proxy.mjs';
 
 const browserName = selectedBrowser();
 
@@ -98,7 +99,7 @@ for (const variant of variants) {
       await mkdir(groupDir, { recursive: true });
       const group = { test: pair.title, cleanup: 'not-started', stage: 'startup', result: 'failed' };
       evidence.groups.push(group);
-      let runtime;
+      let runtime, proxy;
       const errors = [];
       try {
         runtime = await startOAuthAuth({ expectedCommit: process.env.AUTH_E2E_EXPECT_COMMIT, artifacts });
@@ -106,14 +107,18 @@ for (const variant of variants) {
         group.commit = runtime.commit; group.bundleFingerprint = runtime.bundleFingerprint; group.fixture = runtime.schoolFixture;
         await json(join(groupDir, 'fixture.json'), group.fixture);
         group.stage = 'journey';
+        // macOS CFNetwork can bypass loopback proxies (Playwright #20328).
+        if (browserName === 'webkit' && process.platform === 'linux') proxy = await startNetworkProxy([runtime.origin, runtime.oauthAppOrigin]);
         const child = await childRun(['run', '--config', config, pair.file,
           '--grep', `^${escapeRegExp(pair.titlePath.join(' '))}$`, '--output', groupDir], {
           ...env(variant), DEBUG: 'pw:browser', AUTH_E2E_URL: runtime.origin, AUTH_E2E_CONTROL: runtime.controlOrigin,
           AUTH_OAUTH_APP: runtime.oauthAppOrigin, AUTH_OAUTH_CONTROL: runtime.oauthControlOrigin,
+          AUTH_OAUTH_PROXY: proxy?.origin || '',
           AUTH_SCHOOL_CONTROL: runtime.schoolOrigin, AUTH_E2E_OUTPUT: groupDir,
           AUTH_OAUTH_BREAK_ASSERTION: process.env.AUTH_OAUTH_BREAK_ASSERTION || '',
         }, join(groupDir, 'runner.log'));
         group.runnerExitCode = child.code;
+        if (proxy) { group.network = proxy.evidence(); if (child.code === 0) proxy.assertTraffic(); }
         if (browserName === 'chromium') {
           const launch = (child.stdout + child.stderr).split('\n').find(line => line.includes('<launching>')) ?? '';
           const profile = /--user-data-dir=([^\s]+)/.exec(launch)?.[1];
@@ -149,6 +154,10 @@ for (const variant of variants) {
         group.result = 'passed';
       } catch (error) { errors.push(error); }
       finally {
+        if (proxy) {
+          try { await proxy.close(); group.networkCleanup = 'passed'; }
+          catch (error) { group.networkCleanup = 'failed'; errors.push(error); }
+        }
         if (runtime) {
           group.protocol = runtime.oauthDiagnostics();
           try {
@@ -170,6 +179,7 @@ for (const variant of variants) {
             }
           }
         }
+        if (group.networkCleanup === 'failed') group.cleanup = 'failed';
         group.sourceUnchanged = evidence.sourceHash === sourceFingerprint();
         if (!group.sourceUnchanged) errors.push(new Error('Source changed during OAuth run'));
         group.errors = errors.map(serialize);

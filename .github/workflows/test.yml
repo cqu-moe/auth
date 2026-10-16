@@ -2,7 +2,7 @@ name: Tests
 on:
   pull_request:
   push:
-    branches: ['**']
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
 permissions:
@@ -164,7 +164,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   cross-browser:
-    name: Auth supplement (${{ matrix.browser }})
+    name: Auth supplement (${{ matrix.browser }}, ${{ matrix.suite }})
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 75
@@ -172,8 +172,10 @@ jobs:
       fail-fast: false
       matrix:
         browser: [firefox, webkit]
+        suite: [account, oauth, school]
     env:
       AUTH_E2E_BROWSER: ${{ matrix.browser }}
+      AUTH_E2E_SUITE: ${{ matrix.suite }}
       AUTH_E2E_EXPECT_COMMIT: ${{ github.sha }}
       AUTH_SCHOOL_DOCKER_SOCKET: /var/run/docker.sock
       E2E_TELEMETRY_DISABLED: '1'
@@ -194,21 +196,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
       - run: npx --no-install e2e-web install ${{ matrix.browser }} --with-deps
-      # Temporary diagnosis: stop at the original school failure before the full supplement.
-      - name: Diagnose school request cancellation
-        run: |
-          VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build
-          node e2e/school/build.mjs
-          node e2e/school/run.mjs --grep '^school binding persists and returns an allowed business directory through the real container$'
-        env:
-          AUTH_E2E_OUTPUT: .e2e/cross-browser-school-diagnostic
+      - run: node --test e2e/oauth/network-proxy.test.mjs
+        if: matrix.browser == 'webkit' && matrix.suite == 'oauth'
       - run: npm run test:e2e:cross-browser
       - run: node e2e/cross-browser.mjs
       - run: node e2e/cross-browser.mjs --self-check
+        if: matrix.suite == 'account'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: auth-cross-browser-${{ matrix.browser }}-${{ github.sha }}
+          name: auth-cross-browser-${{ matrix.browser }}-${{ matrix.suite }}-${{ github.sha }}
           path: .e2e/cross-browser-*/
           include-hidden-files: true
           if-no-files-found: error

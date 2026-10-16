@@ -27,6 +27,8 @@ export async function createVerifiedAccount({ app, screen, browser }: Fixture, n
   await screen.getByRole('button', '注册', { exact: true }).click();
   await expect(browser).toHaveURL(/verify-email/);
   await browser.locator('#email-verification-otp').fill(secrets.get(otpSecret));
+  // Firefox may resolve the native fill before React renders the controlled code.
+  await expect(browser.locator('.verification-code-display')).toHaveText(/^\d(?:\s+\d){5}$/);
   await screen.getByRole('button', '验证并继续').click();
   await expect(browser).toHaveURL(/\/settings\/security$/);
   return account;
