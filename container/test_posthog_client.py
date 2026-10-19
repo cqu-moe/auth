@@ -1,11 +1,14 @@
 import unittest
+import json
 from types import SimpleNamespace
 from unittest.mock import ANY, Mock, patch
 
 from aiohttp import web
+from posthog import Posthog
 import asyncio
 
 from posthog_client import (
+    _redact_text,
     POSTHOG_CLIENT_KEY,
     flush_posthog,
     mark_business_outcome,
@@ -16,6 +19,58 @@ from posthog_client import (
 
 
 class PostHogPrivacyTests(unittest.TestCase):
+    def test_unlabeled_errors_keep_distinct_stacks_for_automatic_grouping(self):
+        events = []
+
+        def observe(event):
+            result = sanitize_event(event)
+            events.append(result)
+            return result
+
+        client = Posthog("phc_offline", send=False, privacy_mode=True, before_send=observe)
+        try:
+            for operation in (mark_business_outcome, _redact_text):
+                try:
+                    operation([])
+                except TypeError as error:
+                    safe_capture_exception(client, error)
+        finally:
+            client.shutdown()
+        self.assertEqual(len(events), 2)
+        for event in events:
+            self.assertNotIn("$exception_fingerprint", event["properties"])
+        stacks = [event["properties"]["$exception_list"][0]["stacktrace"]["frames"] for event in events]
+        self.assertNotEqual(stacks[0][-1], stacks[1][-1])
+
+    def test_real_sdk_preserves_safe_frames_and_separates_operations(self):
+        events = []
+
+        def observe(event):
+            result = sanitize_event(event)
+            events.append(result)
+            return result
+
+        client = Posthog("phc_offline", send=False, privacy_mode=True, before_send=observe)
+        try:
+            for operation in ("external_search", "external_capture"):
+                try:
+                    mark_business_outcome(["private-cookie"])
+                except TypeError as error:
+                    error.args = ("password=private-password",)
+                    safe_capture_exception(client, error, {"operation": operation, "error_code": "TRANSIENT"})
+        finally:
+            client.shutdown()
+        self.assertEqual(len(events), 2)
+        frames = events[0]["properties"]["$exception_list"][0]["stacktrace"]["frames"]
+        self.assertTrue(frames)
+        self.assertEqual(frames[-1]["filename"], "container/posthog_client.py")
+        self.assertEqual(frames[-1]["function"], "mark_business_outcome")
+        self.assertGreater(frames[-1]["lineno"], 0)
+        self.assertNotEqual(events[0]["properties"]["$exception_fingerprint"], events[1]["properties"]["$exception_fingerprint"])
+        serialized = json.dumps(events)
+        for secret in ("private-cookie", "private-password", "private_local", "context_line", "abs_path", "vars", "/Users/"):
+            self.assertNotIn(secret, serialized)
+
     def test_sanitize_event_uses_the_v2_property_allowlist(self):
         event = sanitize_event({
             "event": "$exception",
@@ -48,7 +103,7 @@ class PostHogPrivacyTests(unittest.TestCase):
             {"product": "auth", "$geoip_disable": True, "$exception_list": [{
                 "type": "Error", "value": "Browser operation failed",
                 "mechanism": {"type": "generic", "handled": True},
-            }]},
+            }], "$issue_name": "exception: EXCEPTION (Error)"},
         )
 
     def test_exception_capture_uses_synthetic_message_without_original_traceback(self):

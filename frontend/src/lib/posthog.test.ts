@@ -13,7 +13,12 @@ describe("browser PostHog privacy boundary", () => {
         "$exception_list": [{
           type: "TypeError",
           value: "password=secret-password ticket=secret-ticket user@example.com",
-          stacktrace: { frames: [{ filename: "https://auth.cqu.moe/assets/index.js?token=secret-token" }] },
+          stacktrace: { frames: [
+            { filename: "https://auth.cqu.moe/assets/index.js?token=secret-token" },
+            { filename: "https://auth.cqu.moe/assets/index.js?token=secret-token#fragment", lineno: 2, colno: 3, function: "save", vars: { password: "secret-password" }, context_line: "user@example.com", abs_path: "/Users/private/index.js", chunk_id: "secret-token" },
+            { filename: "https://private-user:secret-password@auth.cqu.moe/assets/index.js", lineno: 1 },
+            { filename: "file:///Users/private/index.js", lineno: 1 },
+          ] },
         }],
         "$exception_message": "cookie=secret-cookie",
         "$exception_stack_trace": "Error: token=secret-token",
@@ -35,9 +40,14 @@ describe("browser PostHog privacy boundary", () => {
     expect(JSON.stringify(event)).not.toContain("secret-link");
     expect(JSON.stringify(event)).not.toContain("user@example.com");
     expect(event?.properties).toMatchObject({ $exception_type: "TypeError", error_code: "EXCEPTION" });
-    expect(event?.properties.$exception_list).toEqual([expect.objectContaining({ type: "TypeError", value: "Unhandled browser error" })]);
+    expect(event?.properties.$exception_list).toEqual([expect.objectContaining({ type: "TypeError", value: "Browser operation failed" })]);
     expect(event?.properties).not.toHaveProperty("$exception_message");
     expect(event?.properties).not.toHaveProperty("$exception_stack_trace");
+    expect(event?.properties).not.toHaveProperty("$exception_fingerprint");
+    expect(event?.properties.$exception_list).toMatchObject([{ stacktrace: { frames: [
+      { platform: "web:javascript", filename: "https://auth.cqu.moe/assets/index.js", lineno: 2, colno: 3, function: "save", in_app: true },
+    ] } }]);
+    for (const removed of ["vars", "context_line", "abs_path", "chunk_id", "/Users/"]) expect(JSON.stringify(event)).not.toContain(removed);
     expect(event?.properties).toMatchObject({
       product: "auth",
       $current_url: "https://auth.cqu.moe/login",

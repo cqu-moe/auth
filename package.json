@@ -4,7 +4,7 @@
   "scripts": {
     "postinstall": "node scripts/apply-miniflare-transport-patch.mjs",
     "dev": "wrangler dev",
-    "deploy": "npm run build:frontend && wrangler deploy --var QUICKLOGIN_SERVER_BUILD:$(git rev-parse HEAD) --var RELEASE:$(git rev-parse HEAD)",
+    "deploy": "node scripts/deploy.mjs",
     "typecheck": "tsc --noEmit",
     "typecheck:do": "tsc --noEmit -p test/tsconfig.json",
     "test": "vitest run",
@@ -56,6 +56,7 @@
     "@cloudflare/workers-types": "^4.20260523.1",
     "@e2e-dev/web": "0.15.0",
     "@levischuck/tiny-cbor": "0.2.11",
+    "@posthog/cli": "0.18.10",
     "@redocly/cli": "2.52.1",
     "@types/node": "^25.9.1",
     "drizzle-kit": "^0.31.10",

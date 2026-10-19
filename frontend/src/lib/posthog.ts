@@ -1,6 +1,7 @@
 import posthog from "posthog-js";
 import "posthog-js/dist/posthog-recorder";
 import "posthog-js/dist/exception-autocapture";
+import { sanitizedExceptionProperties } from "../../../shared/posthog-exception";
 
 type EventLike = {
   event: string;
@@ -22,7 +23,6 @@ const TRANSPORT_KEYS = new Set(["token", "distinct_id", "$device_id", "$session_
 const PROPERTY_ALLOWLIST = new Set(["telemetry_version", "product", "surface", "environment", "release", "actor_type", "trigger", "operation", "stage", "flow", "outcome", "error_code", "warning_code", "duration_ms", "duration_basis", "operation_id", "no_op", "is_test", "format", "source_type", "view_type", "route", "$process_person_profile"]);
 const SNAPSHOT_KEYS = new Set([...TRANSPORT_KEYS, "$snapshot_data", "$snapshot_bytes", "$snapshot_host"]);
 const IDENTIFY_KEYS = new Set([...TRANSPORT_KEYS, "$anon_distinct_id", "$user_id"]);
-const EXCEPTION_CLASSES = new Set(["Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError", "URIError", "EvalError", "DOMException", "AbortError"]);
 export function templateRoutePath(pathname: string): string {
   if (KNOWN_PATHS.has(pathname)) return pathname;
   return "/unknown";
@@ -64,13 +64,7 @@ export function sanitizePostHogEvent<T extends EventLike>(event: T | null): T | 
       ...(isTestEvent ? { is_test: true } : {}) });
   }
   if (event.event === "$exception") {
-    const first = Array.isArray(source.$exception_list) ? source.$exception_list[0] : undefined;
-    const type = first && EXCEPTION_CLASSES.has(first.type) ? first.type : "Error";
-    properties.$exception_list = [{ type, value: "Unhandled browser error", mechanism: { type: "generic", handled: false } }];
-    properties.$exception_type = type;
-    properties.error_code = "EXCEPTION";
-    properties.operation = "exception";
-    properties.outcome = "failure";
+    Object.assign(properties, sanitizedExceptionProperties(source, "web"));
   }
   // SDK-generated $set and $set_once may contain initial URLs and referrers.
   return { event: event.event, ...(event.uuid === undefined ? {} : { uuid: event.uuid }),
