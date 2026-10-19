@@ -1,6 +1,7 @@
 import { PostHog, type EventMessage } from "posthog-node";
 import type { Context } from "hono";
 import type { HonoEnv } from "../types";
+import { sanitizedExceptionProperties } from "../../shared/posthog-exception";
 
 type TelemetryEnv = {
   POSTHOG_PROJECT_TOKEN?: string;
@@ -124,11 +125,13 @@ function sanitizeValue(value: unknown, key = ""): unknown {
 export function sanitizePostHogProperties(
   properties: Record<string, unknown>
 ): Record<string, unknown> {
-  return Object.fromEntries(
+  const sanitized = Object.fromEntries(
     Object.entries(properties)
-      .filter(([key]) => PROPERTY_ALLOWLIST.has(key))
-      .map(([key, value]) => [key, key === "$exception_list" ? [{ type: "Error", value: "Worker error", mechanism: { type: "generic", handled: true } }] : sanitizeValue(value, key)])
+      .filter(([key]) => PROPERTY_ALLOWLIST.has(key) && key !== "$exception_list")
+      .map(([key, value]) => [key, sanitizeValue(value, key)])
   );
+  if (Array.isArray(properties.$exception_list)) Object.assign(sanitized, sanitizedExceptionProperties(properties, "worker"));
+  return sanitized;
 }
 
 function boundedExceptionClass(error: unknown): string {
@@ -138,11 +141,10 @@ function boundedExceptionClass(error: unknown): string {
 }
 
 function sanitizedError(error: unknown): Error {
-  // The original message and stack must never reach the SDK transport. Raw text
-  // redaction is not used as the privacy boundary for exception payloads.
+  // Let the SDK parse locations; before_send projects frames onto a strict allowlist.
   const safe = new Error(REDACTED);
   safe.name = boundedExceptionClass(error);
-  safe.stack = "";
+  safe.stack = error instanceof Error ? error.stack : undefined;
   return safe;
 }
 

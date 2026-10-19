@@ -6,6 +6,7 @@ import uuid
 from contextvars import ContextVar
 from typing import Any, Mapping
 from time import monotonic
+from pathlib import Path
 
 from aiohttp import web
 from posthog import Posthog
@@ -22,6 +23,7 @@ BROWSER_OPERATIONS = {
     "/external-capture": "external_capture",
 }
 REDACTED = "[redacted]"
+CONTAINER_ROOT = Path(__file__).resolve().parent
 EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 LABELED_SECRET = re.compile(
     r"\b(password|cookie|authorization|token|student_?id|email|otp|code|ticket)\s*[:=]\s*[^\s,;&]+",
@@ -139,11 +141,39 @@ def sanitize_event(event: dict | None) -> dict | None:
         error_type = event["properties"].get("$exception_type", "Error")
         if not isinstance(error_type, str) or not re.fullmatch(r"[A-Z][A-Za-z0-9_$]{0,63}", error_type):
             error_type = "Error"
+        exceptions = properties.get("$exception_list")
+        first = exceptions[0] if isinstance(exceptions, list) and exceptions and isinstance(exceptions[0], dict) else {}
+        stack = first.get("stacktrace", {})
+        raw_frames = stack.get("frames", []) if isinstance(stack, dict) else []
+        frames = []
+        for raw in raw_frames[-50:] if isinstance(raw_frames, list) else []:
+            if not isinstance(raw, dict):
+                continue
+            filename = raw.get("filename")
+            line = raw.get("lineno")
+            if not isinstance(filename, str) or not re.fullmatch(r"container/[A-Za-z_][A-Za-z0-9_]*\.py", filename):
+                continue
+            if not (CONTAINER_ROOT / filename.removeprefix("container/")).is_file():
+                continue
+            if type(line) is not int or not 0 < line < 2**31:
+                continue
+            frame = {"platform": "python", "filename": filename, "lineno": line, "in_app": True}
+            function = raw.get("function")
+            if isinstance(function, str) and re.fullmatch(r"(?:[A-Za-z_][A-Za-z0-9_.]{0,127}|<module>|<lambda>)", function):
+                frame["function"] = function
+            frames.append(frame)
         event["properties"]["$exception_list"] = [{
             "type": error_type,
             "value": "Browser operation failed",
             "mechanism": {"type": "generic", "handled": True},
+            **({"stacktrace": {"type": "raw", "frames": frames}} if frames else {}),
         }]
+        operation = event["properties"].get("operation", "exception")
+        code = event["properties"].get("error_code", "EXCEPTION")
+        operation = operation if isinstance(operation, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", operation) else "exception"
+        code = code if isinstance(code, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", code) else "EXCEPTION"
+        event["properties"]["$exception_fingerprint"] = f"auth:container:{operation}:{code}:{error_type}"
+        event["properties"]["$issue_name"] = f"{operation}: {code} ({error_type})"
     return event
 
 
@@ -195,8 +225,18 @@ def safe_capture_exception(
     if client is None:
         return
     try:
-        # Keep the SDK exception API, but replace the message and traceback before
-        # capture. The static property allowlist is the second structural barrier.
+        # Read code locations only; never give the SDK traceback locals or source context.
+        frames = []
+        traceback = error.__traceback__
+        while traceback is not None:
+            code = traceback.tb_frame.f_code
+            try:
+                filename = Path(code.co_filename).resolve().relative_to(CONTAINER_ROOT)
+                if len(filename.parts) == 1 and filename.suffix == ".py":
+                    frames.append({"platform": "python", "filename": f"container/{filename}", "function": code.co_name, "lineno": traceback.tb_lineno, "in_app": True})
+            except ValueError:
+                pass
+            traceback = traceback.tb_next
         safe_error = RuntimeError(REDACTED)
         client.capture_exception(
             (RuntimeError, safe_error, None),
@@ -204,6 +244,7 @@ def safe_capture_exception(
             properties={
                 **_sanitize_properties(properties or {}),
                 "$exception_type": _bounded_exception_class(error),
+                "$exception_list": [{"stacktrace": {"type": "raw", "frames": frames[-50:]}}],
                 "$process_person_profile": False,
             },
         )

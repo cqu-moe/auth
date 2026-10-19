@@ -72,6 +72,26 @@ function requestBody(body: unknown): Record<string, unknown> {
 }
 
 describe("real posthog-js event sanitization", () => {
+  it("sends source-map-ready frames and separates operations without sending error text", async () => {
+    vi.stubGlobal("_posthogChunkIds", { "Error\n    at https://auth.cqu.moe/assets/index-abc123.js?token=private-token:1:1": "11111111-2222-4333-8444-555555555555" });
+    const instance = initClient();
+    const error = new TypeError("password=private-password");
+    error.stack = "TypeError: password=private-password\n    at saveSettings (https://auth.cqu.moe/assets/index-abc123.js?token=private-token:42:7)\n    at injected (https://school.example/private-student.js:1:1)";
+    instance.captureException(error, { operation: "save_settings", error_code: "SAVE_FAILED" });
+    instance.captureException(new TypeError("another private message"), { operation: "load_settings", error_code: "LOAD_FAILED" });
+
+    await vi.waitFor(() => expect(sanitizedEvents.filter(event => event.event === "$exception")).toHaveLength(2));
+    const exceptions = sanitizedEvents.filter(event => event.event === "$exception");
+    expect(exceptions[0]!.properties.$exception_list).toMatchObject([{
+      type: "TypeError",
+      stacktrace: { type: "raw", frames: [{ filename: "https://auth.cqu.moe/assets/index-abc123.js", function: "saveSettings", lineno: 42, colno: 7, chunk_id: "11111111-2222-4333-8444-555555555555" }] },
+    }]);
+    expect(exceptions[0]!.properties.$exception_fingerprint).not.toBe(exceptions[1]!.properties.$exception_fingerprint);
+    await vi.waitFor(() => expect(requests.some(request => request.body && String(request.body).includes("saveSettings"))).toBe(true));
+    const wire = JSON.stringify(requests);
+    for (const secret of ["private-password", "private-token", "private-student", "another private message"]) expect(wire).not.toContain(secret);
+  });
+
   it("preserves transport identity while removing SDK top-level person data and unknown properties", async () => {
     const instance = initClient();
     instance.capture("app_session_ready", {
