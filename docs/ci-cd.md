@@ -24,7 +24,7 @@ Worker：`cqu-moe-auth`，生产分支 main，根目录 `/`。
 建议构建命令：
 
 ```sh
-npm ci && npx --yes pnpm@11.19.0 --dir frontend install --frozen-lockfile && VITE_RELEASE=$CF_BUILD_COMMIT_SHA npm run build:cloudflare
+npm ci && npx --yes pnpm@11.19.0 --dir frontend install --frozen-lockfile && VITE_RELEASE=$WORKERS_CI_COMMIT_SHA npm run build:cloudflare
 ```
 
 其中 `build:cloudflare` 在构建前执行应用、Workers 和 Docker 容器检查，任何一步失败即停止。

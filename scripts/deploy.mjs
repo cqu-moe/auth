@@ -17,4 +17,4 @@ rmSync('dist-worker', { recursive: true, force: true });
 run('node_modules/.bin/wrangler', ['deploy', '--dry-run', '--outdir', 'dist-worker', '--upload-source-maps']);
 run('node_modules/.bin/posthog-cli', ['sourcemap', 'process', '--directory', 'dist-worker', '--release-name', 'auth-worker', '--release-version', release, '--release-mode', 'symbol-set']);
 assert(readFileSync('dist-worker/index.js', 'utf8').includes('chunkId='), 'Deploy only the source-map-injected Worker');
-run('node_modules/.bin/wrangler', ['deploy', 'dist-worker/index.js', '--no-bundle', '--upload-source-maps', '--keep-vars', '--var', `QUICKLOGIN_SERVER_BUILD:${release}`, '--var', `RELEASE:${release}`, ...(dryRun ? ['--dry-run'] : [])]);
+run('node_modules/.bin/wrangler', ['deploy', 'dist-worker/index.js', '--no-bundle', '--upload-source-maps', '--experimental-provision=false', '--keep-vars', '--var', `QUICKLOGIN_SERVER_BUILD:${release}`, '--var', `RELEASE:${release}`, ...(dryRun ? ['--dry-run'] : [])]);
