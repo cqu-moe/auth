@@ -8,6 +8,7 @@ from posthog import Posthog
 import asyncio
 
 from posthog_client import (
+    _redact_text,
     POSTHOG_CLIENT_KEY,
     flush_posthog,
     mark_business_outcome,
@@ -18,6 +19,29 @@ from posthog_client import (
 
 
 class PostHogPrivacyTests(unittest.TestCase):
+    def test_unlabeled_errors_keep_distinct_stacks_for_automatic_grouping(self):
+        events = []
+
+        def observe(event):
+            result = sanitize_event(event)
+            events.append(result)
+            return result
+
+        client = Posthog("phc_offline", send=False, privacy_mode=True, before_send=observe)
+        try:
+            for operation in (mark_business_outcome, _redact_text):
+                try:
+                    operation([])
+                except TypeError as error:
+                    safe_capture_exception(client, error)
+        finally:
+            client.shutdown()
+        self.assertEqual(len(events), 2)
+        for event in events:
+            self.assertNotIn("$exception_fingerprint", event["properties"])
+        stacks = [event["properties"]["$exception_list"][0]["stacktrace"]["frames"] for event in events]
+        self.assertNotEqual(stacks[0][-1], stacks[1][-1])
+
     def test_real_sdk_preserves_safe_frames_and_separates_operations(self):
         events = []
 
@@ -79,7 +103,7 @@ class PostHogPrivacyTests(unittest.TestCase):
             {"product": "auth", "$geoip_disable": True, "$exception_list": [{
                 "type": "Error", "value": "Browser operation failed",
                 "mechanism": {"type": "generic", "handled": True},
-            }], "$exception_fingerprint": "auth:container:exception:EXCEPTION:Error", "$issue_name": "exception: EXCEPTION (Error)"},
+            }], "$issue_name": "exception: EXCEPTION (Error)"},
         )
 
     def test_exception_capture_uses_synthetic_message_without_original_traceback(self):

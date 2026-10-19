@@ -172,7 +172,8 @@ def sanitize_event(event: dict | None) -> dict | None:
         code = event["properties"].get("error_code", "EXCEPTION")
         operation = operation if isinstance(operation, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", operation) else "exception"
         code = code if isinstance(code, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", code) else "EXCEPTION"
-        event["properties"]["$exception_fingerprint"] = f"auth:container:{operation}:{code}:{error_type}"
+        if operation != "exception" or code != "EXCEPTION":
+            event["properties"]["$exception_fingerprint"] = f"auth:container:{operation}:{code}:{error_type}"
         event["properties"]["$issue_name"] = f"{operation}: {code} ({error_type})"
     return event
 
