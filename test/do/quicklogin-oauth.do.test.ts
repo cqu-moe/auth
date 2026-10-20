@@ -150,8 +150,11 @@ describe("quicklogin OAuth grants", () => {
       websiteSession: fixture.websiteSession, clientId: OTHER_CLIENT_ID,
       redirectUri: OTHER_REDIRECT_URI, scopes: ["openid", "offline_access"],
     });
-    await install.refresh();
+    const rotated = await install.refresh();
     await expect(install.refresh()).rejects.toMatchObject({
+      stage: "refresh", status: 400, oauthError: "invalid_grant",
+    });
+    await expect(rotated.refresh()).rejects.toMatchObject({
       stage: "refresh", status: 400, oauthError: "invalid_grant",
     });
   });

@@ -109,8 +109,11 @@ export async function assertRefreshTokenUserNotBanned(
   if (row.revoked && row.rotationReplayExpiresAt &&
       row.rotationReplayExpiresAt.getTime() >= Date.now() &&
       (!rotationReplayClientId || row.clientId !== rotationReplayClientId)) {
-    throw new APIError("BAD_REQUEST", {
-      error: "invalid_grant", error_description: "invalid refresh token",
+    // Let native client validation and reuse detection retain their revocation semantics.
+    await adapter.update({
+      model: "oauthRefreshToken",
+      where: [{ field: "id", value: row.id }],
+      update: { rotationReplayExpiresAt: null, rotationReplayResponse: null },
     });
   }
   const user = await adapter.findOne<{
