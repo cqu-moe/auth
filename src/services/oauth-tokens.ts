@@ -15,6 +15,8 @@ interface WhereField {
 
 interface RefreshTokenRow extends OAuthTokenRow {
   userId: string;
+  clientId: string;
+  rotationReplayExpiresAt?: Date | null;
   sessionId?: string | null;
   revoked?: Date | null;
 }
@@ -92,7 +94,8 @@ export async function revokeUserOAuthTokens(
 // existed). Mirrors the admin plugin: an expired ban counts as not banned.
 export async function assertRefreshTokenUserNotBanned(
   adapter: OAuthTokenAdapter,
-  refreshToken: unknown
+  refreshToken: unknown,
+  rotationReplayClientId?: string
 ): Promise<void> {
   if (typeof refreshToken !== "string" || refreshToken.length === 0) return;
   const row = await adapter.findOne<RefreshTokenRow>({
@@ -102,6 +105,12 @@ export async function assertRefreshTokenUserNotBanned(
     ],
   });
   if (!row?.userId) return;
+  // The provider setting is global; only QuickLogin opts into response replay.
+  if (row.revoked && row.rotationReplayExpiresAt &&
+      row.rotationReplayExpiresAt.getTime() >= Date.now() &&
+      (!rotationReplayClientId || row.clientId !== rotationReplayClientId)) {
+    throw new APIError("BAD_REQUEST", { code: "INVALID_GRANT", message: "invalid refresh token" });
+  }
   const user = await adapter.findOne<{
     banned?: boolean | null;
     banExpires?: Date | string | null;

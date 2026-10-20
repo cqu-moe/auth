@@ -78,14 +78,20 @@ it("atomically rejects duplicate proofs across fresh verifier contexts and rejec
   const refreshed = await install.refresh();
   const refreshedToken = refreshed.request().headers.get("authorization")!.slice(7);
   await expect(verifyAuthAccessToken(refreshedToken, env)).rejects.toThrow();
+  const signingHandler = fixture.authHandler;
   const wrong = await key();
   fixture.authHandler = async request => {
     if (request.url.endsWith("/token")) request.headers.set("DPoP", await proof(wrong, request));
     return handler(request);
   };
   await expect(refreshed.refresh()).rejects.toMatchObject({ stage: "refresh" });
+  await expect(install.refresh()).rejects.toMatchObject({ stage: "refresh" });
   fixture.authHandler = handler;
   await expect(refreshed.refresh()).rejects.toMatchObject({ stage: "refresh" });
+  await expect(install.refresh()).rejects.toMatchObject({ stage: "refresh" });
+  fixture.authHandler = signingHandler;
+  expect((await install.refresh()).request().headers.get("authorization"))
+    .toBe(refreshed.request().headers.get("authorization"));
 });
 
 it("interoperates with oauth4webapi code exchange, same-key refresh and HTTP resource requests", async () => {

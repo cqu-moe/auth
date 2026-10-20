@@ -30,7 +30,17 @@ native `/oauth2/userinfo`, which honors the token's scopes.
 Use the native `/oauth2/token` endpoint to rotate refresh credentials. Auth
 requires the stored refresh credential's live session even with `offline_access`.
 QuickLogin device requests additionally retain their existing current grant and
-device checks. DPoP proof validation is handled separately at the resource request;
+device checks. QuickLogin alone may retry a rotated refresh credential for up to
+60 seconds and receive the same encrypted, cached token response; no new token
+family is issued. This covers a 15-second request timeout followed by the
+extension's first 24–36-second retry. Replay still requires a live central
+session, an unbanned user, a live QuickLogin grant and an unrevoked refresh family.
+The provider verifies client, scope, resource and sender binding again. Explicit
+revocation and retries outside the window remain rejected; a delayed browser
+wake-up or prolonged outage may still require reconnect. Other OAuth clients
+retain strict rotation without response replay.
+
+DPoP proof validation is handled separately at the resource request;
 introspection is an authenticated server-to-server authority check.
 
 ## Revocation scope

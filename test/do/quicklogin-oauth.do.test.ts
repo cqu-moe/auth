@@ -23,7 +23,7 @@ beforeEach(async () => {
     "session", "account", "user", "jwks", "rateLimit",
   ]) await env.DATABASE.prepare(`DELETE FROM ${table}`).run();
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe("quicklogin OAuth grants", () => {
   it("keeps valid device tokens usable after repeated local JWKS verification", async () => {
@@ -66,10 +66,92 @@ describe("quicklogin OAuth grants", () => {
     const firstPrincipal = await verifyQuickloginBearer(first.request(), env);
     const secondPrincipal = await verifyQuickloginBearer(second.request(), env);
     expect(firstPrincipal.grantId).not.toBe(secondPrincipal.grantId);
-    await expect(verifyQuickloginBearer((await first.refresh()).request(), env))
+    const rotated = await first.refresh();
+    await expect(verifyQuickloginBearer(rotated.request(), env))
       .resolves.toMatchObject({ grantId: firstPrincipal.grantId });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 51_000);
+    const replayed = await first.refresh();
+    expect(replayed.request().headers.get("authorization"))
+      .toBe(rotated.request().headers.get("authorization"));
+    const counts = await env.DATABASE.prepare(`SELECT COUNT(*) AS total, SUM(revoked IS NULL) AS live
+      FROM oauthRefreshToken WHERE referenceId = ?`).bind(firstPrincipal.grantId).first();
+    expect(counts).toEqual({ total: 2, live: 1 });
+    vi.setSystemTime(Date.now() + 10_000);
     await expect(first.refresh()).rejects.toMatchObject({ stage: "refresh" });
     await expect(second.refresh()).resolves.toBeDefined();
+  });
+
+  it.each(["session-ended", "session-expired", "user-banned"])(
+    "rejects cached refresh responses after %s", async (change) => {
+      const fixture = await createOAuthFixture(env);
+      const install = await authorizeOfficialInstall(fixture, { websiteSession: fixture.websiteSession });
+      const rotated = await install.refresh();
+      if (change === "session-ended") {
+        await env.DATABASE.prepare('DELETE FROM session WHERE userId = ?')
+          .bind(fixture.websiteSession.userId).run();
+      } else if (change === "session-expired") {
+        await env.DATABASE.prepare('UPDATE session SET expiresAt = ? WHERE userId = ?')
+          .bind(Date.now() - 1_000, fixture.websiteSession.userId).run();
+      } else {
+        await env.DATABASE.prepare('UPDATE user SET banned = 1 WHERE id = ?')
+          .bind(fixture.websiteSession.userId).run();
+      }
+      await expect(install.refresh()).rejects.toMatchObject({ stage: "refresh" });
+      await expect(rotated.refresh()).rejects.toMatchObject({ stage: "refresh" });
+    }
+  );
+
+  it.each([
+    ["scope", "openid"], ["resource", "https://unregistered.example"], ["client_id", OTHER_CLIENT_ID],
+  ])("rejects changed %s during response replay", async (field, value) => {
+    const fixture = await createOAuthFixture(env);
+    const install = await authorizeOfficialInstall(fixture, { websiteSession: fixture.websiteSession });
+    const rotated = await install.refresh();
+    const handler = fixture.authHandler;
+    fixture.authHandler = async request => {
+      const body = new URLSearchParams();
+      for (const [key, entry] of await request.formData()) body.append(key, String(entry));
+      body.set(field, value);
+      return handler(new Request(request.url, { method: "POST", headers: request.headers, body }));
+    };
+    await expect(install.refresh()).rejects.toMatchObject({ stage: "refresh" });
+    fixture.authHandler = handler;
+    expect((await install.refresh()).request().headers.get("authorization"))
+      .toBe(rotated.request().headers.get("authorization"));
+  });
+
+  it("does not replay a response after native OAuth revocation", async () => {
+    const fixture = await createOAuthFixture(env);
+    const handler = fixture.authHandler;
+    let currentRefresh = "";
+    fixture.authHandler = async request => {
+      const result = await handler(request);
+      if (request.url.endsWith("/token") && result.ok) {
+        currentRefresh = (await result.clone().json<{ refresh_token: string }>()).refresh_token;
+      }
+      return result;
+    };
+    const install = await authorizeOfficialInstall(fixture, { websiteSession: fixture.websiteSession });
+    const rotated = await install.refresh();
+    const result = await handler(new Request(`${env.BETTER_AUTH_URL}/api/v1/auth/oauth2/revoke`, {
+      method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: OFFICIAL_CLIENT_ID,
+        token: currentRefresh, token_type_hint: "refresh_token" }),
+    }));
+    expect(result.status).toBe(200);
+    await expect(install.refresh()).rejects.toMatchObject({ stage: "refresh" });
+    await expect(rotated.refresh()).rejects.toMatchObject({ stage: "refresh" });
+  });
+
+  it("keeps ordinary clients on strict refresh rotation", async () => {
+    const fixture = await createOAuthFixture(env);
+    const install = await authorizeWithOverrides(fixture, {
+      websiteSession: fixture.websiteSession, clientId: OTHER_CLIENT_ID,
+      redirectUri: OTHER_REDIRECT_URI, scopes: ["openid", "offline_access"],
+    });
+    await install.refresh();
+    await expect(install.refresh()).rejects.toMatchObject({ stage: "refresh" });
   });
 
   it("rejects missing PKCE, wrong verifier, unregistered redirect, and non-official azp", async () => {
@@ -113,6 +195,7 @@ describe("quicklogin OAuth grants", () => {
     const second = await authorizeOfficialInstall(fixture, { websiteSession: fixture.websiteSession });
     const firstPrincipal = await verifyQuickloginBearer(first.request(), env);
     const secondPrincipal = await verifyQuickloginBearer(second.request(), env);
+    const rotated = await first.refresh();
     const accounts = new QuickloginAccountClient(env);
     const device = await accounts.registerDevice(fixture.websiteSession.userId, firstPrincipal.grantId, {
       deviceName: "First Synthetic Chrome", browserFamily: "chrome", browserVersion: "140",
@@ -123,6 +206,7 @@ describe("quicklogin OAuth grants", () => {
     await expect(verifyQuickloginBearer(first.request(), env))
       .rejects.toMatchObject({ code: "DEVICE_REVOKED" });
     await expect(first.refresh()).rejects.toMatchObject({ stage: "refresh" });
+    await expect(rotated.refresh()).rejects.toMatchObject({ stage: "refresh" });
     await expect(verifyQuickloginBearer((await second.refresh()).request(), env))
       .resolves.toMatchObject({ grantId: secondPrincipal.grantId });
     const session = await fixture.authHandler(new Request(

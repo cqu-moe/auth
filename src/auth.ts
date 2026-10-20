@@ -228,7 +228,8 @@ export function createAuth(env: Env, request: Request) {
               if (body?.grant_type === "refresh_token") {
                 await assertRefreshTokenUserNotBanned(
                   ctx.context.adapter,
-                  body?.refresh_token
+                  body?.refresh_token,
+                  env.QUICKLOGIN_CLIENT_ID
                 );
               }
               try {
@@ -315,6 +316,8 @@ export function createAuth(env: Env, request: Request) {
             },
           }),
           oauthProvider({
+            // Covers the extension's 15s timeout plus its first 24–36s retry.
+            refreshTokenReuseInterval: 60,
             // Consumers introspect on every protected request, including private
             // Service Binding calls without an IP. Keep a bounded shared budget
             // sized for backend traffic instead of the native 100/min default.
