@@ -109,7 +109,9 @@ export async function assertRefreshTokenUserNotBanned(
   if (row.revoked && row.rotationReplayExpiresAt &&
       row.rotationReplayExpiresAt.getTime() >= Date.now() &&
       (!rotationReplayClientId || row.clientId !== rotationReplayClientId)) {
-    throw new APIError("BAD_REQUEST", { code: "INVALID_GRANT", message: "invalid refresh token" });
+    throw new APIError("BAD_REQUEST", {
+      error: "invalid_grant", error_description: "invalid refresh token",
+    });
   }
   const user = await adapter.findOne<{
     banned?: boolean | null;

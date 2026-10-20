@@ -151,7 +151,9 @@ describe("quicklogin OAuth grants", () => {
       redirectUri: OTHER_REDIRECT_URI, scopes: ["openid", "offline_access"],
     });
     await install.refresh();
-    await expect(install.refresh()).rejects.toMatchObject({ stage: "refresh" });
+    await expect(install.refresh()).rejects.toMatchObject({
+      stage: "refresh", status: 400, oauthError: "invalid_grant",
+    });
   });
 
   it("rejects missing PKCE, wrong verifier, unregistered redirect, and non-official azp", async () => {
