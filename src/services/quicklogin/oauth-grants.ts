@@ -96,6 +96,9 @@ interface RefreshTokenRow extends OAuthTokenRow {
   userId: string;
   referenceId?: string | null;
   revoked?: Date | null;
+  rotatedAt?: Date | null;
+  rotationReplayExpiresAt?: Date | null;
+  expiresAt: Date;
 }
 
 interface RefreshTokenAdapter {
@@ -142,7 +145,22 @@ export async function assertQuickloginRefreshAllowed(
   ) {
     return;
   }
-  if (row.revoked) throw new QuickloginOAuthError("FORBIDDEN");
+  if (row.revoked) {
+    const replayable = row.rotatedAt && row.revoked.getTime() === row.rotatedAt.getTime() &&
+      row.rotationReplayExpiresAt && row.rotationReplayExpiresAt.getTime() >= Date.now();
+    if (!replayable || !row.referenceId) throw new QuickloginOAuthError("FORBIDDEN");
+    // A cached rotation response must not revive a revoked OAuth family.
+    const live = await adapter.findOne<RefreshTokenRow>({
+      model: "oauthRefreshToken",
+      where: [
+        { field: "userId", value: row.userId },
+        { field: "clientId", value: row.clientId },
+        { field: "referenceId", value: row.referenceId },
+        { field: "revoked", value: null },
+      ],
+    });
+    if (!live || live.expiresAt.getTime() <= Date.now()) throw new QuickloginOAuthError("FORBIDDEN");
+  }
   if (!row.referenceId) return;
 
   try {
