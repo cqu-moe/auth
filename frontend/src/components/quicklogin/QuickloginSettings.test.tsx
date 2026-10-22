@@ -229,7 +229,7 @@ describe("QuickLogin settings", () => {
     expect(rows[0].textContent).toContain("当前插件");
     expect(rows[1].textContent).toContain("等待插件同步");
     for (const row of rows) {
-      expect(row.querySelectorAll("p")).toHaveLength(1);
+      expect(row.querySelectorAll("p")).toHaveLength(2);
       expect(row.textContent).not.toContain("此设备云端会话");
       expect(row.textContent).not.toContain("本地报告");
       expect(row.textContent).not.toContain("尚未上报");
@@ -237,6 +237,26 @@ describe("QuickLogin settings", () => {
     expect(container.textContent).not.toContain("在线");
     expect(container.textContent).not.toContain("已就绪");
     expect(container.querySelector(".text-success")).toBeNull();
+  });
+
+  it("shows the canonical status explanation and a concrete recovery action", async () => {
+    const unbound = deviceSnapshot();
+    unbound.binding = {
+      ...unbound.binding,
+      state: "unbound",
+      credentialsState: "unknown",
+      evidenceAt: null,
+      evidenceKind: "none",
+    };
+    const container = await renderUi(createElement(DeviceList, {
+      data: overview([unbound]), onRevoke: async () => undefined,
+      onReconnect: async () => undefined, onRefresh: async () => undefined,
+    }));
+
+    expect(container.textContent).toContain("尚未绑定学校账号");
+    expect(container.textContent).toContain("请先在 Auth 绑定学校账号");
+    const action = container.querySelector('a[href="/settings?cqu=bind"]');
+    expect(action?.textContent).toContain("绑定学校账号");
   });
 
   it("polls active devices every five seconds, pauses hidden and reloads on focus", async () => {
@@ -451,6 +471,7 @@ it("offers reconnect for the explicitly hinted active device without adding it t
   await click(button(rows[0], "重新连接"));
   expect(api.reconnectQuickloginDevice).toHaveBeenCalledWith("device-a");
   expect(api.getQuickloginOverview).toHaveBeenCalledTimes(2);
+  expect(container.querySelector('[role="status"]')?.textContent).toContain("已请求重新连接");
 });
 
 it("keeps a normally opened active-device row free of reconnect controls", async () => {

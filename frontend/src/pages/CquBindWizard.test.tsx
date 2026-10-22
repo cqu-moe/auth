@@ -102,7 +102,8 @@ describe("CquBindWizard bootstrap", () => {
     expect(container.textContent).toContain("绑定成功");
     expect(container.textContent).toContain("可以返回使用服务了。");
     expect(container.textContent).toContain("前往课表");
-    expect(container.textContent).toContain("返回账户设置");
+    expect(container.textContent).toContain("返回 CQU 集成");
+    expect(container.querySelector('a[href="/settings/cqu"]')).not.toBeNull();
   });
 
   it("returns an already-bound user directly to the validated service", async () => {

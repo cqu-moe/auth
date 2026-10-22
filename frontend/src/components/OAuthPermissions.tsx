@@ -17,6 +17,10 @@ const SCOPE_MAP: Record<string, ScopeInfo> = {
   "cqu:ticket:library": { label: "图书馆", description: "代表您访问重庆大学图书馆系统" },
   "cqu:ticket:card": { label: "校园卡", description: "代表您访问重庆大学校园卡系统" },
   "cqu:ticket:friends": { label: "第二课堂", description: "代表您访问重庆大学第二课堂系统" },
+  "cqu:quicklogin:device": {
+    label: "QuickLogin 浏览器设备",
+    description: "授权当前浏览器作为您的 QuickLogin 设备，并维护学校登录",
+  },
 };
 
 function getScopeInfo(scope: string): ScopeInfo {

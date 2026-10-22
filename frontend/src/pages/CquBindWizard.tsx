@@ -1060,7 +1060,7 @@ export default function CquBindWizard({ onReturn = replaceLocation }: CquBindWiz
   return (
     <Layout>
       <Button asChild variant="ghost" size="sm" className="mb-4 -ml-2 text-muted-foreground">
-        <Link to="/settings">
+        <Link to="/settings/cqu">
           <ArrowLeft aria-hidden="true" />
           返回设置
         </Link>

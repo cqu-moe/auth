@@ -97,7 +97,8 @@ describe("CquBindSuccess", () => {
 
     expect(onReturn).not.toHaveBeenCalled();
     expect(container.textContent).toContain("前往课表");
-    expect(container.textContent).toContain("返回账户设置");
+    expect(container.textContent).toContain("返回 CQU 集成");
+    expect(container.querySelector('a[href="/settings/cqu"]')).not.toBeNull();
     expect(container.textContent).not.toContain("秒后自动返回");
   });
 

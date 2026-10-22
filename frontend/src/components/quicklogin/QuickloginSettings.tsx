@@ -34,6 +34,7 @@ export default function QuickloginSettings({ currentDeviceHint, reconnectDeviceH
     | null
   >(null);
   const [error, setError] = useState("");
+  const [reconnectNotice, setReconnectNotice] = useState("");
 
   const load = useCallback(async (signal?: AbortSignal) => {
     requestAbortRef.current?.abort();
@@ -186,9 +187,13 @@ export default function QuickloginSettings({ currentDeviceHint, reconnectDeviceH
     const lifecycle = lifecycleGenerationRef.current;
     setAction({ kind: "reconnect", deviceId });
     setError("");
+    setReconnectNotice("");
     try {
       await reconnectQuickloginDevice(deviceId);
-      if (lifecycleGenerationRef.current === lifecycle) await load();
+      if (lifecycleGenerationRef.current === lifecycle) {
+        setReconnectNotice("已请求重新连接。请在打开的 Auth 授权窗口中完成操作，然后查看插件状态。");
+        await load();
+      }
     } catch (error) {
       if (lifecycleGenerationRef.current === lifecycle) {
         const retryAt = error instanceof ApiError ? error.body?.retryAt : null;
@@ -226,6 +231,7 @@ export default function QuickloginSettings({ currentDeviceHint, reconnectDeviceH
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+      {reconnectNotice && <p role="status" className="mb-4 text-sm text-muted-foreground">{reconnectNotice}</p>}
       {loading && !data && (!preference || isDeviceQuickloginPreference(preference)) ? (
         <QuickloginSkeleton />
       ) : data ? (

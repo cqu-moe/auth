@@ -68,7 +68,7 @@ export default function DeviceList({
         const name = device.identity.deviceName?.trim() || "未命名浏览器";
         const reconnecting = reconnectingDeviceId === id;
         const revoking = revokingDeviceId === id;
-        const title = presentation.actionCode === "complete_verification" ? "需手动登录" : presentation.statusCode === "syncing" && !device.reportedLocal
+        const title = presentation.statusCode === "disabled" ? "此设备已关闭快捷登录" : presentation.statusCode === "syncing" && !device.reportedLocal
           ? "等待插件同步" : presentation.title;
 
         return (
@@ -85,6 +85,11 @@ export default function DeviceList({
               <div className={`mt-1 text-sm ${presentation.statusCode === "ready" ? "text-success" : "text-muted-foreground"}`}>
                 {revoking ? "正在退出设备…" : title}
               </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {presentation.actionCode === "complete_verification"
+                  ? "请在对应设备的插件中选择「前往学校手动登录」，完成本次验证。"
+                  : presentation.detail}
+              </p>
               <p className="mt-1 text-xs tabular-nums text-muted-foreground">
                 {client && `插件 ${client.extensionVersion} · `}
                 最近联系：
@@ -99,13 +104,14 @@ export default function DeviceList({
                 <ActionButton
                   type="button"
                   variant="outline"
+                  className="min-h-11"
                   state={reconnecting ? "loading" : "idle"}
                   labels={{ idle: "重新连接", loading: "正在连接…", success: "已连接", error: "重新连接" }}
                   disabled={busy && !reconnecting}
                   onClick={() => void onReconnect(id)}
                 />
               ) : presentation.actionTarget && actionLabels[presentation.actionCode] ? (
-                <Button asChild variant="outline" size="default">
+                <Button asChild variant="outline" size="default" className="min-h-11">
                   <a href={presentation.actionTarget}>
                     {actionLabels[presentation.actionCode]}
                   </a>
@@ -115,6 +121,7 @@ export default function DeviceList({
                   type="button"
                   variant="outline"
                   size="default"
+                  className="min-h-11"
                   disabled={busy}
                   onClick={() => void onRefresh()}
                 >

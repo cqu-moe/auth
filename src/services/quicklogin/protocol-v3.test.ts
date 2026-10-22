@@ -119,7 +119,20 @@ describe('shared presentation priority and evidence', () => {
     ['syncing', () => {}, { receipt: { ...receipt, generation: 1 } }],
     ['unknown', () => {}, { schoolAccess: 'login_form_seen' }],
   ];
-  it.each(cases)('%s', (expected, mutate, local) => { const s = snapshot(); mutate(s); expect(derivePresentation(s, local, now).statusCode).toBe(expected); });
+  it.each(cases)('%s', (expected, mutate, local) => {
+    const s = snapshot(); mutate(s);
+    const view = derivePresentation(s, local, now);
+    expect(view.statusCode).toBe(expected);
+    expect(view.detail).toBeTruthy();
+  });
+  it('shows active authorization before an old disabled or reconnect state', () => {
+    const s = snapshot();s.authorization.state='reconnect_required';
+    expect(derivePresentation(s,{authorization:'authorizing',enabledIntent:false},now).statusCode).toBe('authorizing');
+  });
+  it('does not mistake an unconfirmed enable for a confirmed remote off state', () => {
+    const s = snapshot();s.authorization.policy='device_off';s.authorization.deviceEnabled=false;
+    expect(derivePresentation(s,{enabledIntent:true,observation:'unreachable'},now).statusCode).toBe('unreachable');
+  });
   it('shows pending ACK for a fresh local receipt when no server report exists yet', () => {
     const s = snapshot(); s.reportedLocal = null;
     expect(derivePresentation(s, { cookieState: 'applied', receipt, pendingAck: true }, now).statusCode).toBe('pending_ack');

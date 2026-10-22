@@ -183,7 +183,40 @@ export const parseApiProblem: Parser<ApiProblem> = boundary(object<ApiProblem>({
 export function sameTuple(a: VersionTuple | null, b: VersionTuple | null): boolean { return a !== null && b !== null && a.deviceId === b.deviceId && a.generation === b.generation && a.bindingEpoch === b.bindingEpoch && a.credentialRevision === b.credentialRevision && a.sessionVersion === b.sessionVersion; }
 export function tupleForSnapshot(s: DeviceSnapshot): VersionTuple | null { const v = s.versions; if (v.bindingEpoch === null || v.credentialRevision === null) return null; return { deviceId: s.identity.deviceId, generation: v.generation, bindingEpoch: v.bindingEpoch, credentialRevision: v.credentialRevision, sessionVersion: v.sessionVersion }; }
 export function cloudSessionUsable(s: DeviceSnapshot, now: number): boolean { return s.capabilities.canUseExistingSession && ['ready', 'refreshing', 'retry_wait'].includes(s.cloud.state) && s.cloud.lastValidatedAt !== null && s.cloud.lastValidatedAt <= now && s.cloud.usableUntil !== null && s.cloud.usableUntil > now; }
-const TITLES: Record<StatusCode, string> = { disabled: '已关闭', disconnecting: '正在退出', revoked: '此设备已退出', disconnected: '未连接 Auth', authorizing: '正在连接 Auth', reconnect_required: '需要重新连接 Auth', update_required: '请更新插件', service_upgrading: '服务正在升级', master_off: '快捷登录已暂停', device_off: '此设备已关闭', quota_blocked: '设备名额已满', service_paused: '快捷登录暂时不可用', manual: '手动登录中', foreign: '已有学校登录', unreachable: '暂时无法连接 Auth', checking: '正在检查', unbound: '尚未绑定学校账号', binding_updating: '正在更新学校登录', credentials_rejected: '学校密码需要更新', interaction_required: '需要完成学校验证', preparing: '正在准备学校登录', refreshing: '正在更新登录', retry_wait: '学校登录暂时不可用', syncing: '正在同步到浏览器', permission_denied: '浏览器权限不足', write_failed: '浏览器同步失败', pending_ack: '浏览器已同步，正在确认', usable_credentials_rejected: '当前可用，续期需处理', usable_retry_wait: '当前可用，正在重试续期', ready: '已就绪', unknown: '状态暂时无法确认' };
+const TITLES: Record<StatusCode, string> = { disabled: '此浏览器已关闭快捷登录', disconnecting: '正在退出', revoked: '此设备已退出', disconnected: '未连接 Auth', authorizing: '正在连接 Auth', reconnect_required: '需要重新连接 Auth', update_required: '请更新插件', service_upgrading: '服务正在升级', master_off: '账号已暂停快捷登录', device_off: '此设备已关闭', quota_blocked: '设备名额已满', service_paused: '快捷登录暂时不可用', manual: '已切换为手动登录', foreign: '正在保留已有学校登录', unreachable: '暂时无法连接 Auth', checking: '正在检查登录状态', unbound: '尚未绑定学校账号', binding_updating: '正在更新学校账号', credentials_rejected: '学校密码需要更新', interaction_required: '需要手动完成学校验证', preparing: '正在准备学校登录', refreshing: '正在准备学校登录', retry_wait: '学校登录暂时不可用', syncing: '正在准备学校登录', permission_denied: '浏览器权限不足', write_failed: '浏览器同步失败', pending_ack: '正在准备学校登录', usable_credentials_rejected: '当前可用，续期需处理', usable_retry_wait: '当前可用，正在重试续期', ready: '已就绪', unknown: '状态暂时无法确认' };
+const DETAILS: Record<StatusCode, string> = {
+  disabled: '请在对应设备的插件中开启快捷登录。',
+  disconnecting: '正在退出此设备并清理插件写入的登录状态。',
+  revoked: '此设备的授权已撤销，请重新连接 Auth。',
+  disconnected: '连接 Auth 后，即可在此浏览器使用学校快捷登录。',
+  authorizing: '请在打开的 Auth 页面完成授权，完成后会自动继续。',
+  reconnect_required: '请在 Auth 中重新授权此设备，完成后会自动继续。',
+  update_required: '当前插件与服务不兼容，请更新后重试。',
+  service_upgrading: '服务暂时无法提供登录状态，请稍后重新检查。',
+  master_off: '请前往 Auth 开启账号的快捷登录总开关。',
+  device_off: '请在对应设备的插件中开启快捷登录。',
+  quota_blocked: '请在 Auth 管理设备名额，再开启此设备。',
+  service_paused: '服务已暂停处理登录，请稍后重新检查。',
+  manual: '插件已暂停自动登录，不会打断你在学校页面的操作。',
+  foreign: '此浏览器已有非插件写入的学校登录；仅在你选择切换后替换。',
+  unreachable: '连接恢复后会自动重试，也可以立即重新检查。',
+  checking: '正在确认最新状态，请稍候。',
+  unbound: '请先在 Auth 绑定学校账号，再返回此处。',
+  binding_updating: '学校账号正在更新，完成后会自动继续。',
+  credentials_rejected: '学校拒绝了已保存的密码，请在 Auth 更新后重试。',
+  interaction_required: '请在学校登录页面手动完成验证；本次登录将由你继续。',
+  preparing: '正在获取学校登录状态，完成后会自动同步到此浏览器。',
+  refreshing: '正在更新学校登录状态，完成后会自动继续。',
+  retry_wait: '系统会按允许的时间自动重试。',
+  syncing: '正在将学校登录状态同步到此浏览器。',
+  permission_denied: '请允许插件访问学校网站，然后重试。',
+  write_failed: '学校登录状态未能写入此浏览器，请重试同步。',
+  pending_ack: '浏览器同步已完成，正在确认结果，请稍候。',
+  usable_credentials_rejected: '当前登录仍可使用；请处理续期问题，以免到期后无法自动登录。',
+  usable_retry_wait: '当前登录仍可使用，插件会按允许的时间自动重试续期。',
+  ready: '学校登录已同步到此浏览器，可以前往学校网站。',
+  unknown: '尚未确认可用的登录状态，请重新检查。',
+};
 const RETRY_TITLES: Partial<Record<ReasonCode, string>> = {
   OTP_TIMEOUT: '验证码未收到',
   OTP_SEND_FAILED: '学校未发出验证码',
@@ -194,19 +227,22 @@ const RETRY_TITLES: Partial<Record<ReasonCode, string>> = {
 };
 const TARGETS: Partial<Record<ActionCode, ActionTarget>> = { open_auth: '/settings?quicklogin=1', manage_devices: '/settings?quicklogin=1', bind_school: '/settings?cqu=bind', update_password: '/settings?cqu=repair', complete_verification: '/settings?cqu=verify' };
 export function derivePresentation(snapshot: DeviceSnapshot | null, local: LocalPresentation = {}, now = Date.now()): Presentation {
-  const show = (statusCode: StatusCode, actionCode: ActionCode = 'none', reasonCode: ReasonCode | null = null, detail: string | null = null): Presentation => ({ statusCode, title: TITLES[statusCode], detail, reasonCode, actionCode, actionTarget: TARGETS[actionCode] ?? null, nextCheckAt: snapshot?.presentation.nextCheckAt ?? null, freshUntil: snapshot?.freshUntil ?? null });
+  const show = (statusCode: StatusCode, actionCode: ActionCode = 'none', reasonCode: ReasonCode | null = null, detail: string = DETAILS[statusCode]): Presentation => ({ statusCode, title: TITLES[statusCode], detail, reasonCode, actionCode, actionTarget: TARGETS[actionCode] ?? null, nextCheckAt: snapshot?.presentation.nextCheckAt ?? null, freshUntil: snapshot?.freshUntil ?? null });
   if (local.disconnecting) return show('disconnecting');
+  if (local.authorization === 'authorizing') return show('authorizing');
   const authorities = [snapshot?.authorization.state, local.authorization];
   const auth = (['revoked', 'reconnect_required', 'disconnected', 'authorizing', 'refreshing_token', 'authorized'] as const).find(state => authorities.includes(state));
   if (auth === 'revoked' || snapshot?.authorization.state === 'revoked' || snapshot?.cloud.state === 'revoked') return show('revoked', 'connect_auth', 'DEVICE_REVOKED');
   if (auth === 'disconnected') return show('disconnected', 'connect_auth');
   if (auth === 'reconnect_required') return show('reconnect_required', 'connect_auth', 'AUTH_RECONNECT_REQUIRED');
-  if ((local.enabledIntent ?? snapshot?.reportedLocal?.enabledIntent) === false) return show('disabled', 'enable_device');
   if (auth === 'authorizing') return show('authorizing');
+  if ((local.enabledIntent ?? snapshot?.reportedLocal?.enabledIntent) === false) return show('disabled', 'enable_device');
   if (local.protocolSupport === 'client_update_required') return show('update_required', 'update_extension', 'CLIENT_UPDATE_REQUIRED');
   if (local.protocolSupport === 'service_upgrading') return show('service_upgrading', 'reconcile', 'PROTOCOL_UNSUPPORTED');
   if (!snapshot) return show('unknown', 'reconcile');
   const s = snapshot, a = s.authorization, r = s.reportedLocal;
+  const observations = [s.observation, local.observation ?? 'fresh'];
+  if (observations.includes('unreachable')) return show('unreachable', 'reconcile');
   if (a.policy === 'master_off' || !a.masterEnabled) return show('master_off', 'open_auth', 'MASTER_DISABLED');
   if (a.policy === 'quota_blocked') return show('quota_blocked', 'manage_devices', 'QUOTA_BLOCKED');
   if (a.policy === 'device_off' || !a.deviceEnabled) return show('device_off', 'enable_device', 'DEVICE_DISABLED');
@@ -214,8 +250,6 @@ export function derivePresentation(snapshot: DeviceSnapshot | null, local: Local
   const currentCookie = local.cookieState ?? r?.cookieState ?? 'unknown';
   if ((local.mode ?? r?.mode) === 'manual' || currentCookie === 'manual') return show('manual', 'resume_automatic');
   if (currentCookie === 'foreign') return show('foreign', 'switch_to_quicklogin', 'LOCAL_COOKIE_CONFLICT');
-  const observations = [s.observation, local.observation ?? 'fresh'];
-  if (observations.includes('unreachable')) return show('unreachable', 'reconcile');
   if (observations.some(state => state !== 'fresh') || s.freshUntil <= now || auth === 'refreshing_token') return show('checking', 'reconcile');
   if (s.binding.state === 'unbound') return show('unbound', 'bind_school', 'BINDING_UNBOUND');
   if (s.binding.state === 'updating' || s.binding.bindingTransitionId !== null) return show('binding_updating', 'none', 'BINDING_UPDATING');
@@ -243,11 +277,11 @@ export function derivePresentation(snapshot: DeviceSnapshot | null, local: Local
   const reportFresh = reportedAge !== null && reportedAge < LOCAL_VERIFICATION_FRESH_MS;
   const localAge = local.receipt === undefined ? null : now - appliedReceipt.verifiedAt;
   if (local.receipt === undefined ? !reportFresh : localAge === null || localAge < 0 || localAge >= LOCAL_VERIFICATION_FRESH_MS) return show('checking', 'reconcile', 'STALE_SNAPSHOT');
-  if (local.pendingAck || !reportFresh || r?.acknowledgedAt == null || r.receipt?.result !== 'applied' || r.receipt.exportId !== appliedReceipt.exportId || !sameTuple(r.receipt, appliedReceipt)) return show('pending_ack', 'confirm_receipt');
+  if (local.pendingAck || !reportFresh || r?.acknowledgedAt == null || r.receipt?.result !== 'applied' || r.receipt.exportId !== appliedReceipt.exportId || !sameTuple(r.receipt, appliedReceipt)) return show('pending_ack');
   if (rejected) return show('usable_credentials_rejected', 'update_password', 'CREDENTIALS_REJECTED');
   if (interactive) return show('usable_credentials_rejected', 'complete_verification', 'INTERACTION_REQUIRED');
   if (s.cloud.state === 'retry_wait' || s.cloud.state === 'refreshing') return show('usable_retry_wait', 'none', s.cloud.reasonCode);
   return show('ready', 'disable');
 }
 
-export const CONTRACT_DIGEST = 'd08b76f3df71879dcedb754b6df0f01eb0da912a5c1f00495283f3512a21cec1' as const;
+export const CONTRACT_DIGEST = '2ad223ead9bab4b66feaa866e95438e1b4312fad332e2077e9e15bf6785ed4bf' as const;
