@@ -1,8 +1,12 @@
 import type { DeviceAuthority, StoredDeviceSession } from "./contracts";
 import { INACTIVE_MS } from "./contracts";
+import type { Env } from "../../types";
+import {
+  CQU_PROACTIVE_RELOGIN_MS,
+  skipDeviceProbes,
+} from "../cqu-maintenance-policy";
 
 const KEEPALIVE_MS = 60 * 60_000;
-const RELOGIN_MS = 7 * 60 * 60_000;
 const MINUTE_MS = 60_000;
 const QUICKLOGIN_RETRY_BACKOFF_AT_MS = 2 * 60 * MINUTE_MS;
 export const QUICKLOGIN_RETRY_CAP_MS = 30 * MINUTE_MS;
@@ -35,7 +39,8 @@ export function nextQuickloginRetryDelayMs(
 export function nextDeviceAction(
   state: StoredDeviceSession,
   authority: DeviceAuthority,
-  now: number
+  now: number,
+  probesEnabled = true
 ): DeviceAction {
   if (!authority.allowed || authority.generation !== state.generation) return "stop";
   if (authority.lastSeenAt !== null && now - authority.lastSeenAt >= INACTIVE_MS) {
@@ -45,9 +50,26 @@ export function nextDeviceAction(
   if (state.state === "needs_reauth") return "wait";
   if (state.operationId && (state.state === "refreshing" || state.state === "preparing")) return "login";
   if (!state.storageState || state.loginAt === null) return "login";
-  if (now - state.loginAt >= RELOGIN_MS) return "login";
+  if (!probesEnabled && state.state === "temporary_unavailable" && state.nextAttemptAt !== null) return "login";
+  if (now - state.loginAt >= CQU_PROACTIVE_RELOGIN_MS) return "login";
+  if (!probesEnabled) return "wait";
   if (state.lastKeepAliveAt === null || now - state.lastKeepAliveAt >= KEEPALIVE_MS) {
     return "keepalive";
   }
   return "wait";
+}
+
+export function quickloginSessionUsableUntil(
+  env: Env,
+  session: StoredDeviceSession
+): number | null {
+  if (!session.storageState) return null;
+  if (skipDeviceProbes(env, session.ownerUserId, session.deviceId)) {
+    return session.loginAt === null
+      ? null
+      : session.loginAt + CQU_PROACTIVE_RELOGIN_MS;
+  }
+  return session.lastKeepAliveAt === null
+    ? null
+    : session.lastKeepAliveAt + 2 * 60 * 60_000;
 }

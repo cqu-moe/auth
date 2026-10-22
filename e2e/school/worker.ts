@@ -37,6 +37,9 @@ export class CquLoginContainer extends BrowserContainer {
   override async fetch(request: Request) {
     const url = new URL(request.url);
     if (url.pathname.startsWith('/__fixture/')) {
+      // Fixture mail/control can cold-start after a job shortened the idle window.
+      this.sleepAfter = '30s';
+      this.renewActivityTimeout();
       url.pathname = url.pathname.slice('/__fixture'.length);
       return this.containerFetch(new Request(url, request), 9090);
     }
