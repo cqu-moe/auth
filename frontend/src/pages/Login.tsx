@@ -1,7 +1,7 @@
 import { useState, useRef, FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ActionButton, Alert, AlertDescription, Input, Label } from "@cqu-moe/ui";
-import AuthLayout from "../components/AuthLayout";
+import AuthLayout from "../components/PassportAuthLayout";
 import { authClient } from "../lib/auth-client";
 import { getLoginNavigationDestination } from "../lib/login-routing";
 import {

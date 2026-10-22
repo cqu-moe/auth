@@ -1,0 +1,59 @@
+{
+  "sourceRepository": "https://github.com/cqu-moe/design",
+  "tag": "v1.2.0",
+  "commit": "81edae415e2e020e321fe831809480a6ae276a9d",
+  "files": {
+    "app-icon.svg": {
+      "source": "assets/brand/path-family/auth/app-icon.svg",
+      "sha256": "3ee2e91bece0653f17e4735466dab5638096cf95368dce552f8c6034e6ff5c27"
+    },
+    "favicon.ico": {
+      "source": "assets/brand/path-family/auth/favicon.ico",
+      "sha256": "13524d5976368a0e4fca512f18b14894a88a3d1e9fcf7fa03e1d6c2fd15e228e"
+    },
+    "favicon.svg": {
+      "source": "assets/brand/path-family/auth/favicon.svg",
+      "sha256": "0bd0af2dbb01e94f61e6a15196df3ae763196dd232cb883419184732979af4c7"
+    },
+    "icon-128.png": {
+      "source": "assets/brand/path-family/auth/icon-128.png",
+      "sha256": "ed653fddb0c4705b6d7091a11af6fc92c63bb9f467852629bfa36367617e5725"
+    },
+    "icon-16.png": {
+      "source": "assets/brand/path-family/auth/icon-16.png",
+      "sha256": "1a483decfb5af0ee2d4e11a6b8da6c1619f716d7212d5218a7b47415c9c64884"
+    },
+    "icon-192.png": {
+      "source": "assets/brand/path-family/auth/icon-192.png",
+      "sha256": "4805d39f971f5078a7b45883a9a66635f68988716903395925458b1f19e87fe3"
+    },
+    "icon-32.png": {
+      "source": "assets/brand/path-family/auth/icon-32.png",
+      "sha256": "60f0b4182947f38bc410cfeed7a1a2a0078a1a7677b78df6419b2de06ae5d4fb"
+    },
+    "icon-48.png": {
+      "source": "assets/brand/path-family/auth/icon-48.png",
+      "sha256": "a95e127c0c5fda47c60babe9ea797d2cf26b6150c751b7868f2e4c4898c1cb6a"
+    },
+    "icon-512.png": {
+      "source": "assets/brand/path-family/auth/icon-512.png",
+      "sha256": "d6433ef2256101531b010a7d8d417811360718f2821c5a8a750a398069ae920c"
+    },
+    "logo-black.svg": {
+      "source": "assets/brand/path-family/auth/logo-black.svg",
+      "sha256": "d5b00dd748670cce7333dd696e81583dd51ac08cc3d7b27d1e803d9d5b561aed"
+    },
+    "logo-dark.svg": {
+      "source": "assets/brand/path-family/auth/logo-dark.svg",
+      "sha256": "b2139532eb6e9ab1ae4b8b87d9c358e36e4d305ceb3e4bf6b2c587a3351c2215"
+    },
+    "logo-white.svg": {
+      "source": "assets/brand/path-family/auth/logo-white.svg",
+      "sha256": "00b79f15809c0a6a735473a1f905c03731d38354b5ecd7716db16e0bf5e0b3fc"
+    },
+    "logo.svg": {
+      "source": "assets/brand/path-family/auth/logo.svg",
+      "sha256": "9d7f52e378b6f81a4cb6e61d36d83554f19670c00c5699526e207a3e4ea2fc5c"
+    }
+  }
+}

@@ -1,7 +1,7 @@
-import { useState, useEffect, FormEvent, useRef } from "react";
+import { useState, useEffect, FormEvent, useRef, type FocusEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ActionButton, Alert, AlertDescription, Input, Label } from "@cqu-moe/ui";
-import AuthLayout from "../components/AuthLayout";
+import AuthLayout from "../components/PassportAuthLayout";
 import { authClient } from "../lib/auth-client";
 import { getPostAuthNavigationDestination } from "../lib/login-routing";
 import {
@@ -11,6 +11,12 @@ import {
 } from "../lib/post-login-redirect";
 import { isScheduleBindingContinuation } from "../lib/cqu-bind-continuation";
 import { getRegistrationSettings } from "../lib/api/registration";
+
+function isMovingToSubmit(event: FocusEvent<HTMLInputElement>): boolean {
+  // Submit validates before a blur error can move the button under the pointer.
+  return event.relatedTarget instanceof HTMLButtonElement &&
+    event.relatedTarget.type === "submit" && event.relatedTarget.form === event.currentTarget.form;
+}
 
 function getPasswordStrength(password: string): { level: number; label: string; bar: string } {
   if (!password) return { level: 0, label: "", bar: "" };
@@ -164,7 +170,8 @@ export default function Register() {
                 setFieldErrors((errors) => ({ ...errors, name: undefined }));
               }
             }}
-            onBlur={() => {
+            onBlur={(event) => {
+              if (isMovingToSubmit(event)) return;
               if (!name.trim()) setFieldErrors((errors) => ({ ...errors, name: "请输入昵称" }));
             }}
             required
@@ -193,7 +200,8 @@ export default function Register() {
                 setFieldErrors((errors) => ({ ...errors, email: undefined }));
               }
             }}
-            onBlur={() => {
+            onBlur={(event) => {
+              if (isMovingToSubmit(event)) return;
               if (!emailRef.current?.validity.valid) {
                 setFieldErrors((errors) => ({ ...errors, email: "请输入有效的邮箱地址" }));
               }
@@ -230,7 +238,8 @@ export default function Register() {
                 setFieldErrors((errors) => ({ ...errors, confirm: undefined }));
               }
             }}
-            onBlur={() => {
+            onBlur={(event) => {
+              if (isMovingToSubmit(event)) return;
               if (password.length < 8) {
                 setFieldErrors((errors) => ({ ...errors, password: "密码至少需要 8 个字符" }));
               }
@@ -276,7 +285,8 @@ export default function Register() {
                 setFieldErrors((errors) => ({ ...errors, confirm: undefined }));
               }
             }}
-            onBlur={() => {
+            onBlur={(event) => {
+              if (isMovingToSubmit(event)) return;
               if (confirmPassword !== password) {
                 setFieldErrors((errors) => ({ ...errors, confirm: "两次输入的密码不一致" }));
               }
@@ -316,7 +326,8 @@ export default function Register() {
                 setFieldErrors((errors) => ({ ...errors, code: undefined }));
               }
             }}
-            onBlur={() => {
+            onBlur={(event) => {
+              if (isMovingToSubmit(event)) return;
               if ((invitationRequired || code) && !new RegExp(invitationCodePattern).test(code)) {
                 setFieldErrors((errors) => ({
                   ...errors,

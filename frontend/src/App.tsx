@@ -6,6 +6,7 @@ import { UsersRouteSkeleton } from "./components/RouteSkeleton";
 import SessionPending from "./components/SessionPending";
 import { authClient } from "./lib/auth-client";
 import Login from "./pages/Login";
+import Home from "./pages/Home";
 import Register from "./pages/Register";
 import ResetPassword from "./pages/ResetPassword";
 import ResetPasswordConfirm from "./pages/ResetPasswordConfirm";
@@ -56,14 +57,6 @@ function PostHogLifecycle() {
   return null;
 }
 
-function RootRedirect() {
-  const { data: session, isPending } = authClient.useSession();
-
-  if (isPending) return <SessionPending />;
-
-  return <Navigate to={session ? "/settings" : "/login"} replace />;
-}
-
 export default function App() {
   return (
     <BrowserRouter>
@@ -72,7 +65,7 @@ export default function App() {
       <EmailVerificationGate>
         <Suspense fallback={<SessionPending message="正在加载页面…" />}>
           <Routes>
-            <Route path="/" element={<RootRedirect />} />
+            <Route path="/" element={<Home />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/reset-password" element={<ResetPassword />} />
