@@ -3,6 +3,7 @@ import type { DeviceAuthority, StoredDeviceSession } from './contracts';
 import type { BindingSnapshot } from './binding-snapshot';
 import { QuickloginAccountClient } from './account-client';
 import { QuickloginLoginBrokerClient } from './login-broker-client';
+import { quickloginSessionUsableUntil } from './maintenance';
 import { extractSsoCookies } from './cookie-envelope';
 import { BROWSER_INVOCATION_BUDGET_MS, BROWSER_CLEANUP_MARGIN_MS } from '../cqu-browser-budget';
 import { parseOperationRequest, parseReceiptRequest, parseReconcileRequest, sameTuple, type Operation, type OperationRequest, type ReasonCode, type ReportedLocal, type VersionTuple, type ExportEnvelope, type ReceiptRequest, type ClientMetadata } from './protocol-v3';
@@ -227,7 +228,8 @@ export class DeviceV3Store {
   await this.storage.transaction(async tx => {
    const session = await tx.get<StoredDeviceSession>(SESSION);
    if (!session || !sameTuple(expected, sessionTuple(session))) throw new V3Error('SESSION_CHANGED');
-   if (!session.storageState || !['ready','refreshing','temporary_unavailable','needs_reauth'].includes(session.state) || session.lastKeepAliveAt === null || session.lastKeepAliveAt + 2 * 60 * 60_000 <= Date.now()) throw new V3Error('SESSION_CHANGED');
+   const usableUntil = quickloginSessionUsableUntil(this.env, session);
+   if (!session.storageState || !['ready','refreshing','temporary_unavailable','needs_reauth'].includes(session.state) || usableUntil === null || usableUntil <= Date.now()) throw new V3Error('SESSION_CHANGED');
    const now = Date.now(), exportId = crypto.randomUUID();
    envelope = { ...expected, protocolVersion: 3, exportId, createdAt: now, applyBefore: now + 30_000, cookies: extractSsoCookies(session.storageState, now) };
    await tx.put(`v3:export:${exportId}`, { tuple: expected, grantId: a.grantId, createdAt: now, applyBefore: envelope.applyBefore, expiresAt: now + 24 * 60 * 60_000 } satisfies IssuedExport);

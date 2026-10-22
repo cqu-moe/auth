@@ -110,6 +110,7 @@ import type {
 import { quickloginBrowserRoute } from "../services/quicklogin/browser-routing";
 import { QuickloginAccountClient } from "../services/quicklogin/account-client";
 import { quickloginDeviceModeEnabled } from "../services/quicklogin/mode";
+import { CQU_PROACTIVE_RELOGIN_MS as PROACTIVE_RELOGIN_MS, skipAccountProbes } from "../services/cqu-maintenance-policy";
 
 // keepalive 每个探针经国内节点提取 1 个青果 IP(连 CQU 出站经青果)。频率直接决定青果消耗:
 // 15min→96 个/天, 60min→24 个/天 —— 取 60min 省青果(单账号够用)。代价: 会话若在两次探针
@@ -127,8 +128,6 @@ const QUICKLOGIN_MINT_RECEIPT_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_QUICKLOGIN_MINT_RECEIPTS = 64;
 // 熔断: transient(瑞数/网络)连续失败时 keepalive 退避封顶(从 KEEPALIVE_INTERVAL_MS 指数涨到 6h)。
 const KEEPALIVE_MAX_BACKOFF_MS = 6 * 60 * 60 * 1000;
-// TGT 绝对寿命 ~8h；在 7h 处主动重铸, 留 ~1h 余量给重登流程(容器点火 + 发码 + 邮件到达 + 提交)。
-const PROACTIVE_RELOGIN_MS = 7 * 60 * 60 * 1000;
 const DUMMY_SERVICE = "https://my.cqu.edu.cn/authserver/authentication/cas";
 
 // CF 容器 stub 的占位 host。所有浏览器出站(/run /service-ticket /keepalive /code
@@ -365,7 +364,7 @@ export class CquSessionDO extends DurableObject<Env> {
     // Leave operation/channel records for the common cancellation recovery.
     this.state = storedState;
     await this.setStatus("active");
-    await this.scheduleSessionAlarm(now + KEEPALIVE_INTERVAL_MS);
+    await this.scheduleSessionAlarm(this.nextAccountMaintenanceAt());
     console.warn(JSON.stringify({
       event: "cqu.cas.persisted_success_recovered",
     }));
@@ -511,7 +510,9 @@ export class CquSessionDO extends DurableObject<Env> {
               && !(await tx.get("bindingOutbox"))
               && !(await tx.get("bindingTransition"))
               && !(await tx.get("codePermitPending"))) {
-              let next = state.lastKeepAlive + KEEPALIVE_INTERVAL_MS;
+              let next = skipAccountProbes(this.env, state.userId)
+                ? state.loginAt + PROACTIVE_RELOGIN_MS
+                : state.lastKeepAlive + KEEPALIVE_INTERVAL_MS;
               const retryAt = await tx.get<number>("reloginRetryAt");
               if (retryAt && retryAt > Date.now()) next = Math.min(next, retryAt);
               await tx.setAlarm(Math.max(Date.now() + 1_000, next));
@@ -791,7 +792,7 @@ export class CquSessionDO extends DurableObject<Env> {
       if (outcome === "failed") {
         return { success: false, error: "CQU 登录失败（容器登录未成功）" };
       }
-      await this.scheduleSessionAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
+      await this.scheduleSessionAlarm(this.nextAccountMaintenanceAt());
       return { success: true };
     } catch (e) {
       await this.releaseRoutedLoginReservation(reservation.token);
@@ -2274,7 +2275,7 @@ export class CquSessionDO extends DurableObject<Env> {
       return;
     if (status === "expired" || status === "relogging") {
       await this.relogin(deadlineAt);
-      if (await this.getStatus() === "active") await this.scheduleSessionAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
+      if (await this.getStatus() === "active") await this.scheduleSessionAlarm(this.nextAccountMaintenanceAt());
       return;
     }
 
@@ -2304,7 +2305,12 @@ export class CquSessionDO extends DurableObject<Env> {
       // relogin 内部已更新状态; 重新排 alarm 继续保活循环。
       // 此处刻意不再 putStateGuarded: containerLogin 成功时内部已落 fresh state; proactive 跑在
       // 健康 active 会话上(consecutiveFailures 本就 0), 无需像 expired 分支那样为清零失败计数而重 put。
-      await this.scheduleSessionAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
+      await this.scheduleSessionAlarm(this.nextAccountMaintenanceAt());
+      return;
+    }
+
+    if (skipAccountProbes(this.env, this.state.userId)) {
+      await this.scheduleSessionAlarm(this.nextAccountMaintenanceAt(), { activeOnly: true });
       return;
     }
 
@@ -3245,6 +3251,14 @@ export class CquSessionDO extends DurableObject<Env> {
       catch { await this.scheduleSessionAlarm(Date.now() + RETRY_INTERVAL_MS); }
     }
     if (remaining.length) await this.scheduleSessionAlarm(Math.min(...remaining.map((item) => item.retryAt)));
+  }
+
+  private nextAccountMaintenanceAt(): number {
+    const now = Date.now();
+    const renewAt = (this.state?.loginAt ?? 0) + PROACTIVE_RELOGIN_MS;
+    // Failed renewal keeps the existing retry/backoff instead of spinning on a past deadline.
+    return this.state && skipAccountProbes(this.env, this.state.userId) && renewAt > now
+      ? renewAt : now + KEEPALIVE_INTERVAL_MS;
   }
 
   /** One alarm serves keepalive, operation deadlines and recovery; no caller may postpone maintenance. */

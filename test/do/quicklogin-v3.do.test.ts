@@ -5,7 +5,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { QuickloginAccountClient } from '../../src/services/quicklogin/account-client';
 import { QuickloginDeviceClient } from '../../src/services/quicklogin/device-client';
 import { QuickloginLoginBrokerClient } from '../../src/services/quicklogin/login-broker-client';
-import { seedSession, seedCredentials, validStorageState } from './helpers';
+import { readStorage, seedSession, seedCredentials, validStorageState, spyBrowserFetch } from './helpers';
 import { snapshotV3 } from '../../src/services/quicklogin/snapshot-v3';
 import { tupleForSnapshot } from '../../src/services/quicklogin/protocol-v3';
 beforeEach(() => { vi.spyOn(CquQuickloginDeviceDO.prototype, "alarm").mockResolvedValue(); vi.spyOn(CquSessionDO.prototype, "alarm").mockResolvedValue(); });
@@ -31,6 +31,12 @@ async function setup() {
  return { userId, accounts, authority, device, devices, stub, call, bindingStub };
 }
 const client = { installationId: 'install-test', extensionVersion: '0.2.0', buildId: 'test', browserVersion: '152' };
+const exportableV3StorageState = (marker = 'v3') => JSON.stringify({
+ ...validStorageState(),
+ cookies: validStorageState().cookies.map(cookie => ({
+  ...cookie, value: `${cookie.value}-${marker}`, secure: true, httpOnly: true, sameSite: 'Lax', expires: -1,
+ })),
+});
 describe('QuickLogin protocol 3 durable device state', () => {
  it('recovers legacy needs_reauth once from current binding without inventing rejected evidence', async () => {
   const t = await setup();
@@ -71,6 +77,183 @@ describe('QuickLogin protocol 3 durable device state', () => {
   await t.call('v3_report', { input: { protocolVersion: 3, requestId: 'r', client, observed: null, reportEpoch: t.authority.grantId, clientReportSeq: 1, local: { enabledIntent: true, mode: 'automatic', cookieState: 'missing', receipt: null } } });
   expect((await t.call('v3_read')).result.report.cookieState).toBe('applied');
   expect((await t.call('v3_export', { expected: { ...expected, sessionVersion: 0 } })).error.code).toBe('SESSION_CHANGED');
+ });
+
+ it('stops new probes only for the exact experiment device while keeping its absolute seven-hour boundary', async () => {
+  const hour = 60 * 60_000;
+  const now = Date.now() + 1_000_000;
+  vi.spyOn(Date, 'now').mockReturnValue(now);
+  const experiment = await setup();
+  const controlGrant = await experiment.accounts.createPendingGrant(experiment.userId, 'control-client', now);
+  await experiment.accounts.activateGrant(experiment.userId, controlGrant.grantId, now);
+  const controlDevice = await experiment.accounts.registerDevice(experiment.userId, controlGrant.grantId, {
+   deviceName: 'Same-user control', browserFamily: 'chrome', browserVersion: '152',
+  });
+  const controlAuthority = await experiment.accounts.setDeviceEnabled(experiment.userId, controlDevice.deviceId, true);
+  await experiment.devices.notifyDevice(controlAuthority);
+  const otherUser = await setup();
+  const loginAt = now - 3 * hour;
+  const storageState = exportableV3StorageState('experiment-boundary');
+  const seedReady = async (t: Awaited<ReturnType<typeof setup>>, ownerDeviceId: string) => {
+   await runInDurableObject(t.stub, async (_, state) => {
+    const session: any = await state.storage.get('session');
+    await state.storage.put('session', {
+     ...session, state: 'ready', sessionVersion: 1, loginAt, lastKeepAliveAt: loginAt, storageState,
+    });
+    await state.storage.setAlarm(now);
+   });
+   return { deviceId: ownerDeviceId, generation: t.authority.generation, bindingEpoch: 0, credentialRevision: 0, sessionVersion: 1 };
+  };
+  const experimentTuple = await seedReady(experiment, experiment.device.deviceId);
+  const sameUserControlStub = env.CQU_QUICKLOGIN_DEVICE.get(
+   env.CQU_QUICKLOGIN_DEVICE.idFromName(`${experiment.userId}:${controlDevice.deviceId}`)
+  );
+  await runInDurableObject(sameUserControlStub, async (_, state) => state.storage.deleteAlarm());
+  const originalExperimentUserId = env.CQU_NO_PROBE_EXPERIMENT_USER_ID;
+  const originalExperimentDeviceId = env.CQU_NO_PROBE_EXPERIMENT_DEVICE_ID;
+  env.CQU_NO_PROBE_EXPERIMENT_USER_ID = experiment.userId;
+  env.CQU_NO_PROBE_EXPERIMENT_DEVICE_ID = experiment.device.deviceId;
+  vi.mocked(CquQuickloginDeviceDO.prototype.alarm).mockRestore();
+  const fetchMock = spyBrowserFetch({
+   '/run': () => Response.json({ ok: true, state: JSON.parse(storageState) }),
+   '/keepalive': () => Response.json({ ok: true, status: 'alive', state: JSON.parse(storageState) }),
+  });
+  vi.spyOn(QuickloginLoginBrokerClient.prototype, 'recordQuickloginKeepaliveMint').mockResolvedValue();
+  const keepalivePath = (input: RequestInfo | URL) =>
+   new URL(input instanceof Request ? input.url : String(input)).pathname;
+  try {
+   const snapshot = await snapshotV3(env, experiment.userId, experiment.device.deviceId);
+   expect(snapshot.cloud.usableUntil).toBe(loginAt + 7 * hour);
+   expect(snapshot.capabilities.canExport).toBe(true);
+   expect((await experiment.call('v3_export', { expected: experimentTuple })).error).toBeUndefined();
+
+   await runInDurableObject(experiment.stub, async instance => {
+    await (instance as unknown as { alarm(): Promise<void> }).alarm();
+   });
+   expect(fetchMock.mock.calls.filter(([input]) => keepalivePath(input) === '/keepalive')).toHaveLength(0);
+   await expect(runInDurableObject(experiment.stub, (_, state) => state.storage.getAlarm()))
+    .resolves.toBe(loginAt + 7 * hour);
+
+   const otherUserTuple = await seedReady(otherUser, otherUser.device.deviceId);
+   const sameUserTuple = { ...experimentTuple, deviceId: controlDevice.deviceId };
+   const sameUserSession = {
+    ...(await runInDurableObject(sameUserControlStub, (_, state) => state.storage.get<Record<string, unknown>>('session'))),
+    state: 'ready', sessionVersion: 1, loginAt, lastKeepAliveAt: loginAt, storageState,
+   };
+   await runInDurableObject(sameUserControlStub, async (_, state) => {
+    await state.storage.put('session', sameUserSession);
+    await state.storage.setAlarm(now);
+   });
+   const sameUserSnapshot = await snapshotV3(env, experiment.userId, controlDevice.deviceId);
+   const otherUserSnapshot = await snapshotV3(env, otherUser.userId, otherUser.device.deviceId);
+   expect(sameUserSnapshot.cloud.usableUntil).toBeNull();
+   expect(otherUserSnapshot.cloud.usableUntil).toBeNull();
+   const sameUserCall = async (operation: string, payload: Record<string, unknown> = {}) => {
+    const response = await sameUserControlStub.fetch('https://device/internal', {
+     method: 'POST', body: JSON.stringify({ operation, ownerUserId: experiment.userId, deviceId: controlDevice.deviceId, payload: { authority: controlAuthority, ...payload } }),
+    });
+    return response.json<any>();
+   };
+   expect((await sameUserCall('v3_export', { expected: sameUserTuple })).error.code).toBe('SESSION_CHANGED');
+   expect((await otherUser.call('v3_export', { expected: otherUserTuple })).error.code).toBe('SESSION_CHANGED');
+
+   await runInDurableObject(sameUserControlStub, async instance => {
+    await (instance as unknown as { alarm(): Promise<void> }).alarm();
+   });
+   await runInDurableObject(otherUser.stub, async instance => {
+    await (instance as unknown as { alarm(): Promise<void> }).alarm();
+   });
+   expect(fetchMock.mock.calls.filter(([input]) => keepalivePath(input) === '/keepalive')).toHaveLength(2);
+
+   vi.spyOn(Date, 'now').mockReturnValue(loginAt + 7 * hour);
+   const expired = await snapshotV3(env, experiment.userId, experiment.device.deviceId);
+   expect(expired.cloud.usableUntil).toBeNull();
+   expect(expired.capabilities.canExport).toBe(false);
+   expect((await experiment.call('v3_export', { expected: experimentTuple })).error.code).toBe('SESSION_CHANGED');
+
+   const login = vi.spyOn(QuickloginLoginBrokerClient.prototype, 'quickloginLogin').mockResolvedValue({
+    kind: 'success', bindingEpoch: 0, credentialRevision: 0, loginAt: loginAt + 7 * hour, storageState,
+   });
+   await runInDurableObject(experiment.stub, async instance => {
+    await (instance as unknown as { alarm(): Promise<void> }).alarm();
+   });
+   expect(login).toHaveBeenCalledTimes(1);
+   expect(fetchMock.mock.calls.filter(([input]) => keepalivePath(input) === '/keepalive')).toHaveLength(2);
+   await expect(runInDurableObject(experiment.stub, (_, state) => state.storage.getAlarm()))
+    .resolves.toBe(loginAt + 14 * hour);
+  } finally {
+   env.CQU_NO_PROBE_EXPERIMENT_USER_ID = originalExperimentUserId;
+   env.CQU_NO_PROBE_EXPERIMENT_DEVICE_ID = originalExperimentDeviceId;
+  }
+ });
+
+ it.each(['needs_reauth', 'retry_wait'] as const)('keeps a future alarm for an experiment device in %s', async kind => {
+  const now = Date.now() + 1_000_000;
+  vi.spyOn(Date, 'now').mockReturnValue(now);
+  const t = await setup();
+  const retryAt = now + 5 * 60_000;
+  await runInDurableObject(t.stub, async (_, state) => {
+   const session: any = await state.storage.get('session');
+   await state.storage.put('session', { ...session, storageState: exportableV3StorageState(),
+    state: kind === 'needs_reauth' ? 'needs_reauth' : 'temporary_unavailable',
+    loginAt: now - 8 * 60 * 60_000, lastKeepAliveAt: now - 8 * 60 * 60_000,
+    nextAttemptAt: kind === 'needs_reauth' ? null : retryAt });
+  });
+  env.CQU_NO_PROBE_EXPERIMENT_USER_ID = t.userId;
+  env.CQU_NO_PROBE_EXPERIMENT_DEVICE_ID = t.device.deviceId;
+  vi.mocked(CquQuickloginDeviceDO.prototype.alarm).mockRestore();
+  const browser = spyBrowserFetch({});
+  try {
+   await runInDurableObject(t.stub, instance => (instance as CquQuickloginDeviceDO).alarm());
+   expect(browser).not.toHaveBeenCalled();
+   expect(await runInDurableObject(t.stub, (_, state) => state.storage.getAlarm()))
+    .toBe(kind === 'needs_reauth' ? now + 60 * 60_000 : retryAt);
+  } finally {
+   delete env.CQU_NO_PROBE_EXPERIMENT_USER_ID;
+   delete env.CQU_NO_PROBE_EXPERIMENT_DEVICE_ID;
+  }
+ });
+
+ it('settles an existing experiment keepalive without starting another browser probe', async () => {
+  const now = Date.now() + 1_000_000;
+  vi.spyOn(Date, 'now').mockReturnValue(now);
+  const t = await setup();
+  const loginAt = now - 3 * 60 * 60_000;
+  const storageState = exportableV3StorageState('pending-settle');
+  await runInDurableObject(t.stub, async (_, state) => {
+   const session: any = await state.storage.get('session');
+   await state.storage.put('session', {
+    ...session, state: 'ready', sessionVersion: 1, loginAt, lastKeepAliveAt: loginAt,
+    storageState: exportableV3StorageState('before-pending'),
+    pendingKeepaliveMint: { operationId: 'experiment-pending', mintedAt: now - 1_000, expiresAt: now + 60_000, hasStorageState: true },
+   });
+   await state.storage.put('pendingKeepaliveState', storageState);
+   await state.storage.setAlarm(now);
+  });
+  const originalExperimentUserId = env.CQU_NO_PROBE_EXPERIMENT_USER_ID;
+  const originalExperimentDeviceId = env.CQU_NO_PROBE_EXPERIMENT_DEVICE_ID;
+  env.CQU_NO_PROBE_EXPERIMENT_USER_ID = t.userId;
+  env.CQU_NO_PROBE_EXPERIMENT_DEVICE_ID = t.device.deviceId;
+  vi.mocked(CquQuickloginDeviceDO.prototype.alarm).mockRestore();
+  const fetchMock = spyBrowserFetch({});
+  const confirm = vi.spyOn(QuickloginLoginBrokerClient.prototype, 'recordQuickloginKeepaliveMint').mockResolvedValue();
+  try {
+   await runInDurableObject(t.stub, async instance => {
+    await (instance as unknown as { alarm(): Promise<void> }).alarm();
+   });
+   expect(confirm).toHaveBeenCalledTimes(1);
+   expect(fetchMock).not.toHaveBeenCalled();
+   const settled = await readStorage<Record<string, unknown>>(t.stub, 'session');
+   expect(settled).toMatchObject({
+    state: 'ready', loginAt, lastKeepAliveAt: now - 1_000, storageState,
+   });
+   expect(settled).not.toHaveProperty('pendingKeepaliveMint');
+   await expect(runInDurableObject(t.stub, (_, state) => state.storage.getAlarm()))
+    .resolves.toBe(loginAt + 7 * 60 * 60_000);
+  } finally {
+   env.CQU_NO_PROBE_EXPERIMENT_USER_ID = originalExperimentUserId;
+   env.CQU_NO_PROBE_EXPERIMENT_DEVICE_ID = originalExperimentDeviceId;
+  }
  });
 });
 

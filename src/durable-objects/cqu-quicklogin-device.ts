@@ -2,6 +2,10 @@ import { DeviceV3Store, V3Error, settleV3Operation, sessionTuple } from "../serv
 import { sameTuple, type VersionTuple, type ReasonCode } from "../services/quicklogin/protocol-v3";
 import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../types";
+import {
+  CQU_PROACTIVE_RELOGIN_MS,
+  skipDeviceProbes,
+} from "../services/cqu-maintenance-policy";
 import { QuickloginAccountClient } from "../services/quicklogin/account-client";
 import {
   digestSsoCookies,
@@ -13,6 +17,7 @@ import type {
   ErrorCode,
   StoredDeviceSession,
 } from "../services/quicklogin/contracts";
+import { INACTIVE_MS } from "../services/quicklogin/contracts";
 import { QuickloginLoginBrokerClient } from "../services/quicklogin/login-broker-client";
 import { quickloginDeviceModeEnabled } from "../services/quicklogin/mode";
 import {
@@ -68,6 +73,19 @@ function emptySession(authority: DeviceAuthority): StoredDeviceSession {
 export class CquQuickloginDeviceDO extends DurableObject<Env> {
   private owner: DeviceOwner | null = null;
   private loginInFlight: Promise<void> | null = null;
+
+  private nextMaintenanceAt(session: StoredDeviceSession, authority: DeviceAuthority): number {
+    const now = Date.now();
+    if (!skipDeviceProbes(this.env, authority.ownerUserId, authority.deviceId)) {
+      return session.nextAttemptAt ?? now + KEEPALIVE_MS;
+    }
+    const renewalAt = session.loginAt !== null && session.state !== "needs_reauth"
+      ? session.loginAt + CQU_PROACTIVE_RELOGIN_MS : now + KEEPALIVE_MS;
+    return Math.max(now + 1_000, Math.min(
+      session.nextAttemptAt ?? renewalAt,
+      authority.lastSeenAt === null ? Infinity : authority.lastSeenAt + INACTIVE_MS
+    ));
+  }
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -180,7 +198,11 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     await this.recoverPendingKeepalive(session, Date.now());
     const authority = await new QuickloginAccountClient(this.env)
       .getDeviceAuthority(this.owner.userId, this.owner.deviceId);
-    const action = nextDeviceAction(session, authority, Date.now());
+    const probesEnabled = !skipDeviceProbes(this.env,
+      this.owner.userId,
+      this.owner.deviceId
+    );
+    const action = nextDeviceAction(session, authority, Date.now(), probesEnabled);
     if (action === "stop") {
       await this.notify(authority);
       return;
@@ -191,10 +213,12 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       await this.ctx.storage.deleteAlarm();
       return;
     }
+    if (session.pendingKeepaliveMint && !probesEnabled) {
+      await this.confirmKeepaliveMint(session, authority);
+      return;
+    }
     if (action === "wait") {
-      await this.ctx.storage.setAlarm(
-        session.nextAttemptAt ?? Date.now() + KEEPALIVE_MS
-      );
+      await this.ctx.storage.setAlarm(this.nextMaintenanceAt(session, authority));
       return;
     }
     if (action === "login") {
@@ -287,6 +311,10 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
   ): Promise<void> {
     if (session.pendingKeepaliveMint) {
       await this.confirmKeepaliveMint(session, authority);
+      return;
+    }
+    if (skipDeviceProbes(this.env, authority.ownerUserId, authority.deviceId)) {
+      await this.ctx.storage.setAlarm(this.nextMaintenanceAt(session, authority));
       return;
     }
     if (!session.storageState) {
@@ -423,9 +451,12 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       delete next.pendingKeepaliveMint;
       await tx.put(SESSION_KEY, next);
       await tx.delete(PENDING_KEEPALIVE_STATE_KEY);
+      session = next;
       committed = true;
     });
-    if (committed) await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_MS);
+    if (committed) {
+      await this.ctx.storage.setAlarm(this.nextMaintenanceAt(session, authority));
+    }
   }
 
   private async recoverPendingKeepalive(
@@ -563,7 +594,11 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
         await settleV3Operation(tx, next);
         committed = true;
       });
-      if (committed) { await this.ctx.storage.setAlarm(Date.now() + KEEPALIVE_MS); await v3.finish(await this.readSession()); }
+      if (committed) {
+        const current = await this.readSession();
+        await this.ctx.storage.setAlarm(this.nextMaintenanceAt(current, authority));
+        await v3.finish(current);
+      }
     } catch (error) {
       const reason = error instanceof Error && ["INVALID_REQUEST", "PROTOCOL_UNSUPPORTED"].includes(error.message)
         ? "CONTRACT_INVALID" : "INTERNAL_STATE_UNAVAILABLE";
