@@ -153,6 +153,7 @@ export const SERVICE_URLS: Record<string, string> = {
   jxpj: "https://my.cqu.edu.cn/authserver/authentication/cas",
   library: "https://lib.cqu.edu.cn/cas/validate",
   card: "https://card.cqu.edu.cn/cas/validate",
+  friends: "https://friends.cqu.edu.cn/mobile/sso",
 };
 
 interface SessionState {

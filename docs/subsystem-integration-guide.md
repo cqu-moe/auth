@@ -215,13 +215,33 @@ Body: { "service": "jwxt" }
 → { "data": { "ticket": "ST-12345-ABCDEF..." } }
 ```
 
-可用 `service` key:`jwxt`(教务) · `jxpj`(教评) · `library`(图书馆) · `card`(校园卡)。
+可用 `service` key:`jwxt`(教务) · `jxpj`(教评) · `library`(图书馆) · `card`(校园卡) · `friends`(第二课堂)。
 
 **安全模型**:你的 client **只会被 admin 授予它需要的服务**(日历→`jwxt`,教评→`jxpj`),取不到别的。校验是双层:token scope **且** 该 client 在 `oauth_client_cqu_scopes` 注册过。**能力(caps)不参与普通取票**——取票安全只看 client。
 
 用返回的 ST 访问对应 CQU 系统(`<服务URL>?ticket=ST-...`)完成 CAS 认证。前置:用户必须已在 `auth.cqu.moe/settings` 绑定 CQU 且会话 `active`;未绑定/会话未激活 → 取票失败(`SESSION_INACTIVE`,HTTP **409**),引导用户去绑定页。
 
 取票错误码 → HTTP 状态(策略/客户端错误回 4xx,可据此判定是否可重试):`SESSION_INACTIVE` **409** · `RATE_LIMITED` **429**(限频,可退避后重试) · `QUICKLOGIN_NOT_ENABLED` **403**(见 §5,广路径功能未开放或未开 opt-in) · `INVALID_SERVICE_URL`/`UNKNOWN_SERVICE`/缺参数 **400**。服务端/未知错误(TGT 过期、无票、网络等)仍回 **500**。
+
+### 3.1 第二课堂（friends）
+
+管理员在客户端的 CQU 服务权限中勾选「第二课堂 (friends)」，同时保存 OAuth scope
+与客户端当前服务授权。消费者申请 `cqu:ticket:friends`，随后向上述端点提交
+`{ "service": "friends" }`，成功返回 HTTP **201** 与 `{ "data": { "ticket": "…" } }`。
+`service` 与 `serviceUrl` 不能同时提交。
+
+固定 CAS service 为 **`https://friends.cqu.edu.cn/mobile/sso`**，不带尾斜杠。
+二课使用 `POST /gateway/ek-agg-mob/cas/login?ticket=…` 核销一次性 ST 并换取自己的应用会话。
+Auth 不替消费者核销票据。仅有 friends scope 不能为 `jwxt` 等其他服务或任意
+`serviceUrl` 取票；符号服务不要求开启 QuickLogin，但学校绑定、会话状态、撤销、
+限流、审计与出票后的最终校验仍然生效。
+
+CLI 使用现有 native/public client、S256 PKCE 及 Better Auth 客户端/官方 OAuth 工具。
+生产客户端注册、回调适配、DPoP 互操作和 CLI 实现属于消费者接入工作。
+
+**验收边界**：本地测试使用合成票据和浏览器出站桩。Auth 到二课的真实取票与换会话
+尚未实地验收；需在获授权的学校会话中为上述精确 service 取得未核销 ST，再由二课
+换成会话，单独记录结果，禁止在日志、测试样例或 issue 中输出真实 ST、token 或 cookie。
 
 ---
 
@@ -350,7 +370,7 @@ GET  /api/v1/auth/oauth2/end-session  ?id_token_hint=…&post_logout_redirect_ur
 | Authorization Code | 10 分钟,PKCE 强制,不支持 Implicit |
 
 **标准 scope**:`openid` · `profile` · `email` · `offline_access`
-**CQU scope**:`cqu:ticket:jwxt` · `cqu:ticket:jxpj` · `cqu:ticket:library` · `cqu:ticket:card` · `cqu:ticket:any`(广域,需 admin 授权 + 用户 opt-in)
+**CQU scope**:`cqu:ticket:jwxt` · `cqu:ticket:jxpj` · `cqu:ticket:library` · `cqu:ticket:card` · `cqu:ticket:friends` · `cqu:ticket:any`(广域,需 admin 授权 + 用户 opt-in)
 
 ## Better Auth 1.7 升级基线
 
