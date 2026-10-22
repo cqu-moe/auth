@@ -8,6 +8,51 @@ export async function getQuickloginOverview(signal?: AbortSignal): Promise<Overv
 }
 
 type ResumeTicket = { resumeTicket: string; deviceId: string; expiresAt: number };
+type ChromeRuntime = {
+  sendMessage: (extensionId: string, message: unknown) => Promise<unknown>;
+};
+
+const QUICKLOGIN_EXTENSION_IDS = [
+  "ainapeknaclcpoioimonkodmoakhacjd",
+  "igfidegfgfoofnoncpmbcokbffjmmook",
+] as const;
+const DISCOVERY_TIMEOUT_MS = 1_500;
+const RESUME_TIMEOUT_MS = 5_000;
+
+async function withTimeout<T>(request: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("timeout")), timeoutMs);
+  });
+  return Promise.race([request, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function findMatchingExtension(deviceId: string, runtime: ChromeRuntime): Promise<string> {
+  const discovered = await Promise.all(QUICKLOGIN_EXTENSION_IDS.map(async (extensionId) => {
+    try {
+      const response = await withTimeout(
+        runtime.sendMessage(extensionId, { type: "GET_DEVICE_INFO" }),
+        DISCOVERY_TIMEOUT_MS,
+      );
+      const info = response as { deviceId?: unknown } | null;
+      if (!info || typeof info !== "object" || Object.keys(info).join(",") !== "deviceId" ||
+        (typeof info.deviceId !== "string" && info.deviceId !== null)) return { extensionId, valid: false };
+      return { extensionId, valid: true, deviceId: info.deviceId };
+    } catch {
+      return { extensionId, valid: false };
+    }
+  }));
+  const matches = discovered.filter((item) => item.valid && "deviceId" in item && item.deviceId === deviceId);
+  if (matches.length === 1) return matches[0].extensionId;
+  if (matches.length > 1) {
+    throw new Error("检测到多个 QuickLogin 插件报告同一设备，请只保留一个安装实例后重试。");
+  }
+  if (discovered.some((item) => item.valid)) {
+    throw new Error("这台浏览器不是要重新连接的设备。请回到原浏览器重试；若已重装插件，请退出旧设备后重新授权。");
+  }
+  throw new Error("无法确认 QuickLogin 插件设备信息，请确认插件已启用并更新后重试。");
+}
+
 function parseResumeTicket(value: unknown): ResumeTicket {
   if (!value || typeof value !== "object") throw new ContractError();
   const ticket = value as Partial<ResumeTicket>;
@@ -18,16 +63,20 @@ function parseResumeTicket(value: unknown): ResumeTicket {
 
 export async function reconnectQuickloginDevice(deviceId: string): Promise<void> {
   const runtime = (globalThis as typeof globalThis & {
-    chrome?: { runtime?: { sendMessage: (extensionId: string, message: unknown) => Promise<unknown> } };
+    chrome?: { runtime?: ChromeRuntime };
   }).chrome?.runtime;
   if (!runtime?.sendMessage) throw new Error("未找到快捷登录插件，请在安装此插件的浏览器中重试。");
+  const extensionId = await findMatchingExtension(deviceId, runtime);
   const ticket = parseApiResponse(await apiRequest<unknown>(
     `/cqu/quicklogin/devices/${encodeURIComponent(deviceId)}/resume-ticket`, { method: "POST" }
   ), parseResumeTicket).data;
   if (ticket.deviceId !== deviceId || ticket.expiresAt <= Date.now()) throw new ContractError();
   let response: unknown;
   try {
-    response = await runtime.sendMessage("igfidegfgfoofnoncpmbcokbffjmmook", { type: "RESUME_DEVICE", ...ticket });
+    response = await withTimeout(
+      runtime.sendMessage(extensionId, { type: "RESUME_DEVICE", ...ticket }),
+      RESUME_TIMEOUT_MS,
+    );
   } catch {
     throw new Error("无法连接快捷登录插件，请确认插件已启用并更新后重试。");
   }

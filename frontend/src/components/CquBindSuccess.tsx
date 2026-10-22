@@ -68,7 +68,7 @@ export default function CquBindSuccess({
       )}
       {!returnTo && (
         <Button asChild variant="link">
-          <Link to="/settings">返回账户设置</Link>
+          <Link to="/settings/cqu">返回 CQU 集成</Link>
         </Button>
       )}
     </div>

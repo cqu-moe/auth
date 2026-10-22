@@ -68,7 +68,7 @@ export default function DeviceList({
         const name = device.identity.deviceName?.trim() || "未命名浏览器";
         const reconnecting = reconnectingDeviceId === id;
         const revoking = revokingDeviceId === id;
-        const title = presentation.actionCode === "complete_verification" ? "需手动登录" : presentation.statusCode === "syncing" && !device.reportedLocal
+        const title = presentation.statusCode === "disabled" ? "此设备已关闭快捷登录" : presentation.statusCode === "syncing" && !device.reportedLocal
           ? "等待插件同步" : presentation.title;
 
         return (
@@ -85,6 +85,11 @@ export default function DeviceList({
               <div className={`mt-1 text-sm ${presentation.statusCode === "ready" ? "text-success" : "text-muted-foreground"}`}>
                 {revoking ? "正在退出设备…" : title}
               </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {presentation.actionCode === "complete_verification"
+                  ? "请在对应设备的插件中选择「前往学校手动登录」，完成本次验证。"
+                  : presentation.detail}
+              </p>
               <p className="mt-1 text-xs tabular-nums text-muted-foreground">
                 {client && `插件 ${client.extensionVersion} · `}
                 最近联系：
