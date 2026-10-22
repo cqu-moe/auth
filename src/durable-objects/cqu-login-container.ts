@@ -14,8 +14,7 @@ import type { Env } from "../types";
  */
 export class CquLoginContainer extends Container<Env> {
   defaultPort = 8080;
-  // 30s 空闲即睡: 保留足够窗口让保活/取票复用刚登录完的浏览器进程, 又不为空转付费。
-  // 容器生命周期仍由 SDK 的请求计数驱动, 不自行写定时 stop。
+  // 预热后还需持久化 bootId 和授予验证码权限, 握手请求之间保留原有窗口。
   sleepAfter = "30s";
   // Task 03 约定的 Cloudflare 运行 profile: 实测加长时限; QG_ENABLED=0 关掉青果
   // 住宅代理(海外出口不需要, 也连不上国内代理入口), 容器内全部直连。
@@ -27,4 +26,27 @@ export class CquLoginContainer extends Container<Env> {
     ENVIRONMENT: this.env.ENVIRONMENT ?? "development",
     RELEASE: this.env.RELEASE ?? "development",
   };
+
+  override async fetch(request: Request): Promise<Response> {
+    const path = new URL(request.url).pathname;
+    const browserJob = request.method === "POST" && [
+      "/run", "/service-ticket", "/keepalive", "/data-harvest",
+      "/external-search", "/external-directory", "/external-capture",
+    ].includes(path);
+    if (path === "/health" || browserJob) {
+      // SDK 的在途计数在冷启动完成后才开始, 启动期间保留原有窗口。
+      this.sleepAfter = "30s";
+      this.renewActivityTimeout();
+    }
+    try {
+      return await super.fetch(request);
+    } finally {
+      if (browserJob) {
+        // SDK 会保护尚未传完的响应; 调度一次检查以唤醒旧的 30s alarm。
+        this.sleepAfter = "1s";
+        this.renewActivityTimeout();
+        await this.schedule(0, "renewActivityTimeout");
+      }
+    }
+  }
 }
