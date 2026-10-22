@@ -104,13 +104,14 @@ export default function DeviceList({
                 <ActionButton
                   type="button"
                   variant="outline"
+                  className="min-h-11"
                   state={reconnecting ? "loading" : "idle"}
                   labels={{ idle: "重新连接", loading: "正在连接…", success: "已连接", error: "重新连接" }}
                   disabled={busy && !reconnecting}
                   onClick={() => void onReconnect(id)}
                 />
               ) : presentation.actionTarget && actionLabels[presentation.actionCode] ? (
-                <Button asChild variant="outline" size="default">
+                <Button asChild variant="outline" size="default" className="min-h-11">
                   <a href={presentation.actionTarget}>
                     {actionLabels[presentation.actionCode]}
                   </a>
@@ -120,6 +121,7 @@ export default function DeviceList({
                   type="button"
                   variant="outline"
                   size="default"
+                  className="min-h-11"
                   disabled={busy}
                   onClick={() => void onRefresh()}
                 >
