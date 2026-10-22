@@ -80,6 +80,7 @@ export const OAUTH_CLIENT_SCOPES = [
   "cqu:ticket:jxpj",
   "cqu:ticket:library",
   "cqu:ticket:card",
+  "cqu:ticket:friends",
   "cqu:ticket:any",
 ];
 export const OAUTH_SCOPES = [...OAUTH_CLIENT_SCOPES, DEVICE_SCOPE];

@@ -65,7 +65,7 @@ describe("admin OAuth API v1", () => {
           token_endpoint_auth_method: "client_secret_basic",
           grant_types: ["authorization_code", "refresh_token"],
           response_types: ["code"],
-          scope: "openid profile",
+          scope: "openid profile cqu:ticket:friends",
           type: "web",
         }),
       });
@@ -77,6 +77,10 @@ describe("admin OAuth API v1", () => {
         method: "PATCH", headers, body: JSON.stringify({ require_pkce: false }),
       });
       expect(disablePkce.status).toBe(400);
+      const updated = await fixture.request(`/api/v1/admin/oauth-clients/${client.data.client_id}`, {
+        method: "PATCH", headers, body: JSON.stringify({ scope: "openid cqu:ticket:friends" }),
+      });
+      expect(updated.status).toBe(200);
 
       const list = await fixture.request("/api/v1/admin/oauth-clients", { headers });
       const item = (await list.json() as { data: Array<Record<string, unknown>> }).data
@@ -86,16 +90,21 @@ describe("admin OAuth API v1", () => {
       expect(item).not.toHaveProperty("name");
       expect(item).not.toHaveProperty("client_secret");
       expect(item).not.toHaveProperty("clientSecret");
+      expect(item.scope).toBe("openid cqu:ticket:friends");
 
       const scopePath = `/api/v1/admin/oauth-clients/${client.data.client_id}/scopes`;
-      const replaced = await fixture.request(scopePath, {
-        method: "PUT", headers,
-        body: JSON.stringify({ scopes: ["cqu:ticket:jwxt", "cqu:ticket:any"] }),
-      });
-      expect(replaced.status).toBe(200);
-      expect(await replaced.json()).toEqual({
-        data: { client_id: client.data.client_id, scopes: ["cqu:ticket:jwxt", "cqu:ticket:any"] },
-      });
+      for (const scopes of [["cqu:ticket:friends"], [], ["cqu:ticket:jwxt", "cqu:ticket:any"]]) {
+        const replaced = await fixture.request(scopePath, {
+          method: "PUT", headers, body: JSON.stringify({ scopes }),
+        });
+        expect(replaced.status).toBe(200);
+        expect(await replaced.json()).toEqual({ data: { client_id: client.data.client_id, scopes } });
+        const readback = await fixture.request(scopePath, { headers });
+        expect(readback.status).toBe(200);
+        const body = await readback.json() as { data: { client_id: string; scopes: string[] } };
+        expect(body.data.client_id).toBe(client.data.client_id);
+        expect(body.data.scopes.sort()).toEqual([...scopes].sort());
+      }
       const duplicate = await fixture.request(scopePath, {
         method: "PUT", headers,
         body: JSON.stringify({ scopes: ["cqu:ticket:jwxt", "cqu:ticket:jwxt"] }),

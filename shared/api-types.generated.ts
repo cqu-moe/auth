@@ -3614,7 +3614,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    service: "jwxt" | "jxpj" | "library" | "card";
+                    service: "jwxt" | "jxpj" | "library" | "card" | "friends";
                 } | {
                     serviceUrl: string;
                 };

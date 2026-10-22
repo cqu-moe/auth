@@ -50,6 +50,7 @@ describe("Better Auth v1 migration", () => {
           authorization_endpoint: "http://localhost:8787/api/v1/auth/oauth2/authorize",
           token_endpoint: "http://localhost:8787/api/v1/auth/oauth2/token",
           jwks_uri: "http://localhost:8787/api/v1/auth/jwks",
+          scopes_supported: expect.arrayContaining(["cqu:ticket:friends"]),
         });
       }
     } finally {

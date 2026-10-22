@@ -16,9 +16,11 @@ describe("CQU binding revocation reconciliation", () => {
       await env.DATABASE.prepare("INSERT INTO cqu_bind_addresses (token,user_id,sender_whitelist,status) VALUES ('test-token','u1','[]',?)").bind(status).run();
     }
     const browser = spyBrowserFetch({ "/service-ticket": () => Response.json({ ok: true, ticket: "ST-must-not-mint" }) });
-    const ticket = await stub.fetch("https://do/service-ticket?service=jwxt");
-    expect(ticket.ok).toBe(false);
-    expect(await ticket.json()).toMatchObject({ code: "SESSION_INACTIVE" });
+    for (const service of ["jwxt", "friends"]) {
+      const ticket = await stub.fetch(`https://do/service-ticket?service=${service}`);
+      expect(ticket.status).toBe(409);
+      expect(await ticket.json()).toMatchObject({ code: "SESSION_INACTIVE" });
+    }
     const harvest = await stub.fetch("https://do/data-harvest", { method: "POST", body: JSON.stringify({ navUrl: "https://my.cqu.edu.cn/", capture: [], fetch: [] }) });
     expect(harvest.ok).toBe(false);
     expect(browser).not.toHaveBeenCalled();

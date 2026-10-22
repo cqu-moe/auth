@@ -70,6 +70,7 @@ const ALL_CQU_SCOPES = [
   { key: "cqu:ticket:jxpj", label: "教学评价 (jxpj)" },
   { key: "cqu:ticket:library", label: "图书馆 (library)" },
   { key: "cqu:ticket:card", label: "校园卡 (card)" },
+  { key: "cqu:ticket:friends", label: "第二课堂 (friends)" },
 ];
 const CQU_SCOPE_KEYS = new Set(ALL_CQU_SCOPES.map((s) => s.key));
 

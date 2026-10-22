@@ -10,7 +10,7 @@ export function createCquServiceTicketsApi() {
   const api = new Hono<HonoEnv>();
   api.post("/", requireBearer, async (c) => {
     c.header("Cache-Control", "no-store");
-    let input: { service: "jwxt" | "jxpj" | "library" | "card" } | { serviceUrl: string };
+    let input: { service: "jwxt" | "jxpj" | "library" | "card" | "friends" } | { serviceUrl: string };
     try {
       input = await parseJsonBody(c.req.raw, TicketTargetSchema);
     } catch (error) {
