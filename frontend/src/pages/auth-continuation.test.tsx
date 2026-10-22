@@ -131,6 +131,7 @@ describe("authentication continuation links", () => {
     await renderPage(createElement(Login), loginEntry);
     expect(container.textContent).toContain("继续使用重庆大学课表");
     expect(anchor("立即注册")?.getAttribute("href")).toBe(withRedirectParam("/register", binding));
+    expect(container.querySelector("nav a")?.getAttribute("href")).toBe(withRedirectParam("/register", binding));
     expect(anchor("忘记密码？")?.getAttribute("href")).toBe(withRedirectParam("/reset-password", binding));
 
     await act(async () => root.unmount());
@@ -138,6 +139,7 @@ describe("authentication continuation links", () => {
     await renderPage(createElement(Register), withRedirectParam("/register", binding));
     expect(container.textContent).toContain("继续使用重庆大学课表");
     expect(anchor("立即登录")?.getAttribute("href")).toBe(withRedirectParam("/login", binding));
+    expect(container.querySelector("nav a")?.getAttribute("href")).toBe(withRedirectParam("/login", binding));
   });
 
   it("does not show the Schedule source on ordinary auth pages", async () => {

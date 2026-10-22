@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withRedirectParam } from "../lib/post-login-redirect";
 import EmailVerificationGate from "./EmailVerificationGate";
 import ProtectedRoute from "./ProtectedRoute";
+import Home from "../pages/Home";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -45,6 +46,8 @@ async function renderFlow(entry: string) {
       <ThemeProvider><MemoryRouter initialEntries={[entry]}>
         <EmailVerificationGate>
           <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/settings" element={<ProtectedRoute><LocationProbe label="settings" /></ProtectedRoute>} />
             <Route path="/login" element={<><LocationProbe label="login" /><LoginDraft /></>} />
             <Route path="/verify-email" element={<LocationProbe label="verify" />} />
             <Route path="/two-factor" element={<LocationProbe label="two-factor" />} />
@@ -84,6 +87,33 @@ afterEach(() => {
 });
 
 describe("email verification route integration", () => {
+  it.each(["signed-out", "pending", "network-error", "verified", "unverified"])("keeps the public homepage accessible with a %s session", async state => {
+    authState.pending = state === "pending";
+    if (state === "network-error") authState.error = { status: 503 };
+    if (state === "verified" || state === "unverified") {
+      authState.session = { user: { id: "current-user", emailVerified: state === "verified" } };
+    }
+    await renderFlow("/");
+    expect(container.querySelector("h1")?.textContent).toContain("校园很大");
+    const start = container.querySelector<HTMLAnchorElement>(".hero-actions a")!;
+    expect(start.getAttribute("href")).toBe(authState.session ? "/settings" : "/login");
+    if (state === "unverified") {
+      await act(async () => start.click());
+      expect(container.querySelector("[data-location]")?.textContent).toContain("verify:/verify-email");
+    }
+  });
+
+  it("switches the service explanation while keeping the selected button focused", async () => {
+    await renderFlow("/");
+    const buttons = container.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="了解服务"] button');
+    buttons[1].focus();
+    await act(async () => buttons[1].click());
+    expect(buttons[1].getAttribute("aria-pressed")).toBe("true");
+    expect(buttons[0].getAttribute("aria-pressed")).toBe("false");
+    expect(container.querySelector('.service-detail [aria-hidden="false"]')?.textContent).toContain("需要对应服务权益");
+    expect(document.activeElement).toBe(buttons[1]);
+  });
+
   it("sends a signed-out binding visit to login with the whole binding path", async () => {
     await renderFlow(binding);
     expect(container.querySelector("[data-location]")?.textContent).toBe(

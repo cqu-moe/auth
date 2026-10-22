@@ -34,6 +34,9 @@ export default function EmailVerificationGate({ children }: EmailVerificationGat
   const { data: session, isPending, error, refetch } = authClient.useSession();
   const location = useLocation();
 
+  // The public introduction does not expose account data or require verification.
+  if (location.pathname === "/") return <>{children}</>;
+
   if (isPending) {
     return publicEntryPaths.has(location.pathname) ? <>{children}</> : <SessionPending />;
   }

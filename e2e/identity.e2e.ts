@@ -16,6 +16,10 @@ afterEach(async () => { expect(unexpected).toEqual([]); });
 
 test('register, verify, persist, sign out and sign in through the built application', async ({ app, screen, browser }) => {
   const account = credentials.user('journey');
+  await app.open('/');
+  await expect(screen.getByRole('heading', '校园很大， 一个账号就够。')).toBeVisible();
+  await screen.getByRole('link', '初次见面？创建账号').click();
+  await expect(browser).toHaveURL(/\/register$/);
   await app.open('/register?redirect=%2Fsettings%2Fsecurity');
   if (process.env.AUTH_E2E_BREAK_ASSERTION === '1') {
     await expect(screen.getByRole('heading', '创建账号', { exact: true })).toHaveText('故意错误的注册成功页面');
@@ -46,6 +50,10 @@ test('register, verify, persist, sign out and sign in through the built applicat
     return { email: session?.user?.email, verified: session?.user?.emailVerified };
   });
   expect(verified).toEqual({ email: account.username, verified: true });
+  await app.open('/');
+  await expect(screen.getByRole('heading', '校园很大， 一个账号就够。')).toBeVisible();
+  await screen.getByRole('link', '账号设置', { exact: true }).click();
+  await expect(browser).toHaveURL(/\/settings$/);
   await screen.getByRole('button', '退出登录', { exact: true }).click();
   await expect(browser).toHaveURL(/login/);
   expect(await browser.evaluate(async () => (await fetch('/api/v1/cqu/binding')).status)).toBe(401);

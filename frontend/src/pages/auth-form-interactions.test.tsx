@@ -105,6 +105,19 @@ afterEach(async () => {
 });
 
 describe("authentication form interactions", () => {
+  it("defers blur validation when focusing submit so the button stays under the pointer", async () => {
+    const container = await renderPage(<Register />, "/register?code=ABCDEFGH");
+    const name = container.querySelector<HTMLInputElement>("#name")!;
+    const button = container.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    await act(async () => name.focus());
+    await act(async () => button.focus());
+    expect(container.querySelector("#name-error")).toBeNull();
+    await submit(container.querySelector<HTMLFormElement>("form")!);
+    expect(container.querySelector("#name-error")?.textContent).toBe("请输入昵称");
+    expect(document.activeElement).toBe(name);
+    expect(authMocks.signUp).not.toHaveBeenCalled();
+  });
+
   it("shows confirmation mismatch after blur, clears it after correction, and focuses the first invalid field", async () => {
     const container = await renderPage(<Register />, "/register?code=ABCDEFGH");
 
