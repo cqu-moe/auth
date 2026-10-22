@@ -50,6 +50,7 @@ export function nextDeviceAction(
   if (state.state === "needs_reauth") return "wait";
   if (state.operationId && (state.state === "refreshing" || state.state === "preparing")) return "login";
   if (!state.storageState || state.loginAt === null) return "login";
+  if (!probesEnabled && state.state === "temporary_unavailable" && state.nextAttemptAt !== null) return "login";
   if (now - state.loginAt >= CQU_PROACTIVE_RELOGIN_MS) return "login";
   if (!probesEnabled) return "wait";
   if (state.lastKeepAliveAt === null || now - state.lastKeepAliveAt >= KEEPALIVE_MS) {

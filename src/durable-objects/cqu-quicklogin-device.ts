@@ -82,7 +82,7 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     const renewalAt = session.loginAt !== null && session.state !== "needs_reauth"
       ? session.loginAt + CQU_PROACTIVE_RELOGIN_MS : now + KEEPALIVE_MS;
     return Math.max(now + 1_000, Math.min(
-      session.nextAttemptAt ?? renewalAt,
+      session.nextAttemptAt !== null && session.nextAttemptAt > now ? session.nextAttemptAt : renewalAt,
       authority.lastSeenAt === null ? Infinity : authority.lastSeenAt + INACTIVE_MS
     ));
   }
@@ -213,7 +213,7 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       await this.ctx.storage.deleteAlarm();
       return;
     }
-    if (session.pendingKeepaliveMint && !probesEnabled) {
+    if (session.pendingKeepaliveMint && !probesEnabled && action !== "login") {
       await this.confirmKeepaliveMint(session, authority);
       return;
     }

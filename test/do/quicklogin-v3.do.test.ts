@@ -187,7 +187,7 @@ describe('QuickLogin protocol 3 durable device state', () => {
   }
  });
 
- it.each(['needs_reauth', 'retry_wait'] as const)('keeps a future alarm for an experiment device in %s', async kind => {
+ it.each(['needs_reauth', 'retry_wait', 'retry_due'] as const)('keeps a future alarm for an experiment device in %s', async kind => {
   const now = Date.now() + 1_000_000;
   vi.spyOn(Date, 'now').mockReturnValue(now);
   const t = await setup();
@@ -196,16 +196,20 @@ describe('QuickLogin protocol 3 durable device state', () => {
    const session: any = await state.storage.get('session');
    await state.storage.put('session', { ...session, storageState: exportableV3StorageState(),
     state: kind === 'needs_reauth' ? 'needs_reauth' : 'temporary_unavailable',
-    loginAt: now - 8 * 60 * 60_000, lastKeepAliveAt: now - 8 * 60 * 60_000,
-    nextAttemptAt: kind === 'needs_reauth' ? null : retryAt });
+    loginAt: now - 3 * 60 * 60_000, lastKeepAliveAt: now - 3 * 60 * 60_000,
+    nextAttemptAt: kind === 'needs_reauth' ? now - 60_000 : kind === 'retry_due' ? now : retryAt });
   });
   env.CQU_NO_PROBE_EXPERIMENT_USER_ID = t.userId;
   env.CQU_NO_PROBE_EXPERIMENT_DEVICE_ID = t.device.deviceId;
   vi.mocked(CquQuickloginDeviceDO.prototype.alarm).mockRestore();
   const browser = spyBrowserFetch({});
+  const login = vi.spyOn(QuickloginLoginBrokerClient.prototype, 'quickloginLogin').mockResolvedValue({
+   kind: 'temporary_unavailable', retryAfterMs: 5 * 60_000, reasonCode: 'SCHOOL_UNREACHABLE',
+  });
   try {
    await runInDurableObject(t.stub, instance => (instance as CquQuickloginDeviceDO).alarm());
    expect(browser).not.toHaveBeenCalled();
+   expect(login).toHaveBeenCalledTimes(kind === 'retry_due' ? 1 : 0);
    expect(await runInDurableObject(t.stub, (_, state) => state.storage.getAlarm()))
     .toBe(kind === 'needs_reauth' ? now + 60 * 60_000 : retryAt);
   } finally {
@@ -214,12 +218,13 @@ describe('QuickLogin protocol 3 durable device state', () => {
   }
  });
 
- it('settles an existing experiment keepalive without starting another browser probe', async () => {
+ it.each([3, 7])('settles pending probes without blocking renewal at session age %ih', async ageHours => {
   const now = Date.now() + 1_000_000;
   vi.spyOn(Date, 'now').mockReturnValue(now);
   const t = await setup();
-  const loginAt = now - 3 * 60 * 60_000;
+  const loginAt = now - ageHours * 60 * 60_000;
   const storageState = exportableV3StorageState('pending-settle');
+  const renewedState = exportableV3StorageState('new-login');
   await runInDurableObject(t.stub, async (_, state) => {
    const session: any = await state.storage.get('session');
    await state.storage.put('session', {
@@ -228,6 +233,7 @@ describe('QuickLogin protocol 3 durable device state', () => {
     pendingKeepaliveMint: { operationId: 'experiment-pending', mintedAt: now - 1_000, expiresAt: now + 60_000, hasStorageState: true },
    });
    await state.storage.put('pendingKeepaliveState', storageState);
+   await state.storage.put('v3:client', client);
    await state.storage.setAlarm(now);
   });
   const originalExperimentUserId = env.CQU_NO_PROBE_EXPERIMENT_USER_ID;
@@ -237,19 +243,26 @@ describe('QuickLogin protocol 3 durable device state', () => {
   vi.mocked(CquQuickloginDeviceDO.prototype.alarm).mockRestore();
   const fetchMock = spyBrowserFetch({});
   const confirm = vi.spyOn(QuickloginLoginBrokerClient.prototype, 'recordQuickloginKeepaliveMint').mockResolvedValue();
+  const login = vi.spyOn(QuickloginLoginBrokerClient.prototype, 'quickloginLogin').mockResolvedValue({
+   kind: 'success', bindingEpoch: 0, credentialRevision: 0, loginAt: now, storageState: renewedState,
+  });
+  if (ageHours === 7) confirm.mockRejectedValue(new Error('audit unavailable'));
   try {
    await runInDurableObject(t.stub, async instance => {
     await (instance as unknown as { alarm(): Promise<void> }).alarm();
    });
-   expect(confirm).toHaveBeenCalledTimes(1);
+   expect(confirm).toHaveBeenCalledTimes(ageHours === 7 ? 0 : 1);
+   expect(login).toHaveBeenCalledTimes(ageHours === 7 ? 1 : 0);
    expect(fetchMock).not.toHaveBeenCalled();
    const settled = await readStorage<Record<string, unknown>>(t.stub, 'session');
    expect(settled).toMatchObject({
-    state: 'ready', loginAt, lastKeepAliveAt: now - 1_000, storageState,
+    state: 'ready', loginAt: ageHours === 7 ? now : loginAt,
+    lastKeepAliveAt: ageHours === 7 ? now : now - 1_000,
+    storageState: ageHours === 7 ? renewedState : storageState,
    });
    expect(settled).not.toHaveProperty('pendingKeepaliveMint');
    await expect(runInDurableObject(t.stub, (_, state) => state.storage.getAlarm()))
-    .resolves.toBe(loginAt + 7 * 60 * 60_000);
+    .resolves.toBe((ageHours === 7 ? now : loginAt) + 7 * 60 * 60_000);
   } finally {
    env.CQU_NO_PROBE_EXPERIMENT_USER_ID = originalExperimentUserId;
    env.CQU_NO_PROBE_EXPERIMENT_DEVICE_ID = originalExperimentDeviceId;
