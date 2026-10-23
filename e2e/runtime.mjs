@@ -7,6 +7,14 @@ import { execFileSync } from 'node:child_process';
 import { checkArtifacts } from './artifacts.mjs';
 
 // Node-side lifecycle API. Never import this from production or expose seed controls on Auth.
+export function extractEmailSecrets(mail) {
+  const text = typeof mail.text === 'string' ? mail.text : '';
+  return {
+    otp: text.match(/\n\n(\d{6})\n\n/)?.[1],
+    resetUrl: text.match(/请打开以下链接重置密码[^\n]*\n\n(https?:\/\/\S+)/)?.[1],
+  };
+}
+
 export async function startAuth({ expectedCommit, platform, artifacts } = {}) {
   const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   if (expectedCommit && expectedCommit !== commit) throw new Error('Auth commit does not match the pinned dependency');
@@ -117,7 +125,7 @@ export async function startAuth({ expectedCommit, platform, artifacts } = {}) {
         CQU_QUICKLOGIN_DEVICE: { className: 'CquQuickloginDeviceDO', useSQLite: true } },
       bindings: { BETTER_AUTH_URL: origin, BETTER_AUTH_SECRET: 'synthetic-auth-e2e-secret-never-use-outside-tests',
         ENCRYPTION_KEY: 'MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=',
-        RESEND_API_KEY: 're_synthetic', ENVIRONMENT: 'development', BIND_EMAIL_DOMAIN: 'example.test',
+        AUTH_RESEND_API_KEY: 're_synthetic', ENVIRONMENT: 'development', BIND_EMAIL_DOMAIN: 'example.test',
         QUICKLOGIN_DEVICE_MODE: 'on', QUICKLOGIN_CLIENT_ID: 'quicklogin-test-client' },
       assets: { workerName: 'auth-e2e', directory: resolve('frontend/dist'), binding: 'ASSETS',
         routerConfig: { invoke_user_worker_ahead_of_assets: true, has_user_worker: true },
@@ -126,10 +134,7 @@ export async function startAuth({ expectedCommit, platform, artifacts } = {}) {
         const url = new URL(request.url);
         if (url.origin === 'https://api.resend.com' && url.pathname === '/emails' && request.method === 'POST') {
           const mail = await request.json();
-          const html = typeof mail.html === 'string' ? mail.html : '';
-          const otp = html.match(/letter-spacing:6px">(\d{6})</)?.[1];
-          const encodedHref = html.match(/<a href="([^"]+)"/)?.[1];
-          const resetUrl = encodedHref?.replace(/&amp;/g, '&');
+          const { otp, resetUrl } = extractEmailSecrets(mail);
           if (!otp && !resetUrl) throw new Error('Unexpected external email payload');
           if (resetUrl && new URL(resetUrl).origin !== origin) throw new Error('Non-application reset link denied');
           for (const recipient of [].concat(mail.to)) {

@@ -9,7 +9,7 @@ const env = {
   DATABASE: database,
   BETTER_AUTH_URL: "https://auth.cqu.moe",
   BETTER_AUTH_SECRET: "local-generation-secret-not-for-production",
-  RESEND_API_KEY: "re_local_generation",
+  AUTH_RESEND_API_KEY: "re_local_generation",
 } as unknown as Env;
 
 async function main() {

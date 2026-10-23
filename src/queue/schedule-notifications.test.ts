@@ -51,7 +51,7 @@ describe("processScheduleNotification", () => {
     expect(result).toBe("ack");
     expect(sendEmail).toHaveBeenCalledWith(
       {
-        from: "重庆大学课表 <noreply@cqu.moe>",
+        from: "CQU Schedule <noreply@schedule.cqu.moe>",
         to: "current@example.com",
         subject: validMessage().subject,
         html: validMessage().html,

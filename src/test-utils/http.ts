@@ -27,7 +27,7 @@ export function createHttpFixture() {
 
   const env = {
     DATABASE: createSqliteD1(database),
-    RESEND_API_KEY: "re_test_placeholder",
+    AUTH_RESEND_API_KEY: "re_test_placeholder",
     CQU_SESSION: namespace,
     CQU_LOGIN: namespace,
     ASSETS: { fetch: assetsFetch },
