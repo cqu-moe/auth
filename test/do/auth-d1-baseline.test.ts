@@ -127,8 +127,8 @@ it("rejects expired email codes and prunes expired verification rows in D1", asy
   const outbound = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const request = input instanceof Request ? input : new Request(input, init);
     expect(new URL(request.url).hostname).toBe("api.resend.com");
-    const { html } = await request.json() as { html: string };
-    otp = html.match(/letter-spacing:6px">(\d{6})</)![1];
+    const { text } = await request.json() as { text: string };
+    otp = text.match(/\n\n(\d{6})\n\n/)![1];
     return Response.json({ id: "test-mail" });
   });
   async function post(path: string, body: unknown) {

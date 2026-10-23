@@ -117,7 +117,7 @@ export async function processScheduleNotification(
 
     const result = await dependencies.sendEmail(
       {
-        from: "重庆大学课表 <noreply@cqu.moe>",
+        from: "CQU Schedule <noreply@schedule.cqu.moe>",
         to: recipient.email,
         subject: notification.subject,
         html: notification.html,
@@ -157,7 +157,7 @@ export async function processScheduleNotification(
 }
 
 function createDependencies(env: Env): NotificationDependencies {
-  const resend = new Resend(env.RESEND_API_KEY);
+  const resend = new Resend(env.SCHEDULE_RESEND_API_KEY);
   return {
     async resolveRecipient(userId) {
       const db = drizzle(env.DATABASE);

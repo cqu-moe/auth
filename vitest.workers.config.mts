@@ -41,7 +41,8 @@ export default defineConfig({
             "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
           BETTER_AUTH_URL: "http://localhost:8787",
           BETTER_AUTH_SECRET: "dev-secret-for-local-testing-only",
-          RESEND_API_KEY: "re_dev_placeholder",
+          AUTH_RESEND_API_KEY: "re_dev_placeholder",
+          SCHEDULE_RESEND_API_KEY: "schedule_re_dev_placeholder",
           BIND_EMAIL_DOMAIN: "cquotp.com",
           QUICKLOGIN_CLIENT_ID: "quicklogin-test-client",
           QUICKLOGIN_EXTENSION_ORIGIN:

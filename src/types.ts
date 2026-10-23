@@ -1,8 +1,9 @@
 export interface Env {
   DATABASE: D1Database;
   QUICKLOGIN_RELEASES?: R2Bucket;
-  RESEND_API_KEY: string;
+  AUTH_RESEND_API_KEY: string;
   AUTH_EMAIL_FROM?: string;
+  SCHEDULE_RESEND_API_KEY: string;
   CQU_SESSION: DurableObjectNamespace;
   CQU_SESSION_RECOVERY: Workflow<CquSessionRecoveryParams>;
   CQU_LOGIN: DurableObjectNamespace;

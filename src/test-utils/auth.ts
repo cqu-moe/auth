@@ -19,7 +19,7 @@ export function createTestAuth(options: { origin?: string } = {}) {
     DATABASE: createSqliteD1(database),
     BETTER_AUTH_URL: origin,
     BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
-    RESEND_API_KEY: "re_test_placeholder",
+    AUTH_RESEND_API_KEY: "re_test_placeholder",
   } as unknown as Env;
 
   return {

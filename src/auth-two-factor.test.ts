@@ -32,8 +32,8 @@ function cookieFromHeaders(headers: Headers): string {
 }
 
 function otpFromEmail(): string {
-  const html = sendEmail.mock.calls.at(-1)?.[0]?.html as string | undefined;
-  const otp = html?.match(/letter-spacing:6px">(\d{6})</)?.[1];
+  const text = sendEmail.mock.calls.at(-1)?.[0]?.text as string | undefined;
+  const otp = text?.match(/\n\n(\d{6})\n\n/)?.[1];
   if (!otp) throw new Error("email did not contain an OTP");
   return otp;
 }
@@ -169,9 +169,10 @@ describe("native two-factor authentication", () => {
     await signUp(auth);
 
     const html = sendEmail.mock.calls.at(-1)?.[0]?.html as string | undefined;
-    expect(html).toMatch(/>\d{6}</);
-    expect(html).not.toContain("href=");
+    const text = sendEmail.mock.calls.at(-1)?.[0]?.text as string | undefined;
+    expect(text).toMatch(/\n\n\d{6}\n\n/);
     expect(html).not.toContain("/api/auth/verify-email");
+    expect(text).not.toContain("/api/auth/verify-email");
     await auth.$context;
     database.close();
   });

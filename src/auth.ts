@@ -14,6 +14,11 @@ import { customSession, emailOTP, twoFactor } from "better-auth/plugins";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { Resend } from "resend";
 import type { Env } from "./types";
+import {
+  renderEmailChangeEmail,
+  renderPasswordResetEmail,
+  renderVerificationEmail,
+} from "./services/auth-emails";
 import { resolveCaps, subsystemForAccessToken } from "./services/entitlements";
 import { isolatedAuthCookies } from "./services/auth-cookies";
 import { enforceFirstPartyConsent } from "./services/first-party-consent";
@@ -91,10 +96,22 @@ const currentEmailOtpPaths = new Set([
 ]);
 
 export function createAuth(env: Env, request: Request) {
-  const getResend = () => new Resend(env.RESEND_API_KEY);
-  const emailFrom = env.AUTH_EMAIL_FROM?.trim() || "auth.cqu.moe <noreply@cqu.moe>";
+  const getResend = () => new Resend(env.AUTH_RESEND_API_KEY);
+  const emailFrom = env.AUTH_EMAIL_FROM?.trim() || "CQU Auth <noreply@auth.cqu.moe>";
   const urls = authUrls(env.BETTER_AUTH_URL);
   const quickloginConsentReference = createQuickloginConsentReference(env);
+  const sendEmail = async (
+    input: Parameters<Resend["emails"]["send"]>[0] & {
+      from: string;
+      to: string;
+      subject: string;
+      html: string;
+      text?: string;
+    },
+  ) => {
+    const { error } = await getResend().emails.send(input);
+    if (error) throw new Error(`Resend email delivery failed: ${error.message}`);
+  };
 
   return betterAuth({
     baseURL: env.BETTER_AUTH_URL,
@@ -115,11 +132,10 @@ export function createAuth(env: Env, request: Request) {
             await clearDeviceTrust((await createAuth(env, request).$context).adapter, user.id);
           },
           sendResetPassword: async ({ user, url }) => {
-            void getResend().emails.send({
+            await sendEmail({
               from: emailFrom,
               to: user.email,
-              subject: "重置密码 - auth.cqu.moe",
-              html: `<p>点击链接重置密码：<a href="${url}">${url}</a></p>`,
+              ...renderPasswordResetEmail(url),
             });
           },
         },
@@ -371,21 +387,12 @@ export function createAuth(env: Env, request: Request) {
           }),
           emailOTP({
             async sendVerificationOTP({ email, otp, type }) {
-              const copy = type === "change-email"
-                ? {
-                    subject: "验证新登录邮箱 - auth.cqu.moe",
-                    intro: "请输入以下验证码，完成登录邮箱更换。",
-                  }
-                : {
-                    subject: "验证你的邮箱 - auth.cqu.moe",
-                    intro: "请输入以下验证码，完成邮箱验证。",
-                  };
-
-              await getResend().emails.send({
+              await sendEmail({
                 from: emailFrom,
                 to: email,
-                subject: copy.subject,
-                html: `<p>${copy.intro}</p><p style="font-size:24px;font-weight:700;letter-spacing:6px">${otp}</p><p>验证码 5 分钟内有效，请勿转发。</p>`,
+              ...(type === "change-email"
+                ? renderEmailChangeEmail(otp)
+                : renderVerificationEmail(otp)),
               });
             },
             otpLength: 6,

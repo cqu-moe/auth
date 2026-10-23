@@ -25,12 +25,12 @@
 
 ### Auth 邮件发件人
 
-可选 Worker 变量 `AUTH_EMAIL_FROM` 统一配置邮箱验证/更换邮箱 OTP 与密码重置邮件的发件人。值会去掉首尾空白；未设置、空字符串或全空白时，仍使用 `auth.cqu.moe <noreply@cqu.moe>`。Resend 客户端保持延迟初始化。
+可选 Worker 变量 `AUTH_EMAIL_FROM` 统一配置邮箱验证/更换邮箱 OTP 与密码重置邮件的发件人。值会去掉首尾空白；未设置、空字符串或全空白时，使用 Auth 自身身份 `CQU Auth <noreply@auth.cqu.moe>`。覆盖仅用于已受信任且已验证发件域的 Auth 部署。Resend 客户端保持延迟初始化。
 
-T17 隔离 Auth 的专用 Wrangler 配置在 `vars` 中加入以下字段（本地可写入该环境的 `.dev.vars`）；对应账号须已验证发件域，`RESEND_API_KEY` 继续通过 secret 配置：
+Auth 邮件使用专用 secret `AUTH_RESEND_API_KEY`，不回退到旧 `RESEND_API_KEY`。T17 隔离 Auth 的专用 Wrangler 配置可在 `vars` 中加入以下字段（本地可写入该环境的 `.dev.vars`）；对应账号须已验证发件域：
 
 ```json
-"AUTH_EMAIL_FROM": "重大通知 <notifications@feed.cqu.moe>"
+"AUTH_EMAIL_FROM": "受信任部署 <noreply@auth.cqu.moe>"
 ```
 
-仅隔离环境设置此覆盖值，生产配置不增加该字段。此变量不影响 `schedule-notifications` 队列的固定发件人，也不改变 [Auth 二次验证策略](../adr/0006-sensitive-operation-reauthentication.md)：中央账号邮件 2FA 路由禁用，继续使用 TOTP、恢复码或 Passkey。本配置不涉及学校 CQU 邮件验证码接收。
+仅隔离环境设置此覆盖值，生产配置不增加该字段。`schedule-notifications` 队列固定使用 `CQU Schedule <noreply@schedule.cqu.moe>`，并使用独立 `SCHEDULE_RESEND_API_KEY`，不回退到 Auth key。cutover 期间旧生产 `RESEND_API_KEY` binding 保留给已部署旧版本使用；新版本发布确认后再移除。此变量不改变 [Auth 二次验证策略](../adr/0006-sensitive-operation-reauthentication.md)：中央账号邮件 2FA 路由禁用，继续使用 TOTP、恢复码或 Passkey。本配置不涉及学校 CQU 邮件验证码接收。

@@ -28,7 +28,7 @@ const env = {
   DATABASE: database,
   BETTER_AUTH_URL: "https://auth.cqu.moe",
   BETTER_AUTH_SECRET: "local-openapi-generation-secret-only-123456789",
-  RESEND_API_KEY: "re_local_generation",
+  AUTH_RESEND_API_KEY: "re_local_generation",
 } as unknown as Env;
 const authDocument = await getBetterAuthOpenApi(env, new Request("https://auth.cqu.moe"));
 const document = mergeBetterAuthOpenApi(
