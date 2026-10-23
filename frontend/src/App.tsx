@@ -10,8 +10,6 @@ import Home from "./pages/Home";
 import Register from "./pages/Register";
 import ResetPassword from "./pages/ResetPassword";
 import ResetPasswordConfirm from "./pages/ResetPasswordConfirm";
-import Settings, { SettingsCqu, SettingsSecurity } from "./pages/Settings";
-import ChangeEmail from "./pages/ChangeEmail";
 import OAuthAuthorize from "./pages/OAuthAuthorize";
 import VerifyEmail from "./pages/VerifyEmail";
 import TwoFactorChallenge from "./pages/TwoFactorChallenge";
@@ -26,6 +24,10 @@ import {
   syncPostHogReplay,
 } from "./lib/posthog";
 
+const Settings = lazy(() => import("./pages/Settings"));
+const SettingsCqu = lazy(() => import("./pages/Settings").then(module => ({ default: module.SettingsCqu })));
+const SettingsSecurity = lazy(() => import("./pages/Settings").then(module => ({ default: module.SettingsSecurity })));
+const ChangeEmail = lazy(() => import("./pages/ChangeEmail"));
 const CquBindWizard = lazy(() => import("./pages/CquBindWizard"));
 const TwoFactorSettings = lazy(() => import("./pages/TwoFactorSettings"));
 const UsersSection = lazy(() => import("./features/admin/UsersSection").then(module => ({ default: module.UsersSection })));

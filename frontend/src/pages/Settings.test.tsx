@@ -52,11 +52,10 @@ async function renderSettings(path = "/settings/cqu") {
   await act(async () => {
     window.history.replaceState({}, "", path);
     root.render(createElement(App));
-    await Promise.resolve();
+    await vi.dynamicImportSettled();
   });
   await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
+    await vi.dynamicImportSettled();
   });
 }
 
@@ -143,6 +142,16 @@ it.each([
 it("keeps the ordinary settings entry on the account page", async () => {
   await renderSettings("/settings");
   expect(container.textContent).toContain("账户信息");
+  expect(quickloginProps).not.toHaveBeenCalled();
+});
+
+it.each([
+  ["/settings/security", "安全"],
+  ["/settings/email", "修改登录邮箱"],
+])("opens the settings subpage at %s", async (path, title) => {
+  await renderSettings(path);
+  expect(container.querySelector("h1")?.textContent).toBe(title);
+  expect(container.querySelector('[aria-label="正在加载页面…"]')).toBeNull();
   expect(quickloginProps).not.toHaveBeenCalled();
 });
 
