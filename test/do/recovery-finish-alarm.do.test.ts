@@ -17,18 +17,18 @@ async function finish(stub: DurableObjectStub, outcome = 'complete') {
 }
 
 describe('completed recovery check alarm', () => {
-  it('retires its obsolete check after recovery, preserving the ordinary keepalive deadline', async () => {
+  it('retires its obsolete check after recovery, preserving the stored relogin deadline', async () => {
     const {stub} = await recovered();
-    const session = await readStorage<{lastKeepAlive:number}>(stub,'state');
+    const session = await readStorage<{reloginAt:number}>(stub,'state');
     const browser = spyBrowserFetch({});
     await finish(stub);
     expect(await readStorage(stub,'sessionRecoveryCycle')).toBeUndefined();
-    expect(await readAlarm(stub)).toBe(session!.lastKeepAlive+3600_000);
+    expect(await readAlarm(stub)).toBe(session!.reloginAt);
     expect(await readState(stub)).toEqual(session);
     expect(browser).not.toHaveBeenCalled();
   });
 
-  it.each(['other alarm','CAS login','device login','cleanup','binding deletion','binding outbox','binding transition','code permit','keepalive retry','relogin retry','expired','failed recovery'])(
+  it.each(['other alarm','CAS login','device login','cleanup','binding deletion','binding outbox','binding transition','code permit','relogin retry','expired','failed recovery'])(
     'preserves a deadline owned by %s', async kind => {
       const {stub,checkedAt} = await recovered();
       const expected = kind === 'other alarm' ? checkedAt+30_000 : kind === 'relogin retry' ? checkedAt+300_000 : checkedAt+60_000;
@@ -42,10 +42,6 @@ describe('completed recovery check alarm', () => {
         if(kind==='binding transition') await state.storage.put('bindingTransition',{id:'new-binding'});
         if(kind==='code permit') await state.storage.put('codePermitPending','pending');
         if(kind==='relogin retry') await state.storage.put('reloginRetryAt',expected);
-        if(kind==='keepalive retry') {
-          const session = await state.storage.get<Record<string,unknown>>('state');
-          await state.storage.put('state',{...session,consecutiveFailures:1});
-        }
         if(kind==='expired') await state.storage.put('status','expired');
       });
       await finish(stub,kind==='failed recovery'?'failed':'complete');

@@ -79,146 +79,7 @@ describe('QuickLogin protocol 3 durable device state', () => {
   expect((await t.call('v3_export', { expected: { ...expected, sessionVersion: 0 } })).error.code).toBe('SESSION_CHANGED');
  });
 
- it('stops new probes only for the exact experiment device while keeping its absolute seven-hour boundary', async () => {
-  const hour = 60 * 60_000;
-  const now = Date.now() + 1_000_000;
-  vi.spyOn(Date, 'now').mockReturnValue(now);
-  const experiment = await setup();
-  const controlGrant = await experiment.accounts.createPendingGrant(experiment.userId, 'control-client', now);
-  await experiment.accounts.activateGrant(experiment.userId, controlGrant.grantId, now);
-  const controlDevice = await experiment.accounts.registerDevice(experiment.userId, controlGrant.grantId, {
-   deviceName: 'Same-user control', browserFamily: 'chrome', browserVersion: '152',
-  });
-  const controlAuthority = await experiment.accounts.setDeviceEnabled(experiment.userId, controlDevice.deviceId, true);
-  await experiment.devices.notifyDevice(controlAuthority);
-  const otherUser = await setup();
-  const loginAt = now - 3 * hour;
-  const storageState = exportableV3StorageState('experiment-boundary');
-  const seedReady = async (t: Awaited<ReturnType<typeof setup>>, ownerDeviceId: string) => {
-   await runInDurableObject(t.stub, async (_, state) => {
-    const session: any = await state.storage.get('session');
-    await state.storage.put('session', {
-     ...session, state: 'ready', sessionVersion: 1, loginAt, lastKeepAliveAt: loginAt, storageState,
-    });
-    await state.storage.setAlarm(now);
-   });
-   return { deviceId: ownerDeviceId, generation: t.authority.generation, bindingEpoch: 0, credentialRevision: 0, sessionVersion: 1 };
-  };
-  const experimentTuple = await seedReady(experiment, experiment.device.deviceId);
-  const sameUserControlStub = env.CQU_QUICKLOGIN_DEVICE.get(
-   env.CQU_QUICKLOGIN_DEVICE.idFromName(`${experiment.userId}:${controlDevice.deviceId}`)
-  );
-  await runInDurableObject(sameUserControlStub, async (_, state) => state.storage.deleteAlarm());
-  const originalExperimentUserId = env.CQU_NO_PROBE_EXPERIMENT_USER_ID;
-  const originalExperimentDeviceId = env.CQU_NO_PROBE_EXPERIMENT_DEVICE_ID;
-  env.CQU_NO_PROBE_EXPERIMENT_USER_ID = experiment.userId;
-  env.CQU_NO_PROBE_EXPERIMENT_DEVICE_ID = experiment.device.deviceId;
-  vi.mocked(CquQuickloginDeviceDO.prototype.alarm).mockRestore();
-  const fetchMock = spyBrowserFetch({
-   '/run': () => Response.json({ ok: true, state: JSON.parse(storageState) }),
-   '/keepalive': () => Response.json({ ok: true, status: 'alive', state: JSON.parse(storageState) }),
-  });
-  vi.spyOn(QuickloginLoginBrokerClient.prototype, 'recordQuickloginKeepaliveMint').mockResolvedValue();
-  const keepalivePath = (input: RequestInfo | URL) =>
-   new URL(input instanceof Request ? input.url : String(input)).pathname;
-  try {
-   const snapshot = await snapshotV3(env, experiment.userId, experiment.device.deviceId);
-   expect(snapshot.cloud.usableUntil).toBe(loginAt + 7 * hour);
-   expect(snapshot.capabilities.canExport).toBe(true);
-   expect((await experiment.call('v3_export', { expected: experimentTuple })).error).toBeUndefined();
-
-   await runInDurableObject(experiment.stub, async instance => {
-    await (instance as unknown as { alarm(): Promise<void> }).alarm();
-   });
-   expect(fetchMock.mock.calls.filter(([input]) => keepalivePath(input) === '/keepalive')).toHaveLength(0);
-   await expect(runInDurableObject(experiment.stub, (_, state) => state.storage.getAlarm()))
-    .resolves.toBe(loginAt + 7 * hour);
-
-   const otherUserTuple = await seedReady(otherUser, otherUser.device.deviceId);
-   const sameUserTuple = { ...experimentTuple, deviceId: controlDevice.deviceId };
-   const sameUserSession = {
-    ...(await runInDurableObject(sameUserControlStub, (_, state) => state.storage.get<Record<string, unknown>>('session'))),
-    state: 'ready', sessionVersion: 1, loginAt, lastKeepAliveAt: loginAt, storageState,
-   };
-   await runInDurableObject(sameUserControlStub, async (_, state) => {
-    await state.storage.put('session', sameUserSession);
-    await state.storage.setAlarm(now);
-   });
-   const sameUserSnapshot = await snapshotV3(env, experiment.userId, controlDevice.deviceId);
-   const otherUserSnapshot = await snapshotV3(env, otherUser.userId, otherUser.device.deviceId);
-   expect(sameUserSnapshot.cloud.usableUntil).toBeNull();
-   expect(otherUserSnapshot.cloud.usableUntil).toBeNull();
-   const sameUserCall = async (operation: string, payload: Record<string, unknown> = {}) => {
-    const response = await sameUserControlStub.fetch('https://device/internal', {
-     method: 'POST', body: JSON.stringify({ operation, ownerUserId: experiment.userId, deviceId: controlDevice.deviceId, payload: { authority: controlAuthority, ...payload } }),
-    });
-    return response.json<any>();
-   };
-   expect((await sameUserCall('v3_export', { expected: sameUserTuple })).error.code).toBe('SESSION_CHANGED');
-   expect((await otherUser.call('v3_export', { expected: otherUserTuple })).error.code).toBe('SESSION_CHANGED');
-
-   await runInDurableObject(sameUserControlStub, async instance => {
-    await (instance as unknown as { alarm(): Promise<void> }).alarm();
-   });
-   await runInDurableObject(otherUser.stub, async instance => {
-    await (instance as unknown as { alarm(): Promise<void> }).alarm();
-   });
-   expect(fetchMock.mock.calls.filter(([input]) => keepalivePath(input) === '/keepalive')).toHaveLength(2);
-
-   vi.spyOn(Date, 'now').mockReturnValue(loginAt + 7 * hour);
-   const expired = await snapshotV3(env, experiment.userId, experiment.device.deviceId);
-   expect(expired.cloud.usableUntil).toBeNull();
-   expect(expired.capabilities.canExport).toBe(false);
-   expect((await experiment.call('v3_export', { expected: experimentTuple })).error.code).toBe('SESSION_CHANGED');
-
-   const login = vi.spyOn(QuickloginLoginBrokerClient.prototype, 'quickloginLogin').mockResolvedValue({
-    kind: 'success', bindingEpoch: 0, credentialRevision: 0, loginAt: loginAt + 7 * hour, storageState,
-   });
-   await runInDurableObject(experiment.stub, async instance => {
-    await (instance as unknown as { alarm(): Promise<void> }).alarm();
-   });
-   expect(login).toHaveBeenCalledTimes(1);
-   expect(fetchMock.mock.calls.filter(([input]) => keepalivePath(input) === '/keepalive')).toHaveLength(2);
-   await expect(runInDurableObject(experiment.stub, (_, state) => state.storage.getAlarm()))
-    .resolves.toBe(loginAt + 14 * hour);
-  } finally {
-   env.CQU_NO_PROBE_EXPERIMENT_USER_ID = originalExperimentUserId;
-   env.CQU_NO_PROBE_EXPERIMENT_DEVICE_ID = originalExperimentDeviceId;
-  }
- });
-
- it.each(['needs_reauth', 'retry_wait', 'retry_due'] as const)('keeps a future alarm for an experiment device in %s', async kind => {
-  const now = Date.now() + 1_000_000;
-  vi.spyOn(Date, 'now').mockReturnValue(now);
-  const t = await setup();
-  const retryAt = now + 5 * 60_000;
-  await runInDurableObject(t.stub, async (_, state) => {
-   const session: any = await state.storage.get('session');
-   await state.storage.put('session', { ...session, storageState: exportableV3StorageState(),
-    state: kind === 'needs_reauth' ? 'needs_reauth' : 'temporary_unavailable',
-    loginAt: now - 3 * 60 * 60_000, lastKeepAliveAt: now - 3 * 60 * 60_000,
-    nextAttemptAt: kind === 'needs_reauth' ? now - 60_000 : kind === 'retry_due' ? now : retryAt });
-  });
-  env.CQU_NO_PROBE_EXPERIMENT_USER_ID = t.userId;
-  env.CQU_NO_PROBE_EXPERIMENT_DEVICE_ID = t.device.deviceId;
-  vi.mocked(CquQuickloginDeviceDO.prototype.alarm).mockRestore();
-  const browser = spyBrowserFetch({});
-  const login = vi.spyOn(QuickloginLoginBrokerClient.prototype, 'quickloginLogin').mockResolvedValue({
-   kind: 'temporary_unavailable', retryAfterMs: 5 * 60_000, reasonCode: 'SCHOOL_UNREACHABLE',
-  });
-  try {
-   await runInDurableObject(t.stub, instance => (instance as CquQuickloginDeviceDO).alarm());
-   expect(browser).not.toHaveBeenCalled();
-   expect(login).toHaveBeenCalledTimes(kind === 'retry_due' ? 1 : 0);
-   expect(await runInDurableObject(t.stub, (_, state) => state.storage.getAlarm()))
-    .toBe(kind === 'needs_reauth' ? now + 60 * 60_000 : retryAt);
-  } finally {
-   delete env.CQU_NO_PROBE_EXPERIMENT_USER_ID;
-   delete env.CQU_NO_PROBE_EXPERIMENT_DEVICE_ID;
-  }
- });
-
- it.each([3, 7])('settles pending probes without blocking renewal at session age %ih', async ageHours => {
+ it.each([[3, false], [3, true], [7, true]] as const)('settles pending probes without blocking renewal at age %ih (receipt unavailable=%s)', async (ageHours, receiptUnavailable) => {
   const now = Date.now() + 1_000_000;
   vi.spyOn(Date, 'now').mockReturnValue(now);
   const t = await setup();
@@ -236,37 +97,43 @@ describe('QuickLogin protocol 3 durable device state', () => {
    await state.storage.put('v3:client', client);
    await state.storage.setAlarm(now);
   });
-  const originalExperimentUserId = env.CQU_NO_PROBE_EXPERIMENT_USER_ID;
-  const originalExperimentDeviceId = env.CQU_NO_PROBE_EXPERIMENT_DEVICE_ID;
-  env.CQU_NO_PROBE_EXPERIMENT_USER_ID = t.userId;
-  env.CQU_NO_PROBE_EXPERIMENT_DEVICE_ID = t.device.deviceId;
   vi.mocked(CquQuickloginDeviceDO.prototype.alarm).mockRestore();
   const fetchMock = spyBrowserFetch({});
   const confirm = vi.spyOn(QuickloginLoginBrokerClient.prototype, 'recordQuickloginKeepaliveMint').mockResolvedValue();
   const login = vi.spyOn(QuickloginLoginBrokerClient.prototype, 'quickloginLogin').mockResolvedValue({
    kind: 'success', bindingEpoch: 0, credentialRevision: 0, loginAt: now, storageState: renewedState,
   });
-  if (ageHours === 7) confirm.mockRejectedValue(new Error('audit unavailable'));
-  try {
-   await runInDurableObject(t.stub, async instance => {
-    await (instance as unknown as { alarm(): Promise<void> }).alarm();
-   });
-   expect(confirm).toHaveBeenCalledTimes(ageHours === 7 ? 0 : 1);
-   expect(login).toHaveBeenCalledTimes(ageHours === 7 ? 1 : 0);
-   expect(fetchMock).not.toHaveBeenCalled();
-   const settled = await readStorage<Record<string, unknown>>(t.stub, 'session');
-   expect(settled).toMatchObject({
-    state: 'ready', loginAt: ageHours === 7 ? now : loginAt,
-    lastKeepAliveAt: ageHours === 7 ? now : now - 1_000,
-    storageState: ageHours === 7 ? renewedState : storageState,
-   });
-   expect(settled).not.toHaveProperty('pendingKeepaliveMint');
+  if (receiptUnavailable) confirm.mockRejectedValue(new Error('audit unavailable'));
+  const alarm = runInDurableObject(t.stub, async (instance, state) => {
+   await state.storage.deleteAlarm();
+   await (instance as unknown as { alarm(): Promise<void> }).alarm();
+  });
+  if (receiptUnavailable && ageHours < 7) {
+   await expect(alarm).rejects.toThrow('audit unavailable');
+   const pending = await readStorage<{reloginAt: number}>(t.stub, 'session');
+   expect(pending).toHaveProperty('pendingKeepaliveMint');
    await expect(runInDurableObject(t.stub, (_, state) => state.storage.getAlarm()))
-    .resolves.toBe((ageHours === 7 ? now : loginAt) + 7 * 60 * 60_000);
-  } finally {
-   env.CQU_NO_PROBE_EXPERIMENT_USER_ID = originalExperimentUserId;
-   env.CQU_NO_PROBE_EXPERIMENT_DEVICE_ID = originalExperimentDeviceId;
+    .resolves.toBe(pending!.reloginAt);
+   expect(login).not.toHaveBeenCalled();
+   expect(fetchMock).not.toHaveBeenCalled();
+   return;
   }
+  await alarm;
+  expect(confirm).toHaveBeenCalledTimes(ageHours === 7 ? 0 : 1);
+  expect(login).toHaveBeenCalledTimes(ageHours === 7 ? 1 : 0);
+  expect(fetchMock).not.toHaveBeenCalled();
+  const settled = await readStorage<Record<string, unknown>>(t.stub, 'session');
+  expect(settled).toMatchObject({
+   state: 'ready', loginAt: ageHours === 7 ? now : loginAt,
+   lastKeepAliveAt: ageHours === 7 ? now : now - 1_000,
+   storageState: ageHours === 7 ? renewedState : storageState,
+  });
+  expect(settled).not.toHaveProperty('pendingKeepaliveMint');
+  const reloginAt = settled?.reloginAt;
+  expect(reloginAt).toBeTypeOf('number');
+  if (typeof reloginAt !== 'number') throw new Error('missing persisted reloginAt');
+  await expect(runInDurableObject(t.stub, (_, state) => state.storage.getAlarm()))
+   .resolves.toBe(reloginAt);
  });
 });
 
@@ -408,25 +275,24 @@ it('starts a fresh maintenance operation after the prior successful operation de
  expect((await t.call('v3_operation_read',{operationId:original.operationId})).result).toMatchObject({state:'succeeded',operationId:original.operationId,versions:{sessionVersion:0}});
 });
 
-it('preserves a newer same-generation retry operation while an older keepalive completes', async () => {
+it('preserves a newer same-generation retry operation while legacy pending accounting completes', async () => {
  const futureNow = Date.now() + 1_000_000;
  vi.spyOn(Date, 'now').mockReturnValue(futureNow);
- const { spyBrowserFetch } = await import('./helpers');
  const { DeviceV3Store } = await import('../../src/services/quicklogin/device-v3-store');
  const t = await setup();
  const storageState = JSON.stringify({...validStorageState(),cookies:validStorageState().cookies.map(c=>({...c,secure:true,httpOnly:true,sameSite:'Lax',expires:-1}))});
- await runInDurableObject(t.stub,async(_,state)=>{const s:any=await state.storage.get('session');await state.storage.put('session',{...s,state:'ready',storageState,sessionVersion:1,loginAt:Date.now(),lastKeepAliveAt:Date.now()});});
+ await runInDurableObject(t.stub,async(_,state)=>{const s:any=await state.storage.get('session');await state.storage.put('session',{...s,state:'ready',storageState,sessionVersion:1,loginAt:Date.now(),lastKeepAliveAt:Date.now(),pendingKeepaliveMint:{operationId:'legacy-during-retry',mintedAt:Date.now(),expiresAt:Date.now()+60_000,hasStorageState:false}});});
  let started!:()=>void, release!:()=>void;
  const began = new Promise<void>(resolve=>{started=resolve;}), hold = new Promise<void>(resolve=>{release=resolve;});
- spyBrowserFetch({'/keepalive':async()=>{started();await hold;return Response.json({ok:true,status:'alive',state:JSON.parse(storageState)});}});
+ vi.spyOn(QuickloginLoginBrokerClient.prototype,'recordQuickloginKeepaliveMint').mockImplementation(async()=>{started();await hold;});
  const expected={deviceId:t.device.deviceId,generation:t.authority.generation,bindingEpoch:0,credentialRevision:0,sessionVersion:1};
  let operationId!:string;
  await runInDurableObject(t.stub,async(instance,state)=>{
-  const keepalive=(instance as any).performKeepalive(await state.storage.get('session'),t.authority);
+  const confirming=(instance as any).confirmKeepaliveMint(await state.storage.get('session'),t.authority);
   await began;
-  const op=await new DeviceV3Store(state.storage, (instance as any).env, a => (instance as any).notify(a)).operation(t.authority,{protocolVersion:3,requestId:'r',command:'retry_session',idempotencyKey:'during-keepalive',expected});
+  const op=await new DeviceV3Store(state.storage, (instance as any).env, a => (instance as any).notify(a)).operation(t.authority,{protocolVersion:3,requestId:'r',command:'retry_session',idempotencyKey:'during-legacy-accounting',expected});
   operationId=op.operationId;
-  release();await keepalive;
+  release();await confirming;
   const current:any=await state.storage.get('session');
   expect(current.operationId).toBe(operationId);
   expect(current.leaseToken).toBeTypeOf('string');
@@ -475,14 +341,12 @@ it('starts a new automatic attempt after retry_wait without reopening the previo
  expect((await t.call('v3_operation_read',{operationId:old.operationId})).result.state).toBe('retry_wait');
 });
 
-describe('keepalive survives observational updates', () => {
+describe('legacy pending accounting survives observational updates', () => {
  it.each([
-  ['browser', 'report'], ['browser', 'receipt'],
-  ['mint confirmation', 'report'], ['mint confirmation', 'receipt'],
- ] as const)('commits after a %s wait overlaps a valid %s', async (phase, observation) => {
+  'report', 'receipt',
+ ] as const)('commits after accounting wait overlaps a valid %s', async observation => {
   const now = Date.now() + 1_000_000;
   vi.spyOn(Date, 'now').mockReturnValue(now);
-  const { spyBrowserFetch } = await import('./helpers');
   const { DeviceV3Store } = await import('../../src/services/quicklogin/device-v3-store');
   const t = await setup();
   const browserState = (marker: string) => ({
@@ -492,24 +356,19 @@ describe('keepalive survives observational updates', () => {
   const oldState = browserState('before'), renewedState = browserState('renewed');
   await runInDurableObject(t.stub, async (_, state) => {
    const session: any = await state.storage.get('session');
-   await state.storage.put('session', { ...session, state:'ready', storageState:JSON.stringify(oldState), sessionVersion:1, loginAt:now, lastKeepAliveAt:now-60_000 });
+   await state.storage.put('session', { ...session, state:'ready', storageState:JSON.stringify(oldState), sessionVersion:1, loginAt:now, lastKeepAliveAt:now-60_000, pendingKeepaliveMint:{operationId:'legacy-observation',mintedAt:now,expiresAt:now+60_000,hasStorageState:true} });
+   await state.storage.put('pendingKeepaliveState', JSON.stringify(renewedState));
   });
   const expected = { deviceId:t.device.deviceId, generation:t.authority.generation, bindingEpoch:0, credentialRevision:0, sessionVersion:1 };
   const exported = (await t.call('v3_export', { expected })).result;
   let started!: () => void, release!: () => void;
   const began = new Promise<void>(resolve => { started = resolve; });
   const hold = new Promise<void>(resolve => { release = resolve; });
-  spyBrowserFetch({ '/keepalive': async () => {
-   if (phase === 'browser') { started(); await hold; }
-   return Response.json({ ok:true, status:'alive', state:renewedState });
-  } });
-  vi.spyOn(QuickloginLoginBrokerClient.prototype, 'recordQuickloginKeepaliveMint').mockImplementation(async () => {
-   if (phase === 'mint confirmation') { started(); await hold; }
-  });
+  vi.spyOn(QuickloginLoginBrokerClient.prototype, 'recordQuickloginKeepaliveMint').mockImplementation(async () => { started(); await hold; });
   await runInDurableObject(t.stub, async (instance, state) => {
    const store = new DeviceV3Store(state.storage, (instance as any).env, a => (instance as any).notify(a));
    const original: any = await state.storage.get('session');
-   const keepalive = (instance as any).performKeepalive(original, t.authority);
+   const confirming = (instance as any).confirmKeepaliveMint(original, t.authority);
    await began;
    if (observation === 'report') {
     await store.report(t.authority, { protocolVersion:3, requestId:'observation', client, observed:null, reportEpoch:'observation-epoch', clientReportSeq:1, local:{enabledIntent:true, mode:'automatic', cookieState:'missing', receipt:null} });
@@ -519,7 +378,7 @@ describe('keepalive survives observational updates', () => {
    }
    const observed: any = await state.storage.get('session');
    expect(observed.deviceRevision).toBeGreaterThan(original.deviceRevision ?? 0);
-   release(); await keepalive;
+   release(); await confirming;
    const completed: any = await state.storage.get('session');
    expect(completed.sessionVersion).toBe(2);
    expect(JSON.parse(completed.storageState)).toEqual(renewedState);
@@ -528,7 +387,7 @@ describe('keepalive survives observational updates', () => {
    expect(completed.pendingKeepaliveMint).toBeUndefined();
    expect(completed.deviceRevision).toBeGreaterThan(observed.deviceRevision);
    expect(await state.storage.get('v3:report')).toMatchObject({clientReportSeq:1, cookieState:observation === 'receipt' ? 'applied' : 'missing'});
-   expect(await state.storage.getAlarm()).toBe(now + 60 * 60_000);
+   expect(await state.storage.getAlarm()).toBe(completed.reloginAt);
   });
  });
 });

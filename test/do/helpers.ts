@@ -59,6 +59,7 @@ export interface SeedOpts {
   status?: string;
   storageState?: CquStorageState | null;
   loginAt?: number;
+  reloginAt?: number;
   /** 额外 storage 键(如 stMintLog)。 */
   extra?: Record<string, unknown>;
 }
@@ -83,9 +84,9 @@ export async function seedSession(
         objectId: "",
         tgt: "",
         loginAt: opts.loginAt ?? now,
+        reloginAt: opts.reloginAt ?? (opts.loginAt ?? now) + 7 * 60 * 60_000,
         lastKeepAlive: now,
         lastRequestedAt: now,
-        consecutiveFailures: 0,
       },
       ...(opts.extra ?? {}),
     });

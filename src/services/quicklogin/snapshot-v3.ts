@@ -24,7 +24,7 @@ export async function snapshotV3(env: Env, userId: string, deviceId: string): Pr
   if (!stable && attempt === 0) continue;
   const now = Date.now(), session = data.session, device = afterList.devices.find(d => d.deviceId === deviceId);
   const aligned = stable && session.generation === live.generation && session.bindingEpoch === binding!.bindingEpoch && (session.credentialRevision ?? session.bindingEpoch) === binding!.credentialRevision;
-  const usableUntil = quickloginSessionUsableUntil(env, session);
+  const usableUntil = quickloginSessionUsableUntil(session);
   const usable = aligned && usableUntil !== null && usableUntil > now;
   const policy = !quickloginDeviceModeEnabled(env) ? 'service_paused' : !live.masterEnabled ? 'master_off' : device?.disabledReason === 'quota_reduced' || live.reason === 'NO_DEVICE_CAPACITY' ? 'quota_blocked' : !live.enabled ? 'device_off' : 'enabled';
   const state = session.state === 'ready' ? 'ready' : session.state === 'preparing' ? data.operation?.state === 'running' ? 'logging_in' : 'queued' : session.state === 'needs_reauth' ? usable ? 'ready' : 'blocked' : session.state === 'temporary_unavailable' ? 'retry_wait' : session.state === 'disabled' ? 'paused' : session.state;

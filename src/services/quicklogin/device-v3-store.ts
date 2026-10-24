@@ -228,7 +228,7 @@ export class DeviceV3Store {
   await this.storage.transaction(async tx => {
    const session = await tx.get<StoredDeviceSession>(SESSION);
    if (!session || !sameTuple(expected, sessionTuple(session))) throw new V3Error('SESSION_CHANGED');
-   const usableUntil = quickloginSessionUsableUntil(this.env, session);
+  const usableUntil = quickloginSessionUsableUntil(session);
    if (!session.storageState || !['ready','refreshing','temporary_unavailable','needs_reauth'].includes(session.state) || usableUntil === null || usableUntil <= Date.now()) throw new V3Error('SESSION_CHANGED');
    const now = Date.now(), exportId = crypto.randomUUID();
    envelope = { ...expected, protocolVersion: 3, exportId, createdAt: now, applyBefore: now + 30_000, cookies: extractSsoCookies(session.storageState, now) };

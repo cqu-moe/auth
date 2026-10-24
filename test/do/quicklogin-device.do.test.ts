@@ -56,55 +56,6 @@ async function setupDevice() {
 }
 
 describe("CquQuickloginDeviceDO", () => {
-  it("does not restore temporary_unavailable after a delayed keepalive failure disables the device", async () => {
-    const { userId, authority } = await setupDevice();
-    const devices = new QuickloginDeviceClient(env);
-    await devices.notifyDevice(authority);
-    const stub = env.CQU_QUICKLOGIN_DEVICE.get(
-      env.CQU_QUICKLOGIN_DEVICE.idFromName(`${userId}:${authority.deviceId}`)
-    );
-    const session = {
-      ...(await devices.readDeviceSession(userId, authority.deviceId)),
-      state: "ready" as const,
-      storageState: JSON.stringify(exportableStorageState("transient-race")),
-    };
-    await runInDurableObject(stub, async (_instance, state) => state.storage.put("session", session));
-    let release!: () => void;
-    let started!: () => void;
-    const began = new Promise<void>((resolve) => { started = resolve; });
-    const hold = new Promise<void>((resolve) => { release = resolve; });
-    spyBrowserFetch({
-      "/keepalive": async () => {
-        started();
-        await hold;
-        return Response.json({ ok: false, status: "unreachable" }, { status: 503 });
-      },
-    });
-
-    await runInDurableObject(stub, async (instance) => {
-      const internal = instance as unknown as {
-        performKeepalive(value: typeof session, input: typeof authority): Promise<void>;
-        notify(input: typeof authority): Promise<void>;
-      };
-      const keepalive = internal.performKeepalive(session, authority);
-      await began;
-      await internal.notify({
-        ...authority,
-        generation: authority.generation + 1,
-        enabled: false,
-        allowed: false,
-        reason: "DEVICE_DISABLED",
-      });
-      release();
-      await keepalive;
-    });
-
-    expect(await readStorage<Record<string, unknown>>(stub, "session"))
-      .toMatchObject({ state: "disabled", storageState: null, generation: authority.generation + 1 });
-    await expect(runInDurableObject(stub, async (_instance, state) => state.storage.getAlarm()))
-      .resolves.toBeNull();
-  });
-
   it("does not restore temporary_unavailable after a delayed login failure revokes the device", async () => {
     const { userId, authority } = await setupDevice();
     const devices = new QuickloginDeviceClient(env);
@@ -248,7 +199,7 @@ describe("CquQuickloginDeviceDO", () => {
       .toMatchObject({ state: "revoked", storageState: null, generation: authority.generation + 1 });
   });
 
-  it("logs in and exports validated SSO cookies", async () => {
+  it("logs in and exports validated SSO cookies without a periodic probe", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
     const { userId, authority } = await setupDevice();
     const sessionStub = env.CQU_SESSION.get(env.CQU_SESSION.idFromName(userId));
@@ -258,7 +209,7 @@ describe("CquQuickloginDeviceDO", () => {
       const current = await state.storage.get<Record<string, unknown>>("state");
       await state.storage.put("state", { ...current, userId });
     });
-    spyBrowserFetch({
+    const browser = spyBrowserFetch({
       "/health": () => Response.json({
         ok: true,
         bootId: "device-boot",
@@ -267,11 +218,6 @@ describe("CquQuickloginDeviceDO", () => {
       }),
       "/code-permit": () => Response.json({ ok: true }),
       "/run": () => Response.json({ ok: true, state: exportableStorageState() }),
-      "/keepalive": () => Response.json({
-        ok: true,
-        status: "alive",
-        state: exportableStorageState("-rotated"),
-      }),
     });
     const devices = new QuickloginDeviceClient(env);
     await devices.notifyDevice(authority);
@@ -293,6 +239,7 @@ describe("CquQuickloginDeviceDO", () => {
       ]),
     });
     const before = await devices.readDeviceSession(userId, authority.deviceId);
+    expect(before.reloginAt).toBeTypeOf("number");
     await runInDurableObject(stub, async (_instance, state) => {
       await state.storage.put("session", { ...before, lastKeepAliveAt: 0 });
     });
@@ -300,9 +247,14 @@ describe("CquQuickloginDeviceDO", () => {
     await expect(devices.readDeviceSession(userId, authority.deviceId))
       .resolves.toMatchObject({
         state: "ready",
-        sessionVersion: 2,
+        sessionVersion: 1,
         loginAt: before.loginAt,
       });
+    expect(browser.mock.calls.map(([input]) => new URL(input.url).pathname))
+      .not.toContain("/keepalive");
+    await expect(
+      runInDurableObject(stub, async (_instance, state) => state.storage.getAlarm())
+    ).resolves.toBe(before.reloginAt);
     const broker = new QuickloginLoginBrokerClient(env);
     const operationId = crypto.randomUUID();
     await broker.recordQuickloginKeepaliveMint(userId, {
@@ -317,7 +269,7 @@ describe("CquQuickloginDeviceDO", () => {
     });
     const mintLog =
       (await readStorage<unknown[]>(sessionStub, "stMintLog")) ?? [];
-    expect(mintLog).toHaveLength(2);
+    expect(mintLog).toHaveLength(1);
   });
 
   it("reuses a pending keepalive mint operation after the broker response is lost", async () => {
@@ -329,8 +281,7 @@ describe("CquQuickloginDeviceDO", () => {
       const current = await state.storage.get<Record<string, unknown>>("state");
       await state.storage.put("state", { ...current, userId });
     });
-    let keepaliveCalls = 0;
-    spyBrowserFetch({
+    const browser = spyBrowserFetch({
       "/health": () => Response.json({
         ok: true,
         bootId: "lost-response-boot",
@@ -342,14 +293,6 @@ describe("CquQuickloginDeviceDO", () => {
         ok: true,
         state: largeExportableStorageState("initial"),
       }),
-      "/keepalive": () => {
-        keepaliveCalls += 1;
-        return Response.json({
-          ok: true,
-          status: "alive",
-          state: largeExportableStorageState("pending"),
-        });
-      },
     });
     const devices = new QuickloginDeviceClient(env);
     await devices.notifyDevice(authority);
@@ -360,8 +303,20 @@ describe("CquQuickloginDeviceDO", () => {
       await (instance as unknown as { alarm(): Promise<void> }).alarm();
     });
     const ready = await devices.readDeviceSession(userId, authority.deviceId);
+    const pendingStorageState = JSON.stringify(largeExportableStorageState("pending"));
     await runInDurableObject(stub, async (_instance, state) => {
-      await state.storage.put("session", { ...ready, lastKeepAliveAt: 0 });
+      await state.storage.put({
+        session: {
+          ...ready,
+          pendingKeepaliveMint: {
+            operationId: "legacy-pending",
+            mintedAt: Date.now(),
+            expiresAt: Date.now() + 60_000,
+            hasStorageState: true,
+          },
+        },
+        pendingKeepaliveState: pendingStorageState,
+      });
     });
 
     let loseFirstResponse = true;
@@ -402,12 +357,150 @@ describe("CquQuickloginDeviceDO", () => {
       await (instance as unknown as { alarm(): Promise<void> }).alarm();
     });
 
-    expect(keepaliveCalls).toBe(1);
+    expect(browser.mock.calls.map(([input]) => new URL(input.url).pathname))
+      .not.toContain("/keepalive");
     expect(operationIds).toHaveLength(2);
-    expect(operationIds[1]).toBe(operationIds[0]);
+    expect(operationIds).toEqual(["legacy-pending", "legacy-pending"]);
     expect(await readStorage<Record<string, unknown>>(stub, "session"))
       .not.toHaveProperty("pendingKeepaliveMint");
     expect(await readStorage(stub, "pendingKeepaliveState")).toBeUndefined();
+  });
+
+  it("persists a relogin draw once before scheduling it", async () => {
+    const currentTime = 1_800_000_000_000;
+    vi.spyOn(Date, "now").mockReturnValue(currentTime);
+    const { userId, authority } = await setupDevice();
+    const devices = new QuickloginDeviceClient(env);
+    await devices.notifyDevice(authority);
+    const stub = env.CQU_QUICKLOGIN_DEVICE.get(
+      env.CQU_QUICKLOGIN_DEVICE.idFromName(`${userId}:${authority.deviceId}`)
+    );
+    const session = await devices.readDeviceSession(userId, authority.deviceId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      await state.storage.put("session", {
+        ...session,
+        state: "ready",
+        loginAt: currentTime - 60 * 60_000,
+        lastKeepAliveAt: currentTime - 60 * 60_000,
+        storageState: JSON.stringify(exportableStorageState("unmigrated")),
+      });
+    });
+    const browser = spyBrowserFetch({});
+    const login = vi.spyOn(
+      QuickloginLoginBrokerClient.prototype,
+      "quickloginLogin"
+    );
+
+    await runInDurableObject(stub, async (instance) => {
+      await (instance as unknown as { alarm(): Promise<void> }).alarm();
+    });
+    const first = await readStorage<Record<string, unknown>>(stub, "session");
+    expect(first?.reloginAt).toBeTypeOf("number");
+    await expect(
+      runInDurableObject(stub, async (_instance, state) => state.storage.getAlarm())
+    ).resolves.toBe(first?.reloginAt);
+
+    await runInDurableObject(stub, async (instance) => {
+      await (instance as unknown as { alarm(): Promise<void> }).alarm();
+    });
+    const second = await readStorage<Record<string, unknown>>(stub, "session");
+    expect(second?.reloginAt).toBe(first?.reloginAt);
+    await expect(
+      runInDurableObject(stub, async (_instance, state) => state.storage.getAlarm())
+    ).resolves.toBe(first?.reloginAt);
+    expect(login).not.toHaveBeenCalled();
+    expect(browser).not.toHaveBeenCalled();
+  });
+
+  it("relogs in at the persisted boundary without a CAS probe", async () => {
+    const currentTime = 1_800_000_000_000;
+    vi.spyOn(Date, "now").mockReturnValue(currentTime);
+    const { userId, authority } = await setupDevice();
+    const sessionStub = env.CQU_SESSION.get(env.CQU_SESSION.idFromName(userId));
+    await seedSession(sessionStub, { status: "active", userId });
+    await seedCredentials(sessionStub);
+    await runInDurableObject(sessionStub, async (_instance, state) => {
+      const current = await state.storage.get<Record<string, unknown>>("state");
+      await state.storage.put("state", { ...current, userId });
+    });
+    const devices = new QuickloginDeviceClient(env);
+    await devices.notifyDevice(authority);
+    const stub = env.CQU_QUICKLOGIN_DEVICE.get(
+      env.CQU_QUICKLOGIN_DEVICE.idFromName(`${userId}:${authority.deviceId}`)
+    );
+    const session = await devices.readDeviceSession(userId, authority.deviceId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      await state.storage.put("session", {
+        ...session,
+        state: "ready",
+        loginAt: currentTime - 60 * 60_000,
+        reloginAt: currentTime,
+        lastKeepAliveAt: currentTime - 60 * 60_000,
+        storageState: JSON.stringify(exportableStorageState("before-relogin")),
+      });
+    });
+    const browser = spyBrowserFetch({});
+    const login = vi.spyOn(
+      QuickloginLoginBrokerClient.prototype,
+      "quickloginLogin"
+    ).mockResolvedValue({
+      kind: "success",
+      bindingEpoch: 0,
+      loginAt: currentTime,
+      storageState: JSON.stringify(exportableStorageState("after-relogin")),
+    });
+
+    await runInDurableObject(stub, async (instance) => {
+      await (instance as unknown as { alarm(): Promise<void> }).alarm();
+    });
+
+    const renewed = await devices.readDeviceSession(userId, authority.deviceId);
+    expect(login).toHaveBeenCalledTimes(1);
+    expect(browser).not.toHaveBeenCalled();
+    expect(renewed).toMatchObject({
+      state: "ready",
+      sessionVersion: 1,
+      loginAt: currentTime,
+    });
+    expect(renewed.reloginAt).toBeGreaterThan(currentTime + 4 * 60 * 60_000);
+    expect(renewed.reloginAt).toBeLessThanOrEqual(currentTime + 7 * 60 * 60_000);
+    await expect(
+      runInDurableObject(stub, async (_instance, state) => state.storage.getAlarm())
+    ).resolves.toBe(renewed.reloginAt);
+  });
+
+  it("does not draw a relogin time after revocation", async () => {
+    const currentTime = 1_800_000_000_000;
+    vi.spyOn(Date, "now").mockReturnValue(currentTime);
+    const { accounts, userId, authority } = await setupDevice();
+    const devices = new QuickloginDeviceClient(env);
+    await devices.notifyDevice(authority);
+    const stub = env.CQU_QUICKLOGIN_DEVICE.get(
+      env.CQU_QUICKLOGIN_DEVICE.idFromName(`${userId}:${authority.deviceId}`)
+    );
+    const session = await devices.readDeviceSession(userId, authority.deviceId);
+    await runInDurableObject(stub, async (_instance, state) => {
+      await state.storage.put("session", {
+        ...session,
+        state: "ready",
+        loginAt: currentTime - 60 * 60_000,
+        lastKeepAliveAt: currentTime - 60 * 60_000,
+        storageState: JSON.stringify(exportableStorageState("before-revoke")),
+      });
+    });
+
+    await accounts.revokeDevice(userId, authority.deviceId, currentTime);
+    await runInDurableObject(stub, async (instance) => {
+      await (instance as unknown as { alarm(): Promise<void> }).alarm();
+    });
+
+    expect(await readStorage<Record<string, unknown>>(stub, "session"))
+      .toMatchObject({ state: "revoked", storageState: null });
+    expect(await readStorage<Record<string, unknown>>(stub, "session"))
+      .not.toHaveProperty("reloginAt");
+    await expect(
+      runInDurableObject(stub, async (_instance, state) => state.storage.getAlarm())
+    ).resolves.toBeNull();
   });
 
   it("clears an independent pending keepalive payload when authority changes", async () => {
@@ -542,97 +635,6 @@ describe("CquQuickloginDeviceDO", () => {
     ).resolves.toBeNull();
   });
 
-  it("uses the elapsed failure window and resets it after recovery", async () => {
-    const minute = 60_000;
-    let currentTime = 1_800_000_000_000;
-    vi.spyOn(Date, "now").mockImplementation(() => currentTime);
-    const { userId, authority } = await setupDevice();
-    const sessionStub = env.CQU_SESSION.get(env.CQU_SESSION.idFromName(userId));
-    await seedSession(sessionStub, { status: "active", userId });
-    await seedCredentials(sessionStub);
-    await runInDurableObject(sessionStub, async (_instance, state) => {
-      const current = await state.storage.get<Record<string, unknown>>("state");
-      await state.storage.put("state", { ...current, userId });
-    });
-    let keepaliveSucceeds = false;
-    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    spyBrowserFetch({
-      "/health": () => Response.json({
-        ok: true,
-        bootId: "retry-window-boot",
-        browserProfile: "cloudflare",
-        capabilities: ["browser-route-v1", "operation-deadline-v1"],
-      }),
-      "/code-permit": () => Response.json({ ok: true }),
-      "/run": () => Response.json({ ok: true, state: exportableStorageState() }),
-      "/keepalive": () => keepaliveSucceeds
-        ? Response.json({
-            ok: true,
-            status: "alive",
-            state: exportableStorageState("-recovered"),
-          })
-        : Response.json(
-            { ok: false, error: "SOURCEID_TGC=must-not-reach-logs" },
-            { status: 400 }
-          ),
-    });
-    const devices = new QuickloginDeviceClient(env);
-    await devices.notifyDevice(authority);
-    const stub = env.CQU_QUICKLOGIN_DEVICE.get(
-      env.CQU_QUICKLOGIN_DEVICE.idFromName(`${userId}:${authority.deviceId}`)
-    );
-    await runInDurableObject(stub, async (instance) => {
-      await (instance as unknown as { alarm(): Promise<void> }).alarm();
-    });
-    const ready = await devices.readDeviceSession(userId, authority.deviceId);
-    await runInDurableObject(stub, async (_instance, state) => {
-      await state.storage.put("session", { ...ready, lastKeepAliveAt: 0 });
-    });
-
-    await runInDurableObject(stub, async (instance) => {
-      await (instance as unknown as { alarm(): Promise<void> }).alarm();
-    });
-    await expect(devices.readDeviceSession(userId, authority.deviceId))
-      .resolves.toMatchObject({
-        state: "temporary_unavailable",
-        transientFailures: 1,
-        transientStartedAt: currentTime,
-        nextAttemptAt: currentTime + minute,
-      });
-    expect(warning).toHaveBeenCalledWith({
-      evt: "quicklogin_maintenance_failure",
-      phase: "keepalive_response",
-      deviceId: authority.deviceId,
-      generation: authority.generation,
-      httpStatus: 400,
-      backendStatus: null,
-    });
-    expect(JSON.stringify(warning.mock.calls)).not.toContain("must-not-reach-logs");
-
-    currentTime += 5 * minute;
-    await runInDurableObject(stub, async (instance) => {
-      await (instance as unknown as { alarm(): Promise<void> }).alarm();
-    });
-    await expect(devices.readDeviceSession(userId, authority.deviceId))
-      .resolves.toMatchObject({
-        transientFailures: 2,
-        transientStartedAt: currentTime - 5 * minute,
-        nextAttemptAt: currentTime + 3 * minute,
-      });
-
-    keepaliveSucceeds = true;
-    currentTime += 3 * minute;
-    await runInDurableObject(stub, async (instance) => {
-      await (instance as unknown as { alarm(): Promise<void> }).alarm();
-    });
-    await expect(devices.readDeviceSession(userId, authority.deviceId))
-      .resolves.toMatchObject({
-        state: "ready",
-        transientFailures: 0,
-        transientStartedAt: null,
-      });
-  });
-
   it("cancels persisted backoff when the device requests an immediate refresh", async () => {
     let currentTime = 1_800_000_000_000;
     vi.spyOn(Date, "now").mockImplementation(() => currentTime);
@@ -644,8 +646,7 @@ describe("CquQuickloginDeviceDO", () => {
       const current = await state.storage.get<Record<string, unknown>>("state");
       await state.storage.put("state", { ...current, userId });
     });
-    let keepaliveCalls = 0;
-    let keepaliveBody: Record<string, unknown> | null = null;
+    let runCalls = 0;
     spyBrowserFetch({
       "/health": () => Response.json({
         ok: true,
@@ -654,15 +655,9 @@ describe("CquQuickloginDeviceDO", () => {
         capabilities: ["browser-route-v1", "operation-deadline-v1"],
       }),
       "/code-permit": () => Response.json({ ok: true }),
-      "/run": () => Response.json({ ok: true, state: exportableStorageState() }),
-      "/keepalive": async (request) => {
-        keepaliveCalls += 1;
-        keepaliveBody = await request.json<Record<string, unknown>>();
-        return Response.json({
-          ok: true,
-          status: "alive",
-          state: exportableStorageState("-manual-refresh"),
-        });
+      "/run": () => {
+        runCalls += 1;
+        return Response.json({ ok: true, state: exportableStorageState() });
       },
     });
     const devices = new QuickloginDeviceClient(env);
@@ -685,6 +680,8 @@ describe("CquQuickloginDeviceDO", () => {
       });
     });
 
+    // A completed broker result is idempotently cached for one minute.
+    currentTime += 60_001;
     await devices.requestDeviceRefresh(authority);
 
     await expect(devices.readDeviceSession(userId, authority.deviceId))
@@ -696,10 +693,7 @@ describe("CquQuickloginDeviceDO", () => {
     await runInDurableObject(stub, async (instance) => {
       await (instance as unknown as { alarm(): Promise<void> }).alarm();
     });
-    expect(keepaliveCalls).toBe(1);
-    expect(keepaliveBody).toMatchObject({
-      operationTimeoutMs: 190_000,
-    });
+    expect(runCalls).toBe(2);
     await expect(devices.readDeviceSession(userId, authority.deviceId))
       .resolves.toMatchObject({
         state: "ready",
