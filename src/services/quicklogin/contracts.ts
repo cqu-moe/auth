@@ -151,6 +151,7 @@ export interface StoredDeviceSession {
   sessionVersion: number;
   state: CloudState;
   loginAt: EpochMs | null;
+  reloginAt?: EpochMs;
   lastKeepAliveAt: EpochMs | null;
   storageState: string | null;
   exportDigest: string | null;

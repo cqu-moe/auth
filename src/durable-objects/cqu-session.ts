@@ -49,7 +49,6 @@ import {
   MAX_RELOGINS_PER_WINDOW,
   CONSECUTIVE_RELOGIN_FAIL_ALERT,
   shouldRequireReauth,
-  nextKeepaliveDelayMs,
   recoveryRetryDelayMs,
 } from "../services/cqu-2fa/relogin-policy";
 import {
@@ -110,15 +109,9 @@ import type {
 import { quickloginBrowserRoute } from "../services/quicklogin/browser-routing";
 import { QuickloginAccountClient } from "../services/quicklogin/account-client";
 import { quickloginDeviceModeEnabled } from "../services/quicklogin/mode";
-import { CQU_PROACTIVE_RELOGIN_MS as PROACTIVE_RELOGIN_MS, skipAccountProbes } from "../services/cqu-maintenance-policy";
+import { CQU_PROACTIVE_RELOGIN_MS as PROACTIVE_RELOGIN_MS, sampleCquReloginAt } from "../services/cqu-maintenance-policy";
 
-// keepalive 每个探针经国内节点提取 1 个青果 IP(连 CQU 出站经青果)。频率直接决定青果消耗:
-// 15min→96 个/天, 60min→24 个/天 —— 取 60min 省青果(单账号够用)。代价: 会话若在两次探针
-// 间意外失效, 最长 ~60min 后才被探到并重登(期间 on-demand 取票会 TGT_EXPIRED)。TGT 绝对
-// 寿命 ~8h 且 7h 处已主动重铸, 故 60min 足以兜住「正常过期」; 仅罕见「定点过期」窗口变长。
-const KEEPALIVE_INTERVAL_MS = 60 * 60 * 1000;
 const RETRY_INTERVAL_MS = 60 * 1000;
-const MAX_FAST_RETRIES = 5;
 // keepalive 探活铸票的审计/限流身份: 专属哨兵 clientId 自成桶(不挤占真实 per-client 配额), source 标 keepalive。
 // 限流桶 key 与审计 key 共用同一常量, 杜绝改一处漏一处导致桶/审计错配。
 const KEEPALIVE_CLIENT_ID = "__keepalive__";
@@ -126,8 +119,6 @@ const KEEPALIVE_SOURCE = "keepalive";
 const QUICKLOGIN_MINT_RECEIPTS_KEY = "quickloginMintReceipts";
 const QUICKLOGIN_MINT_RECEIPT_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_QUICKLOGIN_MINT_RECEIPTS = 64;
-// 熔断: transient(瑞数/网络)连续失败时 keepalive 退避封顶(从 KEEPALIVE_INTERVAL_MS 指数涨到 6h)。
-const KEEPALIVE_MAX_BACKOFF_MS = 6 * 60 * 60 * 1000;
 const DUMMY_SERVICE = "https://my.cqu.edu.cn/authserver/authentication/cas";
 
 // CF 容器 stub 的占位 host。所有浏览器出站(/run /service-ticket /keepalive /code
@@ -161,11 +152,11 @@ interface SessionState {
   storageState: CquStorageState | null;
   objectId: string;
   tgt: string;
-  // 当前 TGT 的铸造时刻(ms)。alarm 用它判定是否到 +7h 主动重登窗口。
+  // 每次登录保存一次随机重登时间；旧会话在首次读取时迁移。
   loginAt: number;
+  reloginAt?: number;
   lastKeepAlive: number;
   lastRequestedAt: number;
-  consecutiveFailures: number;
   /** A confirmed expiry cannot be undone by a concurrent failed proactive refresh. */
   confirmedExpiredAt?: number;
 }
@@ -332,6 +323,16 @@ export class CquSessionDO extends DurableObject<Env> {
     if (!this.state) {
       this.state = (await this.ctx.storage.get<SessionState>("state")) ?? null;
     }
+    if (this.state && this.state.loginAt > 0 && this.state.reloginAt === undefined) {
+      this.state = await this.ctx.storage.transaction(async (tx) => {
+        const state = (await tx.get<SessionState>("state")) ?? null;
+        if (state && state.loginAt > 0 && state.reloginAt === undefined) {
+          state.reloginAt = sampleCquReloginAt(state.loginAt);
+          await tx.put("state", state);
+        }
+        return state;
+      });
+    }
   }
 
   /**
@@ -363,8 +364,9 @@ export class CquSessionDO extends DurableObject<Env> {
     // Completion of this CAS state says nothing about another device's browser.
     // Leave operation/channel records for the common cancellation recovery.
     this.state = storedState;
+    await this.loadState();
     await this.setStatus("active");
-    await this.scheduleSessionAlarm(this.nextAccountMaintenanceAt());
+    await this.scheduleSessionAlarm(await this.nextAccountMaintenanceAt());
     console.warn(JSON.stringify({
       event: "cqu.cas.persisted_success_recovered",
     }));
@@ -501,7 +503,6 @@ export class CquSessionDO extends DurableObject<Env> {
             const state = await tx.get<SessionState>("state");
             if (body.outcome === "complete" && state
               && (await tx.get<CquStatus>("status")) === "active"
-              && state.consecutiveFailures === 0
               && (await tx.getAlarm()) === Math.min(cycle.deadlineAt, (cycle.checkedAt ?? 0) + RETRY_INTERVAL_MS)
               && !(await tx.get("loginInFlight"))
               && !(await tx.list({prefix: "quickloginLogin:"})).size
@@ -510,11 +511,13 @@ export class CquSessionDO extends DurableObject<Env> {
               && !(await tx.get("bindingOutbox"))
               && !(await tx.get("bindingTransition"))
               && !(await tx.get("codePermitPending"))) {
-              let next = skipAccountProbes(this.env, state.userId)
-                ? state.loginAt + PROACTIVE_RELOGIN_MS
-                : state.lastKeepAlive + KEEPALIVE_INTERVAL_MS;
+              if (state.loginAt > 0 && state.reloginAt === undefined) {
+                state.reloginAt = sampleCquReloginAt(state.loginAt);
+                await tx.put("state", state);
+              }
+              let next = state.reloginAt ?? state.loginAt + PROACTIVE_RELOGIN_MS;
               const retryAt = await tx.get<number>("reloginRetryAt");
-              if (retryAt && retryAt > Date.now()) next = Math.min(next, retryAt);
+              if (retryAt && retryAt > Date.now()) next = next > Date.now() ? Math.min(next, retryAt) : retryAt;
               await tx.setAlarm(Math.max(Date.now() + 1_000, next));
             }
             if (body.outcome === "failed" && (await tx.get<CquStatus>("status")) !== "active") {
@@ -771,7 +774,6 @@ export class CquSessionDO extends DurableObject<Env> {
         loginAt: 0,
         lastKeepAlive: Date.now(),
         lastRequestedAt: Date.now(),
-        consecutiveFailures: 0,
       };
       await this.setStatus("binding");
       const outcome = await this.containerLogin(
@@ -792,7 +794,7 @@ export class CquSessionDO extends DurableObject<Env> {
       if (outcome === "failed") {
         return { success: false, error: "CQU 登录失败（容器登录未成功）" };
       }
-      await this.scheduleSessionAlarm(this.nextAccountMaintenanceAt());
+      await this.scheduleSessionAlarm(await this.nextAccountMaintenanceAt());
       return { success: true };
     } catch (e) {
       await this.releaseRoutedLoginReservation(reservation.token);
@@ -813,11 +815,6 @@ export class CquSessionDO extends DurableObject<Env> {
   //   ② D6 限频:对所有取票(两模式)做 per-user + per-client 滑动窗口限频(StMintRecord 落 storage);
   //   ③ D6 告警:广路径上若窗口内不同 host 数越阈值则告警(开放重定向探测信号, 只告警不拦);
   //   ④ D6 审计:成功取票后打一条结构化日志(绝不含 ticket/cookies/密码)。
-  // NOTE: keepalive 探针走国内节点 POST /keepalive(经 Workers VPC binding), 不经本方法(getServiceTicket)。
-  // 但改造后探针在节点侧 navigate /login?service=PROBE **真在 CAS 铸一张可用 ST**(再丢弃),
-  // 是新增的真实出票动作 —— 故 runKeepAlive 的 alive 成功路径已自行补「st_mint 审计 + 计入限流窗口」
-  // (source:"keepalive", 见 recordKeepaliveMint), 让审计/限流覆盖 keepalive 的出票面(~24/账号/天)。
-  // 区别: keepalive 是后台系统探活, **记账但豁免拒绝**(不调 stMintThrottled, 被限流挡掉会破坏会话保鲜)。
   // D1 records the user's/admin's intent before a DO call can fail. Check it
   // at every capability checkpoint, and use the existing alarm to finish
   // orphan cleanup after an unavailable DO recovers.
@@ -2215,19 +2212,10 @@ export class CquSessionDO extends DurableObject<Env> {
     else await this.ctx.storage.deleteAlarm();
   }
 
-  /**
-   * 解除吊销(恢复): revoke 的逆操作 —— 把被吊销的会话拉回保活循环。
-   *   ① status → expired: alarm() 对 revoked/unbound 早退, 但对 expired 不早退,
-   *      会照常跑保活探针 —— 旧 cookie 还活就探回 active, 真过期则用保留的 credentials
-   *      容器重登铸新 TGT。置成 expired 而非直接 active, 是因为吊销期间 TGT 可能已自然失效,
-   *      让 alarm 的探针去判定实际状态, 而不是谎报 active。
-   *   ② setAlarm(now): 立即触发一次 alarm, 不等下个 keepalive 周期才恢复。
-   * 不 deleteAll、不清 credentials/state —— 恢复正要靠这些保留的容器凭证与会话快照。
-   * 复用现有 alarm/relogin 路径, 不改其逻辑。
-   */
+  /** Restore revoked credentials as expired; the next alarm performs a real login. */
   private async unrevoke(): Promise<void> {
     // 刻意直写 setStatus("expired") 而非走 nextStatus 状态机: 解除吊销要从任意状态(含
-    // 空/unbound 的 DO)强制置位让 alarm 探针接管; 状态机表里没有从 revoked/unbound 出发的
+    // 空/unbound 的 DO)强制置位让 alarm 重登接管; 状态机表里没有从 revoked/unbound 出发的
     // UNREVOKE 转移, 走表会停在原态而无法恢复保活循环。勿"修回"成走表。
     await this.setStatus("expired");
     await this.scheduleSessionAlarm(Date.now());
@@ -2262,35 +2250,35 @@ export class CquSessionDO extends DurableObject<Env> {
     await this.pruneQuickloginMintReceipts(Date.now());
     await this.loadState();
     if (!this.state || !(await this.reconcileBinding())) return;
-    // alarm 的 13 分钟平台预算在入口建立一次,贯穿保活/主动重登;
+    // alarm 的 13 分钟平台预算在入口建立一次,贯穿主动重登;
     // 内部函数不得重新取得新的 13 分钟。
     const deadlineAt = resolveBrowserDeadline(undefined, Date.now());
     const status = await this.getStatus();
-    // 已撤销/未绑定的会话不再保活。
+    // 已撤销/未绑定的会话不再自动重登。
     if (
       status === "revoked" ||
       status === "unbound" ||
       status === "needs_reauth"
     )
       return;
-    if (status === "expired" || status === "relogging") {
+    if (status === "expired" || status === "relogging" ||
+        (status === "active" && (!this.state.storageState || this.state.loginAt <= 0))) {
       await this.relogin(deadlineAt);
-      if (await this.getStatus() === "active") await this.scheduleSessionAlarm(this.nextAccountMaintenanceAt());
+      if (await this.getStatus() === "active") await this.scheduleSessionAlarm(await this.nextAccountMaintenanceAt(), { activeOnly: true });
       return;
     }
 
-    // 主动重登: TGT 接近 ~8h 硬上限前(+7h)且当前 active, 提前重铸, 避免热路径在过期窗口取不到 ST。
-    // 判定抽成纯函数 shouldProactiveRelogin(便于单测), 语义与旧内联条件完全一致(含 `>=` 边界)。
+    // 每轮截止时间已经持久化；alarm 重试和状态查询不重新抽签。
     if (
       shouldProactiveRelogin(
         status,
         this.state.loginAt,
         Date.now(),
-        PROACTIVE_RELOGIN_MS
+        (this.state.reloginAt ?? this.state.loginAt + PROACTIVE_RELOGIN_MS) - this.state.loginAt
       )
     ) {
       console.warn(
-        `[CquSession] ${this.state.studentId}: TGT age >= 7h, proactive relogin`
+        `[CquSession] ${this.state.studentId}: scheduled proactive relogin due`
       );
       await this.relogin(deadlineAt);
       // M7 防复活 + 熔断早退: relogin 容器登录 await 期间 input gate 开, admin 可能 revoke/unbind;
@@ -2302,204 +2290,16 @@ export class CquSessionDO extends DurableObject<Env> {
         );
         return;
       }
-      // relogin 内部已更新状态; 重新排 alarm 继续保活循环。
-      // 此处刻意不再 putStateGuarded: containerLogin 成功时内部已落 fresh state; proactive 跑在
-      // 健康 active 会话上(consecutiveFailures 本就 0), 无需像 expired 分支那样为清零失败计数而重 put。
-      await this.scheduleSessionAlarm(this.nextAccountMaintenanceAt());
+      // relogin 内部已更新状态; 重新排 alarm 等待下一次重登。
+      // containerLogin 已原子保存新会话；这里仅重排后续维护。
+      await this.scheduleSessionAlarm(await this.nextAccountMaintenanceAt(), { activeOnly: true });
       return;
     }
 
-    if (skipAccountProbes(this.env, this.state.userId)) {
-      await this.scheduleSessionAlarm(this.nextAccountMaintenanceAt(), { activeOnly: true });
-      return;
-    }
-
-    const sourceSession = structuredClone(this.state);
-    const outcome = await this.runKeepAlive(deadlineAt);
-
-    if (outcome.status === "active") {
-      let refreshed: SessionState | null;
-      try {
-        refreshed = await this.ctx.storage.transaction(async (tx) => {
-          const latest = await tx.get<SessionState>("state");
-          if ((await tx.get<CquStatus>("status")) !== "active" || !latest
-            || latest.confirmedExpiredAt !== undefined
-            || latest.userId !== sourceSession.userId || latest.studentId !== sourceSession.studentId
-            || latest.loginAt !== sourceSession.loginAt
-            || JSON.stringify(latest.storageState) !== JSON.stringify(sourceSession.storageState)) {
-            return null;
-          }
-          const next = { ...latest, lastKeepAlive: Date.now(), consecutiveFailures: 0 };
-          if (outcome.state) {
-            const candidate = { ...next, storageState: outcome.state };
-            if (hasValidTgt(outcome.state) && !stateExceedsHardLimit(serializedStateBytes(candidate))) {
-              next.storageState = outcome.state;
-            } else {
-              console.warn("[CquSession] keepalive refresh invalid or oversized, keeping previous storage state");
-            }
-          }
-          if (stateExceedsHardLimit(serializedStateBytes(next))) return latest;
-          await tx.put({ state: next, reloginFailures: 0, credentialFailures: 0 });
-          return next;
-        });
-      } catch {
-        console.warn("[CquSession] keepalive writeback failed, keeping previous state");
-        await this.scheduleSessionAlarm(Date.now() + RETRY_INTERVAL_MS);
-        return;
-      }
-      if (!refreshed) {
-        await this.scheduleSessionAlarm(Date.now() + KEEPALIVE_INTERVAL_MS, { activeOnly: true });
-        return;
-      }
-      this.state = refreshed;
-      await this.scheduleSessionAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
-      return;
-    }
-
-    if (outcome.status === "expired") {
-      if (!(await this.markSessionExpired(sourceSession))) {
-        await this.scheduleSessionAlarm(Date.now() + KEEPALIVE_INTERVAL_MS, { activeOnly: true });
-        return;
-      }
-      // 探针证实 TGT 服务端失效 — 触发容器重登铸新 TGT。
-      // relogin 自带 single-flight + 状态机(RELOGIN_START/OK/FAIL), 失败落 expired。
-      console.warn(
-        `[CquSession] ${this.state.studentId}: session expired server-side, triggering container relogin`
-      );
-      await this.relogin(deadlineAt);
-      // M7 防复活: runKeepAlive 探活 + relogin 容器登录的 await 期间 input gate 都开过,
-      // admin 可能已 revoke/unbind。relogin 经状态机推进(nextStatus 对 revoked 无 RELOGIN_OK
-      // 转移, 不会复活 status), 但本分支仍可能重排 alarm 重启保活循环。写回前重查 status,
-      // 命中撤销/终态(含 needs_reauth)即放弃: 不 putState、不 setAlarm。
-      if (shouldAbandonKeepaliveWriteback(await this.getStatus())) {
-        console.warn(
-          `[CquSession] ${this.state.studentId}: status changed during expired-relogin, abandoning writeback (anti-resurrection / halt)`
-        );
-        return;
-      }
-      this.state.consecutiveFailures = 0;
-      await this.putStateGuarded(this.state);
-      await this.scheduleSessionAlarm(Date.now() + KEEPALIVE_INTERVAL_MS);
-      return;
-    }
-
-    // outcome === "transient": 够不到 CQU SSO。CAS 会话服务端几乎肯定还有效,
-    // 保留 cookies/status 不动, 快重试而非误判重登。连续失败时指数退避(封顶 6h),
-    // 止住刷屏 + 降瑞数风控, 但仍会自愈(可达即回 active)。
-    this.state.consecutiveFailures = (this.state.consecutiveFailures ?? 0) + 1;
-    const delay = nextKeepaliveDelayMs(this.state.consecutiveFailures, {
-      fastRetries: MAX_FAST_RETRIES,
-      fastMs: RETRY_INTERVAL_MS,
-      baseMs: KEEPALIVE_INTERVAL_MS,
-      capMs: KEEPALIVE_MAX_BACKOFF_MS,
-    });
-    console.warn(
-      `[CquSession] ${this.state.studentId}: keepalive unreachable (attempt #${this.state.consecutiveFailures}), keeping session, retrying in ${delay}ms`
-    );
-    await this.putStateGuarded(this.state);
-    await this.scheduleSessionAlarm(Date.now() + delay);
+    await this.scheduleSessionAlarm(await this.nextAccountMaintenanceAt(), { activeOnly: true });
   }
 
-  /**
-   * 一轮保活探针。返回:
-   * - "active":    凭已有 cookie 仍能换 ST, 会话有效。
-   * - "expired":   服务端可达但 TGT 失效 — 需真重登。
-   * - "transient": 够不到 CQU; cookie 原样保留, 调用方应快重试。
-   *
-   * NOTE: 与旧实现不同, 这里只「探针」, 不在 runKeepAlive 内直接重登;
-   * 重登(走容器)由 alarm() 在 outcome==="expired" 时统一触发, 以复用 single-flight。
-   */
-  private async runKeepAlive(
-    deadlineAt?: number
-  ): Promise<{ status: "active" | "expired" | "transient"; state?: CquStorageState }> {
-    const state = this.state!;
-    // 旧会话迁移守卫:改造前只存 3 cookie(无完整 storageState)。报 expired 让 alarm 触发重登,
-    // 铸一套新的完整 storageState 自愈;绝不把 null state 发给节点(否则 400 → 永远退避不重登)。
-    if (!state.storageState) {
-      console.warn(
-        `[CquSession] ${state.studentId}: no storageState (legacy session), forcing relogin`
-      );
-      return { status: "expired" };
-    }
-    // 探活走集中 transport(node→国内节点;CF→该用户 APAC 容器)。
-    // 节点恒返回 200 {ok, status: alive|expired|unreachable}, 映射回三态:
-    //   alive→active / expired→expired / unreachable→transient。
-    // 够不到节点本身(VPC/网络抛错、非 JSON、非 ok)或未知 status = 探不通 → transient
-    // (保 cookies/status 不动、退避重试), 绝不误判过期触发容器重登。
-    let res: Response;
-    try {
-      const route = this.currentBrowserRoute();
-      const budget = this.browserOperationBudget(deadlineAt ?? resolveBrowserDeadline(undefined, Date.now()));
-      const body: Record<string, unknown> = { state: state.storageState };
-      if (route.backend === "cloudflare" && budget.operationTimeoutMs) {
-        body.operationTimeoutMs = budget.operationTimeoutMs;
-      }
-      res = await fetchBrowser(
-        this.env,
-        route,
-        new Request(`${BROWSER_BASE}/keepalive`, {
-          method: "POST",
-          body: JSON.stringify(body),
-          // 出站 deadline(同取票路径):探活也在节点侧排队持槽,无超时则 backlog 时
-          // 阻塞 DO 单线程。超时/AbortError/容量错误归 transient(退避不误判过期)。
-          signal: AbortSignal.timeout(budget.fetchTimeoutMs),
-        })
-      );
-    } catch (e) {
-      console.warn(
-        `[CquSession] ${state.studentId}: probe unreachable (node fetch failed): ${errMsg(e)}`
-      );
-      return { status: "transient" };
-    }
-    let body: { ok?: boolean; status?: string; detail?: string; state?: CquStorageState };
-    try {
-      body = await res.json();
-    } catch {
-      console.warn(
-        `[CquSession] ${state.studentId}: probe unreachable (node non-JSON status=${res.status})`
-      );
-      return { status: "transient" };
-    }
-    if (!res.ok || !body.ok) {
-      console.warn(
-        `[CquSession] ${state.studentId}: probe unreachable (node not ok status=${res.status} detail=${sanitizeNodeDetail(body.detail)})`
-      );
-      return { status: "transient" };
-    }
-    if (body.status === "alive") {
-      // #1 探针在节点侧 navigate /login?service=PROBE 真铸了一张 ST(再丢弃) —— 把这次出票
-      // 记入 st_mint 审计 + 限流窗口(记账但豁免拒绝, 见 recordKeepaliveMint)。await 落盘后才回写,
-      // 顺序无关(两者各写不同 storage key)。
-      await this.recordKeepaliveMint();
-      // The caller fences and commits this candidate; the probe must not mutate shared session state.
-      return { status: "active", state: body.state };
-    }
-    if (body.status === "expired") {
-      console.warn(
-        `[CquSession] ${state.studentId}: probe says expired: ${sanitizeNodeDetail(body.detail)}`
-      );
-      return { status: "expired" };
-    }
-    // "unreachable" 或未知 status → 保会话退避。
-    console.warn(
-      `[CquSession] ${state.studentId}: probe unreachable: status=${body.status ?? "(none)"} detail=${sanitizeNodeDetail(body.detail)}`
-    );
-    return { status: "transient" };
-  }
-
-  /**
-   * #1 keepalive 铸票纳审计+限流(记账但豁免拒绝)。
-   *
-   * 探针在节点侧 navigate /login?service=PROBE 真在 CAS 铸一张可用 ST(再丢弃), 是新增的真实
-   * 出票动作 —— 故与 getServiceTicket 一致打一条 st_mint 风格审计日志(source:"keepalive"),
-   * 并把这次铸票计入 per-user 限流窗口(StMintRecord 落 stMintLog), 让审计/限流统计涵盖
-   * keepalive 的出票量(~24/账号/天)。
-   *
-   * 关键: keepalive 是后台系统探活, **记账但豁免拒绝** —— 只追加 StMintRecord(不调 stMintThrottled,
-   * 被限流挡掉会破坏会话保鲜)。clientId 用专属哨兵 "__keepalive__" 自成桶, 不挤占用户/插件的
-   * per-client 配额; host 取 PROBE 目标 host; broad=false(符号路径探针, 不计入 distinct-broad 告警)。
-   * 绝不记录 ticket / cookies / state。
-   */
+  /** Settle pre-upgrade device probe receipts without sending any new school request. */
   private async recordQuickloginKeepaliveMint(input: {
     deviceId: string;
     operationId: string;
@@ -2685,7 +2485,7 @@ export class CquSessionDO extends DurableObject<Env> {
       await this.scheduleSessionAlarm(retryAt);
 
       // 熔断(混合): 仅「凭据」失败累计 —— 达阈值落 needs_reauth 终态(凭据真死, 停保活,
-      // 等用户重绑)。「瑞数/瞬态」失败不累计, 交 keepalive 退避自愈, 绝不误杀。
+      // 等用户重绑)。「瑞数/瞬态」失败不累计, 交重登退避自愈, 绝不误杀。
       if (reason === "credential") {
         const credFails =
           ((await this.ctx.storage.get<number>("credentialFailures")) ?? 0) + 1;
@@ -3253,15 +3053,16 @@ export class CquSessionDO extends DurableObject<Env> {
     if (remaining.length) await this.scheduleSessionAlarm(Math.min(...remaining.map((item) => item.retryAt)));
   }
 
-  private nextAccountMaintenanceAt(): number {
+  private async nextAccountMaintenanceAt(): Promise<number> {
     const now = Date.now();
-    const renewAt = (this.state?.loginAt ?? 0) + PROACTIVE_RELOGIN_MS;
-    // Failed renewal keeps the existing retry/backoff instead of spinning on a past deadline.
-    return this.state && skipAccountProbes(this.env, this.state.userId) && renewAt > now
-      ? renewAt : now + KEEPALIVE_INTERVAL_MS;
+    const renewAt = this.state?.reloginAt ?? (this.state?.loginAt ?? 0) + PROACTIVE_RELOGIN_MS;
+    if (renewAt > now) return renewAt;
+    const retryAt = await this.ctx.storage.get<number>("reloginRetryAt");
+    // A failed refresh keeps its persisted backoff even when renewal is overdue.
+    return Math.max(now + 1_000, retryAt ?? now + RETRY_INTERVAL_MS);
   }
 
-  /** One alarm serves keepalive, operation deadlines and recovery; no caller may postpone maintenance. */
+  /** One alarm serves renewal, operation deadlines and recovery; no caller may postpone maintenance. */
   private async scheduleSessionAlarm(at: number, options: { activeOnly?: boolean } = {}): Promise<void> {
     await this.ctx.storage.transaction(async (tx) => {
       if (options.activeOnly) {
@@ -3465,7 +3266,7 @@ export class CquSessionDO extends DurableObject<Env> {
       // CAS 三件套校验)。容器可能返回 ok 但 state 半残(缺 SESSION/rg_objectid 等), 这种半残态
       // 落盘后下轮取票 storageState 非 null 却缺关键 cookie → 落登录页 409 → 误判过期重登; 故按
       // 失败处理(不顶替旧态)。归类为 transient(半残多是瑞数/网络抖动致导出不全, 非凭据真死),
-      // 交 keepalive 退避自愈, 绝不误累计熔断。
+      // 交重登退避自愈, 绝不误累计熔断。
       if (!res.ok || !result.ok || !result.state || !hasValidTgt(result.state)) {
         const invalidState = !!result.state && !hasValidTgt(result.state);
         console.warn({ evt: "cqu.login.failed", httpStatus: res.status,
@@ -3505,9 +3306,9 @@ export class CquSessionDO extends DurableObject<Env> {
           okEvent === "FIRST_LOGIN_OK" ? state.objectId : latest.objectId,
         tgt: "", // 已废弃: 改造后 TGT 在 storageState.cookies 内, 顶层字段恒清空。
         loginAt: now,
+        reloginAt: sampleCquReloginAt(now),
         lastKeepAlive: now,
         lastRequestedAt: latest.lastRequestedAt,
-        consecutiveFailures: latest.consecutiveFailures ?? 0,
       };
       // 诊断: 尽力解出新 TGT(SOURCEID_TGC, JWT) 的 exp, 观测其服务端寿命, 排查
       // 会话疑似「定点过期」(按固定时刻而非固定时长)。绝不记录 token 本身, 只记

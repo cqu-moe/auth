@@ -124,17 +124,3 @@ export function shouldRequireReauth(credentialFailures: number): boolean {
 export function recoveryRetryDelayMs(failures: number): number {
   return [60_000, 120_000, 300_000, 600_000][Math.max(0, failures - 1)] ?? 900_000;
 }
-
-/**
- * keepalive 探针「瞬态(transient)」失败后下一次 alarm 的延迟(纯函数, 便于单测)。
- * - consecutiveFailures <= fastRetries: 快重试(fastMs), 抓瑞数间歇的放行窗口;
- * - 超过后: 从 baseMs 指数退避, 封顶 capMs —— 止住刷屏 + 降瑞数风控, 但仍会自愈。
- */
-export function nextKeepaliveDelayMs(
-  consecutiveFailures: number,
-  opts: { fastRetries: number; fastMs: number; baseMs: number; capMs: number }
-): number {
-  if (consecutiveFailures <= opts.fastRetries) return opts.fastMs;
-  const steps = consecutiveFailures - opts.fastRetries - 1;
-  return Math.min(opts.baseMs * 2 ** steps, opts.capMs);
-}

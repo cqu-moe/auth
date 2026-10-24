@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { DeviceAuthority, StoredDeviceSession } from "./contracts";
-import { nextDeviceAction, nextQuickloginRetryDelayMs } from "./maintenance";
+import {
+  nextDeviceAction,
+  nextQuickloginRetryDelayMs,
+  quickloginSessionUsableUntil,
+} from "./maintenance";
 
 const now = 1_800_000_000_000;
 const authority: DeviceAuthority = {
@@ -17,10 +21,28 @@ const session: StoredDeviceSession = {
 };
 
 describe("nextDeviceAction", () => {
-  it("uses the confirmed maintenance boundaries", () => {
-    expect(nextDeviceAction({ ...session, loginAt: now - 7 * 60 * 60_000 }, authority, now)).toBe("login");
-    expect(nextDeviceAction({ ...session, lastKeepAliveAt: now - 60 * 60_000 }, authority, now)).toBe("keepalive");
+  it("waits until the persisted randomized relogin boundary", () => {
+    const reloginAt = now + 6 * 60 * 60_000;
+    expect(nextDeviceAction({ ...session, reloginAt }, authority, now)).toBe("wait");
+    expect(nextDeviceAction({ ...session, reloginAt }, authority, reloginAt)).toBe("login");
     expect(nextDeviceAction(session, { ...authority, lastSeenAt: now - 7 * 24 * 60 * 60_000 }, now)).toBe("pause_inactive");
+  });
+  it("uses the seven-hour fallback for unmigrated sessions", () => {
+    const boundary = now - 7 * 60 * 60_000;
+    expect(nextDeviceAction({ ...session, loginAt: boundary }, authority, now)).toBe("login");
+    expect(nextDeviceAction({ ...session, loginAt: boundary + 1 }, authority, now)).toBe("wait");
+  });
+  it("starts a login retry when transient backoff is due", () => {
+    expect(nextDeviceAction({
+      ...session,
+      state: "temporary_unavailable",
+      nextAttemptAt: now,
+    }, authority, now)).toBe("login");
+    expect(nextDeviceAction({
+      ...session,
+      state: "temporary_unavailable",
+      nextAttemptAt: now + 60_000,
+    }, authority, now)).toBe("wait");
   });
   it("does not relogin needs_reauth and stops denied authority", () => {
     expect(nextDeviceAction({ ...session, state: "needs_reauth" }, authority, now)).toBe("wait");
@@ -55,6 +77,20 @@ describe("nextQuickloginRetryDelayMs", () => {
 });
 
 it('executes an explicit refresh even when the old session was recently validated', () => {
- const state = { operationId:'explicit-command', state:'refreshing', generation:1, nextAttemptAt:null, storageState:'present', loginAt:Date.now(),lastKeepAliveAt:Date.now() } as any;
- expect(nextDeviceAction(state,{allowed:true,generation:1,lastSeenAt:Date.now()} as any,Date.now())).toBe('login');
+ expect(nextDeviceAction(
+  { ...session, state: 'refreshing', reloginAt: now + 6 * 60 * 60_000 },
+  authority,
+  now
+ )).toBe('login');
+});
+
+it('keeps a refreshing session usable until the seven-hour login boundary', () => {
+  expect(quickloginSessionUsableUntil({
+    ...session,
+    state: "refreshing",
+    lastKeepAliveAt: session.loginAt,
+    reloginAt: session.loginAt + 4 * 60 * 60_000,
+  })).toBe(session.loginAt + 7 * 60 * 60_000);
+  expect(quickloginSessionUsableUntil({ ...session, lastKeepAliveAt: null })).toBeNull();
+  expect(quickloginSessionUsableUntil({ ...session, storageState: null })).toBeNull();
 });

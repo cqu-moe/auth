@@ -8,7 +8,6 @@ import {
   classifyLoginFailure,
   shouldRequireReauth,
   MAX_CREDENTIAL_FAILS,
-  nextKeepaliveDelayMs,
 } from "./relogin-policy";
 
 describe("shouldProactiveRelogin", () => {
@@ -156,30 +155,10 @@ describe("shouldRequireReauth", () => {
   });
 });
 
-describe("nextKeepaliveDelayMs", () => {
-  it("classifies browser infrastructure codes as transient", () => {
-    expect(classifyLoginFailure("BROWSER_BUSY")).toBe("transient");
-    expect(classifyLoginFailure("BROWSER_INSTANCE_REPLACED")).toBe("transient");
-    expect(classifyLoginFailure("BROWSER_DEADLINE")).toBe("transient");
-  });
-  const opts = {
-    fastRetries: 5,
-    fastMs: 60_000, // 60s
-    baseMs: 15 * 60_000, // 15min
-    capMs: 6 * 60 * 60_000, // 6h
-  };
-  it("快重试窗口内(<= fastRetries) -> fastMs", () => {
-    expect(nextKeepaliveDelayMs(1, opts)).toBe(opts.fastMs);
-    expect(nextKeepaliveDelayMs(5, opts)).toBe(opts.fastMs);
-  });
-  it("超过快重试 -> 从 baseMs 指数退避", () => {
-    expect(nextKeepaliveDelayMs(6, opts)).toBe(opts.baseMs); // 15min
-    expect(nextKeepaliveDelayMs(7, opts)).toBe(opts.baseMs * 2); // 30min
-    expect(nextKeepaliveDelayMs(8, opts)).toBe(opts.baseMs * 4); // 1h
-  });
-  it("封顶 capMs", () => {
-    expect(nextKeepaliveDelayMs(99, opts)).toBe(opts.capMs);
-  });
+it("classifies browser infrastructure codes as transient", () => {
+  expect(classifyLoginFailure("BROWSER_BUSY")).toBe("transient");
+  expect(classifyLoginFailure("BROWSER_INSTANCE_REPLACED")).toBe("transient");
+  expect(classifyLoginFailure("BROWSER_DEADLINE")).toBe("transient");
 });
 
 describe('recovery retry policy', () => {

@@ -120,66 +120,7 @@ describe("confirmed CAS expiry recovery", () => {
     });
   });
 
-  it.each(["harvest", "ticket"])("a late alive probe cannot undo confirmed %s expiry", async (operation) => {
-    const stub = freshStub("late-alive-expiry");
-    await seedSession(stub, { extra: { reloginFailures: 3, credentialFailures: 1 } });
-    await runInDurableObject(stub, async (instance, ctx) => {
-      const target = instance as unknown as SessionTarget;
-      let expired: unknown;
-      const oldRefresh = validStorageState();
-      oldRefresh.cookies[0].value = "late-probe-tgt";
-      spyBrowserFetch({
-        "/data-harvest": () => Response.json({ ok: false, error: "TGT_EXPIRED" }, { status: 409 }),
-        "/service-ticket": () => Response.json({ ok: false, error: "TGT_EXPIRED" }, { status: 409 }),
-        "/keepalive": async () => {
-          await expect(operation === "harvest"
-            ? target.dataHarvest({ recipe, clientId: "calendar", source: "rpc" })
-            : target.getServiceTicket({ service: "jwxt" }))
-            .rejects.toMatchObject({ code: "TGT_EXPIRED" });
-          expired = await ctx.storage.get("state");
-          return Response.json({ ok: true, status: "alive", state: oldRefresh });
-        },
-      });
-      await target.alarm();
-      expect(await ctx.storage.get("status")).toBe("expired");
-      expect(await ctx.storage.get("state")).toEqual(expired);
-      expect(await ctx.storage.get("reloginFailures")).toBe(3);
-      expect(await ctx.storage.get("credentialFailures")).toBe(1);
-      const cycle = await ctx.storage.get<{ id: string }>("sessionRecoveryCycle");
-      expect(await (instance as unknown as {
-        recoveryTick(id: string): Promise<{ state: string }>;
-      }).recoveryTick(cycle!.id)).toMatchObject({ state: "waiting" });
-    });
-  });
-
-  it.each(["login", "state-refresh"])("a late alive probe cannot write over a newer %s", async (change) => {
-    const stub = freshStub("late-alive-generation");
-    await seedSession(stub);
-    await runInDurableObject(stub, async (instance, ctx) => {
-      let replacement: Record<string, unknown>;
-      const newState = validStorageState();
-      newState.cookies[0].value = "newer-session-tgt";
-      const oldRefresh = validStorageState();
-      oldRefresh.cookies[0].value = "late-probe-tgt";
-      spyBrowserFetch({ "/keepalive": async () => {
-        const original = await ctx.storage.get<Record<string, unknown>>("state");
-        replacement = {
-          ...original,
-          loginAt: (original!.loginAt as number) + (change === "login" ? 1 : 0),
-          lastKeepAlive: 1234,
-          storageState: newState,
-        };
-        await ctx.storage.put("state", replacement);
-        (instance as unknown as { state: Record<string, unknown> }).state = structuredClone(replacement);
-        return Response.json({ ok: true, status: "alive", state: oldRefresh });
-      } });
-      await (instance as unknown as SessionTarget).alarm();
-      expect(await ctx.storage.get("status")).toBe("active");
-      expect(await ctx.storage.get("state")).toEqual(replacement!);
-    });
-  });
-
-  it.each(["harvest", "ticket"])("%s expiry starts recovery without another keepalive", async (operation) => {
+  it.each(["harvest", "ticket"])("%s expiry starts asynchronous recovery", async (operation) => {
     const stub = freshStub("confirmed-expiry");
     await seedSession(stub);
     await runInDurableObject(stub, async (instance, ctx) => {
@@ -206,14 +147,17 @@ describe("confirmed CAS expiry recovery", () => {
     await seedSession(stub);
     await seedCredentials(stub);
     await runInDurableObject(stub, async (instance, ctx) => {
+      const target = instance as unknown as SessionTarget;
       spyBrowserFetch({
-        "/keepalive": () => Response.json({ ok: true, status: "expired" }),
+        "/service-ticket": () => Response.json({ ok: false, error: "cas-login" }, { status: 409 }),
         "/health": () => Response.json({ ok: true, bootId: "boot-1", browserProfile: "cloudflare", capabilities: ["browser-route-v1", "operation-deadline-v1"] }),
         "/code-permit": () => Response.json({ ok: true }),
         "/run": () => Response.json({ ok: false, errorCode: "WAF_CHALLENGE" }),
         "/login-cancel": () => Response.json({ ok: true, stopped: true, mayHaveRequestedCode: false }),
       });
-      await (instance as unknown as SessionTarget).alarm();
+      await expect(target.getServiceTicket({ service: "jwxt" }))
+        .rejects.toMatchObject({ code: "TGT_EXPIRED" });
+      await target.alarm();
       expect(await ctx.storage.get("status")).toBe("expired");
       const cycle = await ctx.storage.get<{ id: string }>("sessionRecoveryCycle");
       expect(cycle).toBeDefined();
@@ -271,16 +215,17 @@ describe("confirmed CAS expiry recovery", () => {
     });
   });
 
-  it.each([
-    ["alive", 0], ["alive", 30_000], ["expired", 0], ["expired", 30_000],
-  ] as const)("a stale %s probe preserves maintenance after a real harvest refresh (existing delay=%s)", async (probeStatus, existingDelay) => {
-    const stub = freshStub("harvest-refresh-maintenance");
-    await seedSession(stub);
+  it.each([false, true])(
+    "a real harvest refresh preserves maintenance and an earlier alarm (earlier alarm=%s)",
+    async (hasEarlierAlarm) => {
+      const stub = freshStub("harvest-refresh-maintenance");
+      const reloginAt = Date.now() + 2 * 60 * 60_000;
+      await seedSession(stub, { reloginAt });
     await runInDurableObject(stub, async (instance, ctx) => {
       const target = instance as unknown as SessionTarget;
       const refreshed = validStorageState();
       refreshed.cookies[0].value = "harvest-refreshed-tgt";
-      let existingAlarm: number | null = null;
+      const earlierAlarm = Date.now() + 30_000;
       spyBrowserFetch({
         "/data-harvest": () => Response.json({
           ok: true,
@@ -288,26 +233,22 @@ describe("confirmed CAS expiry recovery", () => {
           captures: [{ url: "https://my.cqu.edu.cn/student/my-table-detail", status: 200, contentType: "application/json", body: "{}" }],
           fetches: [],
         }),
-        "/keepalive": async () => {
-          await target.dataHarvest({ recipe, clientId: "calendar", source: "rpc" });
-          expect(await ctx.storage.getAlarm()).toBeNull();
-          if (existingDelay) {
-            existingAlarm = Date.now() + existingDelay;
-            await ctx.storage.setAlarm(existingAlarm);
-          }
-          return Response.json({ ok: true, status: probeStatus, state: validStorageState() });
-        },
       });
-      await ctx.storage.deleteAlarm();
+      await target.dataHarvest({ recipe, clientId: "calendar", source: "rpc" });
+      if (hasEarlierAlarm) await ctx.storage.setAlarm(earlierAlarm);
+      else await ctx.storage.deleteAlarm();
       await target.alarm();
       expect(await ctx.storage.get("status")).toBe("active");
-      expect(await ctx.storage.get("state")).toMatchObject({ storageState: refreshed });
-      expect(await ctx.storage.getAlarm()).not.toBeNull();
-      expect(await ctx.storage.getAlarm()).toBeGreaterThan(Date.now());
-      expect(await ctx.storage.getAlarm()).toBeLessThanOrEqual(Date.now() + 60 * 60_000);
-      if (existingAlarm !== null) expect(await ctx.storage.getAlarm()).toBe(existingAlarm);
+      expect(await ctx.storage.get("state")).toMatchObject({
+        storageState: refreshed,
+        reloginAt,
+      });
+      expect(await ctx.storage.getAlarm()).toBe(
+        hasEarlierAlarm ? earlierAlarm : reloginAt
+      );
     });
-  });
+    }
+  );
 
   it("a successful recovery clears old expiry evidence for future proactive refreshes", async () => {
     const stub = freshStub("recovered-expiry");
@@ -353,7 +294,7 @@ describe("confirmed CAS expiry recovery", () => {
     });
   });
 
-  it.each(["harvest", "ticket", "keepalive"])("late %s expiry cannot invalidate a newer login", async (operation) => {
+  it.each(["harvest", "ticket"])("late %s expiry cannot invalidate a newer login", async (operation) => {
     const stub = freshStub("late-expiry");
     await seedSession(stub);
     await seedCredentials(stub);
@@ -364,22 +305,18 @@ describe("confirmed CAS expiry recovery", () => {
         replacement = { ...original, loginAt: (original!.loginAt as number) + 1 };
         await ctx.storage.put("state", replacement);
         (instance as unknown as { state: Record<string, unknown> }).state = replacement;
-        return operation === "keepalive"
-          ? Response.json({ ok: true, status: "expired" })
-          : Response.json({ ok: false, error: "TGT_EXPIRED" }, { status: 409 });
+        return Response.json({ ok: false, error: "TGT_EXPIRED" }, { status: 409 });
       };
       spyBrowserFetch({
         "/data-harvest": expireOldSession,
         "/service-ticket": expireOldSession,
-        "/keepalive": expireOldSession,
         "/health": () => Response.json({ ok: true, bootId: "boot-1", browserProfile: "cloudflare", capabilities: ["browser-route-v1", "operation-deadline-v1"] }),
         "/code-permit": () => Response.json({ ok: true }),
         "/run": () => Response.json({ ok: false, errorCode: "WAF_CHALLENGE" }),
         "/login-cancel": () => Response.json({ ok: true, stopped: true, mayHaveRequestedCode: false }),
       });
       const target = instance as unknown as SessionTarget;
-      if (operation === "keepalive") await target.alarm();
-      else await expect(operation === "harvest"
+      await expect(operation === "harvest"
         ? target.dataHarvest({ recipe, clientId: "calendar", source: "rpc" })
         : target.getServiceTicket({ service: "jwxt" })).rejects.toMatchObject({ code: "TGT_EXPIRED" });
       expect(await ctx.storage.get("status")).toBe("active");

@@ -4,7 +4,7 @@ import { DurableObject } from "cloudflare:workers";
 import type { Env } from "../types";
 import {
   CQU_PROACTIVE_RELOGIN_MS,
-  skipDeviceProbes,
+  sampleCquReloginAt,
 } from "../services/cqu-maintenance-policy";
 import { QuickloginAccountClient } from "../services/quicklogin/account-client";
 import {
@@ -25,18 +25,11 @@ import {
   nextQuickloginRetryDelayMs,
   QUICKLOGIN_RETRY_CAP_MS,
 } from "../services/quicklogin/maintenance";
-import { fetchBrowser } from "../services/cqu-browser-routing";
-import {
-  BROWSER_CLEANUP_MARGIN_MS,
-  CONTAINER_BROWSER_DEADLINE_MS,
-} from "../services/cqu-browser-budget";
-import { quickloginBrowserRoute } from "../services/quicklogin/browser-routing";
+import { BROWSER_CLEANUP_MARGIN_MS } from "../services/cqu-browser-budget";
 
 const SESSION_KEY = "session";
 const OWNER_KEY = "owner";
 const PENDING_KEEPALIVE_STATE_KEY = "pendingKeepaliveState";
-const KEEPALIVE_MS = 60 * 60_000;
-const PENDING_KEEPALIVE_TTL_MS = 24 * 60 * 60_000;
 
 interface DeviceOwner {
   userId: string;
@@ -76,11 +69,12 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
 
   private nextMaintenanceAt(session: StoredDeviceSession, authority: DeviceAuthority): number {
     const now = Date.now();
-    if (!skipDeviceProbes(this.env, authority.ownerUserId, authority.deviceId)) {
-      return session.nextAttemptAt ?? now + KEEPALIVE_MS;
-    }
     const renewalAt = session.loginAt !== null && session.state !== "needs_reauth"
-      ? session.loginAt + CQU_PROACTIVE_RELOGIN_MS : now + KEEPALIVE_MS;
+      ? Math.min(
+          session.reloginAt ?? session.loginAt + CQU_PROACTIVE_RELOGIN_MS,
+          session.loginAt + CQU_PROACTIVE_RELOGIN_MS
+        )
+      : (authority.lastSeenAt ?? now) + INACTIVE_MS;
     return Math.max(now + 1_000, Math.min(
       session.nextAttemptAt !== null && session.nextAttemptAt > now ? session.nextAttemptAt : renewalAt,
       authority.lastSeenAt === null ? Infinity : authority.lastSeenAt + INACTIVE_MS
@@ -198,22 +192,36 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     await this.recoverPendingKeepalive(session, Date.now());
     const authority = await new QuickloginAccountClient(this.env)
       .getDeviceAuthority(this.owner.userId, this.owner.deviceId);
-    const probesEnabled = !skipDeviceProbes(this.env,
-      this.owner.userId,
-      this.owner.deviceId
-    );
-    const action = nextDeviceAction(session, authority, Date.now(), probesEnabled);
+    if (authority.allowed && authority.generation === session.generation) {
+      session = await this.ensureReloginAt(session);
+    }
+    const action = nextDeviceAction(session, authority, Date.now());
     if (action === "stop") {
       await this.notify(authority);
       return;
     }
     if (action === "pause_inactive") {
-      session.state = "paused";
-      await this.ctx.storage.put(SESSION_KEY, session);
+      await this.ctx.storage.transaction(async (tx) => {
+        const current = await tx.get<StoredDeviceSession>(SESSION_KEY);
+        if (!current || current.state === "disabled" || current.state === "revoked") return;
+        current.state = "paused";
+        await tx.put(SESSION_KEY, current);
+      });
       await this.ctx.storage.deleteAlarm();
       return;
     }
-    if (session.pendingKeepaliveMint && !probesEnabled && action !== "login") {
+    if (session.pendingKeepaliveMint && action !== "login") {
+      // Keep renewal scheduled even if the legacy receipt RPC exhausts alarm retries.
+      await this.ctx.storage.transaction(async (tx) => {
+        const current = await tx.get<StoredDeviceSession>(SESSION_KEY);
+        if (!current || !sameTuple(sessionTuple(current), sessionTuple(session)) ||
+            current.state !== session.state || current.state === "paused" ||
+            current.state === "disabled" || current.state === "revoked" ||
+            !quickloginDeviceModeEnabled(this.env)) return;
+        const next = this.nextMaintenanceAt(current, authority);
+        const existing = await tx.getAlarm();
+        await tx.setAlarm(existing === null ? next : Math.min(existing, next));
+      });
       await this.confirmKeepaliveMint(session, authority);
       return;
     }
@@ -225,7 +233,6 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
       await this.performLogin(session, authority);
       return;
     }
-    await this.performKeepalive(session, authority);
   }
 
   private async ensureOwner(userId: string, deviceId: string): Promise<void> {
@@ -237,6 +244,20 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
     }
     this.owner = { userId, deviceId };
     await this.ctx.storage.put(OWNER_KEY, this.owner);
+  }
+
+  private async ensureReloginAt(session: StoredDeviceSession): Promise<StoredDeviceSession> {
+    if (session.loginAt === null || session.reloginAt !== undefined) return session;
+    return this.ctx.storage.transaction(async (tx) => {
+      const current = await tx.get<StoredDeviceSession>(SESSION_KEY);
+      if (!current || current.loginAt === null || current.reloginAt !== undefined ||
+          current.state === "disabled" || current.state === "revoked") {
+        return current ?? session;
+      }
+      const next = { ...current, reloginAt: sampleCquReloginAt(current.loginAt) };
+      await tx.put(SESSION_KEY, next);
+      return next;
+    });
   }
 
   private async readSession(): Promise<StoredDeviceSession> {
@@ -297,110 +318,18 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
   private async requestRefresh(authority: DeviceAuthority): Promise<void> {
     await this.notify(authority);
     if (!authority.allowed) return;
-    const session = await this.ctx.storage.get<StoredDeviceSession>(SESSION_KEY);
-    if (!session || session.generation !== authority.generation) return;
-    session.state = session.storageState ? "refreshing" : "preparing";
-    session.nextAttemptAt = null;
-    await this.ctx.storage.put(SESSION_KEY, session);
-    await this.ctx.storage.setAlarm(Date.now());
-  }
-
-  private async performKeepalive(
-    session: StoredDeviceSession,
-    authority: DeviceAuthority
-  ): Promise<void> {
-    if (session.pendingKeepaliveMint) {
-      await this.confirmKeepaliveMint(session, authority);
-      return;
-    }
-    if (skipDeviceProbes(this.env, authority.ownerUserId, authority.deviceId)) {
-      await this.ctx.storage.setAlarm(this.nextMaintenanceAt(session, authority));
-      return;
-    }
-    if (!session.storageState) {
-      await this.performLogin(session, authority);
-      return;
-    }
-    let response: Response;
-    try {
-      response = await fetchBrowser(
-        this.env,
-        quickloginBrowserRoute(authority.ownerUserId, authority.deviceId),
-        new Request("http://cqu-login.internal/keepalive", {
-          method: "POST",
-          body: JSON.stringify({
-            state: JSON.parse(session.storageState),
-            operationTimeoutMs:
-              CONTAINER_BROWSER_DEADLINE_MS - BROWSER_CLEANUP_MARGIN_MS,
-          }),
-          signal: AbortSignal.timeout(CONTAINER_BROWSER_DEADLINE_MS),
-        })
-      );
-    } catch {
-      await this.recordTransient(session);
-      return;
-    }
-    const body = await response.json<{
-      ok?: boolean;
-      status?: string;
-      state?: unknown;
-    }>().catch(() => null);
-    if (!response.ok || !body?.ok || body.status === "unreachable") {
-      console.warn({
-        evt: "quicklogin_maintenance_failure",
-        phase: "keepalive_response",
-        deviceId: authority.deviceId,
-        generation: authority.generation,
-        httpStatus: response.status,
-        backendStatus:
-          body?.status === "alive" ||
-          body?.status === "expired" ||
-          body?.status === "unreachable"
-            ? body.status
-            : null,
-      });
-      await this.recordTransient(session);
-      return;
-    }
-    if (body.status === "expired") {
-      await this.performLogin(session, authority);
-      return;
-    }
-    if (body.status !== "alive") {
-      await this.recordTransient(session);
-      return;
-    }
-    const current = await new QuickloginAccountClient(this.env)
-      .getDeviceAuthority(authority.ownerUserId, authority.deviceId);
-    if (!current.allowed || current.generation !== session.generation) {
-      await this.notify(current);
-      return;
-    }
-    session.pendingKeepaliveMint = {
-      operationId: crypto.randomUUID(),
-      mintedAt: Date.now(),
-      expiresAt: Date.now() + PENDING_KEEPALIVE_TTL_MS,
-      hasStorageState: body.state !== undefined,
-    };
-    const pendingStorageState = body.state === undefined
-      ? undefined
-      : JSON.stringify(body.state);
-    let staged = false;
+    let scheduled = false;
     await this.ctx.storage.transaction(async (tx) => {
-      const latest = await tx.get<StoredDeviceSession>(SESSION_KEY);
-      if (!latest || !sameTuple(sessionTuple(latest), sessionTuple(session)) ||
-          latest.operationId !== session.operationId || latest.leaseToken !== session.leaseToken ||
-          latest.state !== session.state || latest.pendingKeepaliveMint !== undefined ||
+      const current = await tx.get<StoredDeviceSession>(SESSION_KEY);
+      if (!current || current.generation !== authority.generation ||
+          current.state === "disabled" || current.state === "revoked" ||
           !quickloginDeviceModeEnabled(this.env)) return;
-      await tx.put(SESSION_KEY, { ...latest, pendingKeepaliveMint: session.pendingKeepaliveMint });
-      if (pendingStorageState === undefined) {
-        await tx.delete(PENDING_KEEPALIVE_STATE_KEY);
-      } else {
-        await tx.put(PENDING_KEEPALIVE_STATE_KEY, pendingStorageState);
-      }
-      staged = true;
+      current.state = current.storageState ? "refreshing" : "preparing";
+      current.nextAttemptAt = null;
+      await tx.put(SESSION_KEY, current);
+      scheduled = true;
     });
-    if (staged) await this.confirmKeepaliveMint(session, authority);
+    if (scheduled) await this.ctx.storage.setAlarm(Date.now());
   }
 
   private async confirmKeepaliveMint(
@@ -441,6 +370,9 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
         next.exportDigest = session.exportDigest;
       }
       next.reasonCode = null;
+      if (next.loginAt !== null && next.reloginAt === undefined) {
+        next.reloginAt = sampleCquReloginAt(next.loginAt);
+      }
       next.deviceRevision = (next.deviceRevision ?? 0) + 1;
       next.lastKeepAliveAt = pending.mintedAt;
       next.state = "ready";
@@ -583,6 +515,7 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
           exportDigest: digest,
           sessionVersion: currentSession.sessionVersion + 1,
           loginAt: result.loginAt,
+          reloginAt: sampleCquReloginAt(result.loginAt),
           lastKeepAliveAt: result.loginAt,
           state: "ready",
           transientFailures: 0,
