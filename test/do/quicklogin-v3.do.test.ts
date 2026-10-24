@@ -79,7 +79,7 @@ describe('QuickLogin protocol 3 durable device state', () => {
   expect((await t.call('v3_export', { expected: { ...expected, sessionVersion: 0 } })).error.code).toBe('SESSION_CHANGED');
  });
 
- it.each([[3, false], [3, true], [7, true]] as const)('settles pending probes without blocking renewal at age %ih (receipt unavailable=%s)', async (ageHours, receiptUnavailable) => {
+ it.each([[3, false, false], [3, true, false], [3, true, true], [7, true, false]] as const)('settles pending probes without blocking renewal at age %ih (receipt unavailable=%s, earlier alarm=%s)', async (ageHours, receiptUnavailable, earlierAlarm) => {
   const now = Date.now() + 1_000_000;
   vi.spyOn(Date, 'now').mockReturnValue(now);
   const t = await setup();
@@ -106,6 +106,7 @@ describe('QuickLogin protocol 3 durable device state', () => {
   if (receiptUnavailable) confirm.mockRejectedValue(new Error('audit unavailable'));
   const alarm = runInDurableObject(t.stub, async (instance, state) => {
    await state.storage.deleteAlarm();
+   if (earlierAlarm) await state.storage.setAlarm(now + 30_000);
    await (instance as unknown as { alarm(): Promise<void> }).alarm();
   });
   if (receiptUnavailable && ageHours < 7) {
@@ -113,7 +114,7 @@ describe('QuickLogin protocol 3 durable device state', () => {
    const pending = await readStorage<{reloginAt: number}>(t.stub, 'session');
    expect(pending).toHaveProperty('pendingKeepaliveMint');
    await expect(runInDurableObject(t.stub, (_, state) => state.storage.getAlarm()))
-    .resolves.toBe(pending!.reloginAt);
+    .resolves.toBe(earlierAlarm ? now + 30_000 : pending!.reloginAt);
    expect(login).not.toHaveBeenCalled();
    expect(fetchMock).not.toHaveBeenCalled();
    return;

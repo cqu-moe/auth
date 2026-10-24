@@ -218,7 +218,9 @@ export class CquQuickloginDeviceDO extends DurableObject<Env> {
             current.state !== session.state || current.state === "paused" ||
             current.state === "disabled" || current.state === "revoked" ||
             !quickloginDeviceModeEnabled(this.env)) return;
-        await tx.setAlarm(this.nextMaintenanceAt(current, authority));
+        const next = this.nextMaintenanceAt(current, authority);
+        const existing = await tx.getAlarm();
+        await tx.setAlarm(existing === null ? next : Math.min(existing, next));
       });
       await this.confirmKeepaliveMint(session, authority);
       return;
