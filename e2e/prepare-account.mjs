@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { turnstileHeaders } from './turnstile.mjs';
 
 /** Prepare a verified synthetic identity through real signup/verification, not INSERT user/session. */
 export async function prepareAccount(runtime, { email, password, name = 'Synthetic Consumer' }) {
@@ -8,7 +9,7 @@ export async function prepareAccount(runtime, { email, password, name = 'Synthet
   await runtime.db.prepare('INSERT INTO registration_invitation(code,created_by,expires_at) VALUES (?,?,?)')
     .bind(code, 'synthetic-consumer', '2099-01-01T00:00:00.000Z').run();
   const signup = await fetch(`${runtime.origin}/api/v1/auth/sign-up/email`, {
-    signal: AbortSignal.timeout(10000), method: 'POST', headers: { origin: runtime.origin, 'content-type': 'application/json' },
+    signal: AbortSignal.timeout(10000), method: 'POST', headers: { origin: runtime.origin, 'content-type': 'application/json', ...turnstileHeaders('/auth/sign-up/email', runtime.origin) },
     body: JSON.stringify({ email, password, name, code }),
   });
   if (!signup.ok) throw new Error(`Synthetic signup failed (${signup.status})`);

@@ -1,3 +1,6 @@
+import { TURNSTILE_TOKEN_HEADER } from "../../../shared/turnstile";
+import { useTurnstile } from "../lib/use-turnstile";
+import TurnstileVerification from "./TurnstileVerification";
 import { requestAuthentication } from "../lib/recent-authentication";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -15,6 +18,7 @@ export interface EmailChangeFlowProps {
 }
 
 type AuthError = { code?: string; message?: string } | null | undefined;
+type CurrentEmailOperation = "none" | "resend-waiting" | "resend-sending" | "verifying";
 
 function emailError(error: AuthError, fallback: string) {
   if (error?.code === "CURRENT_EMAIL_OTP_ONLY") return "只能验证当前登录邮箱";
@@ -71,6 +75,8 @@ export function NewEmailOtpDeliveryNotice({
 
 export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: EmailChangeFlowProps) {
   const [step, setStep] = useState<EmailChangeStep>("current-email");
+  const verification = useTurnstile(step === "current-email" ? "email-verification" : step === "new-email" ? "email-change" : null);
+  const [showVerification, setShowVerification] = useState(true);
   const [currentOtp, setCurrentOtp] = useState("");
   const [newEmail, setNewEmail] = useState("");
   const [newEmailOtp, setNewEmailOtp] = useState("");
@@ -78,7 +84,12 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
   const [cooldown, setCooldown] = useState(0);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [currentOperation, setCurrentOperation] = useState<CurrentEmailOperation>("none");
   const loadingRef = useRef(false);
+  const currentOperationRef = useRef<CurrentEmailOperation>("none");
+  const resendRef = useRef(false);
+  const verifyingRef = useRef(false);
+  const resendRunRef = useRef(0);
   const errorId = "email-change-error";
 
   useEffect(() => {
@@ -88,43 +99,69 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
   }, [cooldown]);
 
   const sendCurrentOtp = async () => {
-    if (loadingRef.current) return;
+    if (resendRef.current || currentOperationRef.current !== "none") return;
     if (!currentEmail) {
       setError("无法读取当前登录邮箱，请重新登录后再试");
       return;
     }
     setError("");
-    loadingRef.current = true;
-    setLoading(true);
+    resendRef.current = true;
+    const resendRun = ++resendRunRef.current;
+    currentOperationRef.current = "resend-waiting";
+    setCurrentOperation("resend-waiting");
+    setShowVerification(true);
+    let verificationToken: string | null = null;
     try {
+      verificationToken = await verification.getToken();
+      if (!verificationToken) return;
+      if (resendRunRef.current !== resendRun) return;
+      currentOperationRef.current = "resend-sending";
+      setCurrentOperation("resend-sending");
+      loadingRef.current = true;
+      setLoading(true);
       const { error: authError } = await authClient.emailOtp.sendVerificationOtp({
         email: currentEmail,
         type: "email-verification",
-      });
+      }, { headers: { [TURNSTILE_TOKEN_HEADER]: verificationToken } });
       if (authError) {
         setError(emailError(authError, "验证码发送失败，请稍后重试"));
         return;
       }
       setCurrentOtpSent(true);
+      setShowVerification(false);
       setCurrentOtp("");
       setCooldown(60);
     } catch {
       setError("网络错误，请检查连接后重试");
     } finally {
-      loadingRef.current = false;
-      setLoading(false);
+      if (verificationToken) verification.reset();
+      resendRef.current = false;
+      if (resendRunRef.current === resendRun) {
+        currentOperationRef.current = "none";
+        setCurrentOperation("none");
+        loadingRef.current = false;
+        setLoading(false);
+      }
     }
   };
 
   const verifyCurrentOtp = async (event: FormEvent) => {
     event.preventDefault();
-    if (loadingRef.current) return;
+    if (verifyingRef.current || currentOperationRef.current === "resend-sending") return;
     const otp = normalizeOtp(currentOtp);
     if (otp.length !== 6) {
       setError("请输入 6 位验证码");
       return;
     }
+    if (currentOperationRef.current === "resend-waiting") {
+      resendRunRef.current += 1;
+      verification.cancelPending();
+    }
     setError("");
+    setShowVerification(false);
+    verifyingRef.current = true;
+    currentOperationRef.current = "verifying";
+    setCurrentOperation("verifying");
     loadingRef.current = true;
     setLoading(true);
     try {
@@ -139,9 +176,13 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
       }
       setCurrentOtp(otp);
       setStep(nextEmailChangeStep(step, "current-otp-verified"));
+      setShowVerification(true);
     } catch {
       setError("网络错误，请检查连接后重试");
     } finally {
+      verifyingRef.current = false;
+      currentOperationRef.current = "none";
+      setCurrentOperation("none");
       loadingRef.current = false;
       setLoading(false);
     }
@@ -158,12 +199,15 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
     setError("");
     loadingRef.current = true;
     setLoading(true);
+    let verificationToken: string | null = null;
     try {
       if (!await requestAuthentication("email")) return;
+      verificationToken = await verification.getToken();
+      if (!verificationToken) return;
       const { error: authError } = await authClient.emailOtp.requestEmailChange({
         newEmail: validation.value,
         otp: currentOtp,
-      });
+      }, { headers: { [TURNSTILE_TOKEN_HEADER]: verificationToken } });
       if (authError) {
         setError(emailError(authError, "新邮箱验证码发送失败，请重新开始"));
         return;
@@ -176,6 +220,7 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
     } catch {
       setError("网络错误，请检查连接后重试");
     } finally {
+      if (verificationToken) verification.reset();
       loadingRef.current = false;
       setLoading(false);
     }
@@ -220,6 +265,7 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
     setStep(restarted.step);
     setCurrentOtp(restarted.currentOtp);
     setCurrentOtpSent(restarted.currentOtpSent);
+    setShowVerification(true);
     setNewEmail(restarted.newEmail);
     setNewEmailOtp(restarted.newEmailOtp);
     setCooldown(restarted.cooldown);
@@ -246,13 +292,14 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
         <section className="content-panel" aria-labelledby="verify-current-email-heading">
           <h2 id="verify-current-email-heading" className="text-base font-semibold text-foreground">验证当前邮箱</h2>
           <p className="mt-1 text-sm text-muted-foreground">{currentOtpSent ? "验证码已发送，请输入邮件中的 6 位数字。" : "先向当前登录邮箱发送 6 位验证码。"}</p>
+          {showVerification && <div className="mt-4"><TurnstileVerification verification={verification} /></div>}
           {!currentOtpSent ? (
             <ActionButton
               type="button"
               className="mt-4"
-              state={loading ? "loading" : error ? "error" : "idle"}
+              state={currentOperation === "resend-waiting" || currentOperation === "resend-sending" ? "loading" : error || verification.status === "error" ? "error" : "idle"}
               onClick={() => void sendCurrentOtp()}
-              labels={{ idle: "发送验证码", loading: "发送中…", success: "已发送", error: "重试发送" }}
+              labels={{ idle: "发送验证码", loading: verification.waiting ? "正在完成安全验证…" : "发送中…", success: "已发送", error: "重试发送" }}
             />
           ) : (
             <form onSubmit={verifyCurrentOtp} className="mt-4 space-y-4" noValidate>
@@ -265,7 +312,7 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
                     setCurrentOtp(value);
                     if (error) setError("");
                   }}
-                  disabled={loading}
+                  disabled={loading || currentOperation === "resend-sending"}
                   aria-invalid={Boolean(error)}
                   aria-describedby={error ? errorId : undefined}
                 />
@@ -273,17 +320,17 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
               <div className="flex flex-wrap items-center gap-3">
                 <ActionButton
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || currentOperation === "resend-sending"}
                   state={loading ? "loading" : "idle"}
                   labels={{ idle: "验证并继续", loading: "验证中…", success: "已验证", error: "重试验证" }}
                 />
                 <Button
                   type="button"
                   variant="link"
-                  disabled={loading || cooldown > 0}
+                  disabled={currentOperation !== "none" || cooldown > 0}
                   onClick={() => void sendCurrentOtp()}
                 >
-                  {cooldown > 0 ? `${cooldown} 秒后可重新发送` : "重新发送验证码"}
+                  {verification.waiting ? "正在完成安全验证…" : cooldown > 0 ? `${cooldown} 秒后可重新发送` : "重新发送验证码"}
                 </Button>
               </div>
             </form>
@@ -315,11 +362,11 @@ export default function EmailChangeFlow({ currentEmail, onSessionRefresh }: Emai
               placeholder="请输入新邮箱"
             />
           </div>
+          <TurnstileVerification verification={verification} />
           <ActionButton
             type="submit"
-            disabled={loading}
-            state={loading ? "loading" : "idle"}
-            labels={{ idle: "发送验证码", loading: "发送中…", success: "已发送", error: "重试发送" }}
+            state={loading ? "loading" : verification.status === "error" ? "error" : "idle"}
+            labels={{ idle: "发送验证码", loading: verification.waiting ? "正在完成安全验证…" : "发送中…", success: "已发送", error: "重试发送" }}
           />
         </form>
       )}

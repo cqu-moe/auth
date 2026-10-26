@@ -6,6 +6,11 @@ import { handleInvitationSignup } from "../../services/registration-invitations"
 import type { HonoEnv } from "../../types";
 import { AUTH_OPERATIONS } from "../auth-operations.generated";
 import {
+  TURNSTILE_ACTIONS,
+  TURNSTILE_TOKEN_HEADER,
+} from "../../../shared/turnstile";
+import { verifyTurnstileToken } from "../../services/turnstile";
+import {
   captureAuthFlowFinished,
   captureAuthFlowStarted,
 } from "../../lib/posthog";
@@ -63,6 +68,23 @@ export function createAuthApi() {
   for (const operation of AUTH_OPERATIONS) {
     router.on(operation.method, operation.path, async (c) => {
       if (operation.path === "/error") return c.redirect("/auth/error", 302);
+
+      const turnstileAction = operation.method === "POST"
+        ? TURNSTILE_ACTIONS[operation.path as keyof typeof TURNSTILE_ACTIONS]
+        : undefined;
+      if (turnstileAction) {
+        const verification = await verifyTurnstileToken(
+          c.env,
+          c.req.header(TURNSTILE_TOKEN_HEADER),
+          turnstileAction
+        );
+        if (!verification.ok) {
+          return c.json(
+            { code: verification.code, message: verification.message },
+            verification.status
+          );
+        }
+      }
 
       // Provider DPoP must see the configured public origin, never a proxy's
       // internal bind address or untrusted Forwarded/X-Forwarded-* headers.

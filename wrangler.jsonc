@@ -15,6 +15,8 @@
     "QUICKLOGIN_STORE_EXTENSION_ORIGIN": "chrome-extension://ainapeknaclcpoioimonkodmoakhacjd",
     "POSTHOG_HOST": "https://p.cqu.moe",
     "ENVIRONMENT": "production",
+    // 生产必须先执行 `wrangler secret put TURNSTILE_SECRET`；缺失时受保护
+    // 认证入口会 fail closed，不能把 secret 值提交到仓库配置。
     // 浏览器后端已固定为 Cloudflare APAC Containers(2026-09-08 全量切换,
     // 2026-09-09 移除腾讯云节点绑定 LOGIN_NODE 与 node 回退路径)。
   },

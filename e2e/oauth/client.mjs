@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { generateKeyPair, exportJWK, SignJWT } from 'jose';
+import { turnstileHeaders } from '../turnstile.mjs';
 
 const b64url = value => Buffer.from(value).toString('base64url');
 const now = () => Math.floor(Date.now() / 1000);
@@ -125,7 +126,7 @@ export function startOAuthClientApp({ authOrigin, accountPassword, business, reg
       const deadline = Date.now() + 45000;
       for (;;) {
         login = await fetch(`${authOrigin}/api/v1/auth/sign-in/email`, {
-          method: 'POST', headers: { origin: authOrigin, 'content-type': 'application/json' },
+          method: 'POST', headers: { origin: authOrigin, 'content-type': 'application/json', ...turnstileHeaders('/auth/sign-in/email', authOrigin) },
           body: JSON.stringify({ email, password: accountPassword }),
           signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
         });

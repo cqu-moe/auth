@@ -2,6 +2,7 @@ import { test, beforeEach, afterEach } from '@e2e-dev/web';
 import { expect, credentials, secrets } from 'e2e';
 import { authWebEngine } from '../e2e.config';
 import { createVerifiedAccount, signIn, sessionState, protectArtifacts, enrollTotp } from './auth-fixture';
+import { TURNSTILE_SCRIPT_URL, fulfillTurnstileFixture } from './turnstile.mjs';
 import { surfaceOf } from '@e2e-dev/web';
 
 let unexpected: string[];
@@ -10,8 +11,10 @@ beforeEach(async ({ browser }) => {
   unexpected = [];
   const allowed = new URL(process.env.AUTH_E2E_URL!).origin;
   await browser.route('**/*', async route => {
-    if (new URL(route.request.url).origin !== allowed) {
-      unexpected.push(new URL(route.request.url).origin);
+    const url = new URL(route.request.url);
+    if (`${url.origin}${url.pathname}` === TURNSTILE_SCRIPT_URL) return await fulfillTurnstileFixture(route);
+    if (url.origin !== allowed) {
+      unexpected.push(url.origin);
       await route.abort();
     } else await route.continue();
   });

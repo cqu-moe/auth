@@ -1,3 +1,6 @@
+import { TURNSTILE_TOKEN_HEADER } from "../../../shared/turnstile";
+import { useTurnstile } from "../lib/use-turnstile";
+import TurnstileVerification from "../components/TurnstileVerification";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AlertCircle, Mail } from "lucide-react";
@@ -17,10 +20,12 @@ import { mapAuthError, normalizeOtp } from "../lib/two-factor";
 type SendStatus = "idle" | "sending" | "sent" | "error";
 
 export default function VerifyEmail() {
+  const verification = useTurnstile("email-verification");
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
   const { data: session, refetch: refetchSession } = authClient.useSession();
+  const [resendRequested, setResendRequested] = useState(false);
   const [otp, setOtp] = useState("");
   const [verifying, setVerifying] = useState(false);
   const [sendStatus, setSendStatus] = useState<SendStatus>("idle");
@@ -28,9 +33,12 @@ export default function VerifyEmail() {
   const [sendError, setSendError] = useState("");
   const [signOutError, setSignOutError] = useState("");
   const [signingOut, setSigningOut] = useState(false);
+  const [resendHttpStarted, setResendHttpStarted] = useState(false);
   const verifyingRef = useRef(false);
   const sendingRef = useRef(false);
   const signingOutRef = useRef(false);
+  const resendHttpRef = useRef(false);
+  const resendRunRef = useRef(0);
   const user = session?.user as { email?: string } | undefined;
 
   const handleVerify = async (event: FormEvent<HTMLFormElement>) => {
@@ -45,6 +53,14 @@ export default function VerifyEmail() {
       setVerificationError("无法读取当前登录邮箱，请退出后重新登录");
       return;
     }
+
+    if (resendHttpRef.current) return;
+    if (sendingRef.current) {
+      resendRunRef.current += 1;
+      verification.cancelPending();
+      setSendStatus("idle");
+    }
+    setResendRequested(false);
 
     setVerificationError("");
     verifyingRef.current = true;
@@ -96,11 +112,19 @@ export default function VerifyEmail() {
     setSendStatus("sending");
     setSendError("");
     sendingRef.current = true;
+    setResendRequested(true);
+    const resendRun = ++resendRunRef.current;
+    let verificationToken: string | null = null;
     try {
+      verificationToken = await verification.getToken();
+      if (!verificationToken) return;
+      if (resendRunRef.current !== resendRun) return;
+      resendHttpRef.current = true;
+      setResendHttpStarted(true);
       const { error: authError } = await authClient.emailOtp.sendVerificationOtp({
         email: user.email,
         type: "email-verification",
-      });
+      }, { headers: { [TURNSTILE_TOKEN_HEADER]: verificationToken } });
 
       if (authError) {
         setSendStatus("error");
@@ -109,12 +133,18 @@ export default function VerifyEmail() {
       }
 
       setSendStatus("sent");
+      setResendRequested(false);
     } catch {
       setSendStatus("error");
       setSendError("网络错误，请检查连接后重试");
     } finally {
+      if (verificationToken) verification.reset();
       sendingRef.current = false;
-      setSendStatus(current => current === "sending" ? "idle" : current);
+      if (resendRunRef.current === resendRun) {
+        resendHttpRef.current = false;
+        setResendHttpStarted(false);
+        setSendStatus(current => current === "sending" ? "idle" : current);
+      }
     }
   };
 
@@ -181,7 +211,7 @@ export default function VerifyEmail() {
         <ActionButton
           type="submit"
           className="w-full"
-          disabled={sendStatus === "sending" || verifying}
+          disabled={resendHttpStarted || verifying}
           state={verifying ? "loading" : verificationError ? "error" : "idle"}
           labels={{
             idle: "验证并继续",
@@ -192,6 +222,8 @@ export default function VerifyEmail() {
         />
       </form>
 
+      {resendRequested && <TurnstileVerification verification={verification} />}
+
       <div className="mt-5 flex min-h-11 items-center justify-center gap-1 text-sm text-muted-foreground">
         <span>没有收到？</span>
         <ActionButton
@@ -199,9 +231,9 @@ export default function VerifyEmail() {
           variant="link"
           size="sm"
           onClick={() => void handleResend()}
-          disabled={sendStatus === "sending" || verifying}
-          state={sendStatus === "sending" ? "loading" : "idle"}
-          labels={{ idle: "重新发送验证码", loading: "发送中…", success: "已发送", error: "重试发送" }}
+          disabled={verifying}
+          state={sendStatus === "sending" ? "loading" : verification.status === "error" ? "error" : "idle"}
+          labels={{ idle: "重新发送验证码", loading: verification.waiting ? "正在完成安全验证…" : "发送中…", success: "已发送", error: "重试发送" }}
         />
       </div>
 

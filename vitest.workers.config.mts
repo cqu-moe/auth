@@ -39,8 +39,11 @@ export default defineConfig({
         bindings: {
           ENCRYPTION_KEY:
             "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+          // 本地 origin 不能继承 Wrangler 的 production 环境。
+          ENVIRONMENT: "development",
           BETTER_AUTH_URL: "http://localhost:8787",
           BETTER_AUTH_SECRET: "dev-secret-for-local-testing-only",
+          TURNSTILE_SECRET: "local-turnstile-test-secret",
           AUTH_RESEND_API_KEY: "re_dev_placeholder",
           SCHEDULE_RESEND_API_KEY: "schedule_re_dev_placeholder",
           BIND_EMAIL_DOMAIN: "cquotp.com",

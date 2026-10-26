@@ -7,6 +7,7 @@ import { identity, newMember, request, responseFor, restore, saveCookies, setRol
 import { authorization, concealCredentials, createClient, issueTokens, tokenRequest, userinfo } from './oauth-fixture';
 import { passkeyAdministrator, registerPasskey } from './recovery-fixture';
 import { authSecuritySecrets } from './secret-holder';
+import { TURNSTILE_SCRIPT_URL, fulfillTurnstileFixture } from './turnstile.mjs';
 
 // The full recovery can cross the unchanged public session-read window.
 // Retry only safe GETs returning 429; keep session identity assertions at the call site.
@@ -27,7 +28,9 @@ let unexpected: string[];
 beforeEach(async ({ browser }) => {
   unexpected = [];
   await browser.route('**/*', async route => {
-    const origin = new URL(route.request.url).origin;
+    const url = new URL(route.request.url);
+    if (`${url.origin}${url.pathname}` === TURNSTILE_SCRIPT_URL) return await fulfillTurnstileFixture(route);
+    const origin = url.origin;
     if (origin !== process.env.AUTH_E2E_URL) { unexpected.push(origin); await route.abort(); }
     else await route.continue();
   });

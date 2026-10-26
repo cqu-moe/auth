@@ -3,6 +3,7 @@ import { credentials, expect, secrets } from 'e2e';
 import { authWebEngine } from '../e2e.config';
 import { createVerifiedAccount, enrollTotp, protectArtifacts, signIn, type Fixture } from './auth-fixture';
 import { authSecuritySecrets } from './secret-holder';
+import { turnstileHeaders } from './turnstile.mjs';
 
 export const surface = () => surfaceOf(authWebEngine)!;
 
@@ -33,6 +34,7 @@ export async function request(path: string, method = 'GET', body?: unknown, cook
     method, redirect: 'manual', signal: AbortSignal.timeout(15000),
     headers: {
       origin: process.env.AUTH_E2E_URL!, 'content-type': 'application/json',
+      ...turnstileHeaders(path),
       cookie: current.map(cookie => `${cookie.name}=${cookie.value}`).join('; '),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),

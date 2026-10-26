@@ -1,21 +1,27 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { createElement } from "react";
+import { installPassingTurnstile } from "../lib/turnstile.testbots";
+import type { TurnstileOptions } from "../lib/turnstile";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
-import { click, cleanupUi, renderUi } from "../lib/api/quicklogin.testbots";
+import { click, cleanupUi, renderUi, setInputValue, settleUi } from "../lib/api/quicklogin.testbots";
 import EmailChangeFlow, { NewEmailOtpDeliveryNotice } from "./EmailChangeFlow";
 
 const authClient = vi.hoisted(() => ({
   emailOtp: {
     sendVerificationOtp: vi.fn(),
+    checkVerificationOtp: vi.fn(),
   },
 }));
 vi.mock("../lib/auth-client", () => ({ authClient }));
 
+beforeEach(installPassingTurnstile);
+
 afterEach(async () => {
   await cleanupUi();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("email change OTP flow", () => {
@@ -78,5 +84,59 @@ describe("email change OTP flow", () => {
     const retry = Array.from(container.querySelectorAll("button"))
       .find(button => button.textContent?.includes("发送验证码"))!;
     expect(retry.getAttribute("aria-disabled")).not.toBe("true");
+  });
+
+  it("keeps current-email OTP verification independent of a waiting resend", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    let renderCount = 0;
+    let pendingTurnstile: TurnstileOptions | undefined;
+    vi.stubGlobal("turnstile", {
+      ready: (ready: () => void) => ready(),
+      render: (_container: HTMLElement, options: TurnstileOptions) => {
+        renderCount += 1;
+        if (renderCount === 1) queueMicrotask(() => options.callback("first-token"));
+        else pendingTurnstile = options;
+        return String(renderCount);
+      },
+      remove: () => undefined,
+    });
+    authClient.emailOtp.sendVerificationOtp.mockResolvedValue({ error: null });
+    authClient.emailOtp.checkVerificationOtp.mockReturnValue(new Promise(() => undefined));
+    try {
+      const container = await renderUi(createElement(
+        MemoryRouter,
+        { initialEntries: ["/settings/email"] },
+        createElement(EmailChangeFlow, {
+          currentEmail: "old@example.com",
+          onSessionRefresh: async () => undefined,
+        })
+      ));
+      const buttonWith = (text: string) =>
+        Array.from(container.querySelectorAll("button"))
+          .find(button => button.textContent?.includes(text))!;
+
+      await click(buttonWith("发送验证码"));
+      expect(authClient.emailOtp.sendVerificationOtp).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+        await Promise.resolve();
+      });
+
+      await click(buttonWith("重新发送验证码"));
+      expect(authClient.emailOtp.sendVerificationOtp).toHaveBeenCalledTimes(1);
+      const verifyButton = buttonWith("验证并继续");
+      expect(verifyButton.getAttribute("aria-disabled")).not.toBe("true");
+
+      await setInputValue(container.querySelector("input")!, "123456");
+      await click(verifyButton);
+      pendingTurnstile?.callback("late-token");
+      await settleUi();
+
+      expect(authClient.emailOtp.sendVerificationOtp).toHaveBeenCalledTimes(1);
+      expect(authClient.emailOtp.checkVerificationOtp).toHaveBeenCalledTimes(1);
+      expect(verifyButton.getAttribute("aria-busy")).toBe("true");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

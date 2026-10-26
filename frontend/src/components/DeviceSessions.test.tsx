@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { installPassingTurnstile } from "../lib/turnstile.testbots";
 
 import { StrictMode } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -78,6 +79,7 @@ function button(container: HTMLElement, text: string) {
 }
 
 beforeEach(() => {
+  installPassingTurnstile();
   auth.listSessions.mockReset().mockResolvedValue({ data: [{ token: "fixture-session", userAgent: "Test browser", createdAt: new Date() }], error: null });
   auth.getSession.mockResolvedValue({ data: { session: { token: "fixture-session" } } });
   auth.email.mockResolvedValue({ data: { user: { emailVerified: true } }, error: null });

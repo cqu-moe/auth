@@ -5,6 +5,7 @@ import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { checkArtifacts } from './artifacts.mjs';
+import { TURNSTILE_SECRET, parseTurnstileToken, turnstileHeaders } from './turnstile.mjs';
 
 // Node-side lifecycle API. Never import this from production or expose seed controls on Auth.
 export function extractEmailSecrets(mail) {
@@ -21,6 +22,7 @@ export async function startAuth({ expectedCommit, platform, artifacts } = {}) {
   const dir = await mkdtemp(resolve('.auth-e2e-'));
   const mails = new Map();
   const unexpected = [];
+  const usedTurnstileTokens = new Set();
   const artifactSecrets = [];
   const inspectArtifacts = output => checkArtifacts(output, [
     ...mails.values().flatMap(mail => [mail.otp, mail.resetUrl].filter(Boolean)), ...artifactSecrets,
@@ -49,7 +51,7 @@ export async function startAuth({ expectedCommit, platform, artifacts } = {}) {
       const { email } = JSON.parse(body);
       if (!/^[^@\s]+@example\.test$/.test(email ?? '')) { res.writeHead(400).end(); return; }
       const login = await fetch(`${origin}/api/v1/auth/sign-in/email`, {
-        method: 'POST', headers: { 'content-type': 'application/json', origin },
+        method: 'POST', headers: { 'content-type': 'application/json', origin, ...turnstileHeaders('/auth/sign-in/email', origin) },
         body: JSON.stringify({ email, password: 'Synthetic-only-123!' }),
       });
       if (!login.ok) { res.writeHead(502).end(); return; }
@@ -125,7 +127,7 @@ export async function startAuth({ expectedCommit, platform, artifacts } = {}) {
         CQU_QUICKLOGIN_DEVICE: { className: 'CquQuickloginDeviceDO', useSQLite: true } },
       bindings: { BETTER_AUTH_URL: origin, BETTER_AUTH_SECRET: 'synthetic-auth-e2e-secret-never-use-outside-tests',
         ENCRYPTION_KEY: 'MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=',
-        AUTH_RESEND_API_KEY: 're_synthetic', ENVIRONMENT: 'development', BIND_EMAIL_DOMAIN: 'example.test',
+        AUTH_RESEND_API_KEY: 're_synthetic', TURNSTILE_SECRET, ENVIRONMENT: 'development', BIND_EMAIL_DOMAIN: 'example.test',
         QUICKLOGIN_DEVICE_MODE: 'on', QUICKLOGIN_CLIENT_ID: 'quicklogin-test-client' },
       assets: { workerName: 'auth-e2e', directory: resolve('frontend/dist'), binding: 'ASSETS',
         routerConfig: { invoke_user_worker_ahead_of_assets: true, has_user_worker: true },
@@ -142,6 +144,16 @@ export async function startAuth({ expectedCommit, platform, artifacts } = {}) {
             mails.set(recipient, { ...(otp ? { otp } : {}), ...(resetUrl ? { resetUrl } : {}) });
           }
           return Response.json({ id: crypto.randomUUID() });
+        }
+        if (url.origin === 'https://challenges.cloudflare.com' && url.pathname === '/turnstile/v0/siteverify' && request.method === 'POST') {
+          const form = await request.json();
+          const token = form.response;
+          const claim = parseTurnstileToken(token);
+          const valid = Boolean(claim && form.secret === TURNSTILE_SECRET && !usedTurnstileTokens.has(token));
+          if (valid) usedTurnstileTokens.add(token);
+          return Response.json(valid
+            ? { success: true, action: claim.action, hostname: claim.hostname, 'challenge-ts': new Date().toISOString() }
+            : { success: false, 'error-codes': ['invalid-input-response'] });
         }
         unexpected.push(url.origin);
         return new Response('Unexpected external request denied', { status: 502 });

@@ -1,3 +1,6 @@
+import { TURNSTILE_TOKEN_HEADER } from "../../../shared/turnstile";
+import { useTurnstile } from "../lib/use-turnstile";
+import TurnstileVerification from "../components/TurnstileVerification";
 import { useState, FormEvent, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { MailCheck } from "lucide-react";
@@ -7,6 +10,7 @@ import { authClient } from "../lib/auth-client";
 import { sanitizePostLoginRedirect, withRedirectParam } from "../lib/post-login-redirect";
 
 export default function ResetPassword() {
+  const verification = useTurnstile("password-reset");
   const [searchParams] = useSearchParams();
   const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
   const [email, setEmail] = useState("");
@@ -30,11 +34,14 @@ export default function ResetPassword() {
 
     submittingRef.current = true;
     setLoading(true);
+    let verificationToken: string | null = null;
     try {
+      verificationToken = await verification.getToken();
+      if (!verificationToken) return;
       const { error } = await authClient.requestPasswordReset({
         email,
         redirectTo: withRedirectParam("/reset-password/confirm", postLoginRedirect),
-      });
+      }, { headers: { [TURNSTILE_TOKEN_HEADER]: verificationToken } });
 
       if (error) {
         setError(error.message ?? "发送失败，请稍后重试");
@@ -44,6 +51,7 @@ export default function ResetPassword() {
     } catch {
       setError("网络错误，请稍后重试");
     } finally {
+      if (verificationToken) verification.reset();
       submittingRef.current = false;
       setLoading(false);
     }
@@ -69,7 +77,7 @@ export default function ResetPassword() {
 
   return (
     <AuthLayout title="重置你的密码" description="输入注册邮箱，我们将发送重置密码链接。">
-      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+      <form onSubmit={handleSubmit} className="space-y-4" aria-busy={loading} noValidate>
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
@@ -90,6 +98,7 @@ export default function ResetPassword() {
             onBlur={() => {
               if (!emailRef.current?.validity.valid) setEmailError("请输入有效的邮箱地址");
             }}
+            readOnly={loading}
             required
             autoComplete="email"
             autoCapitalize="none"
@@ -106,13 +115,14 @@ export default function ResetPassword() {
           )}
         </div>
 
+        <TurnstileVerification verification={verification} />
         <ActionButton
           type="submit"
           className="w-full"
-          state={loading ? "loading" : error || emailError ? "error" : "idle"}
+          state={loading ? "loading" : error || emailError || verification.status === "error" ? "error" : "idle"}
           labels={{
             idle: "发送重置链接",
-            loading: "发送中…",
+            loading: verification.waiting ? "正在完成安全验证…" : "发送中…",
             success: "已发送",
             error: "重试发送",
           }}

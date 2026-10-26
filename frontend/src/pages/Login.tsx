@@ -1,3 +1,6 @@
+import { TURNSTILE_TOKEN_HEADER } from "../../../shared/turnstile";
+import { useTurnstile } from "../lib/use-turnstile";
+import TurnstileVerification from "../components/TurnstileVerification";
 import { useState, useRef, FormEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ActionButton, Alert, AlertDescription, Input, Label } from "@cqu-moe/ui";
@@ -12,6 +15,7 @@ import {
 import { isScheduleBindingContinuation } from "../lib/cqu-bind-continuation";
 
 export default function Login() {
+  const verification = useTurnstile("password-login");
   const navigate = useNavigate();
   const { refetch: refetchSession } = authClient.useSession();
   const [searchParams] = useSearchParams();
@@ -34,8 +38,11 @@ export default function Login() {
     submitting.current = true;
     setError("");
     setLoading("password");
+    let verificationToken: string | null = null;
     try {
-      const { data, error } = await authClient.signIn.email({ email: email.trim(), password });
+      verificationToken = await verification.getToken();
+      if (!verificationToken) return;
+      const { data, error } = await authClient.signIn.email({ email: email.trim(), password }, { headers: { [TURNSTILE_TOKEN_HEADER]: verificationToken } });
       if (error) {
         setError(error.message ?? "登录失败，请检查邮箱和密码");
         return;
@@ -48,6 +55,7 @@ export default function Login() {
     } catch {
       setError("网络连接失败，请检查网络后重试");
     } finally {
+      if (verificationToken) verification.reset();
       submitting.current = false;
       setLoading(null);
     }
@@ -123,14 +131,15 @@ export default function Login() {
           />
         </div>
 
+        <TurnstileVerification verification={verification} />
         <ActionButton
           type="submit"
           className="w-full"
-          disabled={loading !== null}
-          state={loading === "password" ? "loading" : error ? "error" : "idle"}
+          disabled={loading === "passkey"}
+          state={loading === "password" ? "loading" : error || verification.status === "error" ? "error" : "idle"}
           labels={{
             idle: "登录",
-            loading: "登录中…",
+            loading: verification.waiting ? "正在完成安全验证…" : "登录中…",
             success: "已登录",
             error: "重试登录",
           }}

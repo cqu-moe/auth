@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { installPassingTurnstile } from "../lib/turnstile.testbots";
 
 import { act } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -93,6 +94,7 @@ function deferredRejection() {
 }
 
 beforeEach(() => {
+  installPassingTurnstile();
   authMocks.signUp.mockResolvedValue({ error: null });
   authMocks.requestPasswordReset.mockResolvedValue({ error: null });
   authMocks.resetPassword.mockResolvedValue({ error: null });

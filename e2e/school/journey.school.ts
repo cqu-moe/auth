@@ -4,6 +4,7 @@ import type { TestFixtures } from 'e2e';
 import type { Browser } from '@e2e-dev/web';
 import { authWebEngine } from '../../e2e.config';
 import { observeSchoolTransport } from './transport-diagnostics';
+import { TURNSTILE_SCRIPT_URL, fulfillTurnstileFixture } from '../turnstile.mjs';
 
 type Journey = TestFixtures & {browser:Browser};
 
@@ -12,8 +13,10 @@ beforeEach(async ({browser}) => {
   await observeSchoolTransport(surfaceOf(authWebEngine)!.context());
   unexpected = [];
   await browser.route('**/*', async route => {
-    if (new URL(route.request.url).origin !== process.env.AUTH_E2E_URL) {
-      unexpected.push(new URL(route.request.url).origin);
+    const url = new URL(route.request.url);
+    if (`${url.origin}${url.pathname}` === TURNSTILE_SCRIPT_URL) return await fulfillTurnstileFixture(route);
+    if (url.origin !== process.env.AUTH_E2E_URL) {
+      unexpected.push(url.origin);
       await route.abort();
     } else {
       const credentials = route.request.method === 'PUT' && new URL(route.request.url).pathname === '/api/v1/cqu/binding/credentials';
