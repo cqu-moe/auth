@@ -2,7 +2,7 @@ import { CquBindingSkeleton } from "../components/SettingsSkeletons";
 import PasskeySettings from "../components/PasskeySettings";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
-import { ChevronDown, Link2, Loader2, Mail } from "lucide-react";
+import { ChevronDown, Link2, Mail } from "lucide-react";
 import { ActionButton, Alert, AlertDescription, Button, PageHeader } from "@cqu-moe/ui";
 import { authClient } from "../lib/auth-client";
 import {
@@ -17,6 +17,8 @@ import SettingsCard from "../components/SettingsCard";
 import QuickloginSettings from "../components/quicklogin/QuickloginSettings";
 
 import CopyButton from "../components/CopyButton";
+import BindingAddress from "../components/BindingAddress";
+import BindingConnectionStatus from "../components/BindingConnectionStatus";
 
 interface CquSessionStatus {
   status?: string;
@@ -88,15 +90,6 @@ function CodeCountdown({ deadline, onExpire }: { deadline: number; onExpire?: ()
 let liveCodeIdCounter = 0;
 
 const MAX_RETRIES = 5;
-
-const wsStatusText: Record<WsState, string> = {
-  idle: "准备连接…",
-  connecting: "正在建立连接…",
-  open: "实时监听中，验证码到达将立即显示",
-  closed: "连接中断，正在重连…",
-  error: "连接出错，正在重连…",
-  failed: "连接多次失败，请检查网络或登录状态",
-};
 
 function LiveCodeSection() {
   const [open, setOpen] = useState(false);
@@ -176,46 +169,13 @@ function LiveCodeSection() {
 
       {open && (
         <div className="space-y-4 border-t border-border px-4 pb-4 pt-3">
-          <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${
-            wsState === "open"
-              ? "bg-success/10 text-success"
-              : wsState === "connecting"
-              ? "bg-link/10 text-link"
-              : wsState === "error" || wsState === "closed"
-              ? "bg-warning/10 text-warning"
-              : wsState === "failed"
-              ? "bg-destructive/10 text-destructive"
-              : "bg-muted text-muted-foreground"
-          }`}>
-            {wsState === "open" && (
-              <span className="h-2 w-2 rounded-full bg-success" aria-hidden="true" />
-            )}
-            {wsState === "connecting" && (
-              <Loader2 className="animate-spin" aria-hidden="true" size={14} />
-            )}
-            {(wsState === "closed" || wsState === "error") && (
-              <Loader2 className="animate-spin" aria-hidden="true" size={14} />
-            )}
-            {wsState === "failed" && <span aria-hidden="true">✕</span>}
-            <span>{wsStatusText[wsState]}</span>
-            {wsState === "failed" && (
-              <Button
-                type="button"
-                variant="outline"
-                size="xs"
-                className="ml-auto shrink-0"
-                onClick={() => setConnectionKey((key) => key + 1)}
-              >
-                重试
-              </Button>
-            )}
-          </div>
+          <BindingConnectionStatus state={wsState} onRetry={() => setConnectionKey((key) => key + 1)} />
 
           {codes.length === 0 ? (
             <div className="rounded-lg border border-dashed border-border p-6 text-center">
               <Mail className="mx-auto mb-2 text-muted-foreground/60" aria-hidden="true" size={32} />
               <p className="text-sm leading-relaxed text-muted-foreground">
-                去 CQU 登录页选「邮箱验证码」登录，<br />验证码会实时显示在这里。
+                在学校登录页发送验证码，收到后会显示在这里。
               </p>
             </div>
           ) : (
@@ -253,9 +213,6 @@ function LiveCodeSection() {
             </ul>
           )}
 
-          <p className="text-xs text-muted-foreground">
-            最多显示最近 3 条；验证码自到达起约 10 分钟内有效。
-          </p>
         </div>
       )}
     </div>
@@ -311,7 +268,7 @@ function CquBindingSection() {
 
   if (statusLoading && !status) {
     return (
-      <SettingsCard title="CQU 账户绑定" description="绑定后由系统代你维护与重庆大学统一认证的会话。">
+      <SettingsCard title="CQU 账户绑定">
         <CquBindingSkeleton />
       </SettingsCard>
     );
@@ -319,7 +276,7 @@ function CquBindingSection() {
 
   if (statusError && !status) {
     return (
-      <SettingsCard title="CQU 账户绑定" description="绑定后由系统代你维护与重庆大学统一认证的会话。">
+      <SettingsCard title="CQU 账户绑定">
         <div className="space-y-4">
           <Alert variant="destructive">
             <AlertDescription>获取绑定状态失败，请稍后重试。</AlertDescription>
@@ -345,7 +302,7 @@ function CquBindingSection() {
     : { label: "需要重新登录", variant: "warning" };
 
   return (
-    <SettingsCard title="CQU 账户绑定" description="绑定后由系统代你维护与重庆大学统一认证的会话。">
+    <SettingsCard title="CQU 账户绑定">
       {statusError && <Alert variant="destructive" className="mb-4">
         <AlertDescription>无法刷新绑定状态，仍显示上次结果。<Button type="button" variant="outline" className="ml-3" disabled={statusLoading} onClick={() => void fetchStatus()}>重新加载</Button></AlertDescription>
       </Alert>}
@@ -381,20 +338,7 @@ function CquBindingSection() {
 
             {status?.address && (
               <div className="py-4">
-                <div className="mb-2 flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">专属密保邮箱</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      需将此地址设置为 CQU 自服务中心的密保邮箱，系统才能自动接收 2FA 验证码。
-                    </p>
-                  </div>
-                </div>
-                <div className="flex min-h-10 flex-wrap items-center gap-3 sm:min-h-0">
-                  <span className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-foreground">
-                    {status.address}
-                  </span>
-                  <CopyButton text={status.address} />
-                </div>
+                <BindingAddress address={status.address} />
               </div>
             )}
           </div>

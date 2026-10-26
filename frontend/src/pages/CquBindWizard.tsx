@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, FormEvent } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { ArrowLeft, Check, Loader2, Lock, Mail, RefreshCw } from "lucide-react";
+import { ArrowLeft, Check, Loader2, Mail, RefreshCw } from "lucide-react";
 import {
   ActionButton,
   Alert,
@@ -31,6 +31,8 @@ import {
 } from "../lib/cqu-bind-progress";
 
 import CopyButton from "../components/CopyButton";
+import BindingAddress from "../components/BindingAddress";
+import BindingConnectionStatus from "../components/BindingConnectionStatus";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Types
@@ -43,7 +45,7 @@ type WsState = "idle" | "connecting" | "open" | "closed" | "error";
 const STEP_LABELS: Record<Step, string> = {
   1: "说明",
   2: "绑定邮箱",
-  3: "录入凭证",
+  3: "登录账号",
   4: "完成",
 };
 
@@ -75,12 +77,6 @@ function progressStorage(): Storage | null {
 }
 
 const replaceLocation = (url: string) => window.location.replace(url);
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function isValidEmail(s: string): boolean {
-  return EMAIL_RE.test(s.trim());
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Shared UI atoms
@@ -130,186 +126,19 @@ function StepIndicator({ current }: { current: Step }) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// Step 1 — Intro / consent + bind kind selection
+// Step 1 — Introduce the two setup actions
 // ────────────────────────────────────────────────────────────────────────────
 
-function Step1Intro({
-  onNext,
-  bindKind,
-  setBindKind,
-  forwardAddress,
-  setForwardAddress,
-}: {
-  onNext: () => void;
-  bindKind: BindKind;
-  setBindKind: (k: BindKind) => void;
-  forwardAddress: string;
-  setForwardAddress: (v: string) => void;
-}) {
-  const [forwardAddrTouched, setForwardAddrTouched] = useState(false);
-
-  const forwardAddrValid = isValidEmail(forwardAddress);
-  const showForwardError = forwardAddrTouched && forwardAddress.trim() !== "" && !forwardAddrValid;
-
-  const canProceed =
-    bindKind === "direct" ||
-    (bindKind === "forward" && forwardAddrValid);
-
-  const introItems = [
-    {
-      icon: <Mail aria-hidden="true" size={16} />,
-      title: "专属密保邮箱",
-      body: "我们为您生成一个专属收信地址，用于接收 CQU 安全邮箱的验证码。您需要将 CQU 自服务中心的密保邮箱设置为该地址（或设置转发规则）。",
-    },
-    {
-      icon: <Lock aria-hidden="true" size={16} />,
-      title: "凭证加密存储",
-      body: "您的 CQU 密码将以 AES-256-GCM 加密存储，仅用于自动维护会话，不会明文记录或对外透露。",
-    },
-    {
-      icon: <RefreshCw aria-hidden="true" size={16} />,
-      title: "无人值守保活",
-      body: "系统自动刷新 CQU 会话。当 CQU 要求 2FA 时，验证码将通过密保邮箱实时捕获并自动填入。",
-    },
-  ];
-
+function Step1Intro({ onNext }: { onNext: () => void }) {
   return (
     <div className="space-y-6">
       <div>
         <h2 className="mb-2 text-xl font-semibold text-foreground">绑定重庆大学统一认证账号</h2>
-        <p className="text-sm text-muted-foreground">
-          绑定后，系统会安全维护统一认证会话，供已授权的校内服务使用。
+        <p className="text-sm leading-relaxed text-muted-foreground">
+          先设置密保邮箱，再登录学校账号。绑定后即可使用已授权的校园服务。
         </p>
       </div>
-
-      <div className="divide-y divide-border">
-        {introItems.map((item) => (
-          <div key={item.title} className="flex items-start gap-3 py-4 first:pt-0">
-            <div className="mt-1 shrink-0 text-muted-foreground">
-              {item.icon}
-            </div>
-            <div>
-              <p className="text-sm font-medium text-foreground">{item.title}</p>
-              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{item.body}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="space-y-3">
-        <p className="text-sm font-medium text-foreground">选择绑定方式</p>
-
-        <label
-          className={`flex cursor-pointer items-start gap-3 rounded-lg border p-4 transition-colors ${
-            bindKind === "direct"
-              ? "border-primary bg-surface"
-              : "border-border bg-surface hover:border-muted-foreground/40"
-          }`}
-        >
-          <input
-            type="radio"
-            name="bindKind"
-            value="direct"
-            checked={bindKind === "direct"}
-            onChange={() => setBindKind("direct")}
-            className="mt-0.5 accent-primary"
-          />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-medium text-foreground">直设模式</span>
-              <span className="badge badge-info">推荐</span>
-            </div>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              将 CQU 密保邮箱直接改为我们为您生成的专属地址。安全性更高，验证码直达，无中间环节。
-            </p>
-          </div>
-        </label>
-
-        <label
-          className="flex cursor-not-allowed items-start gap-3 rounded-lg border border-border bg-muted p-4 opacity-60"
-          aria-disabled="true"
-        >
-          <input
-            type="radio"
-            name="bindKind"
-            value="forward"
-            checked={false}
-            disabled
-            onChange={() => {
-              /* 暂时禁用：转发模式不可选 */
-            }}
-            className="mt-0.5 cursor-not-allowed accent-primary"
-          />
-          <div className="min-w-0 flex-1">
-            <span className="text-sm font-medium text-muted-foreground">转发（暂不可用）</span>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              保留您自己的邮箱作为 CQU 密保邮箱，在邮箱里添加转发规则，将 CQU 的邮件自动转发到我们的地址。
-            </p>
-            <p className="mt-1 text-xs font-medium text-muted-foreground">该模式暂未开放，请使用直设模式。</p>
-          </div>
-        </label>
-
-        {bindKind === "forward" && (
-          <div className="ml-0 space-y-3">
-            <div>
-              <Label htmlFor="forward-addr" className="mb-1 block">您的转发邮箱（即当前 CQU 密保邮箱）</Label>
-              <Input
-                id="forward-addr"
-                type="email"
-                value={forwardAddress}
-                onChange={(e) => setForwardAddress(e.target.value)}
-                onBlur={() => setForwardAddrTouched(true)}
-                placeholder="example@gmail.com"
-                autoComplete="email"
-                aria-invalid={showForwardError || undefined}
-              />
-              {showForwardError && (
-                <p className="field-error mt-1">请输入合法的邮箱地址</p>
-              )}
-            </div>
-
-            <div className="space-y-1.5 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs text-warning">
-              <p className="font-semibold">转发器兼容性说明</p>
-              <p>
-                由于 CQU 域名不配置 DKIM，转发器必须能对转发邮件做 <strong>SRS 地址改写</strong>或用自身 DKIM 重签，
-                否则邮件会被我们的收信服务器拒收。
-              </p>
-              <p>
-                <strong>主流邮箱均支持</strong>：Gmail、QQ 邮箱、Outlook / Hotmail、163 / 126 等。
-                若使用自建邮件服务，请确认其支持 SRS。
-              </p>
-            </div>
-
-            <div className="space-y-1 rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs text-warning">
-              <p className="font-semibold">安全说明</p>
-              <p>
-                转发模式依赖您邮箱的转发链，安全性略低于直设模式。
-                即使出现最坏情况，风险也仅限于单次 CQU 会话重登失败，不会导致账号被他人接管。
-              </p>
-              <p>如果您对安全要求较高，建议使用直设模式。</p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="rounded-lg border border-warning/40 bg-warning/10 p-4 text-xs text-warning">
-        <strong>信任须知：</strong>绑定完成后，您应改用短信或微信验证方式自行登录 CQU，
-        不要再依赖密保邮箱人工登录——因为该邮箱已由本系统托管，验证码将被自动处理。
-      </div>
-
-      <Button
-        type="button"
-        className="w-full"
-        onClick={onNext}
-        disabled={!canProceed}
-        title={
-          bindKind === "forward" && !forwardAddrValid
-            ? "请填写合法的转发邮箱地址"
-            : undefined
-        }
-      >
-        开始绑定
-      </Button>
+      <Button type="button" className="w-full" onClick={onNext}>开始绑定</Button>
     </div>
   );
 }
@@ -317,14 +146,6 @@ function Step1Intro({
 // ────────────────────────────────────────────────────────────────────────────
 // Step 2 (direct) — Get dedicated address AND await confirmation code via WS
 // ────────────────────────────────────────────────────────────────────────────
-
-const step2WsStatusText: Record<WsState, string> = {
-  idle: "准备连接…",
-  connecting: "正在建立连接…",
-  open: "实时监听中，验证码到达将立即显示",
-  closed: "连接中断，正在重连…",
-  error: "连接出错，正在重连…",
-};
 
 function Step2Direct({
   onNext,
@@ -422,27 +243,10 @@ function Step2Direct({
       {addrLoading ? (
         <div>
           <span className="sr-only" role="status">{addressSkeletonLabel}</span>
-          <div
-            className="rounded-lg border border-link/40 bg-link/10 p-4"
-            aria-hidden="true"
-          >
-            <Skeleton className="mb-2 h-4 w-40" />
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <Skeleton className="h-5 min-w-0 flex-1" />
-              <Button type="button" variant="outline" size="sm" disabled><Skeleton><span className="invisible">复制</span></Skeleton></Button>
-            </div>
-          </div>
+          <BindingAddress address="" loading />
         </div>
       ) : bindAddress ? (
-        <div className="rounded-lg border border-link/40 bg-link/10 p-4">
-          <p className="mb-2 text-xs font-medium text-link">您的专属密保邮箱</p>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <span className="break-all font-mono text-sm font-semibold text-foreground">
-              {bindAddress}
-            </span>
-            <CopyButton text={bindAddress} />
-          </div>
-        </div>
+        <BindingAddress address={bindAddress} />
       ) : null}
 
       {(addrLoading || bindAddress) && (
@@ -464,22 +268,7 @@ function Step2Direct({
         </div>
       )}
 
-      <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium ${
-        wsState === "open"
-          ? "bg-success/10 text-success"
-          : wsState === "connecting"
-          ? "bg-link/10 text-link"
-          : wsState === "error" || wsState === "closed"
-          ? "bg-warning/10 text-warning"
-          : "bg-muted text-muted-foreground"
-      }`}>
-        {wsState === "open" && (
-          <span className="h-2 w-2 animate-pulse rounded-full bg-success" aria-hidden="true" />
-        )}
-        {wsState === "connecting" && <Spinner className="text-link" />}
-        {(wsState === "closed" || wsState === "error") && <Spinner className="text-warning" />}
-        <span>{step2WsStatusText[wsState]}</span>
-      </div>
+      <BindingConnectionStatus state={wsState} />
 
       {code ? (
         <div className={`rounded-lg border p-5 ${codeExpired ? "border-border bg-muted" : "border-link/50 bg-link/10"}`}>
@@ -519,13 +308,6 @@ function Step2Direct({
           <p className="text-sm text-muted-foreground">等待验证码到达…</p>
         </div>
       )}
-
-      <div className="space-y-1 rounded-lg bg-muted p-3 text-xs text-muted-foreground">
-        <p className="font-medium text-foreground">没有收到验证码？</p>
-        <p>· 确认您已在 CQU 自服务中心点击「发送验证邮件」</p>
-        <p>· 邮件通常在 1 分钟内到达，验证码有效期约 10 分钟</p>
-        <p>· 如超时可在 CQU 页面重新发送，新验证码到达后会自动更新</p>
-      </div>
 
       <Button
         type="button"
@@ -596,27 +378,10 @@ function Step2Forward({
       {addrLoading ? (
         <div>
           <span className="sr-only" role="status">{addressSkeletonLabel}</span>
-          <div
-            className="rounded-lg border border-link/40 bg-link/10 p-4"
-            aria-hidden="true"
-          >
-            <Skeleton className="mb-2 h-4 w-64 max-w-full" />
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <Skeleton className="h-5 min-w-0 flex-1" />
-              <Button type="button" variant="outline" size="sm" disabled><Skeleton><span className="invisible">复制</span></Skeleton></Button>
-            </div>
-          </div>
+          <BindingAddress address="" label="转发目标地址" loading />
         </div>
       ) : bindAddress ? (
-        <div className="rounded-lg border border-link/40 bg-link/10 p-4">
-          <p className="mb-2 text-xs font-medium text-link">转发目标地址（请将 CQU 邮件转发到此处）</p>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <span className="break-all font-mono text-sm font-semibold text-foreground">
-              {bindAddress}
-            </span>
-            <CopyButton text={bindAddress} />
-          </div>
-        </div>
+        <BindingAddress address={bindAddress} label="转发目标地址" />
       ) : null}
 
       <div className="space-y-2 text-sm text-muted-foreground">
@@ -746,8 +511,8 @@ function Step3Credentials({
         </h2>
         <p className="text-sm text-muted-foreground">
           {repair
-            ? "输入统一身份认证账号和新密码。系统会验证新密码，并重新建立 CQU 会话，过程可能需要几分钟。"
-            : "输入您的 CQU 统一身份认证账号和密码。系统将立即发起首次登录。由于需要等待 2FA 邮件，此过程可能需要几分钟。"}
+            ? "输入统一身份认证账号和新密码。"
+            : "输入重庆大学统一身份认证账号和密码。"}
         </p>
       </div>
 
@@ -758,13 +523,14 @@ function Step3Credentials({
           <Label htmlFor="bind-studentId">统一身份认证账号</Label>
           <Input
             id="bind-studentId"
+            className="cqu-credential-input"
             type="text"
             value={studentId}
             onChange={(e) => setStudentId(e.target.value)}
             required
             disabled={loading}
             autoComplete="username"
-            placeholder="输入您的统一身份认证账号"
+            placeholder="学号或工号"
           />
         </div>
 
@@ -772,30 +538,21 @@ function Step3Credentials({
           <Label htmlFor="bind-cquPassword">CQU 统一认证密码</Label>
           <Input
             id="bind-cquPassword"
+            className="cqu-credential-input"
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
             disabled={loading}
             autoComplete="current-password"
-            placeholder="输入 CQU 统一认证密码"
+            placeholder="输入密码"
           />
         </div>
 
         {loading && (
-          <div className="rounded-lg border border-link/40 bg-link/10 p-4">
-            <div className="mb-2 flex items-center gap-3">
-              <Spinner className="text-link" />
-              <p className="text-sm font-medium text-foreground">
-                {repair ? "正在验证新密码…" : "正在完成首次登录…"}
-              </p>
-            </div>
-            <p className="pl-6 text-xs text-muted-foreground">
-              {repair
-                ? "系统正在使用新密码重新登录 CQU，可能需要等待 2FA 验证码邮件。请保持页面打开。"
-                : "系统正在以您的身份登录 CQU，可能需要等待 2FA 验证码邮件，预计需要 1–5 分钟。请保持页面打开，不要刷新。"}
-            </p>
-          </div>
+          <p className="text-xs text-muted-foreground" role="status">
+            学校验证可能需要几分钟，请保持页面打开。
+          </p>
         )}
 
         <ActionButton
@@ -805,17 +562,13 @@ function Step3Credentials({
           state={loading ? "loading" : "idle"}
           labels={{
             idle: repair ? "保存并重新登录" : "确认绑定",
-            loading: repair ? "正在保存，请稍候…" : "首次登录中，请稍候…",
+            loading: repair ? "正在保存…" : "正在登录…",
             success: "已完成",
             error: "重试",
           }}
         />
       </form>
 
-      <div className="rounded-lg bg-muted p-3 text-xs text-muted-foreground">
-        <p className="mb-1 font-medium text-foreground">安全提示</p>
-        <p>您的密码将以 AES-256-GCM 加密存储，仅用于维护 CQU 会话，不会明文记录或对外共享。</p>
-      </div>
     </div>
   );
 }
@@ -986,16 +739,11 @@ export default function CquBindWizard({ onReturn = replaceLocation }: CquBindWiz
   ) : screen === null ? (
     <BindingSkeleton repair={repair} />
   ) : screen === "intro" ? (
-    <Step1Intro
-      onNext={() => setScreen("address")}
-      bindKind={bindKind}
-      setBindKind={(kind) => {
-        setBindKind(kind);
-        setBindAddress("");
-      }}
-      forwardAddress={forwardAddress}
-      setForwardAddress={setForwardAddress}
-    />
+    <Step1Intro onNext={() => {
+      setBindKind("direct");
+      if (bindKind !== "direct") setBindAddress("");
+      setScreen("address");
+    }} />
   ) : screen === "address" ? (
     <Step2AddressAndCode
       onNext={continueToCredentials}
