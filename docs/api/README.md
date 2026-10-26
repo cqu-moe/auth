@@ -49,3 +49,8 @@ such exception and the native QuickLogin response contract is recorded in
 Run `npm run generate:api` twice, then `npm run check:api` and `npm run lint:api`.
 Generation and validation are local: they do not upload a schema, enable API Shield,
 change WAF rules, or deploy the Worker.
+
+`POST /api/v1/cqu/binding` requires the exact configured Auth website `Origin`,
+including for an empty body. Missing, opaque (`null`), sibling, and other origins
+return `403 FORBIDDEN_ORIGIN`; a same-origin empty POST still creates a direct
+binding. Host-only `SameSite=Lax` cookies alone do not isolate same-site siblings.

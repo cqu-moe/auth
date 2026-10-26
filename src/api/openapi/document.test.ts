@@ -114,6 +114,8 @@ describe("complete API document", () => {
       .toMatchObject({ properties: { data: { properties: { ticket: { type: "string" } } } } });
     expect(tickets.responses["201"].headers["Cache-Control"].schema.const).toBe("no-store");
     expect(tickets.responses["400"].headers["Cache-Control"].schema.const).toBe("no-store");
+    expect(paths["/api/v1/cqu/binding"].post["x-runtime-origin"]).toBe("same-origin-website");
+    expect(paths["/api/v1/cqu/binding"].post.responses).toHaveProperty("403");
     expect(paths["/api/v1/cqu/binding/credentials"].put.responses["409"])
       .toMatchObject({
         description: "Login already in progress",

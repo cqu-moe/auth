@@ -133,7 +133,12 @@ export function createApp() {
   app.all("/api", apiFallback);
   app.all("/api/*", apiFallback);
 
-  app.all("*", (c) => c.env.ASSETS.fetch(c.req.raw));
+  app.all("*", async (c) => {
+    c.res = await c.env.ASSETS.fetch(c.req.raw);
+    c.header("Content-Security-Policy", "frame-ancestors 'none'", { append: true });
+    c.header("X-Frame-Options", "DENY");
+    return c.res;
+  });
 
   return app;
 }

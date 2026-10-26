@@ -27,6 +27,8 @@ describe("API and SPA routing boundary", () => {
         const response = await createApp().request(path, {}, fixture.env);
         expect(response.status).toBe(200);
         expect(fixture.assetsFetch).toHaveBeenCalledTimes(1);
+        expect(response.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+        expect(response.headers.get("x-frame-options")).toBe("DENY");
       } finally {
         await fixture.close();
       }

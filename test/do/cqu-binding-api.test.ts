@@ -36,6 +36,7 @@ describe("CQU binding API v1", () => {
     const fixture = await createApiFixture();
     try {
       const headers = await fixture.signIn("user");
+      headers.set("origin", env.BETTER_AUTH_URL);
       headers.set("content-type", "application/json");
       const injected = await fixture.request("/api/v1/cqu/binding", {
         method: "POST",
@@ -61,6 +62,7 @@ describe("CQU binding API v1", () => {
     const fixture = await createApiFixture();
     try {
       const headers = await fixture.signIn("user");
+      headers.set("origin", env.BETTER_AUTH_URL);
       const created = await fixture.request("/api/v1/cqu/binding", {
         method: "POST",
         headers,
@@ -90,9 +92,31 @@ describe("CQU binding API v1", () => {
     }
   });
 
+  it.each([undefined, "null", "http://sibling.localhost:8787", "https://untrusted.example"])(
+    "rejects an empty form POST with untrusted Origin %s without creating a binding", async (origin) => {
+      const fixture = await createApiFixture();
+      try {
+        const headers = await fixture.signIn("user");
+        if (origin !== undefined) headers.set("origin", origin);
+        headers.set("content-type", "application/x-www-form-urlencoded");
+        headers.set("sec-fetch-site", "same-site");
+        const response = await fixture.request("/api/v1/cqu/binding", {
+          method: "POST", headers, body: "",
+        });
+        expect(response.status).toBe(403);
+        expect(await response.json()).toMatchObject({ code: "FORBIDDEN_ORIGIN" });
+        const binding = await fixture.request("/api/v1/cqu/binding", { headers });
+        expect(await binding.json()).toMatchObject({ data: { bindStatus: "unbound" } });
+      } finally {
+        await fixture.close();
+      }
+    }
+  );
+
   it("reports failed DO cleanup and keeps unbind retryable", async () => {
     const fixture = await createApiFixture();
     const headers = await fixture.signIn("user");
+    headers.set("origin", env.BETTER_AUTH_URL);
     await fixture.request("/api/v1/cqu/binding", { method: "POST", headers });
     const transport = vi.spyOn(env.CQU_SESSION, "get").mockReturnValue({
       fetch: async () => new Response("unavailable", { status: 503 }),

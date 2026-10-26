@@ -38,7 +38,7 @@ interface SendEmailInput {
 
 interface SendResult {
   data: unknown;
-  error: { statusCode?: number | null; message?: string } | null;
+  error: { statusCode?: number | null; message?: string; name?: string } | null;
 }
 
 export interface NotificationDependencies {
@@ -82,8 +82,13 @@ export function validateScheduleNotificationMessage(
   };
 }
 
-function isRetryableStatus(statusCode: number | null | undefined): boolean {
-  return statusCode == null || statusCode === 429 || statusCode >= 500;
+function isRetryableSendError(
+  error: { statusCode?: number | null; name?: string },
+): boolean {
+  return error.name === "concurrent_idempotent_requests" ||
+    error.statusCode == null ||
+    error.statusCode === 429 ||
+    error.statusCode >= 500;
 }
 
 export async function processScheduleNotification(
@@ -127,7 +132,7 @@ export async function processScheduleNotification(
     );
 
     if (result.error) {
-      const retry = isRetryableStatus(result.error.statusCode);
+      const retry = isRetryableSendError(result.error);
       console.error(JSON.stringify({
         event: retry
           ? "queue.schedule_notification.send_retry"

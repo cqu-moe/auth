@@ -3478,6 +3478,16 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ApiProblem"];
                 };
             };
+            /** @description Origin or binding mode forbidden */
+            403: {
+                headers: {
+                    "Cache-Control"?: "no-store";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ApiProblem"];
+                };
+            };
             /** @description Unsupported request media type */
             415: {
                 headers: {

@@ -163,6 +163,24 @@
               }
             }
           },
+          "403": {
+            "description": "Origin or binding mode forbidden",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiProblem"
+                }
+              }
+            }
+          },
           "415": {
             "description": "Unsupported request media type",
             "headers": {
@@ -182,6 +200,7 @@
             }
           }
         },
+        "x-runtime-origin": "same-origin-website",
         "requestBody": {
           "required": false,
           "content": {

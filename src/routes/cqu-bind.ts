@@ -39,6 +39,10 @@ cquBinding.use("/*", requireSession);
 //   - "forward"：新建仍被硬性禁用；旧 forward 记录的读取和邮件处理不受影响。
 // userId 只取自 session/JWT（绝不取客户端入参）；域名只取自 c.env.BIND_EMAIL_DOMAIN。
 cquBinding.post("/", async (c) => {
+  // Same-site siblings still send host-only SameSite=Lax session cookies.
+  if (c.req.header("Origin") !== new URL(c.env.BETTER_AUTH_URL).origin) {
+    return errorResponse(c, "FORBIDDEN_ORIGIN", "请求来源不被允许", 403);
+  }
   const user = c.get("user") as { id: string };
   const db = drizzle(c.env.DATABASE);
 

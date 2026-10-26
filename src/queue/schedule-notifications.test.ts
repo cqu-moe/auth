@@ -90,6 +90,29 @@ describe("processScheduleNotification", () => {
     expect(result).toBe("retry");
   });
 
+  it("retries a concurrent Resend idempotent request but rejects a reused key with changed payload", async () => {
+    const makeDependencies = (name: string) => ({
+      resolveRecipient: vi.fn().mockResolvedValue({
+        email: "u@example.com",
+        emailVerified: true,
+        eligible: true,
+      }),
+      sendEmail: vi.fn().mockResolvedValue({
+        data: null,
+        error: { name, statusCode: 409, message: "conflict" },
+      }),
+    });
+
+    expect(await processScheduleNotification(
+      validMessage(),
+      makeDependencies("concurrent_idempotent_requests"),
+    )).toBe("retry");
+    expect(await processScheduleNotification(
+      validMessage(),
+      makeDependencies("invalid_idempotent_request"),
+    )).toBe("ack");
+  });
+
   it("acks permanent Resend errors and invalid input", async () => {
     const sendEmail = vi.fn().mockResolvedValue({
       data: null,
