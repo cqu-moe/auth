@@ -16,7 +16,6 @@ export interface TurnstileOptions {
 }
 
 interface Turnstile {
-  ready: (callback: () => void) => void;
   render: (container: HTMLElement, options: TurnstileOptions) => string;
   remove: (id: string) => void;
 }
@@ -28,7 +27,7 @@ declare global {
 let loading: Promise<Turnstile> | undefined;
 
 export function loadTurnstile(): Promise<Turnstile> {
-  if (window.turnstile) return new Promise(resolve => window.turnstile!.ready(() => resolve(window.turnstile!)));
+  if (window.turnstile) return Promise.resolve(window.turnstile);
   if (loading) return loading;
   loading = new Promise<Turnstile>((resolve, reject) => {
     const script = document.createElement("script");
@@ -45,7 +44,9 @@ export function loadTurnstile(): Promise<Turnstile> {
     script.onload = () => {
       const api = window.turnstile;
       if (!api) return fail();
-      api.ready(() => { window.clearTimeout(timer); resolve(api); });
+      // ready() rejects async/defer scripts; the load event already guarantees execution.
+      window.clearTimeout(timer);
+      resolve(api);
     };
     document.head.append(script);
   }).catch(error => { loading = undefined; throw error; });

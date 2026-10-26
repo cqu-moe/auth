@@ -21,7 +21,7 @@ beforeEach(() => {
   remove = vi.fn();
   vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
   vi.stubGlobal("turnstile", {
-    ready: (ready: () => void) => ready(),
+    ready: () => { throw new Error("Remove async/defer before using turnstile.ready()"); },
     render: (_container: HTMLElement, options: TurnstileOptions) => { widgets.push(options); return String(widgets.length); },
     remove,
   });
@@ -135,7 +135,7 @@ describe("password login safety verification", () => {
     vi.useRealTimers();
   });
 
-  it("recovers from a blocked script without losing the pending form data", async () => {
+  it("recovers from a blocked async script without losing the pending form data", async () => {
     vi.stubGlobal("turnstile", undefined);
     const ui = await renderLogin();
     await submit(ui);
@@ -148,7 +148,7 @@ describe("password login safety verification", () => {
     const retried = document.querySelector<HTMLScriptElement>('script[src*="challenges.cloudflare.com"]')!;
     expect(retried).not.toBe(script);
     vi.stubGlobal("turnstile", {
-      ready: (ready: () => void) => ready(),
+      ready: () => { throw new Error("Remove async/defer before using turnstile.ready()"); },
       render: (_container: HTMLElement, options: TurnstileOptions) => { widgets.push(options); return "reloaded"; },
       remove,
     });
