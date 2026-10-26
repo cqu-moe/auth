@@ -293,6 +293,9 @@ function responsesFor(
     },
   });
   if (hasJsonBody || hasValidatedQuery) responses["400"] = problemResponse("Invalid request");
+  if (operation.path === "/api/v1/cqu/binding" && operation.method === "POST") {
+    responses["403"] = problemResponse("Origin or binding mode forbidden");
+  }
   if (
     operation.path === "/api/v1/cqu/binding/credentials" &&
     operation.method === "PUT"
@@ -335,6 +338,9 @@ export function buildOpenApiDocument(operations: readonly HttpOperation[]) {
       security: securityFor(operation),
       responses: responsesFor(operation, successSchema, requestSchema !== undefined),
     };
+    if (operation.path === "/api/v1/cqu/binding" && operation.method === "POST") {
+      entry["x-runtime-origin"] = "same-origin-website";
+    }
     if (requestSchema) {
       entry.requestBody = {
         required: !(
