@@ -1,25 +1,29 @@
 import { test, beforeEach, afterEach } from '@e2e-dev/web';
 import { expect, credentials, secrets } from 'e2e';
+import { TURNSTILE_SCRIPT_URL, fulfillTurnstileFixture } from './turnstile.mjs';
 
 let unexpected: string[];
 beforeEach(async ({ browser }) => {
   unexpected = [];
   const allowed = new URL(process.env.AUTH_E2E_URL!).origin;
   await browser.route('**/*', async route => {
-    if (new URL(route.request.url).origin !== allowed) {
-      unexpected.push(new URL(route.request.url).origin);
+    const url = new URL(route.request.url);
+    if (`${url.origin}${url.pathname}` === TURNSTILE_SCRIPT_URL) return await fulfillTurnstileFixture(route);
+    if (url.origin !== allowed) {
+      unexpected.push(url.origin);
       await route.abort();
     } else await route.continue();
   });
 });
 afterEach(async () => { expect(unexpected).toEqual([]); });
 
-test('register, verify, persist, sign out and sign in through the built application', async ({ app, screen, browser }) => {
+test('register, verify, persist, sign out and sign in with slow Turnstile completion', async ({ app, screen, browser }) => {
   const account = credentials.user('journey');
   await app.open('/');
   await expect(screen.getByRole('heading', '校园很大， 一个账号就够。')).toBeVisible();
+  await browser.evaluate(() => (localStorage.setItem('__E2E_TURNSTILE_DELAY__', '4000'), null));
   await screen.getByRole('link', '初次见面？创建账号').click();
-  await expect(browser).toHaveURL(/\/register$/);
+  await expect(browser).toHaveURL(/\/register(?:\?|$)/);
   await app.open('/register?redirect=%2Fsettings%2Fsecurity');
   if (process.env.AUTH_E2E_BREAK_ASSERTION === '1') {
     await expect(screen.getByRole('heading', '创建账号', { exact: true })).toHaveText('故意错误的注册成功页面');
@@ -29,7 +33,11 @@ test('register, verify, persist, sign out and sign in through the built applicat
   await browser.locator('#password').fill(account.password);
   await browser.locator('#confirmPassword').fill(account.password);
   await screen.getByLabel('邀请码').fill('ABCDEFGH');
+  const signup = browser.waitForResponse(/\/api\/v1\/auth\/sign-up\/email$/);
   await screen.getByRole('button', '注册', { exact: true }).click();
+  await expect(screen.getByRole('button', '正在完成安全验证…', { exact: true })).toBeVisible();
+  await expect(browser).toHaveURL(/\/register(?:\?|$)/);
+  expect((await signup).status).toBe(200);
   await expect(browser).toHaveURL(/verify-email/);
   await expect(browser).toHaveURL(/redirect=/);
   // A real, unverified session must not reach the protected settings UI.
@@ -43,6 +51,11 @@ test('register, verify, persist, sign out and sign in through the built applicat
   await browser.locator('#email-verification-otp').fill(secrets.get('otp'));
   await screen.getByRole('button', '验证并继续').click();
   await expect(browser).toHaveURL(/\/settings\/security$/);
+  await browser.evaluate(() => {
+    localStorage.setItem('__E2E_TURNSTILE_DELAY__', '0');
+    localStorage.setItem('__E2E_TURNSTILE_FAILURES__', '1');
+    return null;
+  });
   await browser.reload();
   await expect(screen.getByRole('button', '退出登录', { exact: true })).toBeVisible();
   const verified = await browser.evaluate(async () => {
@@ -56,16 +69,17 @@ test('register, verify, persist, sign out and sign in through the built applicat
   await expect(browser).toHaveURL(/\/settings$/);
   await screen.getByRole('button', '退出登录', { exact: true }).click();
   await expect(browser).toHaveURL(/login/);
+  await expect(screen.getByText('安全验证加载失败，请重试后再次提交')).toBeVisible();
+  await screen.getByLabel('邮箱', { exact: true }).fill(account.username);
+  await browser.locator('#password').fill('deliberately-wrong-password');
+  await screen.getByRole('button', '重试登录', { exact: true }).click();
+  await expect(browser.locator('#login-error')).toBeVisible();
   expect(await browser.evaluate(async () => (await fetch('/api/v1/cqu/binding')).status)).toBe(401);
   await app.open('/settings');
   await expect(browser).toHaveURL(/login/);
   await screen.getByLabel('邮箱', { exact: true }).fill(account.username);
-  await browser.locator('#password').fill('deliberately-wrong-password');
-  await screen.getByRole('button', '登录', { exact: true }).click();
-  await expect(browser.locator('#login-error')).toBeVisible();
-  expect(await browser.evaluate(async () => (await fetch('/api/v1/cqu/binding')).status)).toBe(401);
   await browser.locator('#password').fill(account.password);
-  await screen.getByRole('button', '重试登录', { exact: true }).click();
+  await screen.getByRole('button', '登录', { exact: true }).click();
   await expect(browser).toHaveURL(/\/settings/);
   await browser.reload();
   await expect(screen.getByRole('button', '退出登录', { exact: true })).toBeVisible();
@@ -76,7 +90,6 @@ test('register, verify, persist, sign out and sign in through the built applicat
   await screen.getByRole('button', '登录', { exact: true }).click();
   await expect(browser).toHaveURL(`${process.env.AUTH_E2E_URL}/settings`);
 });
-
 test('registration policy rejects missing, invalid, expired and used invitations; optional mode creates an unverified account', async ({ app, screen, browser }) => {
   await app.open('/register');
   await screen.getByLabel('昵称').fill('Policy User');

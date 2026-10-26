@@ -3,6 +3,7 @@ import { openAPI } from "better-auth/plugins";
 import { createAuth } from "../../auth";
 import type { Env } from "../../types";
 import { policyForOperation, securityForPolicy } from "../auth-policy";
+import { TURNSTILE_ACTIONS, TURNSTILE_TOKEN_HEADER } from "../../../shared/turnstile";
 
 export async function getBetterAuthOpenApi(env: Env, request: Request) {
   const configured = createAuth(env, request);
@@ -68,6 +69,70 @@ function addPathParameters(path: string, item: Record<string, any>) {
   }
 }
 
+function addTurnstileContract(path: string, item: Record<string, any>) {
+  const action = TURNSTILE_ACTIONS[path as keyof typeof TURNSTILE_ACTIONS];
+  if (!action || !item.post) return;
+  const parameters = Array.isArray(item.post.parameters) ? item.post.parameters : [];
+  if (!parameters.some((parameter: any) => parameter?.in === "header" && parameter?.name === TURNSTILE_TOKEN_HEADER)) {
+    parameters.push({
+      name: TURNSTILE_TOKEN_HEADER,
+      in: "header",
+      required: true,
+      description: "Cloudflare Turnstile token for this action",
+      schema: { type: "string", minLength: 1, maxLength: 2048 },
+    });
+    item.post.parameters = parameters;
+  }
+  item.post.responses ??= {};
+  const turnstileForbiddenSchema = {
+    type: "object",
+    required: ["code", "message"],
+    properties: {
+      code: { enum: ["TURNSTILE_REQUIRED", "TURNSTILE_FAILED"] },
+      message: { type: "string" },
+    },
+  };
+  const existingForbidden = item.post.responses["403"];
+  if (existingForbidden) {
+    existingForbidden.description = `${existingForbidden.description ?? "Forbidden"}; alternatively, Turnstile verification is missing or invalid.`;
+    const jsonContent = existingForbidden.content?.["application/json"];
+    if (jsonContent) {
+      jsonContent.schema = {
+        anyOf: [jsonContent.schema ?? { type: "object" }, turnstileForbiddenSchema],
+      };
+    } else {
+      existingForbidden.content = {
+        ...existingForbidden.content,
+        "application/json": { schema: turnstileForbiddenSchema },
+      };
+    }
+  } else {
+    item.post.responses["403"] = {
+      description: "Turnstile verification is missing or invalid",
+      content: {
+        "application/json": {
+          schema: turnstileForbiddenSchema,
+        },
+      },
+    };
+  }
+  item.post.responses["503"] = {
+    description: "Turnstile verification is unavailable",
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          required: ["code", "message"],
+          properties: {
+            code: { const: "TURNSTILE_UNAVAILABLE" },
+            message: { type: "string" },
+          },
+        },
+      },
+    },
+  };
+}
+
 function pruneSchemas(document: Record<string, any>) {
   const schemas = document.components.schemas as Record<string, unknown>;
   const used = new Set<string>();
@@ -101,6 +166,7 @@ export function mergeBetterAuthOpenApi(
     const rewritten = rewriteRefs(pathItem) as Record<string, any>;
     if (suffix === "/get-session") delete rewritten.post;
     addPathParameters(suffix, rewritten);
+    addTurnstileContract(suffix, rewritten);
     for (const [method, operation] of Object.entries(rewritten)) {
       if (!operation || typeof operation !== "object") continue;
       (operation as Record<string, unknown>).operationId = `auth_${method}_${suffix}`

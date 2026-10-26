@@ -4,6 +4,7 @@ import {mkdir,writeFile,readFile,mkdtemp,rm} from 'node:fs/promises';
 import {resolve,join} from 'node:path';
 import {startSchoolAuth} from './runtime.mjs';
 import {prepareSchoolBinding} from './prepare-binding.mjs';
+import {turnstileHeaders} from '../turnstile.mjs';
 
 const publicOutput=`.e2e/school-consumer-${Date.now()}`;
 const artifacts=await createArtifactRun(publicOutput);
@@ -40,7 +41,7 @@ for(let run=1;run<=2;run++) {
     let consumerDb=await runtime.getD1Database('SCHEDULE_DB','school-consumer');
     const account=await prepareSchoolBinding(runtime,{email:'consumer@example.test',password:'Synthetic-only-123!'});
     const login=await fetch(`${runtime.origin}/api/v1/auth/sign-in/email`,{method:'POST',signal:AbortSignal.timeout(15000),
-      headers:{origin:runtime.origin,'content-type':'application/json'},body:JSON.stringify({email:account.email,password:account.password})});
+      headers:{origin:runtime.origin,'content-type':'application/json',...turnstileHeaders('/auth/sign-in/email',runtime.origin)},body:JSON.stringify({email:account.email,password:account.password})});
     assert.equal(login.status,200);
     const cookie=login.headers.getSetCookie().map(value=>value.split(';')[0]).join('; ');
     await login.arrayBuffer();

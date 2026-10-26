@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { TURNSTILE_TOKEN_HEADER } from "../../shared/turnstile";
 import { AUTH_OPERATIONS } from "./auth-operations.generated";
 import { buildAuthPolicy, securityForPolicy } from "./auth-policy";
 import { createApp } from "../app";
@@ -58,20 +59,39 @@ describe("deterministic API authentication policy", () => {
 
   it("characterizes public, optional-session, session, Bearer, client-auth, and admin gates", async () => {
     const fixture = createHttpFixture();
+    const passwordLoginToken = "turnstile-password-login";
+    const emailChangeToken = "turnstile-email-change";
+    const emailVerificationToken = "turnstile-email-verification";
+    fixture.env.TURNSTILE_SECRET = "test-turnstile-secret";
+    vi.stubGlobal("fetch", vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      const action = typeof body.response === "string"
+        ? body.response.replace("turnstile-", "")
+        : null;
+      return Response.json({
+        success: true,
+        action,
+        hostname: "localhost",
+        "error-codes": [],
+      });
+    }));
     const app = createApp();
     try {
       const optional = await app.request("/api/v1/auth/get-session", {}, fixture.env);
       expect(optional.status).toBe(200);
       const login = await app.request("/api/v1/auth/sign-in/email", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          [TURNSTILE_TOKEN_HEADER]: passwordLoginToken,
+        },
         body: JSON.stringify({ email: "missing@example.test", password: "invalid-password" }),
       }, fixture.env);
       expect(login.status).toBe(401);
       expect(await login.json()).toMatchObject({ code: "INVALID_EMAIL_OR_PASSWORD" });
 
       for (const [path, init] of [
-        ["/api/v1/auth/email-otp/request-email-change", { method: "POST", headers: { "content-type": "application/json" }, body: '{"newEmail":"next@example.test"}' }],
+        ["/api/v1/auth/email-otp/request-email-change", { method: "POST", headers: { "content-type": "application/json", [TURNSTILE_TOKEN_HEADER]: emailChangeToken }, body: '{"newEmail":"next@example.test"}' }],
         ["/api/v1/auth/admin/ban-user", { method: "POST", headers: { "content-type": "application/json" }, body: '{"userId":"target-user"}' }],
         ["/api/v1/auth/oauth2/userinfo", {}],
       ] as const) {
@@ -90,13 +110,19 @@ describe("deterministic API authentication policy", () => {
       ] as const) {
         const response = await app.request(path, {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: {
+            "content-type": "application/json",
+            [TURNSTILE_TOKEN_HEADER]: body.type === "email-verification"
+              ? emailVerificationToken
+              : passwordLoginToken,
+          },
           body: JSON.stringify(body),
         }, fixture.env);
         expect(response.status, path).toBe(403);
         expect(await response.json(), path).toMatchObject({ code: "CURRENT_EMAIL_OTP_ONLY" });
       }
     } finally {
+      vi.unstubAllGlobals();
       await fixture.close();
     }
   });

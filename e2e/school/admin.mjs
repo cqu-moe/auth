@@ -1,4 +1,5 @@
 import { prepareAccount } from '../prepare-account.mjs';
+import { turnstileHeaders } from '../turnstile.mjs';
 
 // Only admin role is a fixture prerequisite. Password, TOTP enrollment and strong
 // admission all cross the real production API; no proof/session is seeded.
@@ -9,7 +10,7 @@ export async function prepareSchoolAdmin(runtime) {
   const jar=new Map();
   async function request(path,body,method='POST') {
     const response=await fetch(`${runtime.origin}/api/v1${path}`,{method,signal:AbortSignal.timeout(15000),
-      headers:{origin:runtime.origin,'content-type':'application/json',cookie:[...jar].map(([k,v])=>`${k}=${v}`).join('; ')},
+      headers:{origin:runtime.origin,'content-type':'application/json',...turnstileHeaders(path,runtime.origin),cookie:[...jar].map(([k,v])=>`${k}=${v}`).join('; ')},
       ...(body===undefined?{}:{body:JSON.stringify(body)})});
     for(const raw of response.headers.getSetCookie()) {const pair=raw.split(';')[0];const index=pair.indexOf('=');jar.set(pair.slice(0,index),pair.slice(index+1));}
     if(!response.ok) throw new Error(`Synthetic admin action failed (${response.status}, ${path})`);

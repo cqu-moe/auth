@@ -13,6 +13,7 @@ export interface Env {
   ENCRYPTION_KEY: string;
   BETTER_AUTH_URL: string;
   BETTER_AUTH_SECRET: string;
+  TURNSTILE_SECRET?: string;
   QUICKLOGIN_CLIENT_ID: string;
   QUICKLOGIN_EXTENSION_ORIGIN: string;
   QUICKLOGIN_STORE_EXTENSION_ORIGIN?: string;

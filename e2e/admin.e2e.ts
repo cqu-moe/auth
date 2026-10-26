@@ -4,12 +4,15 @@ import { administrator, newMember, restore, request, setRole, userRow, login, sa
 import { createVerifiedAccount, enrollTotp, protectArtifacts } from './auth-fixture';
 import { authSecuritySecrets } from './secret-holder';
 import { authorization, concealCredentials, createClient, issueTokens, tokenRequest, userinfo } from './oauth-fixture';
+import { TURNSTILE_SCRIPT_URL, fulfillTurnstileFixture } from './turnstile.mjs';
 
 let unexpected: string[];
 beforeEach(async ({ browser }) => {
   unexpected = [];
   await browser.route('**/*', async route => {
-    const origin = new URL(route.request.url).origin;
+    const url = new URL(route.request.url);
+    if (`${url.origin}${url.pathname}` === TURNSTILE_SCRIPT_URL) return await fulfillTurnstileFixture(route);
+    const origin = url.origin;
     if (origin !== process.env.AUTH_E2E_URL) { unexpected.push(origin); await route.abort(); }
     else await route.continue();
   });

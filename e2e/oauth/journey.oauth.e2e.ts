@@ -5,6 +5,7 @@ import type { Browser } from '@e2e-dev/web';
 import { authWebEngine } from '../../e2e.config';
 import { responseFor } from '../admin-fixture';
 import { authSecuritySecrets } from '../secret-holder';
+import { TURNSTILE_SCRIPT_URL, fulfillTurnstileFixture } from '../turnstile.mjs';
 
 type Journey = TestFixtures & { browser: Browser };
 const courses = [{ id: '31', name: '合成电路', extra: 'SYN101', courseCode: 'SYN101' }];
@@ -16,8 +17,10 @@ beforeEach(async ({ app, screen, browser }) => {
   unexpected = [];
   const allowedOrigins = [new URL(process.env.AUTH_E2E_URL!).origin, new URL(process.env.AUTH_OAUTH_APP!).origin];
   const allowed = new Set(allowedOrigins);
+  await browser.route(`${TURNSTILE_SCRIPT_URL}*`, async route => await fulfillTurnstileFixture(route));
   if (!process.env.AUTH_OAUTH_PROXY) await browser.route('**/*', async route => {
     const url = new URL(route.request.url);
+    if (`${url.origin}${url.pathname}` === TURNSTILE_SCRIPT_URL) return await fulfillTurnstileFixture(route);
     pendingRoutes.set(route, { started: Date.now(), origin: url.origin === allowedOrigins[0] ? 'auth' : url.origin === allowedOrigins[1] ? 'oauth-app' : 'other',
       path: diagnosticPaths.has(url.pathname) ? url.pathname : 'other', decision: allowed.has(url.origin) ? 'continue' : 'abort' });
     try {

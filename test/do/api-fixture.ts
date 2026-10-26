@@ -3,6 +3,10 @@ import { applyD1Migrations, env } from "cloudflare:test";
 import { vi } from "vitest";
 import { createAuth } from "../../src/auth";
 import worker from "../../src/index";
+import {
+  TURNSTILE_ACTIONS,
+  TURNSTILE_TOKEN_HEADER,
+} from "../../shared/turnstile";
 
 type TestRole = "user" | "admin" | "superAdmin";
 
@@ -36,9 +40,58 @@ function cookieHeader(headers: Headers): string {
     .join("; ");
 }
 
-async function withFakeResend<T>(run: () => Promise<T>): Promise<T> {
-  const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-    const request = input instanceof Request ? input : new Request(input);
+const SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+const TURNSTILE_ACTION_VALUES = new Set<string>(Object.values(TURNSTILE_ACTIONS));
+
+function protectedTurnstileAction(path: string, origin: URL, method: string) {
+  if (method.toUpperCase() !== "POST") return undefined;
+  const pathname = new URL(path, origin).pathname;
+  const prefix = "/api/v1/auth";
+  if (!pathname.startsWith(prefix)) return undefined;
+  return TURNSTILE_ACTIONS[pathname.slice(prefix.length) as keyof typeof TURNSTILE_ACTIONS];
+}
+
+export function withTurnstileToken(
+  path: string,
+  init: RequestInit,
+  origin = env.BETTER_AUTH_URL
+): RequestInit {
+  const url = new URL(origin);
+  const action = protectedTurnstileAction(path, url, init.method ?? "GET");
+  if (!action) return init;
+  const headers = new Headers(init.headers);
+  headers.set(
+    TURNSTILE_TOKEN_HEADER,
+    `local-do:${action}:${url.hostname}:${crypto.randomUUID()}`
+  );
+  return { ...init, headers };
+}
+
+export async function withFakeResend<T>(
+  run: () => Promise<T>,
+  expectedOrigin = env.BETTER_AUTH_URL
+): Promise<T> {
+  const redeemedNonces = new Set<string>();
+  const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    if (request.url === SITEVERIFY_URL) {
+      const body = await request.json() as { secret?: string; response?: string };
+      const token = body.response?.match(/^local-do:([^:]+):(.+):([0-9a-f-]+)$/);
+      const action = token?.[1];
+      const hostname = token?.[2];
+      const nonce = token?.[3];
+      const valid = body.secret === env.TURNSTILE_SECRET &&
+        action !== undefined && TURNSTILE_ACTION_VALUES.has(action) &&
+        hostname === new URL(expectedOrigin).hostname &&
+        nonce !== undefined && !redeemedNonces.has(nonce);
+      if (valid && nonce) redeemedNonces.add(nonce);
+      return Response.json({
+        success: valid,
+        action: valid ? action : undefined,
+        hostname: valid ? hostname : undefined,
+        "error-codes": valid ? [] : ["invalid-input-response"],
+      });
+    }
     if (new URL(request.url).hostname !== "api.resend.com") {
       throw new Error(`unstubbed outbound request: ${request.method} ${request.url}`);
     }
@@ -60,8 +113,9 @@ export async function createApiFixture() {
   async function request(path: string, init?: RequestInit) {
     return withFakeResend(async () => {
       const execution = requestContext();
+      const routedInit = withTurnstileToken(path, init ?? {}, origin);
       const response = await worker.fetch(
-        new Request(new URL(path, origin), init),
+        new Request(new URL(path, origin), routedInit),
         env,
         execution.context
       );

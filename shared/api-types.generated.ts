@@ -9841,7 +9841,10 @@ export interface operations {
     post_api_v1_auth_email_otp_request_email_change: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Cloudflare Turnstile token for this action */
+                "x-turnstile-token": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -9888,7 +9891,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Forbidden. You do not have permission to access this resource or to perform this action. */
+            /** @description Forbidden. You do not have permission to access this resource or to perform this action.; alternatively, Turnstile verification is missing or invalid. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -9896,6 +9899,10 @@ export interface operations {
                 content: {
                     "application/json": {
                         message?: string;
+                    } | {
+                        /** @enum {unknown} */
+                        code: "TURNSTILE_REQUIRED" | "TURNSTILE_FAILED";
+                        message: string;
                     };
                 };
             };
@@ -9932,12 +9939,28 @@ export interface operations {
                     };
                 };
             };
+            /** @description Turnstile verification is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        code: "TURNSTILE_UNAVAILABLE";
+                        message: string;
+                    };
+                };
+            };
         };
     };
     post_api_v1_auth_email_otp_send_verification_otp: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Cloudflare Turnstile token for this action */
+                "x-turnstile-token": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -9988,7 +10011,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Forbidden. You do not have permission to access this resource or to perform this action. */
+            /** @description Forbidden. You do not have permission to access this resource or to perform this action.; alternatively, Turnstile verification is missing or invalid. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -9996,6 +10019,10 @@ export interface operations {
                 content: {
                     "application/json": {
                         message?: string;
+                    } | {
+                        /** @enum {unknown} */
+                        code: "TURNSTILE_REQUIRED" | "TURNSTILE_FAILED";
+                        message: string;
                     };
                 };
             };
@@ -10029,6 +10056,19 @@ export interface operations {
                 content: {
                     "application/json": {
                         message?: string;
+                    };
+                };
+            };
+            /** @description Turnstile verification is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        code: "TURNSTILE_UNAVAILABLE";
+                        message: string;
                     };
                 };
             };
@@ -14248,7 +14288,10 @@ export interface operations {
     post_api_v1_auth_request_password_reset: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Cloudflare Turnstile token for this action */
+                "x-turnstile-token": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -14297,7 +14340,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Forbidden. You do not have permission to access this resource or to perform this action. */
+            /** @description Forbidden. You do not have permission to access this resource or to perform this action.; alternatively, Turnstile verification is missing or invalid. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -14305,6 +14348,10 @@ export interface operations {
                 content: {
                     "application/json": {
                         message?: string;
+                    } | {
+                        /** @enum {unknown} */
+                        code: "TURNSTILE_REQUIRED" | "TURNSTILE_FAILED";
+                        message: string;
                     };
                 };
             };
@@ -14338,6 +14385,19 @@ export interface operations {
                 content: {
                     "application/json": {
                         message?: string;
+                    };
+                };
+            };
+            /** @description Turnstile verification is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        code: "TURNSTILE_UNAVAILABLE";
+                        message: string;
                     };
                 };
             };
@@ -15563,7 +15623,10 @@ export interface operations {
     post_api_v1_auth_send_verification_email: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Cloudflare Turnstile token for this action */
+                "x-turnstile-token": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -15625,7 +15688,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Forbidden. You do not have permission to access this resource or to perform this action. */
+            /** @description Forbidden. You do not have permission to access this resource or to perform this action.; alternatively, Turnstile verification is missing or invalid. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -15633,6 +15696,10 @@ export interface operations {
                 content: {
                     "application/json": {
                         message?: string;
+                    } | {
+                        /** @enum {unknown} */
+                        code: "TURNSTILE_REQUIRED" | "TURNSTILE_FAILED";
+                        message: string;
                     };
                 };
             };
@@ -15669,12 +15736,28 @@ export interface operations {
                     };
                 };
             };
+            /** @description Turnstile verification is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        code: "TURNSTILE_UNAVAILABLE";
+                        message: string;
+                    };
+                };
+            };
         };
     };
     post_api_v1_auth_sign_in_email: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Cloudflare Turnstile token for this action */
+                "x-turnstile-token": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -15731,7 +15814,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Forbidden. You do not have permission to access this resource or to perform this action. */
+            /** @description Forbidden. You do not have permission to access this resource or to perform this action.; alternatively, Turnstile verification is missing or invalid. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -15739,6 +15822,10 @@ export interface operations {
                 content: {
                     "application/json": {
                         message?: string;
+                    } | {
+                        /** @enum {unknown} */
+                        code: "TURNSTILE_REQUIRED" | "TURNSTILE_FAILED";
+                        message: string;
                     };
                 };
             };
@@ -15772,6 +15859,19 @@ export interface operations {
                 content: {
                     "application/json": {
                         message?: string;
+                    };
+                };
+            };
+            /** @description Turnstile verification is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        code: "TURNSTILE_UNAVAILABLE";
+                        message: string;
                     };
                 };
             };
@@ -16020,7 +16120,10 @@ export interface operations {
     post_api_v1_auth_sign_up_email: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Cloudflare Turnstile token for this action */
+                "x-turnstile-token": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -16106,7 +16209,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Forbidden. You do not have permission to access this resource or to perform this action. */
+            /** @description Forbidden. You do not have permission to access this resource or to perform this action.; alternatively, Turnstile verification is missing or invalid. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -16114,6 +16217,10 @@ export interface operations {
                 content: {
                     "application/json": {
                         message?: string;
+                    } | {
+                        /** @enum {unknown} */
+                        code: "TURNSTILE_REQUIRED" | "TURNSTILE_FAILED";
+                        message: string;
                     };
                 };
             };
@@ -16158,6 +16265,19 @@ export interface operations {
                 content: {
                     "application/json": {
                         message?: string;
+                    };
+                };
+            };
+            /** @description Turnstile verification is unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        code: "TURNSTILE_UNAVAILABLE";
+                        message: string;
                     };
                 };
             };

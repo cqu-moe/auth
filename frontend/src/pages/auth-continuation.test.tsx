@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { installPassingTurnstile } from "../lib/turnstile.testbots";
 
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -92,6 +93,7 @@ function setInput(selector: string, value: string) {
 }
 
 beforeEach(() => {
+  installPassingTurnstile();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -117,8 +119,9 @@ describe("authentication continuation links", () => {
     expect(container.querySelector("[data-location]")?.textContent).toBe("/login");
     const activeButton = method === "password" ? 'button[type="submit"]' : 'button[aria-label="正在验证 Passkey…"]';
     expect(container.querySelector(activeButton)?.getAttribute("aria-busy")).toBe("true");
-    expect(container.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled).toBe(true);
+    expect(container.querySelector('button[type="submit"]')?.getAttribute("aria-disabled")).toBe("true");
     await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[type="submit"]')?.click();
       container.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     });
     expect(authMocks.signIn).toHaveBeenCalledTimes(method === "password" ? 1 : 0);
@@ -159,7 +162,7 @@ describe("authentication continuation links", () => {
     expect(authMocks.requestPasswordReset).toHaveBeenCalledWith({
       email: "user@example.com",
       redirectTo: withRedirectParam("/reset-password/confirm", binding),
-    });
+    }, expect.objectContaining({ headers: expect.any(Object) }));
     expect(anchor("返回登录")?.getAttribute("href")).toBe(withRedirectParam("/login", binding));
   });
 
@@ -220,5 +223,5 @@ it("blocks registration with an empty nickname and submits after it is supplied"
 
   setInput("#name", "New User");
   await act(async () => submitButton.click());
-  expect(authMocks.signUp).toHaveBeenCalledWith(expect.objectContaining({ name: "New User" }));
+  expect(authMocks.signUp).toHaveBeenCalledWith(expect.objectContaining({ name: "New User" }), expect.objectContaining({ headers: expect.any(Object) }));
 });

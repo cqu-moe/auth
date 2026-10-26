@@ -1,3 +1,6 @@
+import { TURNSTILE_TOKEN_HEADER } from "../../../shared/turnstile";
+import { useTurnstile } from "../lib/use-turnstile";
+import TurnstileVerification from "../components/TurnstileVerification";
 import { useState, useEffect, FormEvent, useRef, type FocusEvent } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ActionButton, Alert, AlertDescription, Input, Label } from "@cqu-moe/ui";
@@ -35,6 +38,7 @@ function getPasswordStrength(password: string): { level: number; label: string; 
 }
 
 export default function Register() {
+  const verification = useTurnstile("signup");
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
@@ -113,7 +117,10 @@ export default function Register() {
 
     submittingRef.current = true;
     setLoading(true);
+    let verificationToken: string | null = null;
     try {
+      verificationToken = await verification.getToken();
+      if (!verificationToken) return;
       const signup = {
         email,
         password,
@@ -122,7 +129,7 @@ export default function Register() {
       } as Parameters<
         typeof authClient.signUp.email
       >[0] & { code: string };
-      const { data, error } = await authClient.signUp.email(signup);
+      const { data, error } = await authClient.signUp.email(signup, { headers: { [TURNSTILE_TOKEN_HEADER]: verificationToken } });
 
       if (error) {
         setError(error.message ?? "注册失败，请稍后重试");
@@ -140,6 +147,7 @@ export default function Register() {
     } catch {
       setError("网络错误，请稍后重试");
     } finally {
+      if (verificationToken) verification.reset();
       submittingRef.current = false;
       setLoading(false);
     }
@@ -150,7 +158,7 @@ export default function Register() {
       title="创建账号"
       description={scheduleSource ? "继续使用重庆大学课表" : "一个账号，连接你的校园服务。"}
     >
-      <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+      <form onSubmit={handleSubmit} className="space-y-4" aria-busy={loading} noValidate>
         {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
@@ -174,6 +182,7 @@ export default function Register() {
               if (isMovingToSubmit(event)) return;
               if (!name.trim()) setFieldErrors((errors) => ({ ...errors, name: "请输入昵称" }));
             }}
+            readOnly={loading}
             required
             autoComplete="name"
             placeholder="您的昵称"
@@ -206,6 +215,7 @@ export default function Register() {
                 setFieldErrors((errors) => ({ ...errors, email: "请输入有效的邮箱地址" }));
               }
             }}
+            readOnly={loading}
             required
             autoComplete="email"
             autoCapitalize="none"
@@ -244,6 +254,7 @@ export default function Register() {
                 setFieldErrors((errors) => ({ ...errors, password: "密码至少需要 8 个字符" }));
               }
             }}
+            readOnly={loading}
             required
             autoComplete="new-password"
             placeholder="至少 8 个字符"
@@ -291,6 +302,7 @@ export default function Register() {
                 setFieldErrors((errors) => ({ ...errors, confirm: "两次输入的密码不一致" }));
               }
             }}
+            readOnly={loading}
             required
             autoComplete="new-password"
             aria-invalid={fieldErrors.confirm ? true : undefined}
@@ -335,6 +347,7 @@ export default function Register() {
                 }));
               }
             }}
+            readOnly={loading}
             required={invitationRequired}
             minLength={invitationRequired ? 8 : 0}
             maxLength={8}
@@ -353,15 +366,16 @@ export default function Register() {
           )}
         </div>
 
+        <TurnstileVerification verification={verification} />
         <ActionButton
           type="submit"
           className="w-full"
           state={
-            loading ? "loading" : error || Object.values(fieldErrors).some(Boolean) ? "error" : "idle"
+            loading ? "loading" : error || verification.status === "error" || Object.values(fieldErrors).some(Boolean) ? "error" : "idle"
           }
           labels={{
             idle: "注册",
-            loading: "注册中…",
+            loading: verification.waiting ? "正在完成安全验证…" : "注册中…",
             success: "已注册",
             error: "重试注册",
           }}

@@ -341,6 +341,41 @@ li[data-step-state='active'] .step-label {
 .disclosure-chevron {
   transition: transform 180ms var(--ease-out);
 }
+
+.turnstile-disclosure {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(calc(-1 * var(--space-1)));
+  transition:
+    grid-template-rows 280ms cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 200ms cubic-bezier(0.32, 0.72, 0, 1),
+    transform 280ms cubic-bezier(0.32, 0.72, 0, 1);
+}
+.turnstile-disclosure[data-open='true'] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: translateY(0);
+}
+.turnstile-disclosure-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+.turnstile-disclosure-content {
+  display: grid;
+  gap: var(--space-2);
+  padding-top: var(--space-4);
+}
+:root[data-input='keyboard'] .turnstile-disclosure,
+:root[data-motion-preview='reduce'] .turnstile-disclosure {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .turnstile-disclosure {
+    transition: none;
+    transform: none;
+  }
+}
 :root[data-input='keyboard'] .disclosure-chevron {
   transition: none;
 }

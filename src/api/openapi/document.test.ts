@@ -3,6 +3,10 @@ import { createApp } from "../../app";
 import { listHttpOperations } from "../operations";
 import { buildOpenApiDocument } from "./document";
 import { createHttpFixture } from "../../test-utils/http";
+import {
+  TURNSTILE_ACTIONS,
+  TURNSTILE_TOKEN_HEADER,
+} from "../../../shared/turnstile";
 import { buildCloudflareSchema } from "./cloudflare";
 import {
   parseDeviceMetadata,
@@ -197,6 +201,52 @@ describe("complete API document", () => {
         .toHaveProperty("caps");
       expect(paths["/api/v1/auth/sign-up/email"].post.requestBody.content["application/json"].schema.properties.code)
         .toMatchObject({ type: "string", pattern: "^[A-Z0-9]{8}$" });
+      for (const [suffix] of Object.entries(TURNSTILE_ACTIONS)) {
+        const operation = paths[`/api/v1/auth${suffix}`].post;
+        expect(operation.parameters, suffix).toContainEqual({
+          name: TURNSTILE_TOKEN_HEADER,
+          in: "header",
+          required: true,
+          description: "Cloudflare Turnstile token for this action",
+          schema: { type: "string", minLength: 1, maxLength: 2048 },
+        });
+        const forbiddenSchema = operation.responses["403"].content["application/json"].schema;
+        expect(forbiddenSchema.anyOf, suffix).toHaveLength(2);
+        expect(forbiddenSchema.anyOf[1], suffix).toMatchObject({
+          type: "object",
+          required: ["code", "message"],
+          properties: {
+            code: { enum: ["TURNSTILE_REQUIRED", "TURNSTILE_FAILED"] },
+            message: { type: "string" },
+          },
+        });
+        const components = body.components.schemas as Record<string, any>;
+        expect(schemaAccepts(
+          forbiddenSchema,
+          { message: "Forbidden by the original auth operation" },
+          components
+        ), suffix).toBe(true);
+        expect(schemaAccepts(
+          forbiddenSchema,
+          { code: "CURRENT_EMAIL_OTP_ONLY", message: "只能向当前登录邮箱发送或校验验证码" },
+          components
+        ), suffix).toBe(true);
+        expect(schemaAccepts(
+          forbiddenSchema,
+          { code: "TURNSTILE_REQUIRED", message: "请完成安全验证后重试" },
+          components
+        ), suffix).toBe(true);
+        expect(operation.responses["503"].content["application/json"].schema, suffix)
+          .toMatchObject({
+            required: ["code", "message"],
+            properties: {
+              code: { const: "TURNSTILE_UNAVAILABLE" },
+              message: { type: "string" },
+            },
+          });
+      }
+      expect(paths["/api/v1/auth/oauth2/token"].post.parameters ?? [])
+        .not.toContainEqual(expect.objectContaining({ name: TURNSTILE_TOKEN_HEADER }));
       expect(paths["/api/v1/auth/error"].get.responses).toHaveProperty("302");
       expect(JSON.stringify(body)).not.toContain('"nullable"');
       expect(Object.keys(paths["/api/v1/auth/oauth2/token"].post.requestBody.content))

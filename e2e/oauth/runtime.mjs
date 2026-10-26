@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { startSchoolAuth } from '../school/runtime.mjs';
 import { prepareSchoolBinding } from '../school/prepare-binding.mjs';
 import { startOAuthClientApp } from './client.mjs';
+import { turnstileHeaders } from '../turnstile.mjs';
 
 async function registerSecrets(controlOrigin, values) {
   if (!values.length) return;
@@ -28,6 +29,7 @@ async function prepareRecoveryAdmin(runtime, remember) {
       response = await fetch(`${runtime.origin}/api/v1${path}`, {
         method, signal: AbortSignal.timeout(30000),
         headers: { origin: runtime.origin, 'content-type': 'application/json', cookie: [...jar].map(([key, value]) => `${key}=${value}`).join('; ') },
+        ...turnstileHeaders(path, runtime.origin),
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
       if (response.status !== 429) break;

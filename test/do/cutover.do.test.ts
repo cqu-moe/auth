@@ -1,13 +1,18 @@
 import { env } from "cloudflare:test";
 import { expect, it } from "vitest";
-import { createApiFixture } from "./api-fixture";
+import {
+  createApiFixture,
+  withFakeResend,
+  withTurnstileToken,
+} from "./api-fixture";
 import { createApp } from "../../src/app";
 
 it("issues a new host-only production credential and refuses old root-domain names and sibling mutation origins", async () => {
   const fixture = await createApiFixture(); const headers = await fixture.signIn("user");
   const session = await (await fixture.request("/api/v1/auth/get-session", { headers })).json() as { user: { email: string } };
-  const origin = "https://auth.cqu.moe"; const app = createApp(); const production = { ...env, BETTER_AUTH_URL: origin };
-  const signin = await app.request(`${origin}/api/v1/auth/sign-in/email`, { method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify({ email: session.user.email, password: "local-test-password" }) }, production);
+  const origin = "https://auth.cqu.moe"; const app = createApp(); const production = { ...env, ENVIRONMENT: "production", BETTER_AUTH_URL: origin };
+  const requestWithNetworks = (path: string, init: RequestInit) => withFakeResend(async () => await app.request(path, withTurnstileToken(path, init, origin), production), origin);
+  const signin = await requestWithNetworks(`${origin}/api/v1/auth/sign-in/email`, { method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify({ email: session.user.email, password: "local-test-password" }) });
   expect(signin.status).toBe(200);
   const cookies = (signin.headers as Headers & { getSetCookie(): string[] }).getSetCookie();
   const credential = cookies.find(cookie => cookie.startsWith("__Host-auth-v2.session_token="));
@@ -23,7 +28,7 @@ it("issues a new host-only production credential and refuses old root-domain nam
   const denied = await app.request(`${origin}/api/v1/auth/sign-out`, { method: "POST", headers: { origin: "https://compromised.cqu.moe", cookie: credential!.split(";")[0], "content-type": "application/json" }, body: "{}" }, production);
   expect(denied.status).toBe(403);
   const jsonHeaders = { origin, cookie: credential!.split(";")[0], "content-type": "application/json" };
-  const post = (path: string, body: unknown, headers = jsonHeaders) => app.request(`${origin}/api/v1/auth${path}`, { method: "POST", headers, body: JSON.stringify(body) }, production);
+  const post = (path: string, body: unknown, headers = jsonHeaders) => requestWithNetworks(`${origin}/api/v1/auth${path}`, { method: "POST", headers, body: JSON.stringify(body) });
   expect((await post("/security/challenge", { password: "local-test-password", purpose: "mfa" })).status).toBe(200);
   const options = await app.request(`${origin}/api/v1/auth/passkey/generate-register-options`, { headers: jsonHeaders }, production);
   const challengeCookie = (options.headers as Headers & { getSetCookie(): string[] }).getSetCookie().find(cookie => cookie.startsWith("__Host-auth-v2.better-auth-passkey="));
