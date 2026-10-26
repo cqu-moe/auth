@@ -28,8 +28,11 @@ async function prepareRecoveryAdmin(runtime, remember) {
     for (;;) {
       response = await fetch(`${runtime.origin}/api/v1${path}`, {
         method, signal: AbortSignal.timeout(30000),
-        headers: { origin: runtime.origin, 'content-type': 'application/json', cookie: [...jar].map(([key, value]) => `${key}=${value}`).join('; ') },
-        ...turnstileHeaders(path, runtime.origin),
+        headers: {
+          origin: runtime.origin, 'content-type': 'application/json',
+          ...turnstileHeaders(path, runtime.origin),
+          cookie: [...jar].map(([key, value]) => `${key}=${value}`).join('; '),
+        },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
       if (response.status !== 429) break;
