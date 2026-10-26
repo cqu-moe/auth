@@ -101,7 +101,7 @@ describe("CquBindWizard bootstrap", () => {
 
     expect(container.textContent).toContain("绑定成功");
     expect(container.textContent).toContain("可以返回使用服务了。");
-    expect(container.textContent).toContain("前往课表");
+    expect(container.querySelector('a[href^="https://schedule.cqu.moe"]')).toBeNull();
     expect(container.textContent).toContain("返回 CQU 集成");
     expect(container.querySelector('a[href="/settings/cqu"]')).not.toBeNull();
   });

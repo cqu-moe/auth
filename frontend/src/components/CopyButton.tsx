@@ -6,10 +6,12 @@ export default function CopyButton({
   text,
   value,
   compact = false,
+  iconOnly = false,
 }: {
   text?: string;
   value?: string;
   compact?: boolean;
+  iconOnly?: boolean;
 }) {
   const content = text ?? value ?? "";
   const [copied, setCopied] = useState(false);
@@ -43,9 +45,11 @@ export default function CopyButton({
   return (
     <Button
       type="button"
-      variant="outline"
-      size={compact ? "xs" : "sm"}
-      aria-label="复制到剪贴板"
+      variant={iconOnly ? "ghost" : "outline"}
+      size={iconOnly ? "icon" : compact ? "xs" : "sm"}
+      className={iconOnly ? "size-11 shrink-0" : undefined}
+      aria-label={copied ? "已复制" : "复制到剪贴板"}
+      title={iconOnly ? label : undefined}
       onClick={() => void copy()}
     >
       {copied ? (
@@ -53,7 +57,7 @@ export default function CopyButton({
       ) : (
         <Copy aria-hidden="true" />
       )}
-      {label}
+      <span className={iconOnly ? "sr-only" : undefined} aria-live="polite">{label}</span>
     </Button>
   );
 }

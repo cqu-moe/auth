@@ -1,6 +1,23 @@
 @import 'tailwindcss' source(none);
 @source './';
 
+/* design-exception-start: 用户要求 Auth 整站使用清晰的蓝色操作与鲜明状态色；只在语义变量层覆盖共享主题。 */
+:root,
+:root[data-theme] {
+  --primary: light-dark(oklch(0.51 0.2 258), oklch(0.75 0.14 258));
+  --primary-foreground: light-dark(oklch(1 0 0), oklch(0.2 0.02 258));
+  --link: light-dark(oklch(0.49 0.2 258), oklch(0.8 0.12 258));
+  --ring: var(--link);
+  --success: light-dark(oklch(0.48 0.15 152), oklch(0.8 0.16 152));
+  --destructive: light-dark(oklch(0.53 0.21 27), oklch(0.78 0.15 27));
+  --warning: light-dark(oklch(0.5 0.12 65), oklch(0.84 0.14 80));
+  --success-soft: light-dark(oklch(0.97 0.035 152), oklch(0.31 0.055 152));
+  --destructive-soft: light-dark(oklch(0.97 0.025 27), oklch(0.31 0.055 27));
+  --warning-soft: light-dark(oklch(0.97 0.04 85), oklch(0.31 0.045 80));
+  --info-soft: light-dark(oklch(0.97 0.015 258), oklch(0.31 0.045 258));
+}
+/* design-exception-end */
+
 @theme inline {
   --color-background: var(--background);
   --color-surface: var(--surface);
@@ -179,6 +196,13 @@ code {
   color: var(--muted-foreground);
 }
 
+/* Use one focus edge instead of stacking the input ring and shell outline. */
+.cqu-credential-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -1px;
+  box-shadow: none;
+}
+
 
 /* ── 状态徽章 ── */
 .badge {
@@ -197,11 +221,17 @@ code {
   border-radius: 9999px;
   background: currentColor;
 }
-.badge-success { color: var(--success); background: color-mix(in oklab, var(--success) 10%, var(--surface)); }
-.badge-warning { color: var(--warning); background: color-mix(in oklab, var(--warning) 12%, var(--surface)); }
+.badge-success { color: var(--success); background: var(--success-soft); }
+.badge-warning { color: var(--warning); background: var(--warning-soft); }
 .badge-muted { color: var(--muted-foreground); background: var(--muted); }
-.badge-destructive { color: var(--destructive); background: color-mix(in oklab, var(--destructive) 10%, var(--surface)); }
-.badge-info { color: var(--link); background: color-mix(in oklab, var(--link) 10%, var(--surface)); }
+.badge-destructive { color: var(--destructive); background: var(--destructive-soft); }
+.badge-info { color: var(--link); background: var(--info-soft); }
+
+.binding-connection-status { color: var(--link); background: var(--info-soft); }
+.binding-connection-status[data-state='open'] { color: var(--success); background: var(--success-soft); }
+.binding-connection-status[data-state='closed'],
+.binding-connection-status[data-state='error'] { color: var(--warning); background: var(--warning-soft); }
+.binding-connection-status[data-state='failed'] { color: var(--destructive); background: var(--destructive-soft); }
 
 /* ── 向导步骤指示器 ── */
 .step-indicator {

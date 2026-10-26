@@ -54,8 +54,8 @@ export default function CquBindSuccess({
           </a>
         </Button>
       ) : (
-        <Button asChild variant="link">
-          <a href="https://schedule.cqu.moe/">前往课表</a>
+        <Button asChild className="w-full">
+          <Link to="/settings/cqu">返回 CQU 集成</Link>
         </Button>
       )}
       {running && (
@@ -65,11 +65,6 @@ export default function CquBindSuccess({
             留在此页
           </Button>
         </p>
-      )}
-      {!returnTo && (
-        <Button asChild variant="link">
-          <Link to="/settings/cqu">返回 CQU 集成</Link>
-        </Button>
       )}
     </div>
   );
