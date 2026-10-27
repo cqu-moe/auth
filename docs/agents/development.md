@@ -23,9 +23,11 @@
 
 报告区分本地检查、CI、合并、Worker 部署与已登录业务验收。分支版本上传不能当作生产部署，也不能假定 DO Worker 有可用的 preview URL；需要时核实独立预览环境。
 
-生产发布由 `.github/workflows/deploy.yml` 在 `main` 的 `Tests` 工作流全部成功后执行，也可从 `main` 手动运行。发布只接受仍为当前 `main` 的已验证提交，串行执行容器测试、D1 迁移和 `npm run deploy`；前后端源码映射继续上传到 Auth 的 PostHog 项目。Cloudflare Workers Builds 自动构建保持关闭，避免重复发布。
+生产发布由 Cloudflare Workers Builds 在 `main` 更新后自动执行。合并前确认 PR 的 GitHub `Tests` / `CI` 全部通过；Cloudflare 构建独立执行 `npm run build:cloudflare`，通过代码检查、应用/DO 测试、容器测试和前端构建后，再执行 `npx wrangler d1 migrations apply auth-cqu-moe-db --remote && npm run deploy`。前后端源码映射继续上传到 Auth 的 PostHog 项目。
 
-GitHub 发布使用已有 `CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_API_TOKEN`、`POSTHOG_CLI_API_KEY` secrets，以及与生产前端一致的公开变量 `VITE_POSTHOG_PROJECT_TOKEN`。运行时 secrets（包括 `TURNSTILE_SECRET`）仍由 Cloudflare Worker 管理，不复制到 GitHub。不要因构建机 Docker 故障跳过容器测试或源码映射上传。
+GitHub Actions 保留 `.github/workflows/test.yml` 的测试、构建产物和版本归档；生产发布工作流保持停用，避免重复部署。Cloudflare 的生产分支为 `main`，自动构建开启；现有非生产分支触发器只执行 `wrangler versions upload`，不切换生产流量。`previews_enabled=false` 表示未切换到新版隔离预览，不能据此判断旧版分支触发器是否关闭。
+
+构建凭据和变量使用 Cloudflare 已有配置：Build Token、`POSTHOG_CLI_API_KEY`、`POSTHOG_CLI_PROJECT_ID=662666`、`VITE_POSTHOG_PROJECT_TOKEN` 与 `VITE_POSTHOG_HOST`。运行时 secrets（包括 `TURNSTILE_SECRET`）仍由 Cloudflare Worker 管理。不要因构建机 Docker 故障跳过容器测试或源码映射上传。
 
 ### Auth 邮件发件人
 
