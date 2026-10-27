@@ -158,6 +158,78 @@ describe("Turnstile protection at the auth route boundary", () => {
     expect(authHandler).not.toHaveBeenCalled();
   });
 
+  it.each(["sequential", "concurrent", "another email endpoint"])(
+    "rejects %s redemption even when Siteverify accepts a reused token",
+    async mode => {
+      const email = mode === "another email endpoint";
+      const firstPath = email ? "/send-verification-email" : "/sign-in/email";
+      const secondPath = email ? "/email-otp/send-verification-otp" : firstPath;
+      siteverify.mockImplementation(async () => Response.json(
+        successPayload(email ? "email-verification" : "password-login")
+      ));
+      authHandler.mockImplementation(async () => Response.json(
+        { code: "INVALID_EMAIL_OR_PASSWORD" }, { status: 401 }
+      ));
+      const submit = (path: string, token = TOKEN) => createApp().request(
+        `/api/v1/auth${path}`, {
+          method: "POST",
+          headers: { "content-type": "application/json", [TURNSTILE_TOKEN_HEADER]: token },
+          body: "{}",
+        }, envWithSecret(fixture)
+      );
+
+      const first = submit(firstPath);
+      if (mode !== "concurrent") await first;
+      const responses = await Promise.all([first, submit(secondPath)]);
+      expect(responses.map(response => response.status).sort()).toEqual([401, 403]);
+      expect(await responses.find(response => response.status === 403)!.json())
+        .toMatchObject({ code: "TURNSTILE_FAILED" });
+      expect(authHandler).toHaveBeenCalledTimes(1);
+
+      expect((await submit(firstPath, "fresh-token")).status).toBe(401);
+      expect(authHandler).toHaveBeenCalledTimes(2);
+    }
+  );
+
+  it("fails closed if the redemption store is unavailable", async () => {
+    siteverify.mockImplementation(async () => Response.json(successPayload("password-login")));
+    await fixture.env.DATABASE.exec("DROP TABLE turnstile_redemption");
+    const response = await createApp().request("/api/v1/auth/sign-in/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", [TURNSTILE_TOKEN_HEADER]: TOKEN },
+      body: "{}",
+    }, envWithSecret(fixture));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: "TURNSTILE_UNAVAILABLE" });
+    expect(authHandler).not.toHaveBeenCalled();
+  });
+
+  it("bounds expiry cleanup and retains only a token hash for the full validity window", async () => {
+    siteverify.mockImplementation(async () => Response.json(successPayload("password-login")));
+    const database = fixture.env.DATABASE;
+    await database.batch(Array.from({ length: 101 }, (_, index) => database.prepare(
+      "INSERT INTO turnstile_redemption (token_hash, expires_at) VALUES (?, ?)"
+    ).bind(`expired-${index}`, Date.now() - 60_000)));
+    const submit = () => createApp().request("/api/v1/auth/sign-in/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", [TURNSTILE_TOKEN_HEADER]: TOKEN },
+      body: "{}",
+    }, envWithSecret(fixture));
+    const before = Date.now();
+    expect((await submit()).status).toBe(200);
+    const rows = await database.prepare("SELECT * FROM turnstile_redemption")
+      .all<{ token_hash: string; expires_at: number }>();
+    expect(rows.results).toHaveLength(2);
+    const live = rows.results.find(row => row.expires_at > before)!;
+    expect(live).toEqual({ token_hash: expect.stringMatching(/^[a-f0-9]{64}$/), expires_at: expect.any(Number) });
+    expect(live.expires_at).toBeGreaterThanOrEqual(before + 300_000);
+    expect((await submit()).status).toBe(403);
+    expect(authHandler).toHaveBeenCalledTimes(1);
+    expect(await database.prepare("SELECT * FROM turnstile_redemption").all())
+      .toMatchObject({ results: [live] });
+  });
+
   it.each(OFFICIAL_TEST_SECRETS)(
     "refuses official test secret %s in production",
     async secret => {
@@ -208,8 +280,7 @@ describe("Turnstile protection at the auth route boundary", () => {
         secret: string;
         response: string;
       };
-      const action = [...actionForPath.values()]
-        .find(value => body.response === `token-${value}`);
+      const action = actionForPath.get(body.response.replace("token-", ""));
       return Response.json({
         success: true,
         action,
@@ -221,11 +292,11 @@ describe("Turnstile protection at the auth route boundary", () => {
     const app = createApp();
     try {
       await seedInvitation(fixture.env, "ABCDEFGH");
-      for (const [path, action] of Object.entries(TURNSTILE_ACTIONS)) {
+      for (const path of Object.keys(TURNSTILE_ACTIONS)) {
         authHandler.mockClear();
         siteverify.mockClear();
         timeoutSpy.mockClear();
-        const token = `token-${action}`;
+        const token = `token-${path}`;
         const response = await app.request(`/api/v1/auth${path}`, {
           method: "POST",
           headers: {

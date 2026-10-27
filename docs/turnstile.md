@@ -17,6 +17,8 @@
 
 浏览器通过 `x-turnstile-token` 请求头发送 token。服务端要求 Siteverify 的 `success` 严格为 `true`，action 与操作匹配，hostname 与 `BETTER_AUTH_URL` 的 hostname 匹配；不信任请求的 Host、Origin 或转发头来扩大允许域名。缺失配置和上游异常都拒绝操作，现有登录、邮件、邀请码、限流与二次验证规则继续生效。
 
+通过 Siteverify 后，服务端在 D1 的 `turnstile_redemption` 表原子登记 token 的 SHA-256 哈希，同一 token 最多放行一次（包括并发请求和后续业务失败）。不保存原始 token；记录保留五分钟，后续校验每次最多清理 100 条过期记录。重复提交返回 `TURNSTILE_FAILED`，数据库不可用返回 `TURNSTILE_UNAVAILABLE`。此检查不依赖提供方是否拒绝重放，部署前须应用 `0014_turnstile_redemption.sql`。
+
 Passkey、输入邮件验证码、TOTP/恢复码、持有重置链接后的改密，以及 OAuth/QuickLogin 后台接口不增加人机验证。安全验证不替代身份验证或限流。
 
 ## 等待与恢复

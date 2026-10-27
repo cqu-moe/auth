@@ -164,6 +164,15 @@ export const registrationInvitation = sqliteTable("registration_invitation", {
   preset: text("preset"),
 });
 
+export const turnstileRedemption = sqliteTable(
+  "turnstile_redemption",
+  {
+    tokenHash: text("token_hash").primaryKey().notNull(),
+    expiresAt: integer("expires_at").notNull(),
+  },
+  (table) => [index("idx_turnstile_redemption_expires_at").on(table.expiresAt)]
+);
+
 export const quickloginAccountProjection = sqliteTable(
   "quicklogin_account_projection",
   {
