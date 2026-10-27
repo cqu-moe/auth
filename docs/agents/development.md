@@ -23,6 +23,10 @@
 
 报告区分本地检查、CI、合并、Worker 部署与已登录业务验收。分支版本上传不能当作生产部署，也不能假定 DO Worker 有可用的 preview URL；需要时核实独立预览环境。
 
+生产发布由 `.github/workflows/deploy.yml` 在 `main` 的 `Tests` 工作流全部成功后执行，也可从 `main` 手动运行。发布只接受仍为当前 `main` 的已验证提交，串行执行容器测试、D1 迁移和 `npm run deploy`；前后端源码映射继续上传到 Auth 的 PostHog 项目。Cloudflare Workers Builds 自动构建保持关闭，避免重复发布。
+
+GitHub 发布使用已有 `CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_API_TOKEN`、`POSTHOG_CLI_API_KEY` secrets，以及与生产前端一致的公开变量 `VITE_POSTHOG_PROJECT_TOKEN`。运行时 secrets（包括 `TURNSTILE_SECRET`）仍由 Cloudflare Worker 管理，不复制到 GitHub。不要因构建机 Docker 故障跳过容器测试或源码映射上传。
+
 ### Auth 邮件发件人
 
 可选 Worker 变量 `AUTH_EMAIL_FROM` 统一配置邮箱验证/更换邮箱 OTP 与密码重置邮件的发件人。值会去掉首尾空白；未设置、空字符串或全空白时，使用 Auth 自身身份 `CQU Auth <noreply@auth.cqu.moe>`。覆盖仅用于已受信任且已验证发件域的 Auth 部署。Resend 客户端保持延迟初始化。
