@@ -24,8 +24,9 @@ export async function startAuth({ expectedCommit, platform, artifacts } = {}) {
   const unexpected = [];
   const usedTurnstileTokens = new Set();
   const artifactSecrets = [];
+  // Six-digit OTPs use e2e Secret redaction; they are not unique artifact fingerprints.
   const inspectArtifacts = output => checkArtifacts(output, [
-    ...mails.values().flatMap(mail => [mail.otp, mail.resetUrl].filter(Boolean)), ...artifactSecrets,
+    ...mails.values().flatMap(mail => [mail.resetUrl].filter(Boolean)), ...artifactSecrets,
   ]);
   artifacts?.add({ checkArtifacts: inspectArtifacts });
   let mf;
