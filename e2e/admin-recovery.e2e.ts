@@ -40,7 +40,9 @@ afterEach(async () => { expect(unexpected).toEqual([]); });
 test('manual recovery invalidates actual old factors and interactive credentials while preserving business data', { timeout: 180000 }, async fixture => {
   const { app, screen, browser } = fixture;
   const admin = await passkeyAdministrator(fixture);
-  const client = await createClient(fixture);
+  const client = await createClient(fixture, async () => {
+    await screen.getByRole('button', '使用 Passkey 验证').click();
+  });
   const member = await newMember(fixture);
   await registerPasskey(fixture, member.account, '恢复前用户密钥');
   await enrollTotp(fixture, member.account, { rejectWrong: false });
@@ -84,6 +86,12 @@ test('manual recovery invalidates actual old factors and interactive credentials
   await screen.getByRole('button', '取消', { exact: true }).click();
   expect((await sessionAfterRateLimit(oldCookies)).body.caps.feed.access).toBe(true);
 
+  // Client creation established a real admin proof; expire it so the recovery
+  // cancellation checks still exercise a new verification rather than reuse it.
+  const expired = await fetch(`${process.env.AUTH_E2E_CONTROL}/expire`, {
+    method: 'POST', body: JSON.stringify({ type: 'recent-auth', email: admin.user.email, purpose: 'admin' }),
+  });
+  expect(expired.status).toBe(204);
   await userRow(fixture, member.user.email).getByRole('button', '重置认证').click();
   await expect(screen.getByRole('heading', '重置全部认证')).toBeVisible();
   await screen.getByRole('button', '取消', { exact: true }).click();

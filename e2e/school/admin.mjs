@@ -25,8 +25,18 @@ export async function prepareSchoolAdmin(runtime) {
   await request('/auth/two-factor/verify-totp',{code:await createOTP(secret).totp()});
   const proof=await request('/auth/security/status',undefined,'GET');
   if(proof.strong!==true) throw new Error('Synthetic admin strong admission missing');
+  async function ensureRecentAdmin() {
+    const proof=await request('/auth/security/status?purpose=admin',undefined,'GET');
+    if(proof.verified===true) return;
+    const challenge=await request('/auth/security/challenge',{password,purpose:'admin'});
+    const completed=await request('/auth/security/complete',{
+      challenge:challenge.challenge,method:'totp',code:await createOTP(secret).totp(),
+    });
+    if(completed.verified!==true) throw new Error('Synthetic admin recent proof missing');
+  }
   return {
     async entitlement(userId,enabled) {
+      await ensureRecentAdmin();
       const path=`/admin/users/${encodeURIComponent(userId)}/entitlements`;
       if(enabled) {
         const previous=await request(path,undefined,'GET');

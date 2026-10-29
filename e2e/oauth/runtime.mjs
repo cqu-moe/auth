@@ -154,6 +154,7 @@ export async function startOAuthAuth(options = {}) {
             method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input),
             signal: AbortSignal.timeout(30000),
           });
+          if (!response.ok) throw new Error(`School admin prerequisite failed (${response.status}, ${url.pathname})`);
           value = await response.json();
         } else if (url.pathname === '/recover') {
           recoveryAdmin ??= await prepareRecoveryAdmin(runtime, remember);
