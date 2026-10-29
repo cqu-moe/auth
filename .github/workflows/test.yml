@@ -79,7 +79,7 @@ jobs:
       - run: node e2e/account-smoke.mjs
       - run: node e2e/self-check.mjs
       - run: node e2e/artifact-safety-check.mjs
-      - run: node --test e2e/publication-failure.test.mjs
+      - run: node --test e2e/publication-failure.test.mjs e2e/artifact-mail.test.mjs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
