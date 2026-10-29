@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { createAuth } from "../../../auth";
 import { userEntitlement } from "../../../db/schema";
-import { requireAdmin } from "../../../middleware/authentication";
+import { requireAdmin, requireRecentAdmin } from "../../../middleware/authentication";
 import {
   QuickloginAccountClient,
   QuickloginAccountClientError,
@@ -197,7 +197,7 @@ export function createAdminQuickloginApi() {
     }
   });
 
-  api.put("/users/:id/quicklogin-policy/initialize", async (c) => {
+  api.put("/users/:id/quicklogin-policy/initialize", requireRecentAdmin, async (c) => {
     if (!(await hasEntitlementPermission(c, "assign"))) {
       return problem(c, "FORBIDDEN", "需要权益写权限", 403);
     }
@@ -257,7 +257,7 @@ export function createAdminQuickloginApi() {
     }
   });
 
-  api.put("/users/:id/quicklogin-quota", async (c) => {
+  api.put("/users/:id/quicklogin-quota", requireRecentAdmin, async (c) => {
     if (!(await hasEntitlementPermission(c, "assign"))) {
       return problem(c, "FORBIDDEN", "需要权益写权限", 403);
     }

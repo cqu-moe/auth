@@ -10,6 +10,9 @@ import { parsePositiveInteger, UserPatchSchema } from "./users.schema";
 
 function apiError(c: Parameters<typeof problem>[0], error: unknown) {
   if (error instanceof APIError) {
+    if (error.body?.code === "RECENT_AUTH_REQUIRED" || error.body?.code === "STRONG_AUTH_REQUIRED") {
+      return problem(c, error.body.code, error.message, 403);
+    }
     return problem(c, "AUTH_ADMIN_ERROR", "管理操作被拒绝", error.statusCode || 400);
   }
   return problem(c, "INTERNAL_ERROR", "服务器内部错误", 500);

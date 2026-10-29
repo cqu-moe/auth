@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { createAuth } from "../../../auth";
-import { requireAdmin } from "../../../middleware/authentication";
+import { requireAdmin, requireRecentAdmin } from "../../../middleware/authentication";
 import {
   getPresetItems,
   isInvitationRequired,
@@ -40,6 +40,8 @@ export function createAdminInvitationsApi() {
         body: { permissions: { entitlement: ["assign"] } },
       });
       if (!permission.success) return problem(c, "FORBIDDEN", "需要权益写权限", 403);
+      const rejected = await requireRecentAdmin(c, async () => {});
+      if (rejected) return rejected;
     }
     if (preset !== null && !(await getPresetItems(c.env.DATABASE, preset))) {
       return problem(c, "UNKNOWN_PRESET", "未知预设", 400);
@@ -71,7 +73,7 @@ export function createAdminInvitationsApi() {
   api.get("/registration-settings", async (c) =>
     c.json({ data: { invitationRequired: await isInvitationRequired(c.env.DATABASE) } })
   );
-  api.put("/registration-settings", async (c) => {
+  api.put("/registration-settings", requireRecentAdmin, async (c) => {
     const auth = createAuth(c.env, c.req.raw);
     const permission = await auth.api.userHasPermission({
       headers: c.req.raw.headers,

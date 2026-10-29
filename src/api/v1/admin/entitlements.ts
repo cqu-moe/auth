@@ -3,7 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { createAuth } from "../../../auth";
 import { userEntitlement } from "../../../db/schema";
-import { requireAdmin } from "../../../middleware/authentication";
+import { requireAdmin, requireRecentAdmin } from "../../../middleware/authentication";
 import {
   deletePreset,
   getDefaultPresetName,
@@ -79,7 +79,7 @@ export function createAdminEntitlementsApi() {
     return c.json({ data: rows });
   });
 
-  api.put("/users/:id/entitlements", async (c) => {
+  api.put("/users/:id/entitlements", requireRecentAdmin, async (c) => {
     if (!(await entitlementPermission(c, "assign"))) return problem(c, "FORBIDDEN", "需要权益写权限", 403);
     const body = await validated(c, ReplaceEntitlementsBody);
     if (isResponse(body)) return body;
@@ -101,7 +101,7 @@ export function createAdminEntitlementsApi() {
     return c.json({ data: { items } });
   });
 
-  api.patch("/users/:id/entitlements", async (c) => {
+  api.patch("/users/:id/entitlements", requireRecentAdmin, async (c) => {
     if (!(await entitlementPermission(c, "assign"))) return problem(c, "FORBIDDEN", "需要权益写权限", 403);
     const body = await validated(c, MergeEntitlementPresetBody);
     if (isResponse(body)) return body;
@@ -127,7 +127,7 @@ export function createAdminEntitlementsApi() {
     return c.json({ data: { applied: items.length } });
   });
 
-  api.delete("/users/:id/entitlements/:subsystem/:capability", async (c) => {
+  api.delete("/users/:id/entitlements/:subsystem/:capability", requireRecentAdmin, async (c) => {
     if (!(await entitlementPermission(c, "revoke"))) return problem(c, "FORBIDDEN", "需要权益撤销权限", 403);
     if (isQuickloginPolicyItem({
       subsystem: c.req.param("subsystem"),
@@ -149,7 +149,7 @@ export function createAdminEntitlementsApi() {
   });
 
   api.get("/entitlement-presets", async (c) => c.json({ data: await listPresets(c.env.DATABASE) }));
-  api.put("/entitlement-presets/:name", async (c) => {
+  api.put("/entitlement-presets/:name", requireRecentAdmin, async (c) => {
     if (!(await entitlementPermission(c, "assign"))) return problem(c, "FORBIDDEN", "需要权益写权限", 403);
     const name = c.req.param("name").trim();
     if (!name || name.length > 50) return problem(c, "INVALID_NAME", "预设名需要 1-50 个字符", 400);
@@ -167,7 +167,7 @@ export function createAdminEntitlementsApi() {
     return c.json({ data: { name, items } });
   });
 
-  api.delete("/entitlement-presets/:name", async (c) => {
+  api.delete("/entitlement-presets/:name", requireRecentAdmin, async (c) => {
     if (!(await entitlementPermission(c, "assign"))) return problem(c, "FORBIDDEN", "需要权益写权限", 403);
     const name = c.req.param("name");
     await deletePreset(c.env.DATABASE, name);
@@ -178,7 +178,7 @@ export function createAdminEntitlementsApi() {
   api.get("/entitlement-default", async (c) =>
     c.json({ data: { preset: await getDefaultPresetName(c.env.DATABASE) } })
   );
-  api.put("/entitlement-default", async (c) => {
+  api.put("/entitlement-default", requireRecentAdmin, async (c) => {
     if (!(await entitlementPermission(c, "assign"))) return problem(c, "FORBIDDEN", "需要权益写权限", 403);
     const body = await validated(c, EntitlementDefaultBody);
     if (isResponse(body)) return body;

@@ -1,3 +1,5 @@
+import { requestAuthentication } from "../recent-authentication";
+
 function jsonResponse(body: unknown, status = 200, headers?: HeadersInit) {
   return new Response(JSON.stringify(body), {
     status,
@@ -29,12 +31,20 @@ export async function adminFetch(path: string, init: RequestInit = {}) {
     canonicalPath = `${path.slice(0, -"/rotate-secret".length)}/secrets`;
   }
 
-  const response = await fetch(`/api/v1${canonicalPath}`, {
+  const send = () => fetch(`/api/v1${canonicalPath}`, {
     ...init,
     method,
     body,
     credentials: "include",
   });
+  let response = await send();
+  if (response.status === 403) {
+    const error = await response.clone().json().catch(() => null) as { code?: string } | null;
+    // Only a rejection before mutation is safe to replay, and only once.
+    if (error?.code === "RECENT_AUTH_REQUIRED" && await requestAuthentication("admin")) {
+      response = await send();
+    }
+  }
   if (response.status === 204) return jsonResponse({ success: true });
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("json")) return response;

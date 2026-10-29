@@ -1,6 +1,8 @@
 import { enrollStrongSession } from "../../src/test-utils/auth-strength";
 import { applyD1Migrations, env } from "cloudflare:test";
 import { vi } from "vitest";
+import { createOTP } from "@better-auth/utils/otp";
+import { symmetricDecrypt } from "better-auth/crypto";
 import { createAuth } from "../../src/auth";
 import worker from "../../src/index";
 import {
@@ -124,6 +126,28 @@ export async function createApiFixture() {
     });
   }
 
+  async function reauthenticateAdmin(headers: Headers) {
+    const auth = createAuth(env, new Request(origin));
+    const session = await auth.api.getSession({ headers });
+    const context = await auth.$context;
+    const factor = await context.adapter.findOne<{ secret: string }>({
+      model: "twoFactor", where: [{ field: "userId", value: session!.user.id }],
+    });
+    const secret = await symmetricDecrypt({ key: context.secretConfig, data: factor!.secret });
+    const proofHeaders = new Headers(headers);
+    proofHeaders.set("origin", origin);
+    proofHeaders.set("content-type", "application/json");
+    const post = (path: string, body: unknown) => request(`/api/v1/auth/security/${path}`, {
+      method: "POST", headers: proofHeaders, body: JSON.stringify(body),
+    });
+    const challenged = await post("challenge", { password: "local-test-password", purpose: "admin" });
+    if (!challenged.ok) throw new Error(`admin challenge failed: ${await challenged.text()}`);
+    const { challenge } = await challenged.json<{ challenge?: string }>();
+    if (!challenge) throw new Error("expected admin factor challenge");
+    const completed = await post("complete", { challenge, method: "totp", code: await createOTP(secret).totp() });
+    if (!completed.ok) throw new Error(`admin challenge completion failed: ${await completed.text()}`);
+  }
+
   async function signIn(role: TestRole, strong = true): Promise<Headers> {
     const id = sequence++;
     const email = `fixture-${role}-${id}@example.com`;
@@ -144,7 +168,11 @@ export async function createApiFixture() {
         returnHeaders: true,
       });
       const headers = new Headers({ cookie: cookieHeader(signedIn.headers), "cf-connecting-ip": `198.51.100.${id % 250 + 1}` });
-      return strong ? enrollStrongSession(auth, headers, "local-test-password") : headers;
+      if (!strong) return headers;
+      const verified = await enrollStrongSession(auth, headers, "local-test-password");
+      verified.set("cf-connecting-ip", headers.get("cf-connecting-ip")!);
+      await reauthenticateAdmin(verified);
+      return verified;
     }
     return new Headers({ cookie: cookieHeader(signup.headers) });
   }
@@ -175,6 +203,7 @@ export async function createApiFixture() {
   return {
     request,
     signIn,
+    reauthenticateAdmin,
     issueToken,
     database: env.DATABASE,
     close: async () => {},
