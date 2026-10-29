@@ -77,20 +77,28 @@ function requirePrincipal(
 export const requireSession = requirePrincipal(sessionPrincipal, "未登录");
 export const requireBearer = requirePrincipal(bearerPrincipal, "无效的访问令牌");
 
-export const requireAdmin: MiddlewareHandler<HonoEnv> = async (c, next) => {
-  const principal = await sessionPrincipal(c);
-  if (!principal || principal.kind !== "session") {
-    return problem(c, "UNAUTHORIZED", "未登录", 401);
-  }
-  const role = principal.user.role;
-  if (role !== "admin" && role !== "superAdmin") {
-    return problem(c, "FORBIDDEN", "需要管理员权限", 403);
-  }
-  const auth = createAuth(c.env, c.req.raw);
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  if (!session || !await hasAuthenticationProof(await auth.$context, session, "strong")) {
-    return problem(c, "STRONG_AUTH_REQUIRED", "管理功能需要强认证", 403);
-  }
-  exposePrincipal(c, principal);
-  return next();
-};
+function adminGuard(recent: boolean): MiddlewareHandler<HonoEnv> {
+  return async (c, next) => {
+    const principal = await sessionPrincipal(c);
+    if (!principal || principal.kind !== "session") {
+      return problem(c, "UNAUTHORIZED", "未登录", 401);
+    }
+    const role = principal.user.role;
+    if (role !== "admin" && role !== "superAdmin") {
+      return problem(c, "FORBIDDEN", "需要管理员权限", 403);
+    }
+    const auth = createAuth(c.env, c.req.raw);
+    const session = await auth.api.getSession({ headers: c.req.raw.headers });
+    if (!session || !await hasAuthenticationProof(await auth.$context, session, "strong")) {
+      return problem(c, "STRONG_AUTH_REQUIRED", "管理功能需要强认证", 403);
+    }
+    if (recent && !await hasAuthenticationProof(await auth.$context, session, "admin")) {
+      return problem(c, "RECENT_AUTH_REQUIRED", "请重新验证身份后继续", 403);
+    }
+    exposePrincipal(c, principal);
+    return next();
+  };
+}
+
+export const requireAdmin = adminGuard(false);
+export const requireRecentAdmin = adminGuard(true);

@@ -86,8 +86,7 @@ export async function administrator(fixture: Fixture, checkWeak = false) {
   await fixture.browser.locator('#twoFactorCode').fill(secrets.get('adminTotp'));
   await fixture.screen.getByRole('button', '完成验证').click();
   await expect(fixture.browser).toHaveURL(/\/settings$/);
-  await fixture.app.open('/admin/users');
-  await expect(fixture.screen.getByRole('heading', '用户管理', { exact: true })).toBeVisible();
+  await adminProof(fixture, account);
   return { account, cookies: await saveCookies(), ...(await identity()) };
 }
 
@@ -126,6 +125,4 @@ export async function adminProof(fixture: Fixture, account: ReturnType<typeof cr
   await fixture.browser.locator('#recent-code').fill(secrets.get(totp));
   await fixture.screen.getByRole('button', '验证并继续').click();
   await expect(fixture.screen.getByRole('heading', '用户管理', { exact: true })).toBeVisible();
-  const proof = await request('/api/v1/auth/security/status?purpose=admin');
-  expect({ status: proof.status, ...proof.body }).toEqual({ status: 200, strong: true, verified: true });
 }

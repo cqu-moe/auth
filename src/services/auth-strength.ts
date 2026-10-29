@@ -32,7 +32,7 @@ export async function recordAuthenticationProof(context: Pick<AuthContext, "inte
 }
 
 export function sensitivePurpose(path: string): SecurityPurpose | null {
-  if (["/admin/set-user-password", "/admin/reset-authentication"].includes(path)) return "admin";
+  if (["/admin/set-role", "/admin/set-user-password", "/admin/reset-authentication", "/admin/oauth2/create-client", "/admin/oauth2/update-client"].includes(path)) return "admin";
   if (path === "/change-password" || path === "/set-password") return "password";
   if (["/change-email", "/email-otp/request-email-change", "/email-otp/change-email"].includes(path)) return "email";
   if (["/passkey/generate-register-options", "/passkey/verify-registration", "/passkey/delete-passkey", "/passkey/update-passkey", "/two-factor/enable", "/two-factor/disable", "/two-factor/get-totp-uri", "/two-factor/generate-backup-codes"].includes(path)) return "mfa";
@@ -41,6 +41,11 @@ export function sensitivePurpose(path: string): SecurityPurpose | null {
 
 export async function enforceAuthenticationStrength(ctx: Parameters<typeof getSessionFromCtx>[0]): Promise<void> {
   let purpose = sensitivePurpose(ctx.path);
+  // The admin plugin also accepts role assignment through these bodies.
+  if ((ctx.path === "/admin/create-user" && (ctx.body?.role != null || ctx.body?.data?.role !== undefined)) ||
+      (ctx.path === "/admin/update-user" && Object.prototype.hasOwnProperty.call(ctx.body?.data ?? {}, "role"))) {
+    purpose = "admin";
+  }
   if (ctx.path === "/two-factor/verify-totp") {
     const session = await getSessionFromCtx(ctx);
     if (session) {
@@ -49,10 +54,17 @@ export async function enforceAuthenticationStrength(ctx: Parameters<typeof getSe
     }
   }
   // Native stop-impersonating restores the signed original administrator session.
-  const administrative = ctx.path.startsWith("/admin/") && ctx.path !== "/admin/stop-impersonating";
-  if (!purpose && !administrative) return;
+  let administrative = ctx.path.startsWith("/admin/") && ctx.path !== "/admin/stop-impersonating";
+  const oauthMutation = ["/oauth2/create-client", "/oauth2/update-client", "/oauth2/client/rotate-secret", "/oauth2/delete-client"].includes(ctx.path);
+  if (!purpose && !administrative && !oauthMutation) return;
   const session = await getSessionFromCtx(ctx);
   if (!session) return; // Native endpoint retains its normal unauthenticated error.
+  // An administrator may also own the client and reach the same write through
+  // the provider's owner endpoints. Ordinary client owners keep their policy.
+  if (oauthMutation && (session.user as { role?: string }).role?.split(",").some(role => ["admin", "superAdmin"].includes(role.trim()))) {
+    administrative = true;
+    purpose = "admin";
+  }
   if (administrative && !await hasAuthenticationProof(ctx.context, session, "strong")) {
     throw new APIError("FORBIDDEN", { code: "STRONG_AUTH_REQUIRED", message: "管理功能需要强认证" });
   }

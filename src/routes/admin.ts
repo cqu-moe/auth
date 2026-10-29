@@ -30,7 +30,7 @@ import {
   listRegistrationInvitations,
   revokeRegistrationInvitation,
 } from "../services/registration-invitations";
-import { requireAdmin } from "../middleware/authentication";
+import { requireAdmin, requireRecentAdmin } from "../middleware/authentication";
 import { JsonBodyError, parseJsonBody } from "../api/validation";
 import {
   OAuthClientCreateBody,
@@ -352,6 +352,8 @@ admin.post("/registration-invitations", async (c) => {
     if (!(await hasEntitlementPermission(c, auth, "assign"))) {
       return errorResponse(c, "FORBIDDEN", "需要权益写权限", 403);
     }
+    const rejected = await requireRecentAdmin(c, async () => {});
+    if (rejected) return rejected;
   }
   if (preset !== null && !(await getPresetItems(c.env.DATABASE, preset))) {
     return errorResponse(c, "UNKNOWN_PRESET", "未知预设", 400);
@@ -387,7 +389,7 @@ admin.get("/registration-settings", async (c) => {
 });
 
 // PUT /api/admin/registration-settings - body { invitationRequired: boolean }
-admin.put("/registration-settings", async (c) => {
+admin.put("/registration-settings", requireRecentAdmin, async (c) => {
   const auth = createAuth(c.env, c.req.raw);
   if (!(await hasEntitlementPermission(c, auth, "assign"))) {
     return errorResponse(c, "FORBIDDEN", "需要权益写权限", 403);
@@ -499,7 +501,7 @@ admin.get("/users/:id/entitlements", async (c) => {
 // body { items: [{subsystem,capability,value}] }。写权限:entitlement:assign(superAdmin)。
 // 写前先校验全部项;校验过再删旧全量、插新(空数组则只删不插)—— 与 oauth scopes 的
 // delete-then-insert 全量替换同模式。
-admin.put("/users/:id/entitlements", async (c) => {
+admin.put("/users/:id/entitlements", requireRecentAdmin, async (c) => {
   const auth = createAuth(c.env, c.req.raw);
   if (!(await hasEntitlementPermission(c, auth, "assign"))) {
     return errorResponse(c, "FORBIDDEN", "需要权益写权限", 403);
@@ -543,7 +545,7 @@ admin.put("/users/:id/entitlements", async (c) => {
 // 预设事实源是 entitlement_preset 表(管理台可编辑),不再是代码常量。
 // upsert 语义:仅删该预设涉及的 (subsystem,capability) 行,再插预设项 —— 覆盖预设
 // 包含的能力,但保留用户其它无关 entitlement(契合「套用预设写若干行,仍可逐项加 share」)。
-admin.post("/users/:id/entitlements/preset", async (c) => {
+admin.post("/users/:id/entitlements/preset", requireRecentAdmin, async (c) => {
   const auth = createAuth(c.env, c.req.raw);
   if (!(await hasEntitlementPermission(c, auth, "assign"))) {
     return errorResponse(c, "FORBIDDEN", "需要权益写权限", 403);
@@ -607,7 +609,7 @@ admin.get("/entitlement-presets", async (c) => {
 
 // PUT /api/admin/entitlement-presets/:name - 新建或整体更新一个预设。
 // body { items: [...] }。name 取 URL(允许中文),1-50 字符;items 过目录校验。
-admin.put("/entitlement-presets/:name", async (c) => {
+admin.put("/entitlement-presets/:name", requireRecentAdmin, async (c) => {
   const auth = createAuth(c.env, c.req.raw);
   if (!(await hasEntitlementPermission(c, auth, "assign"))) {
     return errorResponse(c, "FORBIDDEN", "需要权益写权限", 403);
@@ -631,7 +633,7 @@ admin.put("/entitlement-presets/:name", async (c) => {
 
 // DELETE /api/admin/entitlement-presets/:name - 删除预设(幂等)。
 // 同时清掉指向它的 default_preset 配置,避免新用户注册时引用不存在的预设。
-admin.delete("/entitlement-presets/:name", async (c) => {
+admin.delete("/entitlement-presets/:name", requireRecentAdmin, async (c) => {
   const auth = createAuth(c.env, c.req.raw);
   if (!(await hasEntitlementPermission(c, auth, "assign"))) {
     return errorResponse(c, "FORBIDDEN", "需要权益写权限", 403);
@@ -651,7 +653,7 @@ admin.get("/entitlement-default", async (c) => {
 
 // PUT /api/admin/entitlement-default - body { preset: string | null }。
 // 非 null 时预设必须已存在,否则注册钩子会静默 no-op,造成「以为配了其实没生效」。
-admin.put("/entitlement-default", async (c) => {
+admin.put("/entitlement-default", requireRecentAdmin, async (c) => {
   const auth = createAuth(c.env, c.req.raw);
   if (!(await hasEntitlementPermission(c, auth, "assign"))) {
     return errorResponse(c, "FORBIDDEN", "需要权益写权限", 403);
@@ -672,7 +674,7 @@ admin.put("/entitlement-default", async (c) => {
 // DELETE /api/admin/users/:id/entitlements/:subsystem/:capability - 撤销单条能力。
 // 写权限:entitlement:revoke(superAdmin)。按完整复合主键 (userId,subsystem,capability)
 // 删一行;幂等 —— 删不存在的行是安全 no-op。
-admin.delete("/users/:id/entitlements/:subsystem/:capability", async (c) => {
+admin.delete("/users/:id/entitlements/:subsystem/:capability", requireRecentAdmin, async (c) => {
   const auth = createAuth(c.env, c.req.raw);
   if (!(await hasEntitlementPermission(c, auth, "revoke"))) {
     return errorResponse(c, "FORBIDDEN", "需要权益撤销权限", 403);
@@ -798,7 +800,7 @@ admin.get("/oauth-clients", async (c) => {
 });
 
 // PUT /api/admin/oauth-clients/:id/scopes - Configure CQU scopes for an OAuth client
-admin.put("/oauth-clients/:id/scopes", async (c) => {
+admin.put("/oauth-clients/:id/scopes", requireRecentAdmin, async (c) => {
   const auth = createAuth(c.env, c.req.raw);
   if (!(await hasCquScopePermission(c, auth))) {
     return errorResponse(c, "FORBIDDEN", "需要 CQU scope 写权限", 403);
@@ -852,7 +854,7 @@ admin.get("/oauth-clients/:id/scopes", async (c) => {
 // adminCreateOAuthClient is a SERVER_ONLY plugin endpoint; body is snake_case
 // (redirect_uris, client_name, ...). The plaintext client_secret is returned
 // exactly once here and never again — the frontend must surface it immediately.
-admin.post("/oauth-clients", async (c) => {
+admin.post("/oauth-clients", requireRecentAdmin, async (c) => {
   const auth = createAuth(c.env, c.req.raw);
   if (!(await hasOAuthClientPermission(c, auth, "create"))) {
     return errorResponse(c, "FORBIDDEN", "需要 OAuth 客户端写权限", 403);
@@ -877,7 +879,7 @@ admin.post("/oauth-clients", async (c) => {
 // PATCH /api/admin/oauth-clients/:id - Edit a client. The plugin update endpoint
 // enforces a userId owner check admins can't satisfy for clients they don't own,
 // so map snake_case -> DB model and write via the adapter (same as rotate/delete).
-admin.patch("/oauth-clients/:id", async (c) => {
+admin.patch("/oauth-clients/:id", requireRecentAdmin, async (c) => {
   const auth = createAuth(c.env, c.req.raw);
   if (!(await hasOAuthClientPermission(c, auth, "update"))) {
     return errorResponse(c, "FORBIDDEN", "需要 OAuth 客户端写权限", 403);
@@ -931,7 +933,7 @@ admin.patch("/oauth-clients/:id", async (c) => {
 // satisfy, so we write directly via the adapter. The stored value must match
 // the plugin's "hashed" mode (SHA-256/base64url) or validateClientCredentials
 // rejects it; the plaintext is returned once.
-admin.post("/oauth-clients/:id/rotate-secret", async (c) => {
+admin.post("/oauth-clients/:id/rotate-secret", requireRecentAdmin, async (c) => {
   const auth = createAuth(c.env, c.req.raw);
   if (!(await hasOAuthClientPermission(c, auth, "update"))) {
     return errorResponse(c, "FORBIDDEN", "需要 OAuth 客户端写权限", 403);
@@ -971,7 +973,7 @@ admin.post("/oauth-clients/:id/rotate-secret", async (c) => {
 // The plugin delete endpoint also enforces an owner check, so we delete via the
 // adapter and cascade-clean oauth_client_cqu_scopes (keyed by public client_id)
 // since there's no DB-level foreign key.
-admin.delete("/oauth-clients/:id", async (c) => {
+admin.delete("/oauth-clients/:id", requireRecentAdmin, async (c) => {
   const auth = createAuth(c.env, c.req.raw);
   if (!(await hasOAuthClientPermission(c, auth, "delete"))) {
     return errorResponse(c, "FORBIDDEN", "需要 OAuth 客户端写权限", 403);

@@ -7,7 +7,7 @@ export async function concealCredentials() {
   await surface().page().addStyleTag({ content: 'body code, #recovery-password { visibility:hidden!important; }' });
 }
 
-export async function createClient(fixture: Fixture) {
+export async function createClient(fixture: Fixture, verifyAdmin?: () => Promise<void>) {
   const { app, screen } = fixture;
   await app.open('/admin/oauth');
   await concealCredentials();
@@ -22,7 +22,13 @@ export async function createClient(fixture: Fixture) {
   await screen.getByRole('switch', '跳过同意页').check();
   const creation = responseFor(/\/api\/v1\/admin\/oauth-clients$/, 'POST');
   await screen.getByRole('button', '创建', { exact: true }).click();
-  const response = await creation;
+  let response = await creation;
+  if (verifyAdmin) {
+    expect({ status: response.status, ...(await response.json<{ code: string }>()) }).toMatchObject({ status: 403, code: 'RECENT_AUTH_REQUIRED' });
+    const retried = responseFor(/\/api\/v1\/admin\/oauth-clients$/, 'POST');
+    await verifyAdmin();
+    response = await retried;
+  }
   expect(response.status).toBe(201);
   const { data } = await response.json<{ data: { client_id: string; client_secret: string } }>();
   if (!data.client_secret) throw new Error('Confidential client creation returned no secret');
