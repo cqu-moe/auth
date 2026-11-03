@@ -29,6 +29,7 @@ export type EntitlementForm = Record<string, {
 export const SUBSYSTEM_LABELS: Record<string, string> = {
   calendar: "日历",
   eval: "评教",
+  feed: "通知存档",
   cqu: "CQU 服务",
 };
 

@@ -11,6 +11,7 @@
 ## OAuth 与权益
 
 - `shared/capabilities.ts` 是能力键与预设的定义；`user_entitlement` 行是用户权益事实源，预设只用于赋值。
+- `feed.admin` 的有效值为显式用户权益或 `admin` / `superAdmin` 角色继承；角色继承不写入权益行。此权限仅支持逐用户手动授予，不进入预设或默认权益，与 `feed.access` 分开。Feed 管理请求通过实时 introspection 消费有效值。
 - OAuth access token 的能力使用 `customAccessTokenClaims`，按客户端 subsystem 最小披露；没有映射时不披露能力，不能返回全量。`jwt.definePayload` 不是 OAuth access token 的注入点。
 - `customSession` 位于插件数组末尾，显式返回 `{user, session, caps}`，SPA caps 排除 `cqu`。
 - OAuth 客户端 API 使用 snake_case（如 `client_id`），consent 响应读取 `{redirect, url}`。

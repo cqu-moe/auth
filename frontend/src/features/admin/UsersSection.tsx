@@ -26,7 +26,7 @@ import {
   type EntitlementForm,
   type EntitlementItem,
 } from "../../components/entitlement-form";
-import { USER_ROLE_OPTIONS } from "../../../../shared/user-roles";
+import { canAccessAdmin, USER_ROLE_OPTIONS } from "../../../../shared/user-roles";
 import { adminFetch } from "../../lib/api/admin";
 import { authClient } from "../../lib/auth-client";
 import QuotaEditor from "../../components/quicklogin/QuotaEditor";
@@ -607,6 +607,9 @@ export function EntitlementPanel({
                 form={form}
                 onChange={setForm}
                 quickloginPolicyReadOnly
+                inheritedKeys={canAccessAdmin(user.role)
+                  ? ["feed.admin"]
+                  : []}
               />
             </div>
             {canEditQuota && (

@@ -1,6 +1,11 @@
 import { drizzle } from "drizzle-orm/d1";
 import { eq, sql } from "drizzle-orm";
-import { entitlementConfig, entitlementPreset, userEntitlement } from "../db/schema";
+import {
+  entitlementConfig,
+  entitlementPreset,
+  userEntitlement,
+  user as userTable,
+} from "../db/schema";
 import {
   CAPABILITIES,
   PRESETS,
@@ -8,6 +13,7 @@ import {
   type CapDef,
   type Subsystem,
 } from "../../shared/capabilities";
+import { canAccessAdmin } from "../../shared/user-roles";
 import { assertGenericEntitlementWriteAllowed } from "./quicklogin/quota-admin";
 
 type Row = { subsystem: string; capability: string; value: string };
@@ -31,17 +37,25 @@ function optionalQuota(
   return parsed === null ? undefined : parsed;
 }
 
-export function rowsToCaps(rows: Row[], only?: Subsystem): Caps {
+export function rowsToCaps(
+  rows: Row[],
+  only?: Subsystem,
+  role?: string | null
+): Caps {
   const subs = (only ? [only] : SUBSYSTEMS) as Subsystem[];
   const out: Caps = {};
   for (const sub of subs) {
     out[sub] = {};
     for (const [key, def] of Object.entries(CAPABILITIES[sub])) {
-      // Feed 的配额有独立三态 RPC 契约。旧 caps/OAuth 路径必须继续只暴露
-      // feed.access，不能把缺失/无限折叠成 null 后外泄。
+      // Feed 的配额有独立三态 RPC 契约。旧 caps/OAuth 路径只暴露 feed.access
+      // 与 feed.admin，不能把缺失/无限折叠成 null 后外泄。
       if (sub === "feed" && key === "sub_limit") continue;
       const row = rows.find((r) => r.subsystem === sub && r.capability === key);
-      if (def.type === "flag") out[sub][key] = row?.value === "1";
+      const effectiveAdmin = canAccessAdmin(role ?? undefined);
+      if (def.type === "flag") {
+        out[sub][key] = row?.value === "1" ||
+          (effectiveAdmin && sub === "feed" && key === "admin");
+      }
       else if (def.optional) {
         out[sub][key] = optionalQuota(row?.value, def.allowUnlimited === true);
       } else {
@@ -189,12 +203,16 @@ export async function resolveCaps(
   userId: string,
   only?: Subsystem
 ): Promise<Caps> {
-  const rows = await drizzle(db)
-    .select()
-    .from(userEntitlement)
-    .where(eq(userEntitlement.userId, userId))
-    .all();
-  return rowsToCaps(rows, only);
+  const database = drizzle(db);
+  const [rows, user] = await Promise.all([
+    database.select().from(userEntitlement)
+      .where(eq(userEntitlement.userId, userId)).all(),
+    database.select({ role: userTable.role })
+      .from(userTable)
+      .where(eq(userTable.id, userId))
+      .get(),
+  ]);
+  return rowsToCaps(rows, only, user?.role);
 }
 
 /**

@@ -19,11 +19,13 @@ export function EntitlementMatrix({
   onChange,
   quickloginPolicyReadOnly = false,
   manualOnlyHidden = false,
+  inheritedKeys = [],
 }: {
   form: EntitlementForm;
   onChange: (next: EntitlementForm) => void;
   quickloginPolicyReadOnly?: boolean;
   manualOnlyHidden?: boolean;
+  inheritedKeys?: string[];
 }) {
   type OptionalQuotaOption = {
     value: OptionalQuotaState;
@@ -33,6 +35,7 @@ export function EntitlementMatrix({
 
   const setFlag = (key: string, flag: boolean) =>
     onChange({ ...form, [key]: { ...form[key], flag } });
+  const inherited = new Set(inheritedKeys);
   const setQuota = (key: string, quota: string) =>
     // 仅允许数字(空串=无限);非数字字符直接丢弃,保证 value 始终是数字串或 ""。
     onChange({
@@ -97,21 +100,30 @@ export function EntitlementMatrix({
                   );
                 }
                 if (def.type === "flag") {
+                  const isInherited = inherited.has(key);
                   return (
                     <label
                       key={key}
-                      className="flex cursor-pointer items-center gap-3 rounded-lg p-2 hover:bg-muted"
+                      className={`flex items-center gap-3 rounded-lg p-2 ${
+                        isInherited ? "opacity-80" : "cursor-pointer hover:bg-muted"
+                      }`}
                     >
                       <input
                         type="checkbox"
-                        checked={form[key]?.flag ?? false}
+                        checked={(form[key]?.flag ?? false) || isInherited}
                         onChange={(e) => setFlag(key, e.target.checked)}
+                        disabled={isInherited}
                         className="size-4 accent-primary"
                       />
                       <span className="text-sm text-foreground">{def.label}</span>
                       <span className="ml-auto font-mono text-xs text-muted-foreground">
                         {capability}
                       </span>
+                      {isInherited && (
+                        <span className="basis-full text-xs text-muted-foreground">
+                          由当前角色继承，不能通过权益撤销移除
+                        </span>
+                      )}
                     </label>
                   );
                 }
