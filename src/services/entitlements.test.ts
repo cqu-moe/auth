@@ -267,7 +267,7 @@ describe("validateEntitlementItems (admin write validation)", () => {
       { subsystem: "cqu", capability: "quicklogin_access", value: "1" },
     ];
     const caps = rowsToCaps(rows, "feed");
-    expect(caps).toEqual({ feed: { access: true } });
+    expect(caps).toEqual({ feed: { access: true, admin: false } });
     expect((caps as any).calendar).toBeUndefined();
     expect((caps as any).cqu).toBeUndefined();
   });

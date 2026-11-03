@@ -216,4 +216,24 @@ describe("admin QuickLogin quota integration", () => {
     expect(save).toBeDefined();
     expect(JSON.parse(String(save?.[1]?.body))).toEqual({ items: [] });
   });
+
+  it("shows role-inherited feed administration as effective and non-revocable", async () => {
+    await renderUi(createElement(EntitlementPanel, {
+      user: {
+        id: "admin-a",
+        name: "测试管理员",
+        email: "admin-a@example.com",
+        role: "admin",
+        banned: false,
+        createdAt: "2026-09-12T00:00:00.000Z",
+      },
+      canEditQuota: true,
+      onClose: () => undefined,
+    }));
+    const input = checkbox(document, "通知存档管理");
+    expect(input.checked).toBe(true);
+    expect(input.disabled).toBe(true);
+    expect(document.body.textContent)
+      .toContain("由当前角色继承，不能通过权益撤销移除");
+  });
 });

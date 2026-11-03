@@ -56,6 +56,12 @@ export const CAPABILITIES = {
   },
   feed: {
     access: { type: "flag", label: "通知存档访问" },
+    admin: {
+      type: "flag",
+      label: "通知存档管理",
+      manualOnly: true,
+      hint: "仅支持逐用户手动授予；管理员与超级管理员由角色继承，无需重复写入。",
+    },
     sub_limit: { type: "quota", label: "订阅上限", unit: "个" },
   },
   cqu: {

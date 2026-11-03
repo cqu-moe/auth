@@ -247,6 +247,8 @@ CLI 使用现有 native/public client、S256 PKCE 及 Better Auth 客户端/官�
 
 ## 4. 消费能力(Entitlements / caps)
 
+Feed 的网页权限包含 `feed.access`（阅读）和 `feed.admin`（管理），两者独立。`admin` 与 `superAdmin` 角色自动继承 `feed.admin`；普通用户可由超级管理员单独授予。角色继承实时计算，不新增用户权益行，撤销显式权益也不能覆盖角色继承。`feed.admin` 不允许进入预设或注册默认权益；管理页会标明继承状态。Feed 每次管理请求使用当前 introspection 结果核权，不能把登录时的 JWT 权限快照作为持续授权。`feed.sub_limit` 继续只通过 Feed 专用 RPC 返回。
+
 用户权限 = **中心按用户授予的能力**,分**开关型(flag,布尔)** 与 **配额型(quota,数字)**。你只**读** caps、做功能门禁,**不关心它怎么来的**。
 
 caps 形状(你只拿到自己这片,`<subsystem>` = 你注册 client 时的 `metadata.subsystem`):
