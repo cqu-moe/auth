@@ -6,7 +6,7 @@ import {
   verificationContinuation,
 } from "./cqu-bind-continuation";
 import { withRedirectParam } from "./post-login-redirect";
-import { getLoginNavigationDestination } from "./login-routing";
+import { getPostAuthNavigationDestination } from "./login-routing";
 
 const service = "https://schedule.cqu.moe/dashboard?setup=1";
 const binding = withRedirectParam("/cqu/bind", service);
@@ -17,7 +17,7 @@ describe("CQU binding continuation", () => {
     const login = protectedLoginUrl(url.pathname, url.search);
     const target = new URL(login, url.origin).searchParams.get("redirect");
     expect(target).toBe(binding);
-    expect(getLoginNavigationDestination({ user: { emailVerified: true } }, target)).toBe(binding);
+    expect(getPostAuthNavigationDestination(true, target)).toBe(binding);
   });
 
   it("does not unwrap the service when verifying on the binding route", () => {

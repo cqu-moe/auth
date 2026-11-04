@@ -63,41 +63,6 @@ describe("two-factor login challenge", () => {
     expect(actions.verifyBackupCode).toHaveBeenCalledWith({ code: "recovery-code", trustDevice: true });
   });
 
-  it("refreshes the authenticated session before completing a successful challenge", async () => {
-    const events: string[] = [];
-    const actions = {
-      verifyTotp: vi.fn(async () => {
-        events.push("verified");
-        return { data: { token: "session-token" }, error: null };
-      }),
-      verifyOtp: vi.fn(async () => ({ data: null, error: null })),
-      verifyBackupCode: vi.fn(async () => ({ data: null, error: null })),
-      sendOtp: vi.fn(async () => ({ data: null, error: null })),
-    };
-    const refreshSession = vi.fn(async () => {
-      events.push("refresh-started");
-      await Promise.resolve();
-      events.push("refresh-finished");
-    });
-
-    const result = await verifyLoginChallenge(
-      actions,
-      "totp",
-      "123456",
-      false,
-      refreshSession
-    );
-    events.push("completed");
-
-    expect(result.error).toBeNull();
-    expect(events).toEqual([
-      "verified",
-      "refresh-started",
-      "refresh-finished",
-      "completed",
-    ]);
-  });
-
   it("maps native challenge errors including expired sessions", () => {
     expect(getLoginChallengeError({ code: "INVALID_CODE" }, "验证失败")).toEqual({
       message: "验证码不正确",

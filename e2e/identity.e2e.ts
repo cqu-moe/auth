@@ -1,4 +1,5 @@
-import { test, beforeEach, afterEach } from '@e2e-dev/web';
+import { test, beforeEach, afterEach, surfaceOf } from '@e2e-dev/web';
+import { authWebEngine } from '../e2e.config';
 import { expect, credentials, secrets } from 'e2e';
 import { TURNSTILE_SCRIPT_URL, fulfillTurnstileFixture } from './turnstile.mjs';
 
@@ -48,9 +49,27 @@ test('register, verify, persist, sign out and sign in with slow Turnstile comple
   await screen.getByRole('button', '验证并继续').click();
   await expect(browser.locator('#email-verification-error')).toBeVisible();
   await expect(browser).toHaveURL(/verify-email/);
-  await browser.locator('#email-verification-otp').fill(secrets.get('otp'));
-  await screen.getByRole('button', '验证并继续').click();
-  await expect(browser).toHaveURL(/\/settings\/security$/);
+  // While session refreshes overlap, verification must hand off to settings once.
+  const page = surfaceOf(authWebEngine)!.page();
+  const destinations: string[] = [];
+  const recordNavigation = (frame: ReturnType<typeof page.mainFrame>) => {
+    if (frame === page.mainFrame()) destinations.push(new URL(frame.url()).pathname);
+  };
+  const slowSession = '**/api/v1/auth/get-session*';
+  await page.route(slowSession, async route => {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    await route.continue();
+  });
+  page.on('framenavigated', recordNavigation);
+  try {
+    await browser.locator('#email-verification-otp').fill(secrets.get('otp'));
+    await screen.getByRole('button', '验证并继续').click();
+    await expect(screen.getByRole('heading', '安全', { exact: true })).toBeVisible();
+    expect(destinations).toEqual(['/settings/security']);
+  } finally {
+    page.off('framenavigated', recordNavigation);
+    await page.unroute(slowSession);
+  }
   await browser.evaluate(() => {
     localStorage.setItem('__E2E_TURNSTILE_DELAY__', '0');
     localStorage.setItem('__E2E_TURNSTILE_FAILURES__', '1');
@@ -87,8 +106,29 @@ test('register, verify, persist, sign out and sign in with slow Turnstile comple
   await app.open('/login?redirect=https%3A%2F%2Fevil.example%2Fcallback');
   await screen.getByLabel('邮箱', { exact: true }).fill(account.username);
   await browser.locator('#password').fill(account.password);
-  await screen.getByRole('button', '登录', { exact: true }).click();
-  await expect(browser).toHaveURL(`${process.env.AUTH_E2E_URL}/settings`);
+  // Count session reads only after the password was accepted. A second read
+  // used to cancel the first and could exhaust the server's rate limit.
+  let accepted = false;
+  let sessionReads = 0;
+  const onResponse = (response: import('playwright-core').Response) => {
+    if (response.url().endsWith('/auth/sign-in/email') && response.status() === 200) accepted = true;
+  };
+  page.on('response', onResponse);
+  await page.route(slowSession, async route => {
+    if (accepted) {
+      sessionReads++;
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+    await route.continue();
+  });
+  try {
+    await screen.getByRole('button', '登录', { exact: true }).click();
+    await expect(browser).toHaveURL(`${process.env.AUTH_E2E_URL}/settings`);
+    expect(sessionReads).toBe(1);
+  } finally {
+    page.off('response', onResponse);
+    await page.unroute(slowSession);
+  }
 });
 test('registration policy rejects missing, invalid, expired and used invitations; optional mode creates an unverified account', async ({ app, screen, browser }) => {
   await app.open('/register');

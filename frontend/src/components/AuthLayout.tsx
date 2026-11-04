@@ -28,7 +28,7 @@ export default function AuthLayout({
         </div>
       </header>
       <main className="auth-main">
-        <div className="auth-wrap">
+        <div className="auth-wrap route-arrival">
           <div className="auth-intro">
             <h1>{title}</h1>
             {description && <div className="auth-description">{description}</div>}

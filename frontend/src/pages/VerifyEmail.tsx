@@ -1,16 +1,17 @@
+import { refreshLoginSession } from "../lib/refresh-login-session";
+import { useAuthHandoff } from "../lib/use-auth-handoff";
 import { TURNSTILE_TOKEN_HEADER } from "../../../shared/turnstile";
 import { useTurnstile } from "../lib/use-turnstile";
 import TurnstileVerification from "../components/TurnstileVerification";
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { AlertCircle, Mail } from "lucide-react";
 import { ActionButton, Button, Label } from "@cqu-moe/ui";
-import AuthLayout from "../components/AuthLayout";
+import PassportStep from "../components/PassportStep";
 import { VerificationCodeInput } from "../components/VerificationCodeInput";
 import { authClient } from "../lib/auth-client";
 import { completeEmailVerification } from "../lib/email-verification-flow";
 import {
-  isExternalHttpTarget,
   sanitizePostLoginRedirect,
   withRedirectParam,
 } from "../lib/post-login-redirect";
@@ -21,7 +22,7 @@ type SendStatus = "idle" | "sending" | "sent" | "error";
 
 export default function VerifyEmail() {
   const verification = useTurnstile("email-verification");
-  const navigate = useNavigate();
+  const handoff = useAuthHandoff();
   const [searchParams] = useSearchParams();
   const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
   const { data: session, refetch: refetchSession } = authClient.useSession();
@@ -65,11 +66,15 @@ export default function VerifyEmail() {
     setVerificationError("");
     verifyingRef.current = true;
     setVerifying(true);
+    let confirmed = false;
     try {
       const authError = await completeEmailVerification(
         {
           verifyEmail: (input) => authClient.emailOtp.verifyEmail(input),
-          refreshSession: () => refetchSession(),
+          refreshSession: async () => {
+            const latest = await refreshLoginSession();
+            if (!latest.user.emailVerified) throw new Error("邮箱验证状态未更新");
+          },
         },
         user.email,
         code
@@ -85,17 +90,15 @@ export default function VerifyEmail() {
         return;
       }
 
-      const destination = postLoginRedirect ?? "/settings";
-      if (isExternalHttpTarget(destination)) {
-        window.location.replace(destination);
-        return;
-      }
-      navigate(destination, { replace: true });
+      // The gate owns this redirect, including verification completed in another tab.
+      confirmed = true;
     } catch {
       setVerificationError("网络错误，请检查连接后重试");
     } finally {
-      verifyingRef.current = false;
-      setVerifying(false);
+      if (!confirmed && handoff.canRetry()) {
+        verifyingRef.current = false;
+        setVerifying(false);
+      }
     }
   };
 
@@ -155,17 +158,19 @@ export default function VerifyEmail() {
     setSignOutError("");
     try {
       await authClient.signOut();
-      navigate(withRedirectParam("/login", postLoginRedirect), { replace: true });
+      handoff.go(withRedirectParam("/login", postLoginRedirect));
     } catch {
       setSignOutError("退出失败，请检查网络后重试");
     } finally {
-      signingOutRef.current = false;
-      setSigningOut(false);
+      if (handoff.canRetry()) {
+        signingOutRef.current = false;
+        setSigningOut(false);
+      }
     }
   };
 
   return (
-    <AuthLayout title="输入邮箱验证码" description="最后一步：验证你的邮箱地址。">
+    <PassportStep title="输入邮箱验证码" description="最后一步：验证你的邮箱地址。">
       <div className="mb-5 flex items-center gap-3">
         <div className="icon-tile h-10 w-10 rounded-lg bg-muted text-foreground">
           <Mail aria-hidden="true" size={20} />
@@ -189,7 +194,7 @@ export default function VerifyEmail() {
               setOtp(value);
               setVerificationError("");
             }}
-            disabled={verifying}
+            readOnly={verifying}
             aria-invalid={Boolean(verificationError)}
             aria-describedby={
               verificationError ? "email-verification-error" : "email-verification-help"
@@ -263,6 +268,6 @@ export default function VerifyEmail() {
           退出当前账户
         </Button>
       </div>
-    </AuthLayout>
+    </PassportStep>
   );
 }

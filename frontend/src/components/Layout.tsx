@@ -1,5 +1,5 @@
 import { ReactNode } from "react";
-import { Link, NavLink as RouterNavLink, useNavigate } from "react-router-dom";
+import { Link, NavLink as RouterNavLink, useLocation, useNavigate } from "react-router-dom";
 import { LayoutDashboard, Link2, ShieldCheck, UserRound } from "lucide-react";
 import { AppShell, ContentContainer } from "@cqu-moe/ui";
 import { authClient } from "../lib/auth-client";
@@ -16,6 +16,7 @@ interface LayoutProps {
 export default function Layout({ children, width = "reading" }: LayoutProps) {
   const { data: session } = authClient.useSession();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
 
   const handleSignOut = async () => {
     await authClient.signOut();
@@ -56,7 +57,9 @@ export default function Layout({ children, width = "reading" }: LayoutProps) {
       }
       utilities={<ShellUtilities onSignOut={handleSignOut} />}
     >
-      <ContentContainer width={width}>{children}</ContentContainer>
+      <ContentContainer width={width}>
+        <div key={pathname} className="route-arrival workspace-arrival">{children}</div>
+      </ContentContainer>
     </AppShell>
   );
 }

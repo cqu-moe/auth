@@ -16,25 +16,17 @@ export type LoginChallengeResult = { data: unknown; error: LoginChallengeError }
 export interface LoginChallengeActions {
   verifyTotp(input: { code: string; trustDevice: boolean }): Promise<LoginChallengeResult>;
   verifyBackupCode(input: { code: string; trustDevice: boolean }): Promise<LoginChallengeResult>;
-
 }
 
-export async function verifyLoginChallenge(
+export function verifyLoginChallenge(
   actions: LoginChallengeActions,
   method: LoginChallengeMethod,
   code: string,
-  trustDevice: boolean,
-  refreshSession?: () => Promise<void>
+  trustDevice: boolean
 ): Promise<LoginChallengeResult> {
-  const result = method === "totp"
-    ? await actions.verifyTotp({ code, trustDevice })
-    : await actions.verifyBackupCode({ code, trustDevice });
-
-  if (!result.error && refreshSession) {
-    await refreshSession();
-  }
-
-  return result;
+  return method === "totp"
+    ? actions.verifyTotp({ code, trustDevice })
+    : actions.verifyBackupCode({ code, trustDevice });
 }
 
 export function getLoginChallengeError(

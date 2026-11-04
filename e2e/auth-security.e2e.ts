@@ -143,8 +143,15 @@ test('TOTP enrollment rejects a wrong code, then backup-code reuse is rejected a
 
   await screen.getByRole('button', '退出登录', { exact: true }).click();
   await expect(browser).toHaveURL(/login/);
-  await signIn({ app, screen, browser }, account);
-  await expect(browser).toHaveURL(/two-factor/);
+  await app.open('/');
+  const entryDocument = await browser.evaluate(() => performance.timeOrigin);
+  await screen.getByRole('link', '登录', { exact: true }).click();
+  await screen.getByLabel('邮箱', { exact: true }).fill(account.username);
+  await browser.locator('#password').fill(account.password);
+  await screen.getByRole('button', '登录', { exact: true }).click();
+  await expect(screen.getByRole('heading', '二次验证', { exact: true })).toBeVisible();
+  // A full document navigation here tears down the painted form and brand shell.
+  expect(await browser.evaluate(() => performance.timeOrigin)).toBe(entryDocument);
   await browser.locator('#twoFactorCode').fill(secrets.get('wrongMfaTotp'));
   await screen.getByRole('button', '完成验证').click();
   await expect(screen.getByText('验证码不正确')).toBeVisible();

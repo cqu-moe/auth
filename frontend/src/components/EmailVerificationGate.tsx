@@ -1,4 +1,4 @@
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useEffect, useLayoutEffect, useRef } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { Button, PageState } from "@cqu-moe/ui";
 import { authClient } from "../lib/auth-client";
@@ -22,61 +22,63 @@ interface EmailVerificationGateProps {
   children: ReactNode;
 }
 
-function ExternalRedirect({ url }: { url: string }) {
+function ExternalRedirect({ url, showPending }: { url: string; showPending: boolean }) {
   useEffect(() => {
     window.location.replace(url);
   }, [url]);
 
-  return <SessionPending message="正在返回发起登录的应用…" />;
+  return showPending ? <SessionPending message="正在返回发起登录的应用…" /> : null;
 }
 
 export default function EmailVerificationGate({ children }: EmailVerificationGateProps) {
   const { data: session, isPending, error, refetch } = authClient.useSession();
   const location = useLocation();
 
-  // The public introduction does not expose account data or require verification.
+  const publicEntry = publicEntryPaths.has(location.pathname);
+  const emailStep = location.pathname === "/verify-email";
+  const redirect = getEmailVerificationRedirect({
+    hasSession: Boolean(session),
+    emailVerified: session?.user.emailVerified === true,
+    pathname: location.pathname,
+  });
+  // Only retain a public form already shown at this location. A guard redirect
+  // on a cold visit must never mount the protected destination underneath it.
+  const lastPublicEntry = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (!redirect && (publicEntry || (emailStep && !isPending && !error))) {
+      lastPublicEntry.current = location.key;
+    }
+  }, [location.key, publicEntry, emailStep, redirect, isPending, error]);
+
   if (location.pathname === "/") return <>{children}</>;
 
   if (isPending) {
-    return publicEntryPaths.has(location.pathname) ? <>{children}</> : <SessionPending />;
+    return publicEntry || (emailStep && session && lastPublicEntry.current === location.key)
+      ? <>{children}</> : <SessionPending />;
   }
 
-  if (error && error.status !== 401 && !session && !publicEntryPaths.has(location.pathname)) {
+  if (error && error.status !== 401 && !session && !publicEntry) {
     return (
-      <main className="flex min-h-dvh items-center justify-center bg-background p-6">
+      <div className={emailStep ? "" : "flex min-h-dvh items-center justify-center bg-background p-6"}>
         <div className="w-full max-w-sm">
           <PageState state="error" title="暂时无法确认登录状态" description="请检查网络连接后重试。"
             action={<Button onClick={() => void refetch()}>重新加载</Button>} />
         </div>
-      </main>
+      </div>
     );
   }
 
-  const user = session?.user as { emailVerified?: boolean } | undefined;
-  const redirect = getEmailVerificationRedirect({
-    hasSession: Boolean(session),
-    emailVerified: user?.emailVerified === true,
-    pathname: location.pathname,
-  });
-
   if (redirect) {
-    if (redirect === "/verify-email") {
-      const target = verificationContinuation(location.pathname, location.search);
-      return <Navigate to={withRedirectParam("/verify-email", target)} replace />;
-    }
-    if (redirect === "/settings") {
-      // A verified user leaving the verification page continues the round
-      // trip to the app that started the login, if any.
-      const target = postLoginRedirectFromSearch(location.search);
-      if (target) {
-        return isExternalHttpTarget(target) ? (
-          <ExternalRedirect url={target} />
-        ) : (
-          <Navigate to={target} replace />
-        );
-      }
-    }
-    return <Navigate to={redirect} replace />;
+    const keepForm = (publicEntry || emailStep) && lastPublicEntry.current === location.key;
+    const target = redirect === "/verify-email"
+      ? withRedirectParam(redirect, verificationContinuation(location.pathname, location.search))
+      : postLoginRedirectFromSearch(location.search) ?? redirect;
+    return <>
+      {keepForm ? children : null}
+      {isExternalHttpTarget(target)
+        ? <ExternalRedirect url={target} showPending={!keepForm} />
+        : <Navigate to={target} replace />}
+    </>;
   }
 
   return <>{children}</>;

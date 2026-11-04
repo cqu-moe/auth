@@ -1,12 +1,13 @@
 import { useState, FormEvent, useRef } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { ActionButton, Alert, AlertDescription, AlertTitle, Input, Label } from "@cqu-moe/ui";
-import AuthLayout from "../components/AuthLayout";
+import { useAuthHandoff } from "../lib/use-auth-handoff";
+import PassportStep from "../components/PassportStep";
 import { authClient } from "../lib/auth-client";
 import { sanitizePostLoginRedirect, withRedirectParam } from "../lib/post-login-redirect";
 
 export default function ResetPasswordConfirm() {
-  const navigate = useNavigate();
+  const handoff = useAuthHandoff();
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token") ?? "";
   const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
@@ -51,18 +52,20 @@ export default function ResetPasswordConfirm() {
       if (error) {
         setError(error.message ?? "重置失败，链接可能已过期");
       } else {
-        navigate(withRedirectParam("/login", postLoginRedirect));
+        handoff.go(withRedirectParam("/login", postLoginRedirect));
       }
     } catch {
       setError("网络错误，请稍后重试");
     } finally {
-      submittingRef.current = false;
-      setLoading(false);
+      if (handoff.canRetry()) {
+        submittingRef.current = false;
+        setLoading(false);
+      }
     }
   };
 
   return (
-    <AuthLayout title="设置新密码" description="为你的账户设置新的登录密码。">
+    <PassportStep title="设置新密码" description="为你的账户设置新的登录密码。">
       {!token && (
         <Alert variant="destructive" className="mb-4">
           <AlertTitle>链接无效</AlertTitle>
@@ -168,6 +171,6 @@ export default function ResetPasswordConfirm() {
           重新发送重置链接
         </Link>
       </p>
-    </AuthLayout>
+    </PassportStep>
   );
 }

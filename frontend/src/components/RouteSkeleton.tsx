@@ -3,6 +3,7 @@ import { ActionButton, Button, PageHeader, Skeleton } from "@cqu-moe/ui";
 import { ShieldAlert } from "lucide-react";
 import OAuthPermissions from "./OAuthPermissions";
 import Layout from "./Layout";
+import PassportStep from "./PassportStep";
 import AuthLayout from "./AuthLayout";
 import SettingsCard from "./SettingsCard";
 import AdminLayout, { AdminPage } from "../pages/Admin";
@@ -70,13 +71,13 @@ export default function RouteSkeleton() {
     </Layout>;
   }
   if (pathname === "/settings" || pathname === "/") return <Layout><PageHeader title="账户" description="登录账户和对外展示的基本信息。" /><AccountSkeleton /></Layout>;
-  if (pathname === "/verify-email") return <AuthLayout title="输入邮箱验证码" description="最后一步：验证你的邮箱地址。">
+  if (pathname === "/verify-email") return <PassportStep title="输入邮箱验证码" description="最后一步：验证你的邮箱地址。">
     <div aria-hidden="true">
       <div className="mb-5 flex items-center gap-3"><Skeleton className="size-10 shrink-0" /><div className="min-w-0 flex-1 space-y-2"><Skeleton className="h-12 w-full" /><Skeleton className="h-6 w-48 max-w-full" /></div></div>
       <div className="space-y-4"><div className="field"><p className="text-sm font-medium">六位验证码</p><Skeleton className="h-11 w-full" /><p className="field-hint">仅输入邮件中的数字</p></div><Skeleton className="h-10 w-full" /></div>
       <Skeleton className="mx-auto mt-5 h-11 w-48 max-w-full" /><Skeleton className="mx-auto mt-4 h-9 w-24" />
     </div>
-  </AuthLayout>;
+  </PassportStep>;
   if (pathname === "/oauth/authorize") {
     const scopes = (new URLSearchParams(search).get("scope") ?? "openid").split(" ").filter(Boolean);
     return <AuthLayout title="授权请求" description={<div className="inline-flex flex-wrap items-center gap-2"><Skeleton className="h-4 w-32 max-w-full" aria-hidden="true" /><span>请求访问您的账户。</span></div>}>

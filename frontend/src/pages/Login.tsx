@@ -2,13 +2,14 @@ import { TURNSTILE_TOKEN_HEADER } from "../../../shared/turnstile";
 import { useTurnstile } from "../lib/use-turnstile";
 import TurnstileVerification from "../components/TurnstileVerification";
 import { useState, useRef, FormEvent } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { ActionButton, Alert, AlertDescription, Input, Label } from "@cqu-moe/ui";
-import AuthLayout from "../components/PassportAuthLayout";
+import { Link, useSearchParams } from "react-router-dom";
+import { ActionButton, Input, Label } from "@cqu-moe/ui";
+import PassportStep from "../components/PassportStep";
 import { authClient } from "../lib/auth-client";
-import { getLoginNavigationDestination } from "../lib/login-routing";
+import { useAuthHandoff } from "../lib/use-auth-handoff";
+import { refreshLoginSession } from "../lib/refresh-login-session";
+import { getPostAuthNavigationDestination, requiresLoginChallenge } from "../lib/login-routing";
 import {
-  isExternalHttpTarget,
   sanitizePostLoginRedirect,
   withRedirectParam,
 } from "../lib/post-login-redirect";
@@ -16,8 +17,7 @@ import { isScheduleBindingContinuation } from "../lib/cqu-bind-continuation";
 
 export default function Login() {
   const verification = useTurnstile("password-login");
-  const navigate = useNavigate();
-  const { refetch: refetchSession } = authClient.useSession();
+  const handoff = useAuthHandoff();
   const [searchParams] = useSearchParams();
   const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
   const requiresFreshSession = searchParams.get("reason") === "session-not-fresh";
@@ -27,6 +27,16 @@ export default function Login() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState<"password" | "passkey" | null>(null);
   const submitting = useRef(false);
+
+  async function finishLogin(data: unknown) {
+    // A challenge has no authenticated session to refresh yet.
+    if (requiresLoginChallenge(data)) {
+      handoff.go(withRedirectParam("/two-factor", postLoginRedirect));
+      return;
+    }
+    const session = await refreshLoginSession();
+    handoff.go(getPostAuthNavigationDestination(session.user.emailVerified, postLoginRedirect));
+  }
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -42,22 +52,30 @@ export default function Login() {
     try {
       verificationToken = await verification.getToken();
       if (!verificationToken) return;
-      const { data, error } = await authClient.signIn.email({ email: email.trim(), password }, { headers: { [TURNSTILE_TOKEN_HEADER]: verificationToken } });
+      // finishLogin awaits the session used by the route guard. Do not
+      // schedule a second session read that would cancel that request.
+      const { data, error } = await authClient.signIn.email({ email: email.trim(), password }, {
+        headers: { [TURNSTILE_TOKEN_HEADER]: verificationToken },
+        disableSignal: true,
+      });
       if (error) {
         setError(error.message ?? "登录失败，请检查邮箱和密码");
         return;
       }
-      const destination = getLoginNavigationDestination(data, postLoginRedirect);
-      if (!destination) return;
-      await refetchSession();
-      if (isExternalHttpTarget(destination)) window.location.assign(destination);
-      else navigate(destination, { replace: true });
+      // A challenge has no new session. Invalidate a previous identity if
+      // this browser was already signed in, without waiting to show the form.
+      if (requiresLoginChallenge(data) && authClient.$store.atoms.session.get().data) {
+        authClient.$store.notify("$sessionSignal");
+      }
+      await finishLogin(data);
     } catch {
       setError("网络连接失败，请检查网络后重试");
     } finally {
-      if (verificationToken) verification.reset();
-      submitting.current = false;
-      setLoading(null);
+      if (handoff.canRetry()) {
+        if (verificationToken) verification.reset();
+        submitting.current = false;
+        setLoading(null);
+      }
     }
   };
 
@@ -69,27 +87,19 @@ export default function Login() {
     try {
       const { data, error } = await authClient.signIn.passkey();
       if (error) { setError("Passkey 登录未完成，请重试或使用密码登录"); return; }
-      await refetchSession();
-      const destination = getLoginNavigationDestination(data, postLoginRedirect);
-      if (!destination) return;
-      if (isExternalHttpTarget(destination)) window.location.assign(destination);
-      else navigate(destination, { replace: true });
+      await finishLogin(data);
     } catch { setError("Passkey 登录未完成，请重试"); }
-    finally { submitting.current = false; setLoading(null); }
+    finally {
+      if (handoff.canRetry()) { submitting.current = false; setLoading(null); }
+    }
   };
 
   return (
-    <AuthLayout
+    <PassportStep
       title={requiresFreshSession ? "重新登录" : "欢迎回来"}
       description={requiresFreshSession ? "为了确保安全，请重新登录后查看登录设备。" : scheduleSource ? "继续使用重庆大学课表" : "登录你的账户，继续使用校园服务。"}
     >
       <form onSubmit={handleSubmit} className="space-y-4" aria-busy={loading !== null}>
-        {error && (
-          <Alert variant="destructive" id="login-error">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-
         <div className="field">
           <Label htmlFor="email">邮箱</Label>
           <Input
@@ -129,6 +139,9 @@ export default function Login() {
             autoComplete="current-password"
             placeholder="输入密码"
           />
+          <div className="login-feedback" aria-live="polite">
+            {error && <p className="field-error" id="login-error">{error}</p>}
+          </div>
         </div>
 
         <TurnstileVerification verification={verification} />
@@ -156,6 +169,6 @@ export default function Login() {
           立即注册
         </Link>
       </p>
-    </AuthLayout>
+    </PassportStep>
   );
 }
