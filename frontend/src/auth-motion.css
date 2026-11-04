@@ -1,0 +1,166 @@
+/* The new page is live from its first frame. Only the departing public surface
+   is a browser snapshot; slower routes keep the actual previous form until commit. */
+.entry,
+.auth-main,
+:where(main):has(.workspace-arrival) {
+  overflow-x: clip;
+}
+.challenge-progress,
+.challenge-origin,
+.challenge-destination {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.challenge-progress {
+  margin-block-end: var(--space-4);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.challenge-origin {
+  color: var(--muted-foreground);
+}
+.challenge-origin svg {
+  color: var(--success);
+}
+.challenge-destination {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--brand-soft);
+  color: var(--brand-ink);
+}
+.challenge-bridge {
+  position: relative;
+  inline-size: var(--space-12);
+  block-size: 2px;
+  background: var(--border);
+}
+.challenge-bridge::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--brand-ink);
+  transform-origin: left;
+}
+.challenge-methods {
+  position: relative;
+  isolation: isolate;
+  --inset: 3px;
+}
+.challenge-methods::before {
+  content: "";
+  position: absolute;
+  inset: var(--inset) auto var(--inset) var(--inset);
+  inline-size: calc(50% - var(--inset));
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  pointer-events: none;
+}
+.challenge-methods[data-method="backup-code"]::before {
+  transform: translateX(100%);
+}
+.challenge-methods .challenge-method[data-state="active"] {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.challenge-method:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -3px;
+}
+
+@keyframes auth-arrive {
+  from { opacity: 0.32; transform: translateX(var(--arrival-offset, clamp(28px, 5vw, 64px))); }
+  68% { opacity: 1; }
+  to { opacity: 1; transform: none; }
+}
+@keyframes auth-depart {
+  from { clip-path: inset(0); }
+  to { clip-path: inset(0 100% 0 0); transform: translateX(-24px); }
+}
+@keyframes cover-leave {
+  to { opacity: 0; transform: translateY(-16px) scale(0.97); }
+}
+@keyframes progress-draw {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@keyframes progress-check {
+  from { stroke-dashoffset: 24; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes progress-confirm {
+  from { opacity: 0.5; transform: translateX(-8px) scale(0.94); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-motion-preview="reduce"]) {
+    .route-arrival {
+      animation: auth-arrive 560ms cubic-bezier(0.19, 0.76, 0.26, 1) backwards;
+    }
+    .passport-copy { --arrival-offset: -40px; }
+    .challenge-origin svg path {
+      stroke-dasharray: 24;
+      animation: progress-check 300ms ease-out backwards;
+    }
+    .challenge-bridge::after {
+      animation: progress-draw 460ms 140ms cubic-bezier(0.45, 0, 0.2, 1) backwards;
+    }
+    .challenge-destination {
+      animation: progress-confirm 360ms 390ms ease-out backwards;
+    }
+    [data-challenge-field] {
+      --arrival-offset: 20px;
+      animation: auth-arrive 350ms cubic-bezier(0.22, 0.72, 0.22, 1) backwards;
+    }
+    [data-challenge-field="totp"] { --arrival-offset: -20px; }
+    .challenge-methods::before {
+      transition: transform 320ms cubic-bezier(0.32, 0.72, 0, 1);
+    }
+  }
+  :root:not([data-motion-preview="reduce"])::view-transition-old(.auth-depart) {
+    background: var(--background);
+    animation: auth-depart 230ms cubic-bezier(0.4, 0, 0.4, 1) both;
+  }
+  :root:not([data-motion-preview="reduce"])::view-transition-old(.cover-leave) {
+    animation: cover-leave 300ms ease-out both;
+  }
+  :root:not([data-motion-preview="reduce"])::view-transition-group(.cover-flight),
+  :root:not([data-motion-preview="reduce"])::view-transition-group(.pass-flight) {
+    animation-duration: 640ms;
+    animation-timing-function: cubic-bezier(0.42, 0, 0.18, 1);
+  }
+  :root:not([data-motion-preview="reduce"])::view-transition-group(.cover-flight) {
+    background: var(--brand-solid);
+    overflow: clip;
+    border-radius: calc(var(--radius-lg) * 2);
+  }
+  :root:not([data-motion-preview="reduce"])::view-transition-old(.pass-flight) {
+    opacity: 0;
+    animation: none;
+  }
+  :root:not([data-motion-preview="reduce"])::view-transition-new(.pass-flight) {
+    animation: none;
+  }
+  :root:not([data-motion-preview="reduce"])::view-transition-image-pair(.cover-flight) {
+    isolation: isolate;
+  }
+}
+::view-transition {
+  pointer-events: none;
+}
+:root[data-motion-preview="reduce"]::view-transition-group(*),
+:root[data-motion-preview="reduce"]::view-transition-old(*),
+:root[data-motion-preview="reduce"]::view-transition-new(*) {
+  animation-duration: 0s;
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 0s;
+  }
+}

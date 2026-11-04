@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Button } from "@cqu-moe/ui";
 import { Fingerprint, ShieldCheck } from "lucide-react";
+import EntryTransition from "./EntryTransition";
 import BrandLogo from "./BrandLogo";
 
 const services = [
@@ -34,36 +35,40 @@ export default function CampusPass({
       <span className="scene-label" aria-hidden="true">
         CAMPUS, CONNECTED.
       </span>
-      <div
-        className="access-card"
-        role="img"
-        aria-label="CQU Moe 校园通行证：一个账号，按需连接"
-      >
-        <div className="card-top">
-          <span>CQU MOE / ACCESS</span>
-          <BrandLogo />
-        </div>
-        <div className="card-center">
-          <BrandLogo />
-          <div>
-            <span>你的校园通行证</span>
-            <strong>你好，同学。</strong>
+      <EntryTransition name="campus-pass" default="none" share="pass-flight">
+        <div
+          className="access-card"
+          role="img"
+          aria-label="CQU Moe 校园通行证：一个账号，按需连接"
+        >
+          <div className="card-top">
+            <span>CQU MOE / ACCESS</span>
+            <BrandLogo />
+          </div>
+          <div className="card-center">
+            <BrandLogo />
+            <div>
+              <span>你的校园通行证</span>
+              <strong>你好，同学。</strong>
+            </div>
+          </div>
+          <div className="card-rule" />
+          <div className="card-bottom">
+            <span>一个账号 · 按需连接</span>
+            <Fingerprint size={34} aria-hidden="true" />
           </div>
         </div>
-        <div className="card-rule" />
-        <div className="card-bottom">
-          <span>一个账号 · 按需连接</span>
-          <Fingerprint size={34} aria-hidden="true" />
+      </EntryTransition>
+      <EntryTransition name="campus-stamp" default="none" share="pass-flight">
+        <div className="service-stamp" aria-hidden="true">
+          <ShieldCheck size={22} />
+          <span>
+            连接在一起
+            <br />
+            <strong>权限由你决定</strong>
+          </span>
         </div>
-      </div>
-      <div className="service-stamp" aria-hidden="true">
-        <ShieldCheck size={22} />
-        <span>
-          连接在一起
-          <br />
-          <strong>权限由你决定</strong>
-        </span>
-      </div>
+      </EntryTransition>
       {interactive && (
         <div className="card-explorer">
           <div className="service-tabs" role="group" aria-label="了解服务">

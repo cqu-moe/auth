@@ -5,7 +5,7 @@ import { useState, FormEvent, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { MailCheck } from "lucide-react";
 import { ActionButton, Alert, AlertDescription, Button, Input, Label } from "@cqu-moe/ui";
-import AuthLayout from "../components/AuthLayout";
+import PassportStep from "../components/PassportStep";
 import { authClient } from "../lib/auth-client";
 import { sanitizePostLoginRedirect, withRedirectParam } from "../lib/post-login-redirect";
 
@@ -60,7 +60,7 @@ export default function ResetPassword() {
 
   if (sent) {
     return (
-      <AuthLayout title="邮件已发送" description="请查收并点击邮件中的链接重置密码。">
+      <PassportStep title="邮件已发送" description="请查收并点击邮件中的链接重置密码。">
         <div className="text-center">
           <MailCheck aria-hidden="true" className="mx-auto mb-4 text-muted-foreground" size={32} />
           <p className="text-sm text-muted-foreground">
@@ -71,12 +71,12 @@ export default function ResetPassword() {
             <Link to={withRedirectParam("/login", postLoginRedirect)}>返回登录</Link>
           </Button>
         </div>
-      </AuthLayout>
+      </PassportStep>
     );
   }
 
   return (
-    <AuthLayout title="重置你的密码" description="输入注册邮箱，我们将发送重置密码链接。">
+    <PassportStep title="重置你的密码" description="输入注册邮箱，我们将发送重置密码链接。">
       <form onSubmit={handleSubmit} className="space-y-4" aria-busy={loading} noValidate>
         {error && (
           <Alert variant="destructive">
@@ -138,6 +138,6 @@ export default function ResetPassword() {
           返回登录
         </Link>
       </p>
-    </AuthLayout>
+    </PassportStep>
   );
 }

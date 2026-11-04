@@ -1,5 +1,6 @@
+import EntryTransition from "../components/EntryTransition";
 import { Link } from "react-router-dom";
-import { Button, ThemeMenu } from "@cqu-moe/ui";
+import { Button } from "@cqu-moe/ui";
 import {
   ArrowDown,
   ArrowRight,
@@ -10,65 +11,56 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { authClient } from "../lib/auth-client";
-import EntryHeader from "../components/EntryHeader";
 import CampusPass from "../components/CampusPass";
 
 export default function Home() {
   const { data: session } = authClient.useSession();
   const destination = session ? "/settings" : "/login";
   return (
-    <div className="entry">
-      <EntryHeader>
-        <a className="nav-about" href="#how">
-          如何开始
-        </a>
-        <ThemeMenu />
-        <Button asChild variant="ghost">
-          <Link to={destination}>
-            {session ? "账号设置" : "登录"}
-            <ArrowUpRight aria-hidden="true" size={16} />
-          </Link>
-        </Button>
-      </EntryHeader>
+    <>
       <main id="main-content" tabIndex={-1}>
         <section className="passport-hero">
-          <div className="passport-copy">
-            <span className="eyebrow">
-              <span className="tiny-line" />
-              CQU MOE · 校园连接计划
-            </span>
-            <h1>
-              校园很大，
-              <br />
-              一个账号<span className="blue-word">就够。</span>
-            </h1>
-            <p className="hero-description">
-              从每天的课表，到熟悉的校园网站。
-              <br />
-              用一个账号，连接你的 CQU Moe 校园服务。
-            </p>
-            <div className="hero-actions">
-              <Button asChild size="lg" className="brand-action">
-                <Link to={destination}>
-                  {session ? "进入账号设置" : "开启校园日常"}
-                  <ArrowRight aria-hidden="true" size={18} />
+          <EntryTransition default="none" exit="auth-depart">
+            <div className="passport-copy route-arrival">
+              <span className="eyebrow">
+                <span className="tiny-line" />
+                CQU MOE · 校园连接计划
+              </span>
+              <h1>
+                校园很大，
+                <br />
+                一个账号<span className="blue-word">就够。</span>
+              </h1>
+              <p className="hero-description">
+                从每天的课表，到熟悉的校园网站。
+                <br />
+                用一个账号，连接你的 CQU Moe 校园服务。
+              </p>
+              <div className="hero-actions">
+                <Button asChild size="lg" className="brand-action">
+                  <Link to={destination}>
+                    {session ? "进入账号设置" : "开启校园日常"}
+                    <ArrowRight aria-hidden="true" size={18} />
+                  </Link>
+                </Button>
+                <Link className="text-link" to="/register">
+                  初次见面？创建账号
                 </Link>
-              </Button>
-              <Link className="text-link" to="/register">
-                初次见面？创建账号
-              </Link>
+              </div>
+              <p className="hero-condition">
+                CQU Moe 社区服务 · 部分功能需绑定校园身份
+              </p>
+              <a className="down-link" href="#how">
+                <ArrowDown size={16} aria-hidden="true" />
+                向下看看，如何开始
+              </a>
             </div>
-            <p className="hero-condition">
-              CQU Moe 社区服务 · 部分功能需绑定校园身份
-            </p>
-            <a className="down-link" href="#how">
-              <ArrowDown size={16} aria-hidden="true" />
-              向下看看，如何开始
-            </a>
-          </div>
-          <div className="passport-art">
-            <CampusPass />
-          </div>
+          </EntryTransition>
+          <EntryTransition name="passport-cover" default="none" share="cover-flight" exit="cover-leave">
+            <div className="passport-art">
+              <CampusPass />
+            </div>
+          </EntryTransition>
         </section>
         <section className="feature-strip" aria-label="账号能力">
           <div>
@@ -99,7 +91,7 @@ export default function Home() {
         </section>
       </main>
       <Footer />
-    </div>
+    </>
   );
 }
 

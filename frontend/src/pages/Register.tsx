@@ -1,14 +1,15 @@
+import { refreshLoginSession } from "../lib/refresh-login-session";
+import { useAuthHandoff } from "../lib/use-auth-handoff";
 import { TURNSTILE_TOKEN_HEADER } from "../../../shared/turnstile";
 import { useTurnstile } from "../lib/use-turnstile";
 import TurnstileVerification from "../components/TurnstileVerification";
 import { useState, useEffect, FormEvent, useRef, type FocusEvent } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { ActionButton, Alert, AlertDescription, Input, Label } from "@cqu-moe/ui";
-import AuthLayout from "../components/PassportAuthLayout";
+import PassportStep from "../components/PassportStep";
 import { authClient } from "../lib/auth-client";
 import { getPostAuthNavigationDestination } from "../lib/login-routing";
 import {
-  isExternalHttpTarget,
   sanitizePostLoginRedirect,
   withRedirectParam,
 } from "../lib/post-login-redirect";
@@ -39,7 +40,7 @@ function getPasswordStrength(password: string): { level: number; label: string; 
 
 export default function Register() {
   const verification = useTurnstile("signup");
-  const navigate = useNavigate();
+  const handoff = useAuthHandoff();
   const [searchParams] = useSearchParams();
   const postLoginRedirect = sanitizePostLoginRedirect(searchParams.get("redirect"));
   const scheduleSource = isScheduleBindingContinuation(postLoginRedirect, window.location.origin);
@@ -129,32 +130,31 @@ export default function Register() {
       } as Parameters<
         typeof authClient.signUp.email
       >[0] & { code: string };
-      const { data, error } = await authClient.signUp.email(signup, { headers: { [TURNSTILE_TOKEN_HEADER]: verificationToken } });
+      const { error } = await authClient.signUp.email(signup, { headers: { [TURNSTILE_TOKEN_HEADER]: verificationToken } });
 
       if (error) {
         setError(error.message ?? "注册失败，请稍后重试");
       } else {
+        const session = await refreshLoginSession();
         const destination = getPostAuthNavigationDestination(
-          data?.user.emailVerified === true,
+          session.user.emailVerified,
           postLoginRedirect
         );
-        if (isExternalHttpTarget(destination)) {
-          window.location.assign(destination);
-          return;
-        }
-        navigate(destination, { replace: true });
+        handoff.go(destination);
       }
     } catch {
       setError("网络错误，请稍后重试");
     } finally {
-      if (verificationToken) verification.reset();
-      submittingRef.current = false;
-      setLoading(false);
+      if (handoff.canRetry()) {
+        if (verificationToken) verification.reset();
+        submittingRef.current = false;
+        setLoading(false);
+      }
     }
   };
 
   return (
-    <AuthLayout
+    <PassportStep
       title="创建账号"
       description={scheduleSource ? "继续使用重庆大学课表" : "一个账号，连接你的校园服务。"}
     >
@@ -391,6 +391,6 @@ export default function Register() {
           立即登录
         </Link>
       </p>
-    </AuthLayout>
+    </PassportStep>
   );
 }

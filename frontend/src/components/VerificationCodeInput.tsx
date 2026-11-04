@@ -8,7 +8,7 @@ type VerificationCodeInputProps = {
   onChange: (value: string) => void;
 } & Pick<
   ComponentPropsWithoutRef<"input">,
-  "id" | "name" | "disabled" | "aria-describedby" | "aria-invalid"
+  "id" | "name" | "disabled" | "readOnly" | "aria-describedby" | "aria-invalid"
 >;
 
 export function VerificationCodeInput({
@@ -17,6 +17,7 @@ export function VerificationCodeInput({
   id,
   name = "one-time-code",
   disabled,
+  readOnly,
   "aria-describedby": ariaDescribedBy,
   "aria-invalid": ariaInvalid,
 }: VerificationCodeInputProps) {
@@ -86,7 +87,7 @@ export function VerificationCodeInput({
         type="text"
         value={safeValue}
         onChange={(event) => {
-          if (disabled) return;
+          if (disabled || readOnly) return;
           onChange(normalizeOtp(event.currentTarget.value));
           syncSelection(event.currentTarget);
         }}
@@ -139,6 +140,7 @@ export function VerificationCodeInput({
         autoComplete="one-time-code"
         pattern="[0-9]{6}"
         required
+        readOnly={readOnly}
         disabled={disabled}
         spellCheck={false}
         autoCapitalize="off"

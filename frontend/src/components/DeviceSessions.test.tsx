@@ -20,6 +20,10 @@ const auth = vi.hoisted(() => ({
   verifyTotp: vi.fn(),
 }));
 
+vi.mock("../lib/refresh-login-session", () => ({
+  refreshLoginSession: async () => ({ user: { emailVerified: true } }),
+}));
+
 vi.mock("../lib/auth-client", () => ({
   authClient: {
     listSessions: auth.listSessions,

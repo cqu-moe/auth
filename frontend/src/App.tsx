@@ -1,10 +1,12 @@
 import RecentAuthentication from "./components/RecentAuthentication";
 import { lazy, Suspense, useEffect, useRef } from "react";
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
 import { EntitlementsSkeleton, InvitationsSkeleton, OAuthClientsSkeleton } from "./features/admin/AdminSkeletons";
 import { UsersRouteSkeleton } from "./components/RouteSkeleton";
 import SessionPending from "./components/SessionPending";
 import { authClient } from "./lib/auth-client";
+import EntryLayout from "./components/EntryLayout";
+import PassportAuthLayout from "./components/PassportAuthLayout";
 import Login from "./pages/Login";
 import Home from "./pages/Home";
 import Register from "./pages/Register";
@@ -64,16 +66,22 @@ export default function App() {
     <BrowserRouter>
       <PostHogLifecycle />
       <RecentAuthentication />
-      <EmailVerificationGate>
-        <Suspense fallback={<SessionPending message="正在加载页面…" />}>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/reset-password" element={<ResetPassword />} />
-            <Route path="/reset-password/confirm" element={<ResetPasswordConfirm />} />
-            <Route path="/verify-email" element={<VerifyEmail />} />
-            <Route path="/two-factor" element={<TwoFactorChallenge />} />
+      <Suspense fallback={<SessionPending message="正在加载页面…" />}>
+        <Routes>
+          <Route element={<EntryLayout />}>
+            <Route index element={<Home />} />
+            <Route element={<PassportAuthLayout />}>
+              <Route element={<EmailVerificationGate><Outlet /></EmailVerificationGate>}>
+                <Route path="/login" element={<Login />} />
+                <Route path="/register" element={<Register />} />
+                <Route path="/reset-password" element={<ResetPassword />} />
+                <Route path="/reset-password/confirm" element={<ResetPasswordConfirm />} />
+                <Route path="/verify-email" element={<VerifyEmail />} />
+                <Route path="/two-factor" element={<TwoFactorChallenge />} />
+              </Route>
+            </Route>
+          </Route>
+          <Route element={<EmailVerificationGate><Outlet /></EmailVerificationGate>}>
             <Route path="/auth/error" element={<AuthError />} />
             <Route
               path="/settings"
@@ -174,9 +182,9 @@ export default function App() {
               }
             />
             <Route path="*" element={<NotFound />} />
-          </Routes>
-        </Suspense>
-      </EmailVerificationGate>
+          </Route>
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

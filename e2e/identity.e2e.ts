@@ -1,4 +1,5 @@
-import { test, beforeEach, afterEach } from '@e2e-dev/web';
+import { test, beforeEach, afterEach, surfaceOf } from '@e2e-dev/web';
+import { authWebEngine } from '../e2e.config';
 import { expect, credentials, secrets } from 'e2e';
 import { TURNSTILE_SCRIPT_URL, fulfillTurnstileFixture } from './turnstile.mjs';
 
@@ -48,9 +49,27 @@ test('register, verify, persist, sign out and sign in with slow Turnstile comple
   await screen.getByRole('button', '验证并继续').click();
   await expect(browser.locator('#email-verification-error')).toBeVisible();
   await expect(browser).toHaveURL(/verify-email/);
-  await browser.locator('#email-verification-otp').fill(secrets.get('otp'));
-  await screen.getByRole('button', '验证并继续').click();
-  await expect(browser).toHaveURL(/\/settings\/security$/);
+  // While session refreshes overlap, verification must hand off to settings once.
+  const page = surfaceOf(authWebEngine)!.page();
+  const destinations: string[] = [];
+  const recordNavigation = (frame: ReturnType<typeof page.mainFrame>) => {
+    if (frame === page.mainFrame()) destinations.push(new URL(frame.url()).pathname);
+  };
+  const slowSession = '**/api/v1/auth/get-session*';
+  await page.route(slowSession, async route => {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    await route.continue();
+  });
+  page.on('framenavigated', recordNavigation);
+  try {
+    await browser.locator('#email-verification-otp').fill(secrets.get('otp'));
+    await screen.getByRole('button', '验证并继续').click();
+    await expect(screen.getByRole('heading', '安全', { exact: true })).toBeVisible();
+    expect(destinations).toEqual(['/settings/security']);
+  } finally {
+    page.off('framenavigated', recordNavigation);
+    await page.unroute(slowSession);
+  }
   await browser.evaluate(() => {
     localStorage.setItem('__E2E_TURNSTILE_DELAY__', '0');
     localStorage.setItem('__E2E_TURNSTILE_FAILURES__', '1');

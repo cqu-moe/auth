@@ -497,7 +497,7 @@
   align-items: center;
   min-height: 44px;
 }
-.form-surface .auth-card button {
+.form-surface .auth-card button:not([role="checkbox"]) {
   min-height: 48px;
 }
 .auth-trust {
@@ -536,7 +536,7 @@
   border-radius: calc(var(--radius-lg) * 2);
   padding: var(--space-10);
   overflow: hidden;
-  align-self: stretch;
+  align-self: start;
 }
 .passport-auth-story h2 {
   font-size: var(--display-section);
@@ -849,4 +849,19 @@
     transition: none;
     transform: none;
   }
+}
+
+.passport-step h1 {
+  scroll-margin-top: var(--space-4);
+}
+.passport-step h1:focus {
+  outline: none;
+}
+
+/* Reserve the ordinary one-line failure without moving the input or submit target. */
+.form-surface .field:has(.login-feedback) {
+  margin-bottom: 0;
+}
+.login-feedback {
+  min-block-size: var(--space-6);
 }

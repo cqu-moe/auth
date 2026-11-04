@@ -3,10 +3,11 @@ import { installPassingTurnstile } from "../lib/turnstile.testbots";
 
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { ThemeProvider } from "@cqu-moe/ui";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withRedirectParam } from "../lib/post-login-redirect";
+import EntryLayout from "../components/EntryLayout";
 import Login from "./Login";
 import Register from "./Register";
 import ResetPassword from "./ResetPassword";
@@ -35,6 +36,13 @@ const authMocks = vi.hoisted(() => ({
   requestPasswordReset: vi.fn(async () => ({ error: null })),
   resetPassword: vi.fn(async () => ({ error: null })),
   signOut: vi.fn(async () => ({ error: null })),
+}));
+
+vi.mock("../lib/refresh-login-session", () => ({
+  refreshLoginSession: async () => {
+    await authMocks.refetch();
+    return { user: { emailVerified: true } };
+  },
 }));
 
 vi.mock("../lib/auth-client", () => ({
@@ -68,7 +76,7 @@ async function renderPage(element: React.ReactElement, entry: string) {
     root.render(
       <ThemeProvider>
         <MemoryRouter initialEntries={[entry]}>
-          {element}
+          <Routes><Route element={<EntryLayout />}><Route path="*" element={element} /></Route></Routes>
           <LocationProbe />
         </MemoryRouter>
       </ThemeProvider>,
