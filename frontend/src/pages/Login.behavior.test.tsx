@@ -67,7 +67,7 @@ describe("password login safety verification", () => {
     await act(async () => widgets[0].callback("fresh-token"));
     expect(authClient.signIn.email).toHaveBeenCalledExactlyOnceWith(
       { email: "user@example.com", password: "password-for-test" },
-      { headers: { "x-turnstile-token": "fresh-token" } },
+      { headers: { "x-turnstile-token": "fresh-token" }, disableSignal: true },
     );
     expect(ui.textContent).toContain("邮箱或密码错误");
     expect(ui.querySelector<HTMLInputElement>("#password")!.value).toBe("password-for-test");
@@ -91,7 +91,7 @@ describe("password login safety verification", () => {
     await act(async () => widgets[widgets.length - 1].callback("retry-token"));
     expect(authClient.signIn.email).toHaveBeenCalledExactlyOnceWith(
       { email: "user@example.com", password: "password-for-test" },
-      { headers: { "x-turnstile-token": "retry-token" } },
+      { headers: { "x-turnstile-token": "retry-token" }, disableSignal: true },
     );
   });
 
@@ -112,7 +112,7 @@ describe("password login safety verification", () => {
     expect(authClient.signIn.email).not.toHaveBeenCalled();
     await act(async () => widgets[widgets.length - 1].callback("refreshed-token"));
     expect(authClient.signIn.email).toHaveBeenCalledExactlyOnceWith(expect.anything(),
-      { headers: { "x-turnstile-token": "refreshed-token" } });
+      { headers: { "x-turnstile-token": "refreshed-token" }, disableSignal: true });
     vi.restoreAllMocks();
   });
 

@@ -52,10 +52,20 @@ export default function Login() {
     try {
       verificationToken = await verification.getToken();
       if (!verificationToken) return;
-      const { data, error } = await authClient.signIn.email({ email: email.trim(), password }, { headers: { [TURNSTILE_TOKEN_HEADER]: verificationToken } });
+      // finishLogin awaits the session used by the route guard. Do not
+      // schedule a second session read that would cancel that request.
+      const { data, error } = await authClient.signIn.email({ email: email.trim(), password }, {
+        headers: { [TURNSTILE_TOKEN_HEADER]: verificationToken },
+        disableSignal: true,
+      });
       if (error) {
         setError(error.message ?? "登录失败，请检查邮箱和密码");
         return;
+      }
+      // A challenge has no new session. Invalidate a previous identity if
+      // this browser was already signed in, without waiting to show the form.
+      if (requiresLoginChallenge(data) && authClient.$store.atoms.session.get().data) {
+        authClient.$store.notify("$sessionSignal");
       }
       await finishLogin(data);
     } catch {

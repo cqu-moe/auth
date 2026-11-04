@@ -106,8 +106,29 @@ test('register, verify, persist, sign out and sign in with slow Turnstile comple
   await app.open('/login?redirect=https%3A%2F%2Fevil.example%2Fcallback');
   await screen.getByLabel('邮箱', { exact: true }).fill(account.username);
   await browser.locator('#password').fill(account.password);
-  await screen.getByRole('button', '登录', { exact: true }).click();
-  await expect(browser).toHaveURL(`${process.env.AUTH_E2E_URL}/settings`);
+  // Count session reads only after the password was accepted. A second read
+  // used to cancel the first and could exhaust the server's rate limit.
+  let accepted = false;
+  let sessionReads = 0;
+  const onResponse = (response: import('playwright-core').Response) => {
+    if (response.url().endsWith('/auth/sign-in/email') && response.status() === 200) accepted = true;
+  };
+  page.on('response', onResponse);
+  await page.route(slowSession, async route => {
+    if (accepted) {
+      sessionReads++;
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+    await route.continue();
+  });
+  try {
+    await screen.getByRole('button', '登录', { exact: true }).click();
+    await expect(browser).toHaveURL(`${process.env.AUTH_E2E_URL}/settings`);
+    expect(sessionReads).toBe(1);
+  } finally {
+    page.off('response', onResponse);
+    await page.unroute(slowSession);
+  }
 });
 test('registration policy rejects missing, invalid, expired and used invitations; optional mode creates an unverified account', async ({ app, screen, browser }) => {
   await app.open('/register');
