@@ -86,7 +86,10 @@ async function signInUi({ app, screen, browser }: Journey, account: ReturnType<t
 }
 async function authorize(context: Journey, account: ReturnType<typeof credentials.user>, device: string, client = 'first') {
   await signInUi(context, account);
-  await surface().page().goto(`${process.env.AUTH_OAUTH_APP}/start?device=${device}&client=${client}`, { waitUntil: 'commit' });
+  // Commit the client document before its cross-site return redirect (WebKit provisional targets).
+  await context.browser.goto(`${process.env.AUTH_OAUTH_APP}/launch?device=${device}&client=${client}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await expect(context.screen.getByRole('heading', 'OAuth client', { exact: true })).toBeVisible();
+  await context.screen.getByRole('link', '授权登录', { exact: true }).click();
   if (client === 'ordinary') {
     await context.browser.waitForURL(/\/oauth\/authorize/);
     await context.screen.getByRole('button', '授权', { exact: true }).click();

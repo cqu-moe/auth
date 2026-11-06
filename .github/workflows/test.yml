@@ -288,7 +288,7 @@ jobs:
       - run: node e2e/account-smoke.mjs
       - run: node e2e/self-check.mjs
       - run: node e2e/artifact-safety-check.mjs
-      - run: node --test e2e/publication-failure.test.mjs e2e/artifact-mail.test.mjs
+      - run: node --test e2e/publication-failure.test.mjs e2e/artifact-mail.test.mjs e2e/oauth/client.test.mjs
       - run: node e2e/school/workflow-probe.mjs
       - run: node e2e/school/container-probe.mjs
       - run: node e2e/school/consumer-smoke.mjs

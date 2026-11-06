@@ -186,11 +186,15 @@ export function startOAuthClientApp({ authOrigin, accountPassword, business, reg
       for await (const chunk of req) body += chunk;
       const input = body ? JSON.parse(body) : {};
 
-      if (req.method === 'GET' && url.pathname === '/start') {
+      if (req.method === 'GET' && ['/launch', '/start'].includes(url.pathname)) {
         const deviceName = url.searchParams.get('device') ?? '';
         const device = /^[a-z0-9-]{1,48}$/i.test(deviceName);
         const client = clients[url.searchParams.get('client') ?? ''];
         if (!device || !client) return res.writeHead(400).end('Invalid OAuth device');
+        if (url.pathname === '/launch') {
+          return res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+            .end(`<!doctype html><html lang="zh-CN"><body><main><h1>OAuth client</h1><a href="/start?device=${encodeURIComponent(deviceName)}&amp;client=${encodeURIComponent(url.searchParams.get('client'))}">授权登录</a></main></body></html>`);
+        }
         const verifier = b64url(randomBytes(48));
         const state = b64url(randomBytes(32));
         const key = client.dpop ? await keyPair() : null;
