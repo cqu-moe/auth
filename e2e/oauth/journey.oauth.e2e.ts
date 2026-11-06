@@ -79,7 +79,7 @@ async function signInUi({ app, screen, browser }: Journey, account: ReturnType<t
   }
   await expect(browser).toHaveURL(/settings/);
   // Do not abort the lazy settings import by navigating to OAuth before it renders.
-  await expect(screen.getByRole('heading', '账户', { exact: true })).toBeVisible();
+  await expect(screen.getByRole('button', '修改昵称', { exact: true })).toBeVisible();
   await control('/protect', { values: (await surface().context().cookies()).map(cookie => cookie.value).filter(Boolean) });
 }
 async function authorize(context: Journey, account: ReturnType<typeof credentials.user>, device: string, client = 'first') {
