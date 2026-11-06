@@ -265,12 +265,13 @@ export function createAuth(env: Env, request: Request) {
                 throw error;
               }
             }
-            if (ctx.path === "/admin/ban-user") {
+            if (ctx.path === "/admin/ban-user" || ctx.path === "/admin/unban-user") {
+              const isUnban = ctx.path === "/admin/unban-user";
               const session = await getSessionFromCtx(ctx);
               const targetId = (ctx.body as { userId?: unknown } | undefined)?.userId;
               // z.coerce.string() downstream accepts non-string ids; normalize the same way so the gate cannot be skipped by type juggling.
-              const normalizedId = targetId == null ? null : String(targetId);
-              if (session && normalizedId !== null && normalizedId !== session.user.id) {
+              const normalizedId = String(targetId);
+              if (session && (isUnban || normalizedId !== session.user.id)) {
                 const target = await ctx.context.internalAdapter.findUserById(normalizedId);
                 const targetRole = (target as { role?: string | null } | null)?.role ?? "user";
                 const targetRoles = targetRole.split(",").map((role) => role.trim());
@@ -278,8 +279,8 @@ export function createAuth(env: Env, request: Request) {
                 const callerIsSuperAdmin = callerRole.split(",").map((role) => role.trim()).includes("superAdmin");
                 if (targetRoles.some((role) => role === "admin" || role === "superAdmin") && !callerIsSuperAdmin) {
                   throw new APIError("FORBIDDEN", {
-                    code: "CANNOT_BAN_ADMINS",
-                    message: "只有 superAdmin 可以封禁 admin 或 superAdmin",
+                    code: isUnban ? "CANNOT_UNBAN_ADMINS" : "CANNOT_BAN_ADMINS",
+                    message: isUnban ? "只有 superAdmin 可以解禁 admin 或 superAdmin" : "只有 superAdmin 可以封禁 admin 或 superAdmin",
                   });
                 }
               }
