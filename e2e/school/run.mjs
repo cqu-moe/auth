@@ -5,7 +5,7 @@ import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {startSchoolAuth} from './runtime.mjs';
 import {sourceFingerprint} from './source.mjs';
-import {observeBrowserProfiles,selectedBrowser} from '../browser-custody.mjs';
+import {observeBrowserProfiles,selectedBrowser,selectedViewports} from '../browser-custody.mjs';
 
 const browserName=selectedBrowser();
 
@@ -16,7 +16,7 @@ const describeError=error=>error instanceof AggregateError
 const artifacts=await createArtifactRun(publicOutput);
 const output=artifacts.raw;
 try {
-for(const variant of process.env.AUTH_E2E_MOBILE?['mobile']:['desktop','mobile']) {
+for(const variant of selectedViewports()) {
   const dir=join(output,variant);
   await mkdir(dir,{recursive:true});
   const evidence={variant,browser:browserName,sourceHash:sourceFingerprint(),result:'failed',cleanup:'not-started',stage:'startup'};

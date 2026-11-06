@@ -41,6 +41,11 @@ Consumers must check out a specific Auth commit (the integration merge owner rec
 - Always `await runtime.close()` in `finally`; errors are failures. It removes the database, stops local services and rejects unexpected Worker egress. Per-consumer browser isolation and egress blocking remain the consumer's responsibility.
 - `AUTH_E2E_EXPECT_COMMIT` applies the same pin to the runner. `AUTH_E2E_OUTPUT` must be a child of `.e2e`; `AUTH_E2E_MOBILE=1` runs only the phone viewport. Default runner executes both with separate runtime state.
 
+CI runs each Chromium suite as four independent jobs: two rounds × desktop/mobile.
+`AUTH_E2E_VIEWPORT=desktop|mobile` selects one complete viewport for those jobs;
+without it, local runners retain the default two-view behavior and legacy mobile selector.
+Controls run once outside that selector, retaining their original viewport scope.
+
 School binding, queue/recovery workflow, OAuth grant/revocation, TOTP/Passkey and live test accounts remain the other tickets' responsibilities. This helper does not claim they work. The official CI aggregate requires the new browser job as well as the original application/container jobs; remote CI results must be reported separately from local execution.
 
 ## Firefox / WebKit complete applicable release journeys

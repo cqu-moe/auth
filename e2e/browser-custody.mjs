@@ -9,6 +9,15 @@ export function selectedBrowser() {
   return name;
 }
 
+export function selectedViewports() {
+  const viewport = process.env.AUTH_E2E_VIEWPORT;
+  if (viewport) {
+    if (!['desktop', 'mobile'].includes(viewport)) throw new Error('Unsupported AUTH_E2E_VIEWPORT');
+    return [viewport];
+  }
+  return process.env.AUTH_E2E_MOBILE ? ['mobile'] : ['desktop', 'mobile'];
+}
+
 // Cleanup must not replace a child/log/readback failure. Keep the actual Error
 // objects (including causes) for the runner's private evidence serializer.
 export async function withBrowserCustody(custody, task) {

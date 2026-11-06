@@ -1,8 +1,16 @@
 # CI/CD
 
 GitHub Actions 负责自动检查和构建归档；Cloudflare Workers Builds 负责部署。
-PR、分支 push、`v*` tag 和手动运行均执行 Tests，稳定汇总检查名为 `CI`。
-取消旧的分支运行不会中断 tag 发布。文档变更也生成检查结果。
+PR、main push、`v*` tag 和手动运行均执行 Tests，稳定汇总检查名为 `CI`。
+同一 PR 的新运行取消旧运行；main、tag 和手动运行各用独立并发组，排队中的提交也不会被替换。
+纯 Markdown 或 `docs/` 文档变更的 PR 只运行路径分类与 `CI`；`docs/api/` 的非 Markdown 契约产物仍触发全部检查。
+main 的每个提交、tag 和手动验收始终运行全套。路径比较失败会阻止门禁，不能当作文档变更放行。
+
+Chromium 的账号、学校、OAuth E2E 各按桌面/手机与两轮独立执行拆成四台 Ubuntu 机器，
+保留每轮全部业务旅程。负向、清理、下游与产物安全校验仍各执行一次；E2E 类型检查集中在应用 job。
+Firefox/WebKit 的发布及手动矩阵也按两轮并行，保留原有全部视口与适用测试。
+每个分片有独立产物名，任何分片失败均阻止 `CI`。npm 与 pnpm 分别使用 setup-node 的包管理器缓存，
+不缓存 node_modules、浏览器运行状态或测试结果。
 
 ## 本地与 CI 命令
 
@@ -36,7 +44,7 @@ npm ci && npx --yes pnpm@11.19.0 --dir frontend install --frozen-lockfile && VIT
 不在 Wrangler custom build hook 内跑测试，避免 Workers 测试读取 Wrangler 配置时递归构建。
 
 Cloudflare Git 构建不会自动等待独立 Actions 的完成，不能把二者并行启动当作部署门禁。
-私有仓库分支保护接口当前返回套餐限制；`CI` 汇总检查不会因此自动成为禁止合并的规则。
+仓库 ruleset 要求 `CI` 成功；仅查询旧的 branch protection 接口不足以确认当前门禁。
 构建命令必须在 Cloudflare 控制台真实配置后才生效，仓库文档不能证明控制台已更新。
 
 现有生产 deploy command 会先执行 `wrangler d1 migrations apply auth-cqu-moe-db --remote`，再部署 Worker；本次保留该行为。新增迁移必须继续单独审查，代码回滚不能撤销迁移。

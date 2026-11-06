@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { relative, join } from 'node:path';
 import { startAuth } from './runtime.mjs';
 import { sourceFingerprint } from './school/source.mjs';
-import { observeBrowserProfiles, selectedBrowser, withBrowserCustody } from './browser-custody.mjs';
+import { observeBrowserProfiles, selectedBrowser, selectedViewports, withBrowserCustody } from './browser-custody.mjs';
 
 const browserName = selectedBrowser();
 const supplement = browserName !== 'chromium';
@@ -15,7 +15,7 @@ const applicable = supplement && !process.env.AUTH_E2E_CLEANUP_CONTROL
   ? ['--grep-invert', '^(virtual WebAuthn|manual recovery invalidates actual old factors)'] : [];
 
 const publicOutput = process.env.AUTH_E2E_OUTPUT || `.e2e/run-${Date.now()}`;
-const variants = process.env.AUTH_E2E_MOBILE ? ['mobile'] : ['desktop', 'mobile'];
+const variants = selectedViewports();
 const userArgs = process.argv.slice(2);
 if (supplement) for (let i = 0; i < userArgs.length; i++) {
   if (userArgs[i] === '--grep' && userArgs[i + 1]) i++;
