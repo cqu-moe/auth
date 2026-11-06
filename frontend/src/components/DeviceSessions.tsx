@@ -44,9 +44,12 @@ export default function DeviceSessions() {
   async function revoke(token?: string) {
     setError(""); setBusy(token ? "revoke" : "revoke-all"); setRevokeToken(token ?? null);
     try {
-      const result = token ? await authClient.revokeSession({ token }) : await authClient.revokeSessions();
+      const leavesPage = !token || token === currentToken;
+      // The hard navigation reads the next session; do not start a refresh it will abort.
+      const fetchOptions = { disableSignal: leavesPage };
+      const result = token ? await authClient.revokeSession({ token }, fetchOptions) : await authClient.revokeSessions({}, fetchOptions);
       if (result.error) { setError(result.error.message ?? "退出失败，请稍后重试"); return; }
-      if (!token || token === currentToken) { window.location.assign("/login"); return; }
+      if (leavesPage) { window.location.assign("/login"); return; }
       await load();
     } catch { setError("退出失败，请稍后重试"); }
     finally { setBusy(null); setRevokeToken(null); }
