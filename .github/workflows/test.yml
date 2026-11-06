@@ -122,6 +122,8 @@ jobs:
       - run: npm ci
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
+      # Azure returned fonts at 49 kB/s; retain the signed official Ubuntu mirrors.
+      - run: sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
       # Same lockfile-pinned Playwright as @e2e-dev/web; CI launches only headless shell.
       - run: npx --no-install playwright-core install-deps chromium
       - run: npx --no-install playwright-core install chromium --only-shell
@@ -175,6 +177,8 @@ jobs:
         working-directory: frontend
       - run: VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build
       - run: node e2e/school/build.mjs
+      # Azure returned fonts at 49 kB/s; retain the signed official Ubuntu mirrors.
+      - run: sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
       # Same lockfile-pinned Playwright as @e2e-dev/web; CI launches only headless shell.
       - run: npx --no-install playwright-core install-deps chromium
       - run: npx --no-install playwright-core install chromium --only-shell
@@ -225,6 +229,8 @@ jobs:
       - run: npm ci
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
+      # Azure returned fonts at 49 kB/s; retain the signed official Ubuntu mirrors.
+      - run: sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
       # Same lockfile-pinned Playwright as @e2e-dev/web; CI launches only headless shell.
       - run: npx --no-install playwright-core install-deps chromium
       - run: npx --no-install playwright-core install chromium --only-shell
@@ -272,6 +278,8 @@ jobs:
       - run: npm ci
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
+      # Azure returned fonts at 49 kB/s; retain the signed official Ubuntu mirrors.
+      - run: sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
       # Same lockfile-pinned Playwright as @e2e-dev/web; CI launches only headless shell.
       - run: npx --no-install playwright-core install-deps chromium
       - run: npx --no-install playwright-core install chromium --only-shell
@@ -333,6 +341,7 @@ jobs:
       - run: npm ci
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
+      - run: sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
       - run: npx --no-install e2e-web install ${{ matrix.browser }} --with-deps
       - run: node --test e2e/oauth/network-proxy.test.mjs
         if: matrix.browser == 'webkit' && matrix.suite == 'oauth' && matrix.round == 1

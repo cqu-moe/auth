@@ -13,6 +13,8 @@ Firefox/WebKit 的发布及手动矩阵也按两轮并行，保留原有全部�
 不缓存 node_modules、浏览器运行状态或测试结果。
 Chromium 通过锁文件中同一 Playwright CLI 安装系统依赖与 headless shell，分步计时；
 这些 CI 旅程不启动 headed Chromium，因此不下载额外的 headed 浏览器。Firefox/WebKit 安装保持原样。
+浏览器 job 从 runner 的 apt 镜像候选中移除曾以约 49 kB/s 下载字体包的 Azure 源，
+保留 Ubuntu 官方主站与安全源及原有签名校验，继续安装全部依赖。
 
 ## 本地与 CI 命令
 
