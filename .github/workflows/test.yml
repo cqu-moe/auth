@@ -122,19 +122,13 @@ jobs:
       - run: npm ci
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
-      - run: npx --no-install e2e-web install chromium --with-deps
+      # Same lockfile-pinned Playwright as @e2e-dev/web; CI launches only headless shell.
+      - run: npx --no-install playwright-core install-deps chromium
+      - run: npx --no-install playwright-core install chromium --only-shell
       - run: VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build
       - run: node e2e/run.mjs
         env:
           AUTH_E2E_VIEWPORT: ${{ matrix.viewport }}
-      - run: node e2e/account-smoke.mjs
-        if: matrix.round == 1 && matrix.viewport == 'desktop'
-      - run: node e2e/self-check.mjs
-        if: matrix.round == 1 && matrix.viewport == 'desktop'
-      - run: node e2e/artifact-safety-check.mjs
-        if: matrix.round == 1 && matrix.viewport == 'desktop'
-      - run: node --test e2e/publication-failure.test.mjs e2e/artifact-mail.test.mjs
-        if: matrix.round == 1 && matrix.viewport == 'desktop'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -179,20 +173,14 @@ jobs:
       - run: npm ci
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
-      - run: node e2e/school/workflow-probe.mjs
-        if: matrix.round == 1 && matrix.viewport == 'desktop'
       - run: VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build
       - run: node e2e/school/build.mjs
-      - run: node e2e/school/container-probe.mjs
-        if: matrix.round == 1 && matrix.viewport == 'desktop'
-      - run: npx --no-install e2e-web install chromium --with-deps
+      # Same lockfile-pinned Playwright as @e2e-dev/web; CI launches only headless shell.
+      - run: npx --no-install playwright-core install-deps chromium
+      - run: npx --no-install playwright-core install chromium --only-shell
       - run: node e2e/school/run.mjs
         env:
           AUTH_E2E_VIEWPORT: ${{ matrix.viewport }}
-      - run: node e2e/school/consumer-smoke.mjs
-        if: matrix.round == 1 && matrix.viewport == 'desktop'
-      - run: node e2e/school/self-check.mjs
-        if: matrix.round == 1 && matrix.viewport == 'desktop'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -237,18 +225,71 @@ jobs:
       - run: npm ci
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
-      - run: npx --no-install e2e-web install chromium --with-deps
+      # Same lockfile-pinned Playwright as @e2e-dev/web; CI launches only headless shell.
+      - run: npx --no-install playwright-core install-deps chromium
+      - run: npx --no-install playwright-core install chromium --only-shell
       - run: VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build
       - run: node e2e/school/build.mjs
       - run: node e2e/oauth/run.mjs
         env:
           AUTH_E2E_VIEWPORT: ${{ matrix.viewport }}
-      - run: node e2e/oauth/self-check.mjs
-        if: matrix.round == 1 && matrix.viewport == 'desktop'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: auth-oauth-${{ matrix.viewport }}-${{ matrix.round }}-${{ github.sha }}
+          path: .e2e/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+  controls:
+    name: E2E negative and cleanup controls
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      E2E_TELEMETRY_DISABLED: '1'
+      DO_NOT_TRACK: '1'
+      WRANGLER_SEND_METRICS: 'false'
+      AUTH_SCHOOL_DOCKER_SOCKET: /var/run/docker.sock
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '22.22.3'
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '22.22.3'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: npm ci
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+      # Same lockfile-pinned Playwright as @e2e-dev/web; CI launches only headless shell.
+      - run: npx --no-install playwright-core install-deps chromium
+      - run: npx --no-install playwright-core install chromium --only-shell
+      - run: VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build
+      - run: node e2e/school/build.mjs
+      - run: node e2e/account-smoke.mjs
+      - run: node e2e/self-check.mjs
+      - run: node e2e/artifact-safety-check.mjs
+      - run: node --test e2e/publication-failure.test.mjs e2e/artifact-mail.test.mjs
+      - run: node e2e/school/workflow-probe.mjs
+      - run: node e2e/school/container-probe.mjs
+      - run: node e2e/school/consumer-smoke.mjs
+      - run: node e2e/school/self-check.mjs
+      - run: node e2e/oauth/self-check.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: auth-controls-${{ github.sha }}
           path: .e2e/
           include-hidden-files: true
           if-no-files-found: error
@@ -312,7 +353,7 @@ jobs:
   ci:
     name: CI
     if: always()
-    needs: [changes, test, container, browser, school, oauth, cross-browser]
+    needs: [changes, test, container, browser, school, oauth, controls, cross-browser]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -331,7 +372,8 @@ jobs:
           BROWSER_RESULT: ${{ needs.browser.result }}
           SCHOOL_RESULT: ${{ needs.school.result }}
           OAUTH_RESULT: ${{ needs.oauth.result }}
-        run: test "$TEST_RESULT" = success && test "$CONTAINER_RESULT" = success && test "$BROWSER_RESULT" = success && test "$SCHOOL_RESULT" = success && test "$OAUTH_RESULT" = success
+          CONTROLS_RESULT: ${{ needs.controls.result }}
+        run: test "$TEST_RESULT" = success && test "$CONTAINER_RESULT" = success && test "$BROWSER_RESULT" = success && test "$SCHOOL_RESULT" = success && test "$OAUTH_RESULT" = success && test "$CONTROLS_RESULT" = success
       - name: Require browser supplement before release or manual acceptance
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
         env:

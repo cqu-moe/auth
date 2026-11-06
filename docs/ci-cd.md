@@ -7,10 +7,12 @@ PR、main push、`v*` tag 和手动运行均执行 Tests，稳定汇总检查名
 main 的每个提交、tag 和手动验收始终运行全套。路径比较失败会阻止门禁，不能当作文档变更放行。
 
 Chromium 的账号、学校、OAuth E2E 各按桌面/手机与两轮独立执行拆成四台 Ubuntu 机器，
-保留每轮全部业务旅程。负向、清理、下游与产物安全校验仍各执行一次；E2E 类型检查集中在应用 job。
+保留每轮全部业务旅程。负向、清理、下游与产物安全校验在独立 job 中仍各执行一次；E2E 类型检查集中在应用 job。
 Firefox/WebKit 的发布及手动矩阵也按两轮并行，保留原有全部视口与适用测试。
 每个分片有独立产物名，任何分片失败均阻止 `CI`。npm 与 pnpm 分别使用 setup-node 的包管理器缓存，
 不缓存 node_modules、浏览器运行状态或测试结果。
+Chromium 通过锁文件中同一 Playwright CLI 安装系统依赖与 headless shell，分步计时；
+这些 CI 旅程不启动 headed Chromium，因此不下载额外的 headed 浏览器。Firefox/WebKit 安装保持原样。
 
 ## 本地与 CI 命令
 
