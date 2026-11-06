@@ -18,6 +18,8 @@ const auth = vi.hoisted(() => ({
   passkey: vi.fn(),
   refetch: vi.fn(),
   verifyTotp: vi.fn(),
+  revokeSession: vi.fn(),
+  revokeSessions: vi.fn(),
 }));
 
 vi.mock("../lib/refresh-login-session", () => ({
@@ -28,6 +30,8 @@ vi.mock("../lib/auth-client", () => ({
   authClient: {
     listSessions: auth.listSessions,
     getSession: auth.getSession,
+    revokeSession: auth.revokeSession,
+    revokeSessions: auth.revokeSessions,
     signIn: { email: auth.email, passkey: auth.passkey },
     twoFactor: { verifyTotp: auth.verifyTotp },
     useSession: () => ({
@@ -90,6 +94,8 @@ beforeEach(() => {
   auth.passkey.mockResolvedValue({ data: { user: { emailVerified: true } }, error: null });
   auth.refetch.mockResolvedValue(undefined);
   auth.verifyTotp.mockResolvedValue({ data: {}, error: null });
+  auth.revokeSession.mockReset().mockResolvedValue({ data: {}, error: null });
+  auth.revokeSessions.mockReset().mockResolvedValue({ data: {}, error: null });
 });
 
 afterEach(async () => {
@@ -150,4 +156,29 @@ it("stops redirecting if the returned session is still not fresh, and permits an
   expect(auth.listSessions).toHaveBeenCalledOnce();
   await click(button(container, "重试读取"));
   expect(container.textContent).toContain("为了确保安全，请重新登录后查看登录设备。");
+});
+
+it.each(["current", "all"])("avoids a redundant session signal when revoking %s devices, while retaining API errors", async (scope) => {
+  const revoke = scope === "all" ? auth.revokeSessions : auth.revokeSession;
+  revoke.mockResolvedValue({ error: { message: "退出失败，请重试" } });
+  const container = await renderFlow();
+  await click(button(container, "查看登录设备"));
+  await click(button(container, scope === "all" ? "退出全部设备（包括当前设备）" : "退出此设备"));
+  expect(revoke).toHaveBeenCalledWith(scope === "all" ? {} : { token: "fixture-session" }, { disableSignal: true });
+  expect(container.textContent).toContain("退出失败，请重试");
+  expect(container.querySelector("output")!.textContent).toBe("/settings/security");
+  expect(auth.listSessions).toHaveBeenCalledOnce();
+});
+
+it("refreshes the remaining device list when revoking another device", async () => {
+  auth.listSessions.mockResolvedValueOnce({ data: [{ token: "other-session", userAgent: "Other browser", createdAt: new Date() }], error: null });
+  const container = await renderFlow();
+  await click(button(container, "查看登录设备"));
+  await click(button(container, "退出此设备"));
+  expect(auth.revokeSession.mock.calls[0][0]).toEqual({ token: "other-session" });
+  expect(auth.revokeSession.mock.calls[0][1]?.disableSignal).not.toBe(true);
+  expect(auth.listSessions).toHaveBeenCalledTimes(2);
+  expect(container.textContent).not.toContain("Other browser");
+  expect(container.textContent).toContain("当前设备：Test browser");
+  expect(container.querySelector("output")!.textContent).toBe("/settings/security");
 });

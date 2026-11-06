@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { assertAttemptCleanup } from './report.mjs';
 import { startOAuthAuth } from './runtime.mjs';
 import { sourceFingerprint } from '../school/source.mjs';
-import { observeBrowserProfiles, selectedBrowser, withBrowserCustody } from '../browser-custody.mjs';
+import { observeBrowserProfiles, selectedBrowser, selectedViewports, withBrowserCustody } from '../browser-custody.mjs';
 import { startNetworkProxy } from './network-proxy.mjs';
 
 const browserName = selectedBrowser();
@@ -19,7 +19,7 @@ for (let index = 0; index < args.length; index++) {
   if (args[index] === '--grep' && args[index + 1]) index++;
   else if (!args[index].startsWith('--grep=')) throw new Error(`Unsupported OAuth runner option: ${args[index]}`);
 }
-const variants = process.env.AUTH_E2E_MOBILE ? ['mobile'] : ['desktop', 'mobile'];
+const variants = selectedViewports();
 const escapeRegExp = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const serialize = error => ({ name: error?.name ?? 'Error', message: error?.message ?? String(error),
   stack: error?.stack ?? String(error),

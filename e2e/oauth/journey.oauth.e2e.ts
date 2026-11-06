@@ -5,7 +5,7 @@ import type { Browser } from '@e2e-dev/web';
 import { authWebEngine } from '../../e2e.config';
 import { responseFor } from '../admin-fixture';
 import { authSecuritySecrets } from '../secret-holder';
-import { TURNSTILE_SCRIPT_URL, fulfillTurnstileFixture } from '../turnstile.mjs';
+import { TURNSTILE_SCRIPT_URL, fulfillTurnstileFixture, turnstileFixtureScript } from '../turnstile.mjs';
 
 type Journey = TestFixtures & { browser: Browser };
 const courses = [{ id: '31', name: '合成电路', extra: 'SYN101', courseCode: 'SYN101' }];
@@ -17,7 +17,9 @@ beforeEach(async ({ app, screen, browser }) => {
   unexpected = [];
   const allowedOrigins = [new URL(process.env.AUTH_E2E_URL!).origin, new URL(process.env.AUTH_OAUTH_APP!).origin];
   const allowed = new Set(allowedOrigins);
-  await browser.route(`${TURNSTILE_SCRIPT_URL}*`, async route => await fulfillTurnstileFixture(route));
+  // Even one route re-enables the WebKit interception that the loopback proxy avoids.
+  if (process.env.AUTH_OAUTH_PROXY) await browser.addInitScript(turnstileFixtureScript);
+  else await browser.route(`${TURNSTILE_SCRIPT_URL}*`, async route => await fulfillTurnstileFixture(route));
   if (!process.env.AUTH_OAUTH_PROXY) await browser.route('**/*', async route => {
     const url = new URL(route.request.url);
     if (`${url.origin}${url.pathname}` === TURNSTILE_SCRIPT_URL) return await fulfillTurnstileFixture(route);
@@ -78,11 +80,16 @@ async function signInUi({ app, screen, browser }: Journey, account: ReturnType<t
     await new Promise(resolve => setTimeout(resolve, Math.max(1000, seconds * 1000 + 100)));
   }
   await expect(browser).toHaveURL(/settings/);
+  // Do not abort the lazy settings import by navigating to OAuth before it renders.
+  await expect(screen.getByRole('button', '修改昵称', { exact: true })).toBeVisible();
   await control('/protect', { values: (await surface().context().cookies()).map(cookie => cookie.value).filter(Boolean) });
 }
 async function authorize(context: Journey, account: ReturnType<typeof credentials.user>, device: string, client = 'first') {
   await signInUi(context, account);
-  await surface().page().goto(`${process.env.AUTH_OAUTH_APP}/start?device=${device}&client=${client}`, { waitUntil: 'commit' });
+  // Commit the client document before its cross-site return redirect (WebKit provisional targets).
+  await context.browser.goto(`${process.env.AUTH_OAUTH_APP}/launch?device=${device}&client=${client}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await expect(context.screen.getByRole('heading', 'OAuth client', { exact: true })).toBeVisible();
+  await context.screen.getByRole('link', '授权登录', { exact: true }).click();
   if (client === 'ordinary') {
     await context.browser.waitForURL(/\/oauth\/authorize/);
     await context.screen.getByRole('button', '授权', { exact: true }).click();
