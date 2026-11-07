@@ -122,6 +122,24 @@ class PostHogPrivacyTests(unittest.TestCase):
         self.assertNotIn("secret-ticket", serialized)
         self.assertEqual(kwargs["properties"]["$exception_type"], "ValueError")
 
+    def test_empty_timeout_preserves_safe_error_tracking_contract(self):
+        client = Mock()
+        safe_capture_exception(client, TimeoutError(), {"error_class": "untrusted"})
+        args, kwargs = client.capture_exception.call_args
+        kind, error, traceback = args[0]
+        self.assertIs(kind, RuntimeError)
+        self.assertEqual(str(error), "[redacted]")
+        self.assertIsNone(traceback)
+        self.assertIsNone(error.__cause__)
+        self.assertIsNone(error.__context__)
+        self.assertEqual(kwargs["properties"]["$exception_type"], "TimeoutError")
+        self.assertNotIn("error_class", kwargs["properties"])
+        event = sanitize_event({"event": "$exception", "properties": kwargs["properties"]})
+        self.assertEqual(event["properties"]["$exception_list"], [{
+            "type": "TimeoutError", "value": "Browser operation failed",
+            "mechanism": {"type": "generic", "handled": True},
+        }])
+
     def test_capture_failure_does_not_replace_the_business_exception(self):
         client = Mock()
         client.capture_exception.side_effect = RuntimeError("telemetry unavailable")

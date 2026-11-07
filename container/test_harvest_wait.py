@@ -651,6 +651,56 @@ async def test_outer_short_budget_classifies_observed_hung_body(monkeypatch, ext
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("on_sso", [False, True])
+@pytest.mark.parametrize("prefetch", [False, True])
+@pytest.mark.parametrize("content_failure", ["hung", "cdp", "error"])
+async def test_html_failure_keeps_classification(monkeypatch, on_sso, prefetch, content_failure):
+    page = TimelinePage()
+
+    async def hung_content():
+        if content_failure == "cdp":
+            raise TimeoutError("private CDP details")
+        if content_failure == "error":
+            raise RuntimeError("private page details")
+        await asyncio.Event().wait()
+
+    async def no_wait(*args, **kwargs):
+        pass
+
+    page.content = hung_content
+    if on_sso:
+        page.url = m.cqu_login.SSO + "/login"
+    monkeypatch.setattr(m, "ChromiumSession", lambda **kwargs: page)
+    monkeypatch.setattr(m, "wait_for_harvest_captures", no_wait)
+    monkeypatch.setattr(m, "PAGE_CONTENT_TIMEOUT_S", 0.01, raising=False)
+    monkeypatch.setattr(m, "HARVEST_OVERALL_TIMEOUT", 0.5)
+    operation = m.harvest({}, {"navUrl": NAV, "capture": [TABLE] if prefetch else [], "fetch": []})
+    if on_sso:
+        with pytest.raises(m.HarvestExpiredError):
+            await operation
+        return
+    with pytest.raises(m.HarvestTransientError) as failure:
+        await operation
+    assert failure.value.code == ("WAF_BOOTSTRAP_TIMEOUT" if prefetch else "HARVEST_TRANSIENT")
+    assert "NAV_START" in str(failure.value.diagnostics)
+
+
+@pytest.mark.asyncio
+async def test_inner_browser_call_timeout_is_classified_transient(monkeypatch):
+    page = TimelinePage()
+
+    async def cdp_timeout(*args, **kwargs):
+        raise TimeoutError
+
+    monkeypatch.setattr(m, "ChromiumSession", lambda **kwargs: page)
+    monkeypatch.setattr(m, "wait_for_harvest_captures", cdp_timeout)
+    with pytest.raises(m.HarvestTransientError) as failure:
+        await m.harvest({}, {"navUrl": NAV, "capture": [TABLE], "fetch": []})
+    assert failure.value.code == "WAF_BOOTSTRAP_TIMEOUT"
+    assert str(failure.value) == "browser call timed out"
+
+
+@pytest.mark.asyncio
 async def test_empty_judge_data_does_not_prove_schedule_unpublished():
     page = TimelinePage(bootstrap(judge=100) + [
         (40, response("/judge-release-schedule-stu", body='{"data":""}')),
@@ -667,3 +717,45 @@ def test_cross_layer_browser_work_budget_leaves_queue_cleanup_and_margin():
         work = probe_profile({"CQU_BROWSER_PROFILE": name})["harvest_overall"]
         assert work == (300 if name == "cloudflare" else 150)
         assert (m.cqu_ticket_browser.QUEUE_WAIT + work + 15 + 10) * 1000 <= outer_ms
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefetch", [False, True])
+@pytest.mark.parametrize("external_deadline", [False, True])
+async def test_html_read_propagates_external_cancellation(monkeypatch, prefetch, external_deadline):
+    import server
+    page = TimelinePage()
+    page.counts = {"open": 0, "close": 0}
+    started = asyncio.Event()
+    canceled = asyncio.Event()
+    semaphore = asyncio.Semaphore(1)
+
+    async def content():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            canceled.set()
+
+    async def no_wait(*args, **kwargs):
+        pass
+
+    page.content = content
+    monkeypatch.setattr(m, "ChromiumSession", lambda **kwargs: page)
+    monkeypatch.setattr(m, "wait_for_harvest_captures", no_wait)
+    monkeypatch.setattr(m.cqu_ticket_browser, "TICKET_SEMAPHORE", semaphore)
+    monkeypatch.setattr(m, "PAGE_CONTENT_TIMEOUT_S", 5)
+    monkeypatch.setattr(m, "HARVEST_OVERALL_TIMEOUT", 10)
+    operation = m.harvest({}, {"navUrl": NAV, "capture": [TABLE] if prefetch else [], "fetch": []})
+    if external_deadline:
+        with pytest.raises(server.BrowserDeadlineExceeded):
+            await server.run_bounded(operation, 100)
+    else:
+        task = asyncio.create_task(operation)
+        await asyncio.wait_for(started.wait(), timeout=1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert started.is_set() and canceled.is_set()
+    assert page.counts == {"open": 1, "close": 1}
+    assert not semaphore.locked()
