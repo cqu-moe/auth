@@ -4,6 +4,7 @@ import { AccountRecovery } from "./AccountRecovery";
 // 仅把勾选的 flag 与非空 quota 发给 PUT,未勾/空缺省即「false / 无限」。
 // 预设从 GET /admin/entitlement-presets 读(管理台「权益预设」页可编辑)。
 import { useState, useEffect, useCallback } from "react";
+import { Ban, ShieldCheck } from "lucide-react";
 import {
   ActionButton,
   Alert,
@@ -244,20 +245,19 @@ export function UsersSection() {
               >
                 权益
               </Button>
-              <ActionButton
+              <Button
                 type="button"
                 variant="outline"
                 className={user.banned ? undefined : "text-destructive hover:text-destructive"}
                 onClick={() => updateUser(user.id, { action: user.banned ? "unban" : "ban" })}
-                disabled={refreshing}
-                state={actionLoading === user.id ? "loading" : "idle"}
-                labels={{
-                  idle: user.banned ? "解封" : "封禁",
-                  loading: user.banned ? "正在解封…" : "正在封禁…",
-                  success: user.banned ? "已解封" : "已封禁",
-                  error: user.banned ? "重试解封" : "重试封禁",
-                }}
-              />
+                disabled={refreshing || actionLoading === user.id}
+                aria-busy={actionLoading === user.id}
+              >
+                {user.banned ? <ShieldCheck aria-hidden="true" /> : <Ban aria-hidden="true" />}
+                <span aria-live="polite" aria-atomic="true">
+                  {actionLoading === user.id ? (user.banned ? "正在解封…" : "正在封禁…") : (user.banned ? "解封" : "封禁")}
+                </span>
+              </Button>
             </div>
           </div>
         ))}
@@ -319,21 +319,20 @@ export function UsersSection() {
                     >
                       权益
                     </Button>
-                    <ActionButton
+                    <Button
                       type="button"
                       variant="outline"
                       className={user.banned ? undefined : "text-destructive hover:text-destructive"}
                       size="sm"
                       onClick={() => updateUser(user.id, { action: user.banned ? "unban" : "ban" })}
-                      disabled={refreshing}
-                      state={actionLoading === user.id ? "loading" : "idle"}
-                      labels={{
-                        idle: user.banned ? "解封" : "封禁",
-                        loading: user.banned ? "正在解封…" : "正在封禁…",
-                        success: user.banned ? "已解封" : "已封禁",
-                        error: user.banned ? "重试解封" : "重试封禁",
-                      }}
-                    />
+                      disabled={refreshing || actionLoading === user.id}
+                      aria-busy={actionLoading === user.id}
+                    >
+                      {user.banned ? <ShieldCheck aria-hidden="true" /> : <Ban aria-hidden="true" />}
+                      <span aria-live="polite" aria-atomic="true">
+                        {actionLoading === user.id ? (user.banned ? "正在解封…" : "正在封禁…") : (user.banned ? "解封" : "封禁")}
+                      </span>
+                    </Button>
                   </div>
                 </TableCell>
               </TableRow>

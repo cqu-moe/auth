@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ChevronRight, Copy, Plus } from "lucide-react";
+import { Ban, ChevronRight, Copy, Plus, TicketPlus } from "lucide-react";
 import {
   ActionButton,
   Button,
@@ -72,7 +72,7 @@ export function UsersSkeleton({ canEditQuota = false }: { canEditQuota?: boolean
               <Button type="button" variant="outline" disabled>
                 权益
               </Button>
-              <ActionButton type="button" variant="outline" disabled state="idle" labels={{ idle: "封禁", loading: "正在封禁…", success: "已封禁", error: "重试封禁" }} />
+              <Button type="button" variant="outline" disabled><Ban aria-hidden="true" />封禁</Button>
             </div>
           </div>
         ))}
@@ -115,7 +115,7 @@ export function UsersSkeleton({ canEditQuota = false }: { canEditQuota?: boolean
                     <Button type="button" variant="outline" size="sm" disabled>
                       权益
                     </Button>
-                    <ActionButton type="button" variant="outline" size="sm" disabled state="idle" labels={{ idle: "封禁", loading: "正在封禁…", success: "已封禁", error: "重试封禁" }} />
+                    <Button type="button" variant="outline" size="sm" disabled><Ban aria-hidden="true" />封禁</Button>
                   </div>
                 </TableCell>
               </TableRow>
@@ -193,7 +193,7 @@ export function InvitationsSkeleton() {
           <FieldLabel hint="使用该邀请码注册的用户获得对应权益">注册后权益</FieldLabel>
           <Bone className="h-10 w-full pointer-coarse:h-11" />
         </div>
-        <ActionButton type="button" disabled state="idle" labels={{ idle: "生成邀请", loading: "正在生成…", success: "已生成", error: "重试生成" }} />
+        <Button type="button" disabled><TicketPlus aria-hidden="true" />生成邀请</Button>
       </div>
 
       <div className="overflow-x-auto">
