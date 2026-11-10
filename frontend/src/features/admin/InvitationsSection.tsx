@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { TicketPlus } from "lucide-react";
 import {
   ActionButton,
   Alert,
@@ -268,18 +269,15 @@ export function InvitationsSection() {
             className="w-full"
           />
         </div>
-        <ActionButton
+        <Button
           type="button"
           onClick={createInvitation}
-          disabled={refreshing}
-          state={creating ? "loading" : "idle"}
-          labels={{
-            idle: "生成邀请",
-            loading: "正在生成…",
-            success: "已生成",
-            error: "重试生成",
-          }}
-        />
+          disabled={refreshing || creating}
+          aria-busy={creating}
+        >
+          <TicketPlus aria-hidden="true" />
+          <span aria-live="polite" aria-atomic="true">{creating ? "正在生成…" : "生成邀请"}</span>
+        </Button>
       </div>
 
       {error && (

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ActionButton, Alert, AlertDescription, Skeleton } from "@cqu-moe/ui";
+import { Alert, AlertDescription, Button, Skeleton } from "@cqu-moe/ui";
 import { authClient } from "../lib/auth-client";
 import { withRedirectParam } from "../lib/post-login-redirect";
 
@@ -59,19 +59,18 @@ export default function DeviceSessions() {
   return <div id="login-devices" className="space-y-3 pt-4" aria-busy={busy !== null}>
     <div className="flex items-center justify-between gap-4">
       <span className="text-sm text-muted-foreground">登录设备</span>
-      <ActionButton
+      <Button
+        type="button"
         variant="link"
         size="sm"
         disabled={busy !== null}
         onClick={() => void load()}
-        state={busy === "load" ? "loading" : error && devices === null ? "error" : "idle"}
-        labels={{
-          idle: "查看登录设备",
-          loading: "正在读取…",
-          success: "已读取",
-          error: "重试读取",
-        }}
-      />
+        aria-busy={busy === "load"}
+      >
+        <span aria-live="polite" aria-atomic="true">
+          {busy === "load" ? "正在读取…" : error && devices === null ? "重试读取" : "查看登录设备"}
+        </span>
+      </Button>
     </div>
     {error && <Alert variant="destructive"><AlertDescription>{error}</AlertDescription></Alert>}
     {firstLoad ? <div role="status">
@@ -81,42 +80,40 @@ export default function DeviceSessions() {
         {[0, 1, 2].map((device) => (
           <div key={device} className="flex items-center justify-between gap-3">
             <Skeleton className="h-5 min-w-0 flex-1" />
-            <ActionButton variant="outline" size="sm" disabled state="idle" labels={{ idle: "退出此设备", loading: "正在退出…", success: "已退出", error: "重试退出" }} />
+            <Button type="button" variant="outline" size="sm" disabled>退出此设备</Button>
           </div>
         ))}
-        <ActionButton variant="outline" disabled state="idle" labels={{ idle: "退出全部设备（包括当前设备）", loading: "正在退出全部设备…", success: "已退出", error: "重试退出" }} />
+        <Button type="button" variant="outline" disabled>退出全部设备（包括当前设备）</Button>
       </div>
     </div> : devices && <>
       <p className="text-xs text-muted-foreground">退出设备会同时结束该设备的应用访问，后台课表同步保持运行。</p>
       {devices.length === 0 && <p className="text-sm text-muted-foreground">当前没有登录设备记录。</p>}
       {devices.map(device => <div key={device.token} className="flex items-center justify-between gap-3 text-sm">
         <span className="min-w-0 truncate">{device.token === currentToken ? "当前设备：" : ""}{device.userAgent || "未知设备"} · {new Date(device.createdAt).toLocaleDateString("zh-CN")}</span>
-        <ActionButton
+        <Button
+          type="button"
           variant="outline"
           size="sm"
           disabled={busy !== null}
           onClick={() => void revoke(device.token)}
-          state={busy === "revoke" && revokeToken === device.token ? "loading" : "idle"}
-          labels={{
-            idle: "退出此设备",
-            loading: "正在退出…",
-            success: "已退出",
-            error: "重试退出",
-          }}
-        />
+          aria-busy={busy === "revoke" && revokeToken === device.token}
+        >
+          <span aria-live="polite" aria-atomic="true">
+            {busy === "revoke" && revokeToken === device.token ? "正在退出…" : "退出此设备"}
+          </span>
+        </Button>
       </div>)}
-      <ActionButton
+      <Button
+        type="button"
         variant="outline"
         disabled={busy !== null}
         onClick={() => void revoke()}
-        state={busy === "revoke-all" ? "loading" : "idle"}
-        labels={{
-          idle: "退出全部设备（包括当前设备）",
-          loading: "正在退出全部设备…",
-          success: "已退出",
-          error: "重试退出",
-        }}
-      />
+        aria-busy={busy === "revoke-all"}
+      >
+        <span aria-live="polite" aria-atomic="true">
+          {busy === "revoke-all" ? "正在退出全部设备…" : "退出全部设备（包括当前设备）"}
+        </span>
+      </Button>
     </>}
   </div>;
 }

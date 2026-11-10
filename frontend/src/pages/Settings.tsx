@@ -2,8 +2,8 @@ import { CquBindingSkeleton } from "../components/SettingsSkeletons";
 import PasskeySettings from "../components/PasskeySettings";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
-import { ChevronDown, Link2, Mail } from "lucide-react";
-import { ActionButton, Alert, AlertDescription, Button, PageHeader } from "@cqu-moe/ui";
+import { ChevronDown, Link2, Mail, Unlink } from "lucide-react";
+import { Alert, AlertDescription, Button, PageHeader } from "@cqu-moe/ui";
 import { authClient } from "../lib/auth-client";
 import {
   deleteBinding,
@@ -365,16 +365,18 @@ function CquBindingSection() {
               <Link to="/cqu/bind?repair=1">重新设置密码</Link>
             </Button>
 
-            <ActionButton
+            <Button
               type="button"
               variant="destructive"
               size="sm"
               className="min-h-11"
               onClick={() => void handleUnbind()}
               disabled={unbindLoading || statusLoading}
-              state={unbindLoading ? "loading" : "idle"}
-              labels={{ idle: "解除绑定", loading: "正在解除…", success: "已解除", error: "重试解绑" }}
-            />
+              aria-busy={unbindLoading}
+            >
+              <Unlink aria-hidden="true" />
+              <span aria-live="polite" aria-atomic="true">{unbindLoading ? "正在解除…" : "解除绑定"}</span>
+            </Button>
           </div>
         </div>
       ) : (
