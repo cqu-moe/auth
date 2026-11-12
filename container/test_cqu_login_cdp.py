@@ -180,3 +180,70 @@ def test_cdp_export_matches_worker_cookie_fixture():
     from pathlib import Path
     fixture = json.loads((Path(__file__).parent / "fixtures/cdp-session-cookie.json").read_text())
     assert cqu_login_cdp.cookies_to_storage_state(fixture["rawCookies"], []) == fixture["storageState"]
+
+
+class _StubCdp:
+    """Minimal stand-in exposing only the `evaluate` call `_wait_first_factor` uses."""
+
+    def __init__(self, poll):
+        self._poll = poll
+        self.calls = 0
+
+    async def evaluate(self, expression, timeout=30):
+        self.calls += 1
+        if isinstance(self._poll, Exception):
+            raise self._poll
+        return self._poll
+
+
+def _run_first_factor(cdp):
+    return asyncio.run(cqu_login_cdp._wait_first_factor(cdp, []))
+
+
+def test_first_factor_names_last_poll_fault_when_page_stays_unrecognized():
+    import json
+    original = cqu_login_cdp.browser_profile.FORMNAV_TIMEOUT_MS
+    cqu_login_cdp.browser_profile.FORMNAV_TIMEOUT_MS = 10  # one short poll, then give up
+    try:
+        cdp = _StubCdp(RuntimeError("CDP Runtime.evaluate failed"))
+        verdict = _run_first_factor(cdp)
+    finally:
+        cqu_login_cdp.browser_profile.FORMNAV_TIMEOUT_MS = original
+
+    assert verdict.startswith("transient:unrecognized_page ")
+    payload = json.loads(verdict.split(" ", 1)[1])
+    assert "CDP Runtime.evaluate failed" in payload["lastPollError"]
+
+
+def test_first_factor_returns_bare_verdict_when_no_poll_fault_occurred():
+    original = cqu_login_cdp.browser_profile.FORMNAV_TIMEOUT_MS
+    cqu_login_cdp.browser_profile.FORMNAV_TIMEOUT_MS = 10
+    try:
+        cdp = _StubCdp({"url": "https://sso.cqu.edu.cn/login", "text": "", "error": ""})
+        verdict = _run_first_factor(cdp)
+    finally:
+        cqu_login_cdp.browser_profile.FORMNAV_TIMEOUT_MS = original
+
+    assert verdict == "transient:unrecognized_page"
+
+
+def test_first_factor_fails_fast_when_the_cdp_connection_is_gone():
+    import time
+    # A long window proves the dead-target path leaves at once instead of polling it out.
+    original = cqu_login_cdp.browser_profile.FORMNAV_TIMEOUT_MS
+    cqu_login_cdp.browser_profile.FORMNAV_TIMEOUT_MS = 60_000
+    try:
+        cdp = _StubCdp(ConnectionError("Chrome DevTools connection closed"))
+        started = time.monotonic()
+        raised = None
+        try:
+            _run_first_factor(cdp)
+        except RuntimeError as error:
+            raised = str(error)
+        elapsed = time.monotonic() - started
+    finally:
+        cqu_login_cdp.browser_profile.FORMNAV_TIMEOUT_MS = original
+
+    assert raised == "CONTAINER_UNAVAILABLE"
+    assert elapsed < 5  # nowhere near the 60 s deadline
+    assert cdp.calls == 1  # gave up on the first dead-target reading
