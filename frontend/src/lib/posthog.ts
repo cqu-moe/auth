@@ -1,5 +1,4 @@
 import posthog from "posthog-js";
-import "posthog-js/dist/posthog-recorder";
 import "posthog-js/dist/exception-autocapture";
 import { sanitizedExceptionProperties } from "../../../shared/posthog-exception";
 
@@ -93,6 +92,7 @@ const isTestEvent = !import.meta.env.PROD || (typeof window !== "undefined" && n
 const environment = import.meta.env.PROD ? "production" : import.meta.env.MODE === "test" ? "test" : "development";
 const release = import.meta.env.VITE_RELEASE?.trim() || "development";
 let initialized = false;
+let replayRequested = false;
 
 function clearLegacyPostHogCookie(projectToken: string): void {
   const encodedToken = projectToken.replace(/\+/g, "PL").replace(/\//g, "SL").replace(/=/g, "EQ");
@@ -205,10 +205,19 @@ export function capturePostHogSessionReady(): void {
   });
 }
 
-export function syncPostHogReplay(pathname: string): void {
+export async function syncPostHogReplay(pathname: string): Promise<void> {
   if (!initialized) return;
-  if (window.location.origin === ORIGIN && pathname.startsWith("/")) posthog.startSessionRecording(true);
-  else posthog.stopSessionRecording();
+  replayRequested = window.location.origin === ORIGIN && pathname.startsWith("/");
+  if (!replayRequested) {
+    posthog.stopSessionRecording();
+    return;
+  }
+  try {
+    await import("posthog-js/dist/posthog-recorder");
+    if (replayRequested) posthog.startSessionRecording(true);
+  } catch {
+    posthog.captureException(new Error("Session recorder could not be loaded"), { operation: "load_recorder" });
+  }
 }
 
 export { posthog };

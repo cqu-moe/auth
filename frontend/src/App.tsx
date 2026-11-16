@@ -1,6 +1,6 @@
 import RecentAuthentication from "./components/RecentAuthentication";
 import { lazy, Suspense, useEffect, useRef } from "react";
-import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, Outlet, matchPath, useLocation } from "react-router-dom";
 import { EntitlementsSkeleton, InvitationsSkeleton, OAuthClientsSkeleton } from "./features/admin/AdminSkeletons";
 import { UsersRouteSkeleton } from "./components/RouteSkeleton";
 import SessionPending from "./components/SessionPending";
@@ -9,12 +9,6 @@ import EntryLayout from "./components/EntryLayout";
 import PassportAuthLayout from "./components/PassportAuthLayout";
 import Login from "./pages/Login";
 import Home from "./pages/Home";
-import Register from "./pages/Register";
-import ResetPassword from "./pages/ResetPassword";
-import ResetPasswordConfirm from "./pages/ResetPasswordConfirm";
-import OAuthAuthorize from "./pages/OAuthAuthorize";
-import VerifyEmail from "./pages/VerifyEmail";
-import TwoFactorChallenge from "./pages/TwoFactorChallenge";
 import ProtectedRoute from "./components/ProtectedRoute";
 import EmailVerificationGate from "./components/EmailVerificationGate";
 import AuthError from "./pages/AuthError";
@@ -27,6 +21,12 @@ import {
 } from "./lib/posthog";
 
 const Settings = lazy(() => import("./pages/Settings"));
+const Register = lazy(() => import("./pages/Register"));
+const ResetPassword = lazy(() => import("./pages/ResetPassword"));
+const ResetPasswordConfirm = lazy(() => import("./pages/ResetPasswordConfirm"));
+const OAuthAuthorize = lazy(() => import("./pages/OAuthAuthorize"));
+const VerifyEmail = lazy(() => import("./pages/VerifyEmail"));
+const TwoFactorChallenge = lazy(() => import("./pages/TwoFactorChallenge"));
 const SettingsCqu = lazy(() => import("./pages/Settings").then(module => ({ default: module.SettingsCqu })));
 const SettingsSecurity = lazy(() => import("./pages/Settings").then(module => ({ default: module.SettingsSecurity })));
 const ChangeEmail = lazy(() => import("./pages/ChangeEmail"));
@@ -36,6 +36,39 @@ const UsersSection = lazy(() => import("./features/admin/UsersSection").then(mod
 const EntitlementsSection = lazy(() => import("./features/admin/EntitlementsSection").then(module => ({ default: module.EntitlementsSection })));
 const InvitationsSection = lazy(() => import("./features/admin/InvitationsSection").then(module => ({ default: module.InvitationsSection })));
 const OAuthClientsSection = lazy(() => import("./features/admin/OAuthClientsSection").then(module => ({ default: module.OAuthClientsSection })));
+
+const pageTitles = {
+  "/": "连接你的校园服务",
+  "/login": "登录",
+  "/register": "创建账号",
+  "/reset-password": "重置密码",
+  "/reset-password/confirm": "设置新密码",
+  "/verify-email": "验证邮箱",
+  "/two-factor": "二次验证",
+  "/auth/error": "认证未完成",
+  "/settings": "账户",
+  "/settings/security": "安全",
+  "/settings/cqu": "CQU 集成",
+  "/settings/email": "修改登录邮箱",
+  "/settings/two-factor": "设置二次验证",
+  "/admin": "管理控制台",
+  "/admin/users": "用户管理",
+  "/admin/presets": "权益预设",
+  "/admin/invitations": "注册邀请",
+  "/admin/oauth": "OAuth 客户端",
+  "/oauth/authorize": "授权请求",
+  "/cqu/bind": "绑定 CQU 账号",
+};
+
+function DocumentTitle() {
+  const { pathname } = useLocation();
+  const title = Object.entries(pageTitles).find(([path]) => matchPath(path, pathname))?.[1] ?? "找不到这个页面";
+  useEffect(() => {
+    // Reuse the HTML fallback title, including while a lazy route is loading.
+    document.title = `${title} · CQU Auth`;
+  }, [title]);
+  return null;
+}
 
 function PostHogLifecycle() {
   const { data: session, isPending } = authClient.useSession();
@@ -55,7 +88,7 @@ function PostHogLifecycle() {
   }, [isPending, session]);
 
   useEffect(() => {
-    syncPostHogReplay(location.pathname);
+    void syncPostHogReplay(location.pathname);
   }, [location.pathname]);
 
   return null;
@@ -64,6 +97,7 @@ function PostHogLifecycle() {
 export default function App() {
   return (
     <BrowserRouter>
+      <DocumentTitle />
       <PostHogLifecycle />
       <RecentAuthentication />
       <Suspense fallback={<SessionPending message="正在加载页面…" />}>

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { ApiError } from "../../lib/api/http";
 import {
   applyQuickloginQuota,
@@ -9,6 +9,11 @@ import {
 import { ActionButton, Button, Input, Label } from "@cqu-moe/ui";
 
 export const PREVIEW_CHANGED_MESSAGE = "设备状态已变化，请确认最新名单";
+const INVALID_QUOTA_MESSAGE = "设备额度必须是非负整数。";
+
+function isValidQuota(value: string) {
+  return /^\d+$/.test(value) && Number.isSafeInteger(Number(value));
+}
 
 function previewDeviceList(
   label: string,
@@ -42,13 +47,16 @@ export default function QuotaEditor({ userId, onSaved }: {
   const [failedAction, setFailedAction] = useState<"preview" | "apply" | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const fieldInvalid = error === INVALID_QUOTA_MESSAGE;
 
   const requestPreview = async (event: FormEvent) => {
     event.preventDefault();
     const limit = Number(value);
-    if (!/^\d+$/.test(value) || !Number.isSafeInteger(limit)) {
-      setError("设备额度必须是非负整数。");
+    if (!isValidQuota(value)) {
+      setError(INVALID_QUOTA_MESSAGE);
       setFailedAction(null);
+      inputRef.current?.focus();
       return;
     }
     setBusy("preview");
@@ -114,13 +122,18 @@ export default function QuotaEditor({ userId, onSaved }: {
           </Label>
           <Input
             id="quicklogin-device-limit"
+            ref={inputRef}
             type="number"
             min={0}
             step={1}
             inputMode="numeric"
             value={value}
-            onChange={(event) => setValue(event.target.value)}
-            aria-invalid={error === "设备额度必须是非负整数。" || undefined}
+            onChange={(event) => {
+              setValue(event.target.value);
+              if (fieldInvalid && isValidQuota(event.target.value)) setError("");
+            }}
+            aria-invalid={fieldInvalid || undefined}
+            aria-describedby={fieldInvalid ? "quicklogin-quota-error" : undefined}
             className="w-28"
           />
         </div>
@@ -137,7 +150,7 @@ export default function QuotaEditor({ userId, onSaved }: {
           }}
         />
       </form>
-      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      {error && <p id="quicklogin-quota-error" role="alert" className="text-sm text-destructive">{error}</p>}
       {notice && <p role="status" className="text-sm text-success">{notice}</p>}
       {preview && (
         <div className="rounded-lg border border-border bg-muted p-3 text-sm">

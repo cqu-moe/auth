@@ -80,6 +80,29 @@ afterEach(async () => {
 });
 
 describe("QuickLogin quota editor", () => {
+  it("focuses and describes an invalid quota, then clears its error when corrected", async () => {
+    const container = await renderUi(createElement(QuotaEditor, {
+      userId: "synthetic-user",
+      onSaved: () => undefined,
+    }));
+    const input = container.querySelector<HTMLInputElement>('input[type="number"]')!;
+
+    await requestPreview(container, "");
+    expect(api.previewQuickloginQuota).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(input);
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    const description = document.getElementById(input.getAttribute("aria-describedby") ?? "");
+    expect(description?.textContent).toBe("设备额度必须是非负整数。");
+
+    await setInputValue(input, "9007199254740992");
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    await setInputValue(input, "0");
+    expect(input.hasAttribute("aria-invalid")).toBe(false);
+    expect(input.hasAttribute("aria-describedby")).toBe(false);
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(api.previewQuickloginQuota).not.toHaveBeenCalled();
+  });
+
   it("uses a labeled non-negative integer form and supports cancelling a preview", async () => {
     api.previewQuickloginQuota.mockResolvedValue(PREVIEW);
     const container = await renderUi(createElement(QuotaEditor, {
@@ -142,5 +165,7 @@ describe("QuickLogin quota editor", () => {
     expect(container.textContent).toContain("服务暂时不可用");
     expect(container.textContent).not.toContain("设备额度已保存");
     expect(saved).not.toHaveBeenCalled();
+    await setInputValue(container.querySelector<HTMLInputElement>('input[type="number"]')!, "4");
+    expect(container.textContent).toContain("服务暂时不可用");
   });
 });
