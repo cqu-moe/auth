@@ -110,7 +110,7 @@ export default function Login() {
             required
             readOnly={loading !== null}
             aria-describedby={error ? "login-error" : undefined}
-            autoComplete="email"
+            autoComplete="username"
             placeholder="your@email.com"
             autoCapitalize="none"
             spellCheck={false}

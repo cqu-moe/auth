@@ -66,6 +66,7 @@ function actionLink(label: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  document.title = "CQU Auth";
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -143,6 +144,19 @@ it("keeps the ordinary settings entry on the account page", async () => {
   await renderSettings("/settings");
   expect(container.textContent).toContain("账户信息");
   expect(quickloginProps).not.toHaveBeenCalled();
+});
+
+it("updates the single document title during navigation without including query data", async () => {
+  await renderSettings("/settings/security");
+  expect(document.title).toBe("安全 · CQU Auth");
+  await act(async () => {
+    window.history.pushState({}, "", "/settings/email?code=private-code#private-fragment");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    await vi.dynamicImportSettled();
+  });
+  await act(async () => { await vi.dynamicImportSettled(); });
+  expect(document.title).toBe("修改登录邮箱 · CQU Auth");
+  expect(document.head.querySelectorAll("title")).toHaveLength(1);
 });
 
 it.each([

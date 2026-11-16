@@ -15,6 +15,7 @@ Cloudflare Workers 上的统一认证服务：Hono、D1、Better Auth 与 React 
 - 修改 OAuth、角色、权益或数据库访问前，读 [认证与数据约定](docs/agents/auth-contracts.md)；子系统接入再读 [接入契约](docs/subsystem-integration-guide.md)。
 - 修改 CQU 登录、取票、keepalive、会话存储或撤销前，读 [CQU 会话约定](docs/agents/cqu-session.md)。
 - 修改前端、运行验证或准备部署前，读 [开发与验证](docs/agents/development.md)。
+- 修改 HTML/CSS、浏览器端 JS 或检查前端现代化机会前，使用 `modern-web-guidance`；应用边界见 [Web 平台指南](docs/agents/development.md#web-平台指南)。
 - 历史交接与执行记录从 [HANDOFF.md](HANDOFF.md) 查找；它们不证明当前分支或生产状态。
 
 ## Agent skills

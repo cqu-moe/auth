@@ -217,7 +217,7 @@ export default function Register() {
             }}
             readOnly={loading}
             required
-            autoComplete="email"
+            autoComplete="username"
             autoCapitalize="none"
             spellCheck={false}
             inputMode="email"
@@ -352,7 +352,7 @@ export default function Register() {
             minLength={invitationRequired ? 8 : 0}
             maxLength={8}
             pattern={invitationRequired ? invitationCodePattern : `(${invitationCodePattern})?`}
-            autoComplete="one-time-code"
+            autoComplete="off"
             spellCheck={false}
             className="font-mono tracking-widest uppercase"
             placeholder={invitationRequired ? "请输入邀请码" : "请输入邀请码，可留空"}
