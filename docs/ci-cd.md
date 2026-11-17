@@ -33,18 +33,18 @@ Actions 保存 `auth-<commit>` 构建产物 14 天，包含 tar.gz 和 `SHA256SU
 ## Cloudflare
 
 Worker：`cqu-moe-auth`，生产分支 main，根目录 `/`。
-构建变量 `PNPM_VERSION=11.19.0` 显式固定 Cloudflare 提供的 pnpm；保留 `NODE_VERSION=22` 与 `SKIP_DEPENDENCY_INSTALL=1`。控制台按根锁文件选择新旧提交的安装路径：
+构建变量 `PNPM_VERSION=11.19.0` 显式固定 Cloudflare 提供的 pnpm；保留 `NODE_VERSION=22` 与 `SKIP_DEPENDENCY_INSTALL=1`。构建命令直接使用 pnpm：
 
 ```sh
-if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile && pnpm --dir frontend install --frozen-lockfile && VITE_RELEASE=$WORKERS_CI_COMMIT_SHA pnpm run build:cloudflare; else npm ci && npx --yes pnpm@11.19.0 --dir frontend install --frozen-lockfile && VITE_RELEASE=$WORKERS_CI_COMMIT_SHA npm run build:cloudflare; fi
+pnpm install --frozen-lockfile && pnpm --dir frontend install --frozen-lockfile && VITE_RELEASE=$WORKERS_CI_COMMIT_SHA pnpm run build:cloudflare
 ```
 
 其中 `build:cloudflare` 在构建前执行应用、Workers 和 Docker 容器检查，任何一步失败即停止。
 
-生产 deploy command 保留远程 D1 迁移，按锁文件使用 `pnpm exec wrangler d1 migrations apply auth-cqu-moe-db --remote && pnpm run deploy` 或旧提交的 `npx wrangler d1 migrations apply auth-cqu-moe-db --remote && npm run deploy`。该脚本要求构建 secret `POSTHOG_CLI_API_KEY`（error-tracking write 权限）和变量 `POSTHOG_CLI_PROJECT_ID=662666`；上传 Auth Web / Worker source map 后，使用 `--no-bundle` 部署同一份已注入 chunk ID 的 Worker，并保留已有远程变量。缺少上传凭据或上传失败会阻止部署，避免发布无法解析的堆栈。`pnpm run deploy --dry-run` 完成真实映射上传和打包校验，但不部署 Worker/容器。不要在末尾另行运行会重新打包的 `wrangler deploy`。
+生产 deploy command 保留远程 D1 迁移：`pnpm exec wrangler d1 migrations apply auth-cqu-moe-db --remote && pnpm run deploy`。该脚本要求构建 secret `POSTHOG_CLI_API_KEY`（error-tracking write 权限）和变量 `POSTHOG_CLI_PROJECT_ID=662666`；上传 Auth Web / Worker source map 后，使用 `--no-bundle` 部署同一份已注入 chunk ID 的 Worker，并保留已有远程变量。缺少上传凭据或上传失败会阻止部署，避免发布无法解析的堆栈。`pnpm run deploy --dry-run` 完成真实映射上传和打包校验，但不部署 Worker/容器。不要在末尾另行运行会重新打包的 `wrangler deploy`。
 
 容器检查先按生产 Dockerfile 构建基础镜像，再用 `container/Dockerfile.test` 在镜像构建阶段安装固定版本 pytest 并运行测试。根 `.dockerignore` 仅允许测试文件、fixture 和必要源码契约进入测试上下文，不使用 Cloudflare 构建机不支持的 `docker run`。当 Cloudflare 设置 `WRANGLER_CI_OVERRIDE_NETWORK_MODE_HOST` 时，两次构建都采用与 Wrangler 相同的 host 网络；生产镜像仍使用原 Dockerfile。
-非生产版本命令同样按锁文件选择 `pnpm exec wrangler` 或历史 `npx wrangler`，保留 `versions upload --experimental-provision=false --var QUICKLOGIN_SERVER_BUILD:$WORKERS_CI_COMMIT_SHA --var RELEASE:$WORKERS_CI_COMMIT_SHA`，不切换生产流量。
+非生产版本命令为 `pnpm exec wrangler versions upload --experimental-provision=false --var QUICKLOGIN_SERVER_BUILD:$WORKERS_CI_COMMIT_SHA --var RELEASE:$WORKERS_CI_COMMIT_SHA`，不切换生产流量。
 构建环境需要 Node 22、与根及 frontend/package.json 一致的 pnpm 和 Docker。
 不在 Wrangler custom build hook 内跑测试，避免 Workers 测试读取 Wrangler 配置时递归构建。
 
