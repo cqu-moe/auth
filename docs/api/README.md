@@ -46,7 +46,7 @@ validation does not validate form bodies, WebSocket messages, or responses; ever
 such exception and the native QuickLogin response contract is recorded in
 `coverage.json`. The application continues to validate all of them.
 
-Run `npm run generate:api` twice, then `npm run check:api` and `npm run lint:api`.
+Run `pnpm run generate:api` twice, then `pnpm run check:api` and `pnpm run lint:api`.
 Generation and validation are local: they do not upload a schema, enable API Shield,
 change WAF rules, or deploy the Worker.
 

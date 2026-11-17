@@ -4,7 +4,7 @@ Cloudflare Workers 上的统一认证服务：Hono、D1、Better Auth 与 React 
 
 ## 工作约定
 
-- 根目录使用 `npm ci`；`frontend/` 使用其锁文件和 `packageManager` 指定的 pnpm。命令以各自 `package.json` 为准。
+- 根目录使用 `pnpm install --frozen-lockfile`；`frontend/` 使用其锁文件和 `packageManager` 指定的 pnpm。命令以各自 `package.json` 为准。
 - 正式 HTTP API 使用 `/api/v1`。OAuth issuer 保持 `https://auth.cqu.moe/api/auth`；discovery 与已退役业务路径分别处理。
 - 数据库迁移全部手写下一个编号的 SQL。`drizzle/migrations` 没有 Drizzle meta 基线，自动生成会重建已有表；`schema.ts` 只提供应用表查询类型。
 - 用户界面使用简体中文。提交使用有效 Git 身份与现有签名配置；1Password 签名失败时报告并等待解锁。

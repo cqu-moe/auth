@@ -2,6 +2,9 @@
 
 ## 本地开发
 
+- 根目录和 `frontend/` 各自保留独立锁文件；分别执行 `pnpm install --frozen-lockfile` 与 `pnpm --dir frontend install --frozen-lockfile`。包管理器版本由各自 `packageManager` 固定。
+- Miniflare 补丁由 `pnpm-workspace.yaml` 的 `patchedDependencies` 应用，根 `postinstall` 校验版本、补丁散列和生成握手代码；不要手改共享 store 或跳过该校验。
+
 - 根目录 `.dev.vars` 提供本地 secrets；`BETTER_AUTH_URL` 应与本地服务一致。变量名及 bindings 查 `wrangler.jsonc`，值不写入文档。
 - 前端 `createAuthClient` 使用同源 `/api/v1/auth` basePath；需要 baseURL 时使用绝对地址。
 - 邮件客户端延迟初始化，避免缺少 Resend key 时使无关路由失败。
@@ -19,19 +22,19 @@
 
 | 改动 | 验证入口 |
 | --- | --- |
-| 后端类型/纯函数 | `npm run typecheck`、`npm test` |
-| DO/会话时序 | 另跑 `npm run typecheck:do`、`npm run test:do` |
-| HTTP 契约/鉴权边界 | [API 文档](../api/README.md) 的生成与校验流程，另跑 `npm run check:boundaries` |
+| 后端类型/纯函数 | `pnpm run typecheck`、`pnpm test` |
+| DO/会话时序 | 另跑 `pnpm run typecheck:do`、`pnpm run test:do` |
+| HTTP 契约/鉴权边界 | [API 文档](../api/README.md) 的生成与校验流程，另跑 `pnpm run check:boundaries` |
 | 前端 | `pnpm --dir frontend build`；相关页面行为、设计检查与 lint 按前端 scripts 执行 |
 | 浏览器容器 | 按 `.github/workflows/test.yml` 的 container 测试方式；现场登录另作验收 |
 
 ## 部署与证据
 
-部署前读取当前 `package.json`、Wrangler 配置和 `.github/workflows/`。旧交接中的部署工作流及分支状态仅为历史，不假定 push 就会上线。`npm run deploy` 会实际部署，需在用户授权范围内执行。
+部署前读取当前 `package.json`、Wrangler 配置和 `.github/workflows/`。旧交接中的部署工作流及分支状态仅为历史，不假定 push 就会上线。`pnpm run deploy` 会实际部署，需在用户授权范围内执行。
 
 报告区分本地检查、CI、合并、Worker 部署与已登录业务验收。分支版本上传不能当作生产部署，也不能假定 DO Worker 有可用的 preview URL；需要时核实独立预览环境。
 
-生产发布由 Cloudflare Workers Builds 在 `main` 更新后自动执行。合并前确认 PR 的 GitHub `Tests` / `CI` 全部通过；Cloudflare 构建独立执行 `npm run build:cloudflare`，通过代码检查、应用/DO 测试、容器测试和前端构建后，再执行 `npx wrangler d1 migrations apply auth-cqu-moe-db --remote && npm run deploy`。前后端源码映射继续上传到 Auth 的 PostHog 项目。
+生产发布由 Cloudflare Workers Builds 在 `main` 更新后自动执行。合并前确认 PR 的 GitHub `Tests` / `CI` 全部通过；Cloudflare 构建独立执行 `pnpm run build:cloudflare`，通过代码检查、应用/DO 测试、容器测试和前端构建后，再执行 `pnpm exec wrangler d1 migrations apply auth-cqu-moe-db --remote && pnpm run deploy`。前后端源码映射继续上传到 Auth 的 PostHog 项目。
 
 GitHub Actions 保留 `.github/workflows/test.yml` 的测试、构建产物和版本归档；生产发布工作流保持停用，避免重复部署。Cloudflare 的生产分支为 `main`，自动构建开启；现有非生产分支触发器只执行 `wrangler versions upload`，不切换生产流量。`previews_enabled=false` 表示未切换到新版隔离预览，不能据此判断旧版分支触发器是否关闭。
 

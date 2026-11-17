@@ -1,14 +1,13 @@
-import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 // Miniflare 4.20260521.0 predates upstream PR #15552. The first releases
 // containing that fix are Miniflare 5 alphas, whose worker-options schema is
 // incompatible with this repository's E2E runtime. Keep the exact 4.x pin and
-// apply only the upstream generation handshake fix after npm installs it.
+// verify the upstream generation handshake fix applied by pnpm patchedDependencies.
 const patchPath = 'patches/miniflare+4.20260521.0.patch';
 const targetPath = 'node_modules/miniflare/dist/src/index.js';
-const expectedPatchSha256 = '2967a306b4945926eefa080271b12d3df4076b1c4a5f80f3465b76753078f8b6';
+const expectedPatchSha256 = '09cbd995e8e89c6184f123ce3dbdc63e5e21649ecf13241d65a3fbc06502ba90';
 
 function assertPatched(source) {
   if (!source.includes('function receiveReply(notifyHandle, port, id)')
@@ -26,13 +25,5 @@ if (manifest.name !== 'miniflare' || manifest.version !== '4.20260521.0') {
   throw new Error(`Unexpected Miniflare version: ${manifest.name}@${manifest.version}`);
 }
 
-let source = await readFile(targetPath, 'utf8');
-try {
-  assertPatched(source);
-  console.log('[miniflare-transport] official generation fix already applied');
-} catch {
-  execFileSync('git', ['apply', '--whitespace=nowarn', patchPath], { stdio: 'inherit' });
-  source = await readFile(targetPath, 'utf8');
-  assertPatched(source);
-  console.log('[miniflare-transport] applied official generation fix');
-}
+assertPatched(await readFile(targetPath, 'utf8'));
+console.log('[miniflare-transport] verified pnpm-applied generation fix');

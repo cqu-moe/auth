@@ -1,6 +1,6 @@
 // Workers-pool 测试配置(@cloudflare/vitest-pool-workers, 跑在真 workerd 运行时里)。
 // 独立于根 vitest.config.ts(Node pool, 跑 runtime-agnostic 纯函数单测)—— 两者 include
-// 互斥, `npm run test` 不会跑这里的 DO 集成测试, 反之亦然。
+// 互斥, `pnpm run test` 不会跑这里的 DO 集成测试, 反之亦然。
 //
 // 用途: 锁住 CquSessionDO 方法体里只能在 workerd 内验证的时序行为(纯函数层已被 Node pool
 // 覆盖, 但 DO 本体 import `cloudflare:workers` 在 Node pool 起不来)。

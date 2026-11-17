@@ -11,7 +11,7 @@ process.env.VITE_RELEASE = release;
 process.env.POSTHOG_CLI_HOST = 'https://us.posthog.com';
 const run = (command, args) => execFileSync(command, args, { stdio: 'inherit' });
 
-run('npm', ['--prefix', 'frontend', 'run', 'build']);
+run('pnpm', ['--dir', 'frontend', 'run', 'build']);
 assert(!readdirSync('frontend/dist/assets').some(name => name.endsWith('.map')), 'Source maps must not be public assets');
 rmSync('dist-worker', { recursive: true, force: true });
 run('node_modules/.bin/wrangler', ['deploy', '--dry-run', '--outdir', 'dist-worker', '--upload-source-maps']);

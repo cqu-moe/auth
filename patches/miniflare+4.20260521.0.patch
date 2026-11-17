@@ -1,5 +1,6 @@
---- a/node_modules/miniflare/dist/src/index.js
-+++ b/node_modules/miniflare/dist/src/index.js	2026-10-16 04:48:53
+diff --git a/dist/src/index.js b/dist/src/index.js
+--- a/dist/src/index.js
++++ b/dist/src/index.js
 @@ -77872,7 +77872,7 @@
        port.postMessage({ id, error: new Error(String(error)) });
      }

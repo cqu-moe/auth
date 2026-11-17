@@ -50,26 +50,21 @@ jobs:
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-        with:
-          package_json_file: frontend/package.json
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
-        with:
-          node-version: '22.22.3'
-          cache: npm
-          cache-dependency-path: package-lock.json
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '22.22.3'
           cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-      - run: npm ci
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
       - run: node --test scripts/ci-paths.test.mjs e2e/viewports.test.mjs
-      - run: npm run typecheck:e2e && npx --no-install tsc -p e2e/school/tsconfig.json
-      - run: npm run check:ci
-      - run: npm run build:ci
-      - run: npm run package:ci
+      - run: pnpm run typecheck:e2e && pnpm exec tsc -p e2e/school/tsconfig.json
+      - run: pnpm run check:ci
+      - run: pnpm run build:ci
+      - run: pnpm run package:ci
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: auth-${{ github.sha }}
@@ -107,27 +102,22 @@ jobs:
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
-        with:
-          package_json_file: frontend/package.json
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
-        with:
-          node-version: '22.22.3'
-          cache: npm
-          cache-dependency-path: package-lock.json
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '22.22.3'
           cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-      - run: npm ci
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
       # Azure returned fonts at 49 kB/s; retain the signed official Ubuntu mirrors.
       - run: sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
       # Same lockfile-pinned Playwright as @e2e-dev/web; CI launches only headless shell.
-      - run: npx --no-install playwright-core install-deps chromium
-      - run: npx --no-install playwright-core install chromium --only-shell
-      - run: VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build
+      - run: pnpm exec playwright-core install-deps chromium
+      - run: pnpm exec playwright-core install chromium --only-shell
+      - run: VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= pnpm --dir frontend run build
       - run: node e2e/run.mjs
         env:
           AUTH_E2E_VIEWPORT: ${{ matrix.viewport }}
@@ -160,28 +150,23 @@ jobs:
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
-        with:
-          package_json_file: frontend/package.json
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
-        with:
-          node-version: '22.22.3'
-          cache: npm
-          cache-dependency-path: package-lock.json
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '22.22.3'
           cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-      - run: npm ci
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
-      - run: VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build
+      - run: VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= pnpm --dir frontend run build
       - run: node e2e/school/build.mjs
       # Azure returned fonts at 49 kB/s; retain the signed official Ubuntu mirrors.
       - run: sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
       # Same lockfile-pinned Playwright as @e2e-dev/web; CI launches only headless shell.
-      - run: npx --no-install playwright-core install-deps chromium
-      - run: npx --no-install playwright-core install chromium --only-shell
+      - run: pnpm exec playwright-core install-deps chromium
+      - run: pnpm exec playwright-core install chromium --only-shell
       - run: node e2e/school/run.mjs
         env:
           AUTH_E2E_VIEWPORT: ${{ matrix.viewport }}
@@ -214,27 +199,22 @@ jobs:
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
-        with:
-          package_json_file: frontend/package.json
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
-        with:
-          node-version: '22.22.3'
-          cache: npm
-          cache-dependency-path: package-lock.json
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '22.22.3'
           cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-      - run: npm ci
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
       # Azure returned fonts at 49 kB/s; retain the signed official Ubuntu mirrors.
       - run: sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
       # Same lockfile-pinned Playwright as @e2e-dev/web; CI launches only headless shell.
-      - run: npx --no-install playwright-core install-deps chromium
-      - run: npx --no-install playwright-core install chromium --only-shell
-      - run: VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build
+      - run: pnpm exec playwright-core install-deps chromium
+      - run: pnpm exec playwright-core install chromium --only-shell
+      - run: VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= pnpm --dir frontend run build
       - run: node e2e/school/build.mjs
       - run: node e2e/oauth/run.mjs
         env:
@@ -263,27 +243,22 @@ jobs:
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
-        with:
-          package_json_file: frontend/package.json
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
-        with:
-          node-version: '22.22.3'
-          cache: npm
-          cache-dependency-path: package-lock.json
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '22.22.3'
           cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-      - run: npm ci
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
       # Azure returned fonts at 49 kB/s; retain the signed official Ubuntu mirrors.
       - run: sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
       # Same lockfile-pinned Playwright as @e2e-dev/web; CI launches only headless shell.
-      - run: npx --no-install playwright-core install-deps chromium
-      - run: npx --no-install playwright-core install chromium --only-shell
-      - run: VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build
+      - run: pnpm exec playwright-core install-deps chromium
+      - run: pnpm exec playwright-core install chromium --only-shell
+      - run: VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= pnpm --dir frontend run build
       - run: node e2e/school/build.mjs
       - run: node e2e/account-smoke.mjs
       - run: node e2e/self-check.mjs
@@ -326,26 +301,21 @@ jobs:
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
-        with:
-          package_json_file: frontend/package.json
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
-        with:
-          node-version: '22.22.3'
-          cache: npm
-          cache-dependency-path: package-lock.json
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '22.22.3'
           cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-      - run: npm ci
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
       - run: pnpm install --frozen-lockfile
         working-directory: frontend
       - run: sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
-      - run: npx --no-install e2e-web install ${{ matrix.browser }} --with-deps
+      - run: pnpm exec e2e-web install ${{ matrix.browser }} --with-deps
       - run: node --test e2e/oauth/network-proxy.test.mjs
         if: matrix.browser == 'webkit' && matrix.suite == 'oauth' && matrix.round == 1
-      - run: VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= npm --prefix frontend run build
+      - run: VITE_POSTHOG_PROJECT_TOKEN= VITE_POSTHOG_HOST= pnpm --dir frontend run build
       - run: node e2e/school/build.mjs
         if: matrix.suite != 'account'
       - run: node e2e/cross-browser.mjs
