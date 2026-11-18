@@ -397,7 +397,7 @@ issuer 仍为 `https://auth.cqu.moe/api/auth`，HTTP 端点仍位于 `/api/v1/au
 未来增加 API/MCP 资源前必须启用逐客户端资源关联并迁移已有客户端；不得直接在这个
 兼容配置下增加新 audience。本次没有创建 API/MCP 业务端点，跨站 Cookie 收口待消费者迁移。
 
-本地回归使用真实 workerd/D1：`npm run test:do`，其中
+本地回归使用真实 workerd/D1：`pnpm run test:do`，其中
 `auth-d1-baseline.test.ts` 覆盖并发限流、授权码单次消费、PKCE/回调/事务校验、
 TOTP 登录与退出、OTP 过期和 verification 清理；`auth-upgrade-migration.test.ts`
 从带数据的旧 schema 升级后验证登录、学校数据、权益和客户端保留。
