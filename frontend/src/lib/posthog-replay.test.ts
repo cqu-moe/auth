@@ -6,7 +6,6 @@ beforeEach(() => {
   vi.resetModules();
   vi.stubEnv("VITE_POSTHOG_PROJECT_TOKEN", "test");
   vi.stubEnv("VITE_POSTHOG_ALLOW_NON_PRODUCTION", "true");
-  vi.doMock("posthog-js/dist/posthog-recorder", () => ({}));
 });
 
 afterEach(() => {
@@ -26,6 +25,7 @@ async function telemetry() {
 }
 
 it("waits for the recorder module before enabling recording", async () => {
+  vi.doMock("posthog-js/dist/posthog-recorder", () => ({}));
   const { sync, start } = await telemetry();
   const loading = sync("/login");
   expect(start).not.toHaveBeenCalled();
@@ -34,6 +34,7 @@ it("waits for the recorder module before enabling recording", async () => {
 });
 
 it("keeps recording stopped when disabled while the module is loading", async () => {
+  vi.doMock("posthog-js/dist/posthog-recorder", () => ({}));
   const { sync, start, stop } = await telemetry();
   const loading = sync("/login");
   await sync("");
