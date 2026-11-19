@@ -580,6 +580,7 @@ INPAGE_FETCH_TIMEOUT_MS = browser_profile.INPAGE_FETCH_TIMEOUT_MS
 HARVEST_OVERALL_TIMEOUT = browser_profile.HARVEST_OVERALL_TIMEOUT_S
 STATE_EXPORT_TIMEOUT_S = 5.0
 STATE_EXPORT_DEADLINE_MARGIN_S = 1.0
+PAGE_CONTENT_TIMEOUT_S = 5.0
 CAPTURE_BODY_SETTLE_S = browser_profile.CAPTURE_BODY_SETTLE_S
 
 
@@ -759,6 +760,16 @@ async def run_serial_inpage_gets(
             await sleep(uniform(0.250, 0.800))
 
 
+async def page_content_for_classification(page) -> str:
+    """Bounded page HTML for the CAS expiry check; failure falls back to the URL-only check."""
+    try:
+        async with asyncio.timeout(PAGE_CONTENT_TIMEOUT_S):
+            return await page.content()
+    except Exception:
+        # CancelledError is a BaseException: outer deadlines/cancellation must win.
+        return ""
+
+
 async def harvest(state: dict, recipe: dict) -> dict:
     """在水化 state 的临时浏览器里 navigate recipe.navUrl(过瑞数,页面有机 fire 课表/学期),
     截获命中 capture 模式的响应 + 跑 fetch[] in-page GET,返回 {captures, fetches}。
@@ -818,7 +829,7 @@ async def harvest(state: dict, recipe: dict) -> dict:
             # still be completing its token-index bootstrap.
             prefetch_code = failure_code() if patterns else None
             if prefetch_code is not None:
-                page_content = "" if captured else await page.content()
+                page_content = "" if captured else await page_content_for_classification(page)
                 outcome = classify_harvest_outcome(
                     set(captured), patterns, page_content, page.url, [],
                 )
@@ -837,7 +848,7 @@ async def harvest(state: dict, recipe: dict) -> dict:
             await run_serial_inpage_gets(page, fetch_list, trace, fetches)
 
             fetch_statuses = [f["status"] for f in fetches]
-            page_content = "" if captured else await page.content()
+            page_content = "" if captured else await page_content_for_classification(page)
             outcome = classify_harvest_outcome(
                 set(captured), patterns, page_content, page.url, fetch_statuses,
             )
@@ -891,13 +902,13 @@ async def harvest(state: dict, recipe: dict) -> dict:
                 async with work_timeout:
                     return await _run(work_timeout.when())
             except TimeoutError:
-                if not work_timeout.expired():
-                    raise
-                # Only our work cap is classified here. External cancellation still
-                # reaches run_bounded, which owns BROWSER_DEADLINE precedence.
+                # Our work cap or an inner CDP call timeout. External cancellation
+                # still reaches run_bounded, which owns BROWSER_DEADLINE precedence.
                 code = failure_code() if trace.has_stage("NAV_START") else None
                 raise HarvestTransientError(
-                    "harvest work budget exhausted", diagnostics,
+                    "harvest work budget exhausted" if work_timeout.expired()
+                    else "browser call timed out",
+                    diagnostics,
                     code=code or "HARVEST_TRANSIENT",
                 ) from None
         except Exception:
